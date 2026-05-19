@@ -205,3 +205,35 @@ def test_three_costs_agree_for_multi_operand():
             f"{subs}: optimized_cost={info.optimized_cost} != "
             f"accumulation.total={info.accumulation.total}"
         )
+
+
+def test_path_cache_distinguishes_on_per_op_symmetries():
+    """Same subscripts, different per-op symmetries should produce distinct
+    cache entries (and may produce different paths once symmetry-aware
+    search is enabled).
+
+    Uses einsum_path() (which routes through _get_path_info → _path_cache)
+    to exercise the path-cache key directly.
+    """
+    from flopscope._einsum import _path_cache
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    flops.clear_cache()
+    A = fnp.zeros((4, 4))
+    S = flops.as_symmetric(fnp.zeros((4, 4)), symmetry=(0, 1))
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        fnp.einsum_path("ij,jk->ik", A, A)
+    info_a = _path_cache.cache_info()
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        fnp.einsum_path("ij,jk->ik", S, A)
+    info_b = _path_cache.cache_info()
+
+    # The second call must be a miss (different per_op_symmetries).
+    assert info_b.misses > info_a.misses, (
+        f"path cache treated symmetric and dense calls as same key: "
+        f"hits_after={info_b.hits}, misses_after={info_b.misses}, "
+        f"misses_before={info_a.misses}"
+    )

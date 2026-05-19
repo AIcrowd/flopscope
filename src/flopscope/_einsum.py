@@ -46,10 +46,24 @@ def _make_path_cache(maxsize):
     would not invalidate cached PathInfos and would return stale per-step
     counts. The arg itself is unused inside the body — the path builder reads
     the setting transparently via ``_helpers.flop_count``.
+
+    The key also includes ``per_op_symmetries`` (a tuple of per-operand
+    SymmetryGroup-or-None, canonicalized as a hashable fingerprint) and
+    ``identity_pattern`` so that symmetric operands produce a distinct cache
+    entry from dense operands with the same subscripts and shapes.  When
+    symmetry-aware path search is enabled the chosen path may differ; without
+    this the dense-optimal path would silently be reused for symmetric inputs.
     """
 
     @functools.lru_cache(maxsize=maxsize)
-    def _compute(subscripts, shapes, optimize, fma_cost):  # noqa: ARG001
+    def _compute(
+        subscripts,
+        shapes,
+        optimize,
+        fma_cost,  # noqa: ARG001
+        per_op_symmetries,
+        identity_pattern,
+    ):
         from flopscope._opt_einsum import contract_path as _contract_path
 
         _path, path_info = _contract_path(
@@ -150,7 +164,14 @@ def _parse_einsum_parts(subscripts: str, operands):
     return canonical_subscripts, input_subscripts.split(","), output_subscript
 
 
-def _get_path_info(subscripts: str, operands, optimize):
+def _get_path_info(
+    subscripts: str,
+    operands,
+    optimize,
+    *,
+    per_op_symmetries=None,
+    identity_pattern=None,
+):
     from flopscope._cost_model import fma_cost
 
     canonical_subscripts, input_parts, output_subscript = _parse_einsum_parts(
@@ -158,11 +179,30 @@ def _get_path_info(subscripts: str, operands, optimize):
         operands,
     )
     shapes = tuple(tuple(op.shape) for op in operands)
+
+    # Build a hashable symmetry key for the cache.  Each entry is either None
+    # (dense operand) or the canonical fingerprint of a SymmetryGroup so that
+    # symmetric and dense operands with identical subscripts/shapes get distinct
+    # cache slots.  This prevents a dense-optimal path from being silently
+    # reused when symmetry-aware path search is later enabled.
+    if per_op_symmetries is None:
+        from flopscope._accumulation._public import _per_op_symmetries as _extract_syms
+
+        per_op_symmetries = _extract_syms(operands)
+    syms_key = tuple(per_op_symmetries)
+
+    if identity_pattern is None:
+        from flopscope._accumulation._public import _identity_pattern as _extract_id
+
+        identity_pattern = _extract_id(operands)
+
     path_info = _path_cache(
         canonical_subscripts,
         shapes,
         _normalize_optimize(optimize),
         fma_cost(),
+        syms_key,
+        identity_pattern,
     )
     return canonical_subscripts, input_parts, output_subscript, shapes, path_info
 
