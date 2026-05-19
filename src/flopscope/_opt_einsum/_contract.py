@@ -24,6 +24,13 @@ __all__ = [
     "StepInfo",
 ]
 
+_RICH_SYMMETRY_STYLES = {
+    "S": "bold bright_cyan",
+    "C": "bold bright_magenta",
+    "D": "bold bright_yellow",
+    "W": "bold bright_green",
+}
+
 
 @dataclass
 class StepInfo:
@@ -207,6 +214,83 @@ class PathInfo:
                 result.append(ch, style="dim")
             else:
                 result.append(ch)
+        return result
+
+    def _rich_symmetry_token_text(self, token: str):
+        from rich.text import Text
+
+        if token == "-":
+            return Text("-", style="dim")
+        if token in {"×", "→"}:
+            return Text(token, style="dim")
+        if token.startswith("PermGroup⟨"):
+            return self._style_text_charwise(token)
+
+        result = Text()
+        if token.startswith("W"):
+            sym_style = _RICH_SYMMETRY_STYLES["W"]
+            result.append("W", style=sym_style)
+            if token.startswith("W✓"):
+                result.append("✓", style=sym_style)
+            if ":" in token:
+                result.append(":", style=sym_style)
+            remainder = token.split(":", 1)[1].lstrip() if ":" in token else token[1:]
+            if remainder:
+                result.append(" ", style="dim")
+                result.append_text(self._rich_symmetry_token_text(remainder))
+            return result
+
+        if token[0] in _RICH_SYMMETRY_STYLES and token[1:].split("{", 1)[0].isdigit():
+            prefix = token[0]
+            digits = []
+            i = 1
+            while i < len(token) and token[i].isdigit():
+                digits.append(token[i])
+                i += 1
+            result.append(prefix, style=_RICH_SYMMETRY_STYLES[prefix])
+            result.append("".join(digits), style=_RICH_SYMMETRY_STYLES[prefix])
+            if i < len(token) and token[i] == "{":
+                result.append("{", style="dim")
+                i += 1
+                while i < len(token) and token[i] != "}":
+                    ch = token[i]
+                    if ch.isalpha():
+                        result.append(ch, style=self._label_style(ch))
+                    elif ch == ",":
+                        result.append(ch, style="dim")
+                    else:
+                        result.append(ch)
+                    i += 1
+                if i < len(token) and token[i] == "}":
+                    result.append("}", style="dim")
+                return result
+
+        return self._style_text_charwise(token)
+
+    def _rich_step_sym_text(self, step: StepInfo):
+        from rich.text import Text
+
+        in_parts = [self._fmt_sym(s) for s in step.input_groups]
+        out_part = self._fmt_sym(step.output_group)
+        w_part = self._fmt_sym(step.inner_group)
+        if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
+            return Text("-", style="dim")
+
+        result = Text()
+        for idx, part in enumerate(in_parts):
+            if idx:
+                result.append(" × ", style="dim")
+            result.append_text(self._rich_symmetry_token_text(part))
+        result.append(" → ", style="dim")
+        result.append_text(self._rich_symmetry_token_text(out_part))
+        if w_part != "-":
+            result.append("  [", style="dim")
+            result.append(
+                "W✓" if step.inner_applied else "W", style=_RICH_SYMMETRY_STYLES["W"]
+            )
+            result.append(": ", style="dim")
+            result.append_text(self._rich_symmetry_token_text(w_part))
+            result.append("]", style="dim")
         return result
 
     def _rich_eq_text(self):
@@ -516,6 +600,11 @@ class PathInfo:
         from rich import box
         from rich.table import Table
 
+        any_unique = any(
+            s.dense_flop_cost > 0 and s.flop_cost != s.dense_flop_cost
+            for s in self.steps
+        )
+
         contract_width = max(
             len("contract"),
             max((len(self._fmt_contract(step)) for step in self.steps), default=0),
@@ -531,6 +620,16 @@ class PathInfo:
             len("flops"),
             max((len(f"{step.flop_cost:,}") for step in self.steps), default=0),
         )
+        dense_width = max(
+            len("dense_flops"),
+            max((len(f"{step.dense_flop_cost:,}") for step in self.steps), default=0),
+        )
+        savings_width = max(
+            len("savings"),
+            max(
+                (len(f"{step.symmetry_savings:0.1%}") for step in self.steps), default=0
+            ),
+        )
         blas_width = max(
             len("blas"),
             max(
@@ -541,6 +640,15 @@ class PathInfo:
                 default=0,
             ),
         )
+        unique_width = None
+        if any_unique:
+            unique_width = max(
+                len("unique/total"),
+                max(
+                    (len(self._fmt_unique_dense(step)) for step in self.steps),
+                    default=0,
+                ),
+            )
 
         table = Table(
             show_header=True,
@@ -555,7 +663,19 @@ class PathInfo:
         table.add_column("contract", justify="left", no_wrap=True, width=contract_width)
         table.add_column("subscript", overflow="fold", width=subscript_width)
         table.add_column("flops", justify="right", no_wrap=True, width=flops_width)
+        table.add_column(
+            "dense_flops", justify="right", no_wrap=True, width=dense_width
+        )
+        table.add_column("savings", justify="right", no_wrap=True, width=savings_width)
         table.add_column("blas", no_wrap=True, width=blas_width)
+        if any_unique:
+            table.add_column("unique/total", no_wrap=True, width=unique_width)
+        table.add_column(
+            "symmetry (inputs → output)",
+            overflow="fold",
+            min_width=len("symmetry (inputs → output)"),
+            ratio=1,
+        )
 
         cumulative = 0
         for i, step in enumerate(self.steps):
@@ -564,8 +684,13 @@ class PathInfo:
                 self._fmt_contract(step),
                 self._rich_subscript_text(step.subscript),
                 f"{step.flop_cost:,}",
+                f"{step.dense_flop_cost:,}",
+                f"{step.symmetry_savings:>7.1%}",
                 str(step.blas_type) if step.blas_type else "-",
             ]
+            if any_unique:
+                row.append(self._fmt_unique_dense(step))
+            row.append(self._rich_step_sym_text(step) or "-")
             table.add_row(*row)
             if verbose:
                 cumulative += step.flop_cost

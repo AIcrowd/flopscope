@@ -54,3 +54,19 @@ def test_format_table_includes_dense_flops_and_savings_columns():
     assert "dense_flops" in rendered, f"missing dense_flops column:\n{rendered}"
     assert "savings" in rendered, f"missing savings column:\n{rendered}"
     assert "symmetry" in rendered, f"missing symmetry column:\n{rendered}"
+
+
+def test_rich_table_renders_without_error():
+    """info.print() should not raise when Rich is installed."""
+    import importlib
+
+    if importlib.util.find_spec("rich") is None:
+        import pytest
+
+        pytest.skip("rich not installed")
+    x = fnp.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+    # Capture rich output without raising
+    info.print(verbose=False)
+    info.print(verbose=True)
