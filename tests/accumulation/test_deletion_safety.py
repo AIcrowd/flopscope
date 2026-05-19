@@ -10,29 +10,24 @@ import importlib
 import pytest
 
 
-def test_subgraph_symmetry_module_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._subgraph_symmetry")
-
-
-def test_subgraph_symmetry_oracle_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._subgraph_symmetry")
+def test_subgraph_symmetry_module_is_importable():
+    # Restored in Task 15 (symmetry-aware path search branch).
+    importlib.import_module("flopscope._opt_einsum._subgraph_symmetry")
 
 
 def test_symmetric_flop_count_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._symmetry")
+    # _symmetry.py was restored in Task 15; SubsetSymmetry is still present.
+    importlib.import_module("flopscope._opt_einsum._symmetry")
 
 
 def test_unique_elements_in_opt_einsum_symmetry_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._symmetry")
+    # _symmetry.py was restored in Task 15.
+    importlib.import_module("flopscope._opt_einsum._symmetry")
 
 
 def test_subset_symmetry_dataclass_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._symmetry")
+    # _symmetry.py was restored in Task 15; SubsetSymmetry is present.
+    importlib.import_module("flopscope._opt_einsum._symmetry")
 
 
 def test_unique_elements_for_shape_in_symmetry_utils_is_kept():
@@ -74,9 +69,9 @@ def test_symmetry_oracle_param_gone_from_path_random():
 # ── Devendor task 7+8 deletions ─────────────────────────────────────────
 
 
-def test_opt_einsum_paths_module_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._paths")
+def test_opt_einsum_paths_module_is_importable():
+    # Restored in Task 15 (symmetry-aware path search branch).
+    importlib.import_module("flopscope._opt_einsum._paths")
 
 
 def test_opt_einsum_path_random_module_is_gone():
@@ -94,9 +89,9 @@ def test_opt_einsum_testing_module_is_gone():
         importlib.import_module("flopscope._opt_einsum._testing")
 
 
-def test_opt_einsum_typing_module_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._typing")
+def test_opt_einsum_typing_module_is_importable():
+    # Restored in Task 15 (symmetry-aware path search branch).
+    importlib.import_module("flopscope._opt_einsum._typing")
 
 
 def test_opt_einsum_parser_module_is_gone():
