@@ -65,28 +65,41 @@ def test_parse_implicit():
 
 
 def test_analytical_einsum_cost_matmul():
-    # new direct-event model: (k-1)*prod(M) + prod(alpha) = 60 + 60 = 120
-    assert analytical_einsum_cost("ij,jk->ik", shapes=[(3, 4), (4, 5)]) == 120
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form for square matmul)
+    # First cell of each output orbit is a free copy.
+    assert analytical_einsum_cost("ij,jk->ik", shapes=[(3, 4), (4, 5)]) == 105
 
 
 def test_analytical_einsum_cost_trace():
-    # single-operand trace: (k-1)*prod(M) + prod(alpha) = 0 + 10 = 10
-    assert analytical_einsum_cost("ii->", shapes=[(10, 10)]) == 10
+    # single-operand trace with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 0 + 10 - 1 = 9 (scalar output: first cell is free).
+    assert analytical_einsum_cost("ii->", shapes=[(10, 10)]) == 9
 
 
 def test_analytical_einsum_cost_batch_matmul():
-    # new direct-event model: 120 + 120 = 240
-    assert analytical_einsum_cost("bij,bjk->bik", shapes=[(2, 3, 4), (2, 4, 5)]) == 240
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 120 + 120 - 30 = 210. First cell of each output orbit is a free copy.
+    assert analytical_einsum_cost("bij,bjk->bik", shapes=[(2, 3, 4), (2, 4, 5)]) == 210
 
 
 def test_analytical_einsum_cost_outer_product():
-    # new direct-event model: 12 + 12 = 24
-    assert analytical_einsum_cost("i,j->ij", shapes=[(3,), (4,)]) == 24
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits) = 12
+    # Outer product has no summed axes; alpha == num_output_orbits so the
+    # accumulation term collapses to zero, leaving only the multiplications
+    # ((k-1)*prod(M) = 12).
+    assert analytical_einsum_cost("i,j->ij", shapes=[(3,), (4,)]) == 12
 
 
 def test_analytical_einsum_cost_scalar_output():
-    # new direct-event model: 5 + 5 = 10
-    assert analytical_einsum_cost("i,i->", shapes=[(5,), (5,)]) == 10
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 5 + 5 - 1 = 9 (scalar output: first cell is a free copy).
+    assert analytical_einsum_cost("i,i->", shapes=[(5,), (5,)]) == 9
 
 
 def test_analytical_pointwise_cost():
@@ -158,9 +171,11 @@ def test_analytical_einsum_cost_symmetric_input():
 
 
 def test_analytical_einsum_cost_no_operand_symmetry_unchanged():
-    # new direct-event model: (2-1)*100 + 100 = 200
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 100 + 100 - 10 = 190. First cell of each output orbit is a free copy.
     cost = analytical_einsum_cost("ij,j->i", shapes=[(10, 10), (10,)])
-    assert cost == 200
+    assert cost == 190
 
 
 def test_analytical_einsum_cost_preserves_repeated_label_axis_positions():
@@ -183,8 +198,9 @@ def test_analytical_einsum_cost_matches_accumulation_model():
     # The new model: analytical_einsum_cost uses compute_accumulation_cost,
     # NOT contract_path.optimized_cost (they differ after the new model).
     cost = analytical_einsum_cost("ij,jk->ik", shapes=[(3, 4), (4, 5)])
-    # New model gives (k-1)*prod(M) + prod(alpha) = 60 + 60 = 120
-    assert cost == 120  # direct-event model result
+    # New model gives (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 60 + 60 - 15 = 105. First cell of each output orbit is a free copy.
+    assert cost == 105  # direct-event model result
 
 
 def test_public_pointwise_cost_is_weighted(tmp_path):
@@ -207,8 +223,10 @@ def test_public_reduction_cost_is_weighted(tmp_path):
 
 def test_public_einsum_cost_is_weighted(tmp_path):
     load_weights(_write_weights(tmp_path, {"einsum": 2.0}), use_packaged_default=False)
-    # new direct-event model: unweighted=120, weight=2.0 → 240
-    assert public_flops.einsum_cost("ij,jk->ik", shapes=[(3, 4), (4, 5)]) == 240
+    # direct-event model with off-by-one correction:
+    # unweighted = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 60 + 60 - 15 = 105; weight=2.0 → 210.
+    assert public_flops.einsum_cost("ij,jk->ik", shapes=[(3, 4), (4, 5)]) == 210
 
 
 def test_public_helpers_can_use_packaged_default_weights():

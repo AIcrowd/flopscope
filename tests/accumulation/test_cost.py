@@ -104,7 +104,10 @@ from flopscope._accumulation._cost import AccumulationCost, aggregate_einsum
 
 
 def test_aggregate_einsum_total_for_two_trivial_components():
-    """Two trivial components: M_total = ∏ sizes; α = ∏ sizes; total = (k-1)·M + α."""
+    """Two trivial components with V=L: no actual reduction → off-by-one
+    correction zeroes out the α contribution.
+    M_total = ∏ sizes; α = ∏ sizes; ∏num_output_orbits = ∏ sizes;
+    total = (k-1)·M + α − ∏num_output_orbits = mu + 0."""
     c1 = run_ladder_per_component(
         (_trivial_component(labels=("i",), sizes=(3,)),), partition_budget=100_000
     )[0]
@@ -120,13 +123,14 @@ def test_aggregate_einsum_total_for_two_trivial_components():
     assert cost.m_total == 12
     assert cost.alpha == 12
     assert cost.mu == 12  # (k-1) · m_total = 1 · 12
-    assert cost.total == 24  # mu + alpha = 12 + 12
+    assert cost.total == 12  # mu + alpha − ∏num_output_orbits = 12 + 12 − 12
     assert cost.fallback_used is False
     assert cost.unavailable_components == ()
 
 
 def test_aggregate_einsum_with_symmetry_savings():
-    """A single S_2 component with V=L: M = α = 10 (S_2 on (4,4))."""
+    """A single S_2 component with V=L: M = α = num_output_orbits = 10
+    (S_2 on (4,4)). No reduction → off-by-one zeroes α contribution."""
     c = ComponentCost(
         labels=("i", "j"),
         va=("i", "j"),
@@ -135,6 +139,7 @@ def test_aggregate_einsum_with_symmetry_savings():
         m=10,
         alpha=10,
         dense_count=16,
+        num_output_orbits=10,  # same as α when V=L (no reduction)
         regime_id="functionalProjection",
         shape="allVisible",
         group_name="S2{i,j}",
@@ -142,7 +147,7 @@ def test_aggregate_einsum_with_symmetry_savings():
         regime_trace=(),
     )
     cost = aggregate_einsum(component_costs=(c,), num_terms=2, dense_baseline=16)
-    assert cost.total == 1 * 10 + 10  # (k-1) * M + α
+    assert cost.total == 1 * 10 + 10 - 10  # (k-1)·M + α − num_output_orbits
 
 
 def test_aggregate_einsum_records_num_terms_and_dense_baseline():
@@ -154,6 +159,7 @@ def test_aggregate_einsum_records_num_terms_and_dense_baseline():
         m=5,
         alpha=5,
         dense_count=5,
+        num_output_orbits=5,
         regime_id="trivial",
         shape="trivial",
         group_name="trivial",
@@ -173,7 +179,9 @@ from flopscope._accumulation._cost import compute_accumulation_cost
 
 def test_compute_cost_matmul_no_symmetry():
     """ij,jk -> ik on (3,3,3): no symmetry → trivial component per label.
-    M_total = 27, α = 27, total = (2-1)·27 + 27 = 54."""
+    M_total = 27, α = 27, ∏num_output_orbits = 3·1·3 = 9
+    (i,k visible → 3 each; j summed → 1),
+    total = (2-1)·27 + 27 − 9 = 45 (= textbook 2·n³ − n² for n=3)."""
     cost = compute_accumulation_cost(
         canonical_subscripts="ij,jk->ik",
         input_parts=("ij", "jk"),
@@ -185,7 +193,7 @@ def test_compute_cost_matmul_no_symmetry():
     assert cost.dense_baseline == 27  # ∏ over {i, j, k} = 27 (each has size 3)
     assert cost.m_total == 27
     assert cost.alpha == 27
-    assert cost.total == 54
+    assert cost.total == 45
 
 
 def test_compute_cost_with_one_symmetric_input():

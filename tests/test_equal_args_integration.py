@@ -3,11 +3,13 @@
 Tests that fnp.einsum with repeated operands produces the expected symmetry-aware
 FLOP costs. Uses hand-computed expected values.
 
-Migration note (direct-event accumulation model):
-  The new model uses total = num_terms * m_total, where m_total is the number of
-  unique output elements after Burnside's lemma. This replaces the old oracle-based
-  formula. All optimized_cost values are updated accordingly. For a 2-term expression
-  with S2 savings reducing output from 100 to 55 elements: cost = 2 * 550 = 1100.
+Migration note (direct-event accumulation model with off-by-one correction):
+  The new model uses
+      total = (num_terms - 1) * prod(M) + prod(alpha) - prod(num_output_orbits).
+  The final ``- prod(num_output_orbits)`` term applies the off-by-one correction
+  used by ``reduction_accumulation_cost``: the first cell of each output orbit
+  is a free copy. For a 2-term expression with S2 savings (output orbits = 55):
+  cost = 1 * 550 + 550 - 55 = 1045.
 
   Output auto-tagging as SymmetricTensor has also been removed (the oracle that
   inferred output symmetry from equal-operand detection is gone). Results are plain
@@ -28,10 +30,13 @@ class TestGramMatrixInduction:
     def test_plain_X_induces_s2_on_jk(self):
         n = 10
         X = np.ones((n, n))
-        # Accumulation model: m_total = n * C(n+1,2) = 10 * 55 = 550 unique (i,j,k) combos.
-        # total = num_terms * m_total = 2 * 550 = 1100
+        # Accumulation model with off-by-one correction:
+        # m_total = n * C(n+1,2) = 10 * 55 = 550 unique (i,j,k) combos.
+        # num_output_orbits = 55 (S2 swap of j<->k on the (j,k) output).
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 550 + 550 - 55 = 1045. First cell of each output orbit is free.
         _, info_eq = fnp.einsum_path("ij,ik->jk", X, X)
-        assert info_eq.optimized_cost == 1100
+        assert info_eq.optimized_cost == 1045
         # Verify savings are present: m_total < dense_baseline
         acc = info_eq.accumulation
         assert acc.m_total < acc.dense_baseline
@@ -42,8 +47,9 @@ class TestGramMatrixInduction:
         Y = np.ones((n, n))
         _, info = fnp.einsum_path("ij,ik->jk", X, Y)
         # Different operands → no induction → full dense.
-        # total = num_terms * m_total = 2 * 1000 = 2000
-        assert info.optimized_cost == 2000
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+        assert info.optimized_cost == 1900
         acc = info.accumulation
         assert acc.m_total == acc.dense_baseline  # no savings
 
@@ -90,8 +96,10 @@ class TestMatMulChainNoInducedSymmetry:
         X = np.ones((n, n))
         _, info = fnp.einsum_path("ij,jk->ik", X, X)
         # No symmetry detected: m_total == dense_baseline.
-        # total = num_terms * m_total = 2 * 1000 = 2000
-        assert info.optimized_cost == 2000
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+        # First cell of each output orbit is a free copy.
+        assert info.optimized_cost == 1900
         acc = info.accumulation
         assert acc.m_total == acc.dense_baseline  # no savings
 
@@ -103,10 +111,12 @@ class TestTripleProductInduction:
         n = 10
         X = np.ones((n, n))
         _, info = fnp.einsum_path("ij,ik,il->jkl", X, X, X)
-        # Accumulation model: m_total is the number of unique (i,j,k,l) combos
-        # after the full-expression S3 symmetry on the output (j,k,l) axes.
-        # total = num_terms * m_total = 3 * 2200 = 6600
-        assert info.optimized_cost == 6600
+        # Accumulation model with off-by-one correction:
+        # m_total = 2200 (unique (i,j,k,l) combos under S3 on output (j,k,l)).
+        # num_output_orbits = C(n+2,3) = 12*11*10/6 = 220.
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 2*2200 + 2200 - 220 = 6380. First cell of each output orbit is free.
+        assert info.optimized_cost == 6380
         acc = info.accumulation
         assert acc.m_total < acc.dense_baseline  # savings from S3
 
@@ -118,9 +128,12 @@ class TestBlockOuterProductInduction:
         n = 10
         X = np.ones((n, n, n))
         _, info = fnp.einsum_path("ijk,ilm->jklm", X, X)
-        # Accumulation model: block S2 swaps the two operand blocks.
-        # m_total = 50500, total = num_terms * m_total = 2 * 50500 = 101000
-        assert info.optimized_cost == 101000
+        # Accumulation model with off-by-one correction: block S2 swaps the
+        # two operand blocks. m_total = 50500.
+        # num_output_orbits = C(n^2+1, 2) = 100*101/2 = 5050 (S2 on (jk,lm)).
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 50500 + 50500 - 5050 = 95950. First cell of each output orbit is free.
+        assert info.optimized_cost == 95950
         acc = info.accumulation
         assert acc.m_total < acc.dense_baseline  # savings from block S2
 
@@ -137,7 +150,10 @@ class TestSymmetricXMatMul:
         X_data = np.ones((n, n))
         X = flops.as_symmetric(X_data, symmetry=(0, 1))
         _, info = fnp.einsum_path("ij,jk->ik", X, X)
-        # Accumulation model: m_total = 550, total = 2 * 550 = 1100
-        assert info.optimized_cost == 1100
+        # Accumulation model with off-by-one correction:
+        # m_total = 550, num_output_orbits = 55 (S2 on (i,k) output).
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 550 + 550 - 55 = 1045. First cell of each output orbit is free.
+        assert info.optimized_cost == 1045
         acc = info.accumulation
         assert acc.m_total < acc.dense_baseline  # savings detected

@@ -20,6 +20,7 @@ from ._ladder import (
     Shape,
     compute_accumulation,
 )
+from ._output_orbit import restrict_stabilizer_to_positions
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class ComponentCost:
     m: int
     alpha: int | None
     dense_count: int
+    num_output_orbits: int
 
     regime_id: RegimeId
     shape: Shape
@@ -81,6 +83,22 @@ def run_ladder_per_component(
             m = math.prod(c.sizes) if c.sizes else 1
         dense_count = math.prod(c.sizes) if c.sizes else 1
 
+        # num_output_orbits: orbits of the visible-label tuples under the
+        # output stabilizer (the subgroup of G that preserves V setwise,
+        # restricted to V). Used by aggregate_einsum to apply the same
+        # "first cell of each orbit is a free copy" off-by-one correction
+        # that reduction_accumulation_cost already applies.
+        v_sizes = tuple(c.sizes[p] for p in c.visible_positions)
+        if not v_sizes:
+            num_output_orbits = 1
+        elif c.elements and len(c.elements) > 0:
+            h_elements = restrict_stabilizer_to_positions(
+                c.elements, c.visible_positions
+            )
+            num_output_orbits = size_aware_burnside(h_elements, v_sizes)
+        else:
+            num_output_orbits = math.prod(v_sizes)
+
         unavailable_reason: str | None = None
         if result.regime_id == "unavailable":
             # The "unavailable" trace step's reason is the ladder's last word.
@@ -100,6 +118,7 @@ def run_ladder_per_component(
                 m=m,
                 alpha=result.count,
                 dense_count=dense_count,
+                num_output_orbits=num_output_orbits,
                 regime_id=result.regime_id,
                 shape=result.shape,
                 group_name=c.group_name,
@@ -156,7 +175,15 @@ def aggregate_einsum(
     num_terms: int,
     dense_baseline: int,
 ) -> AccumulationCost:
-    """Aggregate per-component costs into the einsum cost: total = (k-1)·∏M + ∏α.
+    """Aggregate per-component costs into the einsum cost:
+    ``total = (k-1)·∏M + ∏α − ∏num_output_orbits``.
+
+    The final ``−∏num_output_orbits`` term applies the same off-by-one
+    correction that ``reduction_accumulation_cost`` uses: the first cell of
+    each output orbit is a free copy, and only the remaining accumulations
+    cost. When there is no actual reduction (``∏α == ∏num_output_orbits``),
+    the α contribution collapses to zero, leaving only the ``(k-1)·∏M``
+    multiplication chain.
 
     Fallback policy: if any component has alpha=None, total = k · dense_baseline
     (the no-symmetry direct-event count) and a CostFallbackWarning fires.
@@ -169,11 +196,13 @@ def aggregate_einsum(
 
     if not failing:
         alpha_product = 1
+        output_orbit_product = 1
         for c in component_costs:
             assert c.alpha is not None  # for type narrowing
             alpha_product *= c.alpha
+            output_orbit_product *= c.num_output_orbits
         mu = (num_terms - 1) * m_total
-        total = mu + alpha_product
+        total = mu + alpha_product - output_orbit_product
         return AccumulationCost(
             total=total,
             mu=mu,

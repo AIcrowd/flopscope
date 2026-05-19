@@ -23,18 +23,24 @@ function preset(id) {
 test('dense tuple count uses actual heterogeneous label sizes', () => {
   const outer = analyzeExample(preset('outer'), 3);
   assert.equal(denseTupleCountFromComponents(outer.componentData.components), 4 * 4 * 4 * 4);
-  assert.equal(denseDirectEventCostFromComponents(outer.componentData.components, 2), 512);
+  // outer = ab,cd->abcd: all 4 labels visible → dense_outputs = 4·4·4·4 = 256.
+  // With off-by-one: (k-1)·256 + 256 − 256 = 256.
+  assert.equal(denseDirectEventCostFromComponents(outer.componentData.components, 2), 256);
 });
 
 test('dense tuple count keeps uniform behavior for ordinary presets', () => {
   const matrix = analyzeExample(preset('matrix-chain'), 3);
   assert.equal(denseTupleCountFromComponents(matrix.componentData.components), 27);
-  assert.equal(denseDirectEventCostFromComponents(matrix.componentData.components, 2), 54);
+  // matrix-chain = ij,jk->ik: i,k visible (3·3=9), j summed.
+  // With off-by-one: (2-1)·27 + 27 − 9 = 45 (textbook 2·n³ − n²).
+  assert.equal(denseDirectEventCostFromComponents(matrix.componentData.components, 2), 45);
 });
 
 test('dense tuple count treats an empty scalar grid as one assignment', () => {
   assert.equal(denseTupleCountFromComponents([]), 1);
-  assert.equal(denseDirectEventCostFromComponents([], 1), 1);
+  // Empty components → no operations produce a scalar (0·1 + 1 − 1 = 0).
+  // The previous value (1) was the pre-fix overcount.
+  assert.equal(denseDirectEventCostFromComponents([], 1), 0);
 });
 
 test('dense scaling latex reflects selected label count, not a hard-coded n^5', () => {

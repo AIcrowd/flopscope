@@ -356,17 +356,23 @@ def test_cumulative_numel(name, we):
 
 
 def test_matmul_mnk(we):
-    # new direct-event model: (k-1)*prod(M) + prod(alpha) = 1000 + 1000 = 2000
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
         _cost_of(we.matmul, numpy.random.rand(10, 10), numpy.random.rand(10, 10))
-        == 2000
+        == 1900
     )
 
 
 def test_dot_mnk(we):
-    # new direct-event model: (k-1)*prod(M) + prod(alpha) = 1000 + 1000 = 2000
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
-        _cost_of(we.dot, numpy.random.rand(10, 10), numpy.random.rand(10, 10)) == 2000
+        _cost_of(we.dot, numpy.random.rand(10, 10), numpy.random.rand(10, 10)) == 1900
     )
 
 
@@ -406,12 +412,15 @@ def test_cross_6n(we):
 
 
 def test_einsum_mnk(we):
-    # new direct-event model: (k-1)*prod(M) + prod(alpha) = 1000 + 1000 = 2000
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
         _cost_of(
             we.einsum, "ij,jk->ik", numpy.random.rand(10, 10), numpy.random.rand(10, 10)
         )
-        == 2000
+        == 1900
     )
 
 
@@ -525,12 +534,15 @@ class TestLinalgProperties:
 
 class TestLinalgDelegates:
     def test_matmul_mnk(self, we):
-        # new direct-event model: (k-1)*prod(M) + prod(alpha) = 1000 + 1000 = 2000
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+        # First cell of each output orbit is a free copy.
         assert (
             _cost_of(
                 we.linalg.matmul, numpy.random.rand(10, 10), numpy.random.rand(10, 10)
             )
-            == 2000
+            == 1900
         )
 
     def test_outer_mn(self, we):

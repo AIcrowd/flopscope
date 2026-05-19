@@ -156,7 +156,9 @@ test('TotalCostView compares dense and symmetry-aware direct event counts with p
   assert.match(src, /denseTupleCountFromComponents/);
   assert.match(src, /label:\s*'Dense Direct Events'/);
   assert.match(src, /label:\s*'Symmetry-Aware Direct Events'/);
-  assert.match(src, /formula:\s*String\.raw`\((k-1|k-1)\)\\prod_\{\\ell\\in L\} n_\\ell \+ \\prod_\{\\ell\\in L\} n_\\ell`/);
+  // The dense formula now subtracts the visible-axis product to apply the
+  // same off-by-one correction the symmetry-aware aggregator uses.
+  assert.match(src, /formula:\s*String\.raw`\((k-1|k-1)\)\\prod_\{\\ell\\in L\} n_\\ell \+ \\prod_\{\\ell\\in L\} n_\\ell - \\prod_\{\\ell\\in V\} n_\\ell`/);
   assert.doesNotMatch(src, /label:\s*'Dense Cost'/);
   assert.doesNotMatch(src, /label:\s*'Symmetry-Aware Cost'/);
   assert.doesNotMatch(src, /n\^\{\|L\|\}/);

@@ -76,15 +76,21 @@ class TestSortingConsistency:
 
 class TestContractionConsistency:
     """matmul: cost uses the whole-expression direct-event accumulation model.
-    For 2D matrix multiply with no symmetry: total = (k-1)*M + alpha = M*N*K + M*N*K = 2*M*N*K."""
+    For 2D matrix multiply with no symmetry:
+        total = (k-1)*M + alpha - num_output_orbits
+              = M*N*K + M*N*K - M*N = 2*M*N*K - M*N.
+    The final -M*N applies the off-by-one correction: first cell of each
+    output orbit is a free copy."""
 
     def test_matmul(self):
         m, n, k = 32, 32, 32
         a = np.random.rand(m, k)
         b = np.random.rand(k, n)
         runtime_cost = _run_and_get_cost(fnp.matmul, a, b)
-        # new direct-event model: (k-1)*prod(M) + prod(alpha) = M*N*K + M*N*K = 2*M*N*K
-        expected = 2 * m * n * k
+        # direct-event model with off-by-one correction:
+        # (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = M*N*K + M*N*K - M*N = 2*M*N*K - M*N (textbook 2n^3 - n^2 form).
+        expected = 2 * m * n * k - m * n
         assert runtime_cost == expected, (
             f"matmul({m},{k})x({k},{n}): runtime={runtime_cost}, expected={expected}"
         )

@@ -18,8 +18,11 @@ def test_einsum_accumulation_cost_simple_matmul():
     cost = fps.einsum_accumulation_cost("ij,jk->ik", A, B)
     assert isinstance(cost, fps.AccumulationCost)
     assert cost.dense_baseline == 27
-    # No symmetry → trivial components, total = (k-1)·M + α = 27 + 27 = 54
-    assert cost.total == 54
+    # No symmetry → trivial components (i, j, k each as singletons).
+    # ∏M = 27, ∏α = 27, ∏num_output_orbits = 3·1·3 = 9
+    # total = (k-1)·M + α − ∏num_output_orbits = 27 + 27 − 9 = 45
+    # (matches the textbook 2·n³ − n² for n=3.)
+    assert cost.total == 45
 
 
 def test_einsum_accumulation_cost_does_not_require_budget_context():
@@ -33,7 +36,7 @@ def test_einsum_accumulation_cost_accepts_partition_budget_override():
     A = np.zeros((3, 3))
     B = np.zeros((3, 3))
     cost = fps.einsum_accumulation_cost("ij,jk->ik", A, B, partition_budget=50_000)
-    assert cost.total == 54
+    assert cost.total == 45  # see test_einsum_accumulation_cost_simple_matmul
 
 
 def test_einsum_accumulation_cost_with_symmetric_input():

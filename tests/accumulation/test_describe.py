@@ -13,6 +13,7 @@ def _comp(regime_id, shape: Shape = "mixed"):
         m=3,
         alpha=3,
         dense_count=3,
+        num_output_orbits=3,
         regime_id=regime_id,
         shape=shape,
         group_name="S2{i,j}",
@@ -42,7 +43,7 @@ def test_describe_component_unavailable_has_distinct_latex():
 def test_describe_total_includes_summary_fields():
     c = _comp("trivial", "trivial")
     cost = AccumulationCost(
-        total=6,
+        total=3,  # mu + alpha − num_output_orbits = 3 + 3 − 3
         mu=3,
         alpha=3,
         m_total=3,
@@ -54,4 +55,4 @@ def test_describe_total_includes_summary_fields():
     d = cost.describe()
     assert "total" in d
     assert "savings_ratio" in d
-    assert d["total"] == 6
+    assert d["total"] == 3

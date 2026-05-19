@@ -27,8 +27,10 @@ class TestEinsumSymmetricInput:
         v = numpy.ones(10)
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             einsum("ij,j->i", A, v)
-            # new direct-event model: (k-1)*prod(M) + prod(alpha) = 100 + 100 = 200
-            assert budget.flops_used == 200
+            # direct-event model with off-by-one correction:
+            # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+            # = 100 + 100 - 10 = 190. First cell of each output orbit is free.
+            assert budget.flops_used == 190
 
 
 class TestEinsumSymmetricOutput:

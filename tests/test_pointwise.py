@@ -129,9 +129,11 @@ def test_dot_result():
     with BudgetContext(flop_budget=10**6) as budget:
         result = dot(a, b)
         assert numpy.allclose(result, numpy.dot(a, b))
-        assert (
-            budget.flops_used == 120
-        )  # new direct-event model: (k-1)*prod(M) + prod(alpha)
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form).
+        # First cell of each output orbit is a free copy.
+        assert budget.flops_used == 105
 
 
 def test_matmul_result():

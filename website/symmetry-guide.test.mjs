@@ -235,8 +235,14 @@ print(json.dumps({
     broadcast_has_symmetry: true,
     unary_c3_order: 3,
     unary_d4_order: 8,
-    repeated_einsum_cost: 60,
-    distinct_einsum_cost: 90,
+    // After the off-by-one fix in einsum_accumulation_cost: the formula
+    // is now `(k-1)·∏M + ∏α − ∏num_output_orbits` (mirrors the same
+    // "first cell of each output orbit is a free copy" correction the
+    // reduction surface already applies). For ki,kj->ij with k=5,i=j=3
+    // and S_2 on the (i,j) output: ∏num_output_orbits = 6 for the
+    // repeated-input case and 9 for the distinct-operand case.
+    repeated_einsum_cost: 54,
+    distinct_einsum_cost: 81,
     repeated_einsum_type: 'SymmetricTensor',
     distinct_einsum_type: 'SymmetricTensor',
   });

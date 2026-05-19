@@ -555,9 +555,11 @@ class TestBackwardCompatibility:
         B = numpy.ones((4, 5))
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             result = einsum("ij,jk->ik", A, B)
-            assert (
-                budget.flops_used == 120
-            )  # new direct-event model: (k-1)*prod(M) + prod(alpha)
+            # direct-event model with off-by-one correction:
+            # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+            # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form).
+            # First cell of each output orbit is a free copy.
+            assert budget.flops_used == 105
             assert result.shape == (3, 5)
 
     def test_symmetry_output_kwarg_still_works(self):

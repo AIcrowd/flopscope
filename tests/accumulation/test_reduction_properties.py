@@ -37,15 +37,16 @@ def test_gaming_resistance_cost_never_exceeds_dense():
 
 
 def test_einsum_parity_reduction_via_sum_equals_via_einsum():
-    """np.sum(T, axis=k) charge matches einsum_accumulation_cost('...', T) up to off-by-one."""
+    """np.sum(T, axis=k) charge matches einsum_accumulation_cost('...', T) exactly.
+
+    Both surfaces now apply the same off-by-one correction ("first cell of
+    each output orbit is a free copy"), so the totals agree without a
+    num_output_orbits offset. Previously the einsum surface overcharged by
+    num_output_orbits; this regression test guards against that bug
+    returning.
+    """
     n = 4
     T = fps.as_symmetric(fnp.zeros((n, n, n)), symmetry=(0, 1, 2))
     sum_cost = fps.reduction_accumulation_cost(T, axis=2).total
     einsum_cost = fps.einsum_accumulation_cost("abc->ab", T).total
-    from flopscope._accumulation._reduction import _num_output_orbits
-
-    sym = fps.SymmetryGroup.symmetric(axes=(0, 1, 2))
-    num_orbits = _num_output_orbits((n, n, n), (2,), sym)
-    assert einsum_cost - sum_cost == num_orbits, (
-        f"einsum_cost={einsum_cost}, sum_cost={sum_cost}, num_orbits={num_orbits}"
-    )
+    assert einsum_cost == sum_cost, f"einsum_cost={einsum_cost}, sum_cost={sum_cost}"
