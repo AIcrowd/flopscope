@@ -265,3 +265,22 @@ def test_large_k_einsum_completes_within_one_second():
     flops.einsum_accumulation_cost(subs, *ops)
     elapsed = time.perf_counter() - t0
     assert elapsed < 1.0, f"k=8 auto cold call took {elapsed:.2f}s (budget 1.0s)"
+
+
+def test_clear_cache_flushes_all_layers():
+    import flopscope as flops
+    import flopscope.numpy as fnp
+    from flopscope._einsum import _path_cache
+    from flopscope._accumulation._cache import _accumulation_cache, _reduction_cache
+
+    x = fnp.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        fnp.einsum_path("ij,jk,kl->il", x, x, x)
+    flops.einsum_accumulation_cost("ij,jk,kl->il", x, x, x)
+    assert _path_cache.cache_info().currsize > 0
+    assert _accumulation_cache.cache_info().currsize > 0
+
+    flops.clear_cache()
+    assert _path_cache.cache_info().currsize == 0
+    assert _accumulation_cache.cache_info().currsize == 0
+    assert _reduction_cache.cache_info().currsize == 0
