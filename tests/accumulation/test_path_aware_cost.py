@@ -237,3 +237,31 @@ def test_path_cache_distinguishes_on_per_op_symmetries():
         f"hits_after={info_b.hits}, misses_after={info_b.misses}, "
         f"misses_before={info_a.misses}"
     )
+
+
+def test_large_k_auto_fallback_to_greedy():
+    """For k >= 8 with optimize='auto', resolve to greedy to avoid optimal/B&B
+    cold-call latency blowup."""
+    from flopscope._einsum import _resolve_optimize_for_k
+
+    assert _resolve_optimize_for_k("auto", k=8) == "greedy"
+    assert _resolve_optimize_for_k("auto", k=10) == "greedy"
+    assert _resolve_optimize_for_k("auto", k=7) == "auto"
+    # Explicit user choice always honored.
+    assert _resolve_optimize_for_k("optimal", k=10) == "optimal"
+    assert _resolve_optimize_for_k("branch", k=10) == "branch"
+
+
+def test_large_k_einsum_completes_within_one_second():
+    """Smoke check: k=8 chain with optimize='auto' completes quickly."""
+    import time
+    import flopscope.numpy as fnp
+    import flopscope as flops
+
+    subs = ",".join(f"{chr(ord('a')+i)}{chr(ord('a')+i+1)}" for i in range(8)) + "->ai"
+    ops = tuple(fnp.ones((3, 3)) for _ in range(8))
+    flops.clear_cache()
+    t0 = time.perf_counter()
+    flops.einsum_accumulation_cost(subs, *ops)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0, f"k=8 auto cold call took {elapsed:.2f}s (budget 1.0s)"

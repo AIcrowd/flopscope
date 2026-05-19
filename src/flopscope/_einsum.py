@@ -148,6 +148,19 @@ def _execute_pairwise(path_info, operands: list):
     return ops[0]
 
 
+_LARGE_K_THRESHOLD = 8
+
+
+def _resolve_optimize_for_k(optimize, k: int):
+    """Auto-downgrade 'auto' to 'greedy' for k >= 8 to avoid optimal/B&B
+    cold-call latency on large operand counts. Explicit user choices
+    (optimal/branch/dp/etc.) are honored verbatim. See spec §10.
+    """
+    if optimize == "auto" and k >= _LARGE_K_THRESHOLD:
+        return "greedy"
+    return optimize
+
+
 def _normalize_optimize(optimize):
     if optimize is False:
         return "auto"
@@ -196,10 +209,11 @@ def _get_path_info(
 
         identity_pattern = _extract_id(operands)
 
+    effective_optimize = _resolve_optimize_for_k(optimize, k=len(operands))
     path_info = _path_cache(
         canonical_subscripts,
         shapes,
-        _normalize_optimize(optimize),
+        _normalize_optimize(effective_optimize),
         fma_cost(),
         syms_key,
         identity_pattern,
