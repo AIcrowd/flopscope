@@ -156,6 +156,10 @@ class AccumulationCost:
     unavailable_components: tuple[int, ...] = ()
     unavailable_reason: str | None = None
 
+    # NEW: path-aware decomposition. Empty for k<=2 (no path walked).
+    per_step: tuple["AccumulationCost", ...] = ()
+    path: tuple[tuple[int, ...], ...] | None = None
+
     def describe(self) -> dict:
         """Human-readable + LaTeX summary, built on demand."""
         from ._cost_descriptions import describe_total
