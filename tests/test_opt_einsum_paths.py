@@ -155,12 +155,12 @@ def test_bad_path_option() -> None:
 @pytest.mark.skip(reason="oe.contract not vendored")
 def test_explicit_path() -> None:
     pytest.importorskip("numpy")
-    x = oe.contract("a,b,c", [1], [2], [3], optimize=[(1, 2), (0, 1)])  # pyright: ignore[reportAttributeAccessIssue]
+    x = oe.contract("a,b,c", [1], [2], [3], optimize=[(1, 2), (0, 1)])  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue]
     assert x.item() == 6
 
 
 def test_path_optimal() -> None:
-    test_func = oe._paths.optimal
+    test_func = oe._paths.optimal  # pyright: ignore[reportAttributeAccessIssue]
 
     test_data = explicit_path_tests["GEMM1"]
     assert_contract_order(test_func, test_data, 5000, [(0, 2), (0, 1)])
@@ -168,7 +168,7 @@ def test_path_optimal() -> None:
 
 
 def test_path_greedy() -> None:
-    test_func = oe._paths.greedy
+    test_func = oe._paths.greedy  # pyright: ignore[reportAttributeAccessIssue]
 
     test_data = explicit_path_tests["GEMM1"]
     assert_contract_order(test_func, test_data, 5000, [(0, 2), (0, 1)])
@@ -213,7 +213,7 @@ def test_path_edge_cases(alg: OptimizeKind, expression: str, order: PathType) ->
 
 
 @pytest.mark.parametrize("expression,order", path_scalar_tests)
-@pytest.mark.parametrize("alg", oe._paths._PATH_OPTIONS)
+@pytest.mark.parametrize("alg", oe._paths._PATH_OPTIONS)  # pyright: ignore[reportAttributeAccessIssue]
 def test_path_scalar_cases(alg: OptimizeKind, expression: str, order: PathType) -> None:
     views = build_shapes(expression)
 
@@ -434,9 +434,9 @@ def test_custom_random_greedy() -> None:
     views = list(map(np.ones, shapes))
 
     with pytest.raises(ValueError):
-        oe._path_random.RandomGreedy(minimize="something")
+        oe._path_random.RandomGreedy(minimize="something")  # pyright: ignore[reportAttributeAccessIssue]
 
-    optimizer = oe._path_random.RandomGreedy(max_repeats=10, minimize="flops")
+    optimizer = oe._path_random.RandomGreedy(max_repeats=10, minimize="flops")  # pyright: ignore[reportAttributeAccessIssue]
     path, path_info = oe.contract_path(eq, *views, optimize=optimizer)
 
     assert len(optimizer.costs) == 10
@@ -511,7 +511,7 @@ def test_parallel_random_greedy() -> None:
     eq, shapes = rand_equation(10, 4, seed=42)
     views = list(map(np.ones, shapes))
 
-    optimizer = oe._path_random.RandomGreedy(max_repeats=10, parallel=pool)
+    optimizer = oe._path_random.RandomGreedy(max_repeats=10, parallel=pool)  # pyright: ignore[reportAttributeAccessIssue]
     path, path_info = oe.contract_path(eq, *views, optimize=optimizer)
 
     assert len(optimizer.costs) == 10
@@ -574,7 +574,7 @@ def test_custom_path_optimizer() -> None:
 def test_custom_random_optimizer() -> None:
     np = pytest.importorskip("numpy")
 
-    class NaiveRandomOptimizer(oe._path_random.RandomOptimizer):
+    class NaiveRandomOptimizer(oe._path_random.RandomOptimizer):  # pyright: ignore[reportAttributeAccessIssue]
         @staticmethod
         def random_path(
             r: int,
@@ -593,7 +593,7 @@ def test_custom_random_optimizer() -> None:
                 remaining.remove(i)
                 remaining.remove(j)
                 ssa_path.append((i, j))
-            cost, size = oe._path_random.ssa_path_compute_cost(
+            cost, size = oe._path_random.ssa_path_compute_cost(  # pyright: ignore[reportAttributeAccessIssue]
                 ssa_path, inputs, output, size_dict
             )
             return ssa_path, cost, size
@@ -624,16 +624,16 @@ def test_optimizer_registration() -> None:
         return [(0, 1)] * (len(inputs) - 1)
 
     with pytest.raises(KeyError):
-        oe._paths.register_path_fn("optimal", custom_optimizer)
+        oe._paths.register_path_fn("optimal", custom_optimizer)  # pyright: ignore[reportAttributeAccessIssue]
 
-    oe._paths.register_path_fn("custom", custom_optimizer)
-    assert "custom" in oe._paths._PATH_OPTIONS
+    oe._paths.register_path_fn("custom", custom_optimizer)  # pyright: ignore[reportAttributeAccessIssue]
+    assert "custom" in oe._paths._PATH_OPTIONS  # pyright: ignore[reportAttributeAccessIssue]
 
     eq = "ab,bc,cd"
     shapes = [(2, 3), (3, 4), (4, 5)]
     path, _ = oe.contract_path(eq, *shapes, shapes=True, optimize="custom")  # type: ignore
     assert path == [(0, 1), (0, 1)]
-    del oe._paths._PATH_OPTIONS["custom"]
+    del oe._paths._PATH_OPTIONS["custom"]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_path_with_assumed_shapes() -> None:

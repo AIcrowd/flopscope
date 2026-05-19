@@ -58,6 +58,7 @@ def test_format_table_includes_dense_flops_and_savings_columns():
 def test_rich_table_renders_without_error():
     """info.print() should not raise when Rich is installed."""
     import importlib
+    import importlib.util
 
     if importlib.util.find_spec("rich") is None:
         import pytest
