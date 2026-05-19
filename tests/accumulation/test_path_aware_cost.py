@@ -47,3 +47,24 @@ def test_binary_einsum_unchanged():
     )
     assert cost.per_step == ()  # no path walked for k=2
     assert cost.path is None
+
+
+def test_per_step_totals_sum_to_top_level():
+    """For multi-operand einsums, top-level total must equal sum of per-step totals."""
+    x = fnp.ones((10, 10))
+    cost = flops.einsum_accumulation_cost("ij,jk,kl->il", x, x, x)
+    assert cost.per_step, "k=3 einsum should have populated per_step"
+    step_sum = sum(s.total for s in cost.per_step)
+    assert cost.total == step_sum, (
+        f"top-level total ({cost.total}) != sum of per_step ({step_sum})"
+    )
+
+
+def test_per_step_path_matches_top_level_path():
+    """AccumulationCost.path must match the path opt_einsum produced."""
+    x = fnp.ones((4, 4))
+    cost = flops.einsum_accumulation_cost("ij,jk,kl,lm->im", x, x, x, x)
+    assert cost.path is not None
+    # 4-operand chain produces 3 binary steps.
+    assert len(cost.path) == 3, f"expected 3 steps, got {cost.path}"
+    assert len(cost.per_step) == 3
