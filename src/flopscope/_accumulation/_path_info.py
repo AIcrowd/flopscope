@@ -66,6 +66,39 @@ class FlopscopePathInfo:
             return self.__repr__()
         return fmt()
 
+    def check_consistency(self) -> bool:
+        """Verify the three cost surfaces agree:
+          info.optimized_cost == sum(s.flop_cost for s in info.steps)
+                              == info.accumulation.total
+
+        Returns True on success; raises AssertionError with a diagnostic
+        message otherwise. Use this in tests or after manually mutating
+        the wrapper to confirm invariants hold.
+        """
+        sum_steps = sum(
+            getattr(s, "flop_cost", 0)
+            for s in getattr(self._inner, "steps", [])
+        )
+        acc_total = (
+            self.accumulation.total if self.accumulation is not None else None
+        )
+        opt_cost = self.optimized_cost
+        if acc_total is not None and opt_cost != acc_total:
+            raise AssertionError(
+                f"check_consistency: optimized_cost ({opt_cost}) != "
+                f"accumulation.total ({acc_total})"
+            )
+        if (
+            opt_cost != sum_steps
+            and self.accumulation is not None
+            and self.accumulation.per_step
+        ):
+            raise AssertionError(
+                f"check_consistency: optimized_cost ({opt_cost}) != "
+                f"sum(steps.flop_cost) ({sum_steps})"
+            )
+        return True
+
     def __repr__(self) -> str:
         return (
             f"FlopscopePathInfo(optimized_cost={self.optimized_cost}, "
