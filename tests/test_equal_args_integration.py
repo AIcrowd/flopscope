@@ -111,12 +111,11 @@ class TestTripleProductInduction:
         n = 10
         X = np.ones((n, n))
         _, info = fnp.einsum_path("ij,ik,il->jkl", X, X, X)
-        # Updated for path-aware einsum (spec §6.1). Was 6380 (single-step k-way formula:
-        # (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits) = 2*2200 + 2200 - 220 = 6380).
-        # Now 20000 = sum of binary-step costs: step1=1000 (ij,ik->jk) + step2=19000 (jk,il->jkl).
-        # Conservative value with dense intermediates; tighter symmetry-aware value will land
-        # once SubgraphSymmetryOracle is restored in Phase 3.
-        assert info.optimized_cost == 20000
+        # Updated for Task 17b: SubgraphSymmetryOracle now threads symmetry across
+        # binary steps (was conservative dense-intermediate value of 20000).
+        # With oracle: step1=550 (ij,ik->jk with S2 inherited) + step2=10450 (jk,il->jkl).
+        # Total = 11000 (tighter symmetry-aware path cost).
+        assert info.optimized_cost == 11000
         acc = info.accumulation
         assert acc.m_total < acc.dense_baseline  # savings from S3
 

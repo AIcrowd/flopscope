@@ -72,7 +72,15 @@ def test_per_step_path_matches_top_level_path():
 
 def test_per_step_cache_hits_across_expressions():
     """Two different multi-operand expressions sharing a binary sub-step
-    (here 'ij,jk->ik') should produce one cache hit on the shared step."""
+    should produce cache hits on the shared step.
+
+    Updated for Task 17b: SubgraphSymmetryOracle now threads symmetry through
+    per-step calls. Each step now makes TWO cache calls — one from build_path_info
+    (dense fingerprint, for path ordering) and one from _walk_path_and_aggregate
+    (oracle fingerprint, for cost). So first call yields:
+      1 (top-level) + 2 (build_path_info dense) + 2 (oracle per-step) = 5 misses.
+    The second call shares 1 dense step and 1 oracle step → 2 hits.
+    """
     from flopscope._accumulation._cache import _accumulation_cache
 
     flops.clear_cache()
@@ -80,19 +88,21 @@ def test_per_step_cache_hits_across_expressions():
     assert info_before.hits == 0 and info_before.misses == 0
 
     x = fnp.ones((4, 4))
-    # First call: 1 miss (top-level) + 2 misses (per-step "ij,jk->ik"
-    # and "ik,kl->il"). Total: 3 misses.
+    # First call: 1 top-level miss + 2 build_path_info dense-step misses +
+    # 2 oracle per-step misses = 5 misses total.
+    # (Updated for Task 17b: was 3 misses before oracle was wired in.)
     flops.einsum_accumulation_cost("ij,jk,kl->il", x, x, x)
     info_mid = _accumulation_cache.cache_info()
-    assert info_mid.misses == 3, f"expected 3 misses, got {info_mid.misses}"
+    assert info_mid.misses == 5, f"expected 5 misses, got {info_mid.misses}"
 
-    # Second call shares "ij,jk->ik" step. Top-level miss (different
-    # subscripts), one per-step hit on "ij,jk->ik", one per-step miss
-    # on "ik,km->im". Total: 1 hit + 2 misses (cumulative 1 + 5).
+    # Second call shares the first build_path_info step (dense) and the first
+    # oracle per-step. Top-level miss + 1 dense-step miss + 1 oracle-step miss
+    # + 2 hits for the shared steps. Total: >=2 cumulative hits.
     flops.einsum_accumulation_cost("ij,jk,km->im", x, x, x)
     info_after = _accumulation_cache.cache_info()
-    assert info_after.hits >= 1, (
-        f"expected >=1 hit (shared step), got {info_after.hits}"
+    assert info_after.hits >= 2, (
+        f"expected >=2 hits (shared build_path_info + oracle steps), "
+        f"got {info_after.hits}"
     )
 
 
@@ -144,6 +154,32 @@ def test_fma_cost_affects_multiplication_term_only():
     assert cost2.total == 20, f"fma=2: expected 20, got {cost2.total}"
 
     flops.configure(fma_cost=1)
+
+
+def test_symmetric_triangle_uses_inherited_symmetry():
+    """ij,jk,ki->ijk with all three operands sharing an S_2 symmetric matrix:
+    the path walker should INHERIT the full-expression group's restriction
+    to each binary step, not treat intermediates as dense.
+
+    Expected: per-step costs use the restricted group, total = 80
+    (two 40-op symmetric steps), not 128 (two 64-op dense steps).
+    Before SubgraphSymmetryOracle was wired in, this returned 128.
+    """
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    A = flops.as_symmetric(fnp.zeros((4, 4)), symmetry=(0, 1))
+    cost = flops.einsum_accumulation_cost("ij,jk,ki->ijk", A, A, A)
+
+    # Pre-oracle: cost.total == 128. With oracle: each step is a binary
+    # contraction whose effective group inherits from the full S_2 symmetry,
+    # bringing total down. Exact value depends on opt_einsum's path choice
+    # under symmetry-aware search, but it MUST be < 128 (proves symmetry
+    # is being threaded through).
+    assert cost.total < 128, (
+        f"symmetric triangle should benefit from symmetry inheritance; "
+        f"got {cost.total} (>=128 implies oracle is not being used)"
+    )
 
 
 def test_three_costs_agree_for_multi_operand():

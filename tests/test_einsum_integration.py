@@ -23,11 +23,10 @@ class TestMultiOperandEinsum:
         numpy.testing.assert_allclose(result, expected, rtol=1e-10)
 
     def test_symmetric_input_reduces_multi_operand_cost(self):
-        # In the new direct-event model, S3{i,j,k} on the first operand does not
-        # necessarily reduce the charged cost below dense when contracted with two
-        # dense matrices ai,bj->abk. The output abk doesn't inherit the S3 symmetry,
-        # so the whole-expression group has no savings over the dense path.
-        # The result is numerically correct in both cases.
+        # Updated for Task 17b: SubgraphSymmetryOracle now threads T's declared
+        # S3 symmetry through binary steps. The first step 'ai,ijk->ajk' correctly
+        # inherits T's S3 symmetry, reducing cost from 19000 to 10450.
+        # The symmetric case now costs less than the dense case.
         n = 10
         T_data = numpy.random.RandomState(42).rand(n, n, n)
         T_data = (
@@ -49,9 +48,9 @@ class TestMultiOperandEinsum:
             result_dense = einsum("ijk,ai,bj->abk", T_data, A, B)
 
         numpy.testing.assert_allclose(result_sym, result_dense, rtol=1e-10)
-        # Both have the same cost since the S3 symmetry on T doesn't carry through
-        # to the output abk in this contraction pattern.
-        assert budget_sym.flops_used == budget_dense.flops_used
+        # With the oracle wired in (Task 17b), T's S3 symmetry carries through
+        # the first binary step (ai,ijk->ajk), so the symmetric case is cheaper.
+        assert budget_sym.flops_used < budget_dense.flops_used
 
     def test_optimize_false_falls_back(self):
         A = numpy.ones((3, 4))
@@ -479,11 +478,10 @@ class TestPathInfoDebugFields:
         assert "subset=" in table
         assert "out_shape=" in table
         assert "cumulative=" in table
-        # Final cumulative in the table equals the inner path-level optimized_cost
-        # (the step-by-step sum), not the accumulation total which uses the
-        # whole-expression direct-event model.
-        inner_cost = getattr(info._inner, "optimized_cost", info.optimized_cost)
-        assert f"cumulative={inner_cost:,}" in table
+        # Updated for Task 17b: from_inner now syncs inner.steps[i].flop_cost to
+        # accumulation.per_step[i].total, so the table's cumulative equals
+        # info.optimized_cost (= accumulation.total), not the pre-sync inner cost.
+        assert f"cumulative={info.optimized_cost:,}" in table
 
     def test_format_table_verbose_subset_grows(self):
         # For a 3-op chain, step 0's subset has 2 entries, step 1 has 3.

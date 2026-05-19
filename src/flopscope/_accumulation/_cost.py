@@ -353,8 +353,98 @@ def _walk_path_and_aggregate(
         size_dict=upstream_info.size_dict,
     )
 
+    # Build SubgraphSymmetryOracle for the full expression so per-step
+    # binary contractions inherit their symmetry from the declared groups
+    # rather than treating every intermediate as dense.
+    from flopscope._opt_einsum._subgraph_symmetry import SubgraphSymmetryOracle
+
+    def _group_to_oracle_list(sym: _Any, subscript: str) -> "list | None":
+        """Convert a per_op_symmetry entry to the oracle's per_op_groups format.
+
+        The oracle's Source A generator loop requires ``group._labels`` to be
+        set (the subscript chars the group acts on, in axis order).  When the
+        declared SymmetryGroup has ``axes`` but ``_labels is None``, we derive
+        _labels from the operand subscript and the group's axes mapping.
+        """
+        from flopscope._perm_group import SymmetryGroup as _SG
+
+        if sym is None:
+            return None
+        if not isinstance(sym, _SG):
+            # String symmetries (e.g. 'symmetric') are not SymmetryGroup objects;
+            # skip them here — the oracle only consumes SymmetryGroup generators.
+            return None
+        # Ensure _labels is set so the oracle's Source A generator loop can
+        # map group-axis positions to subscript characters.
+        if sym._labels is None and sym.axes is not None:
+            # axes[g_pos] = tensor axis index; subscript[axis_idx] = char.
+            try:
+                derived_labels = tuple(subscript[ax] for ax in sym.axes)
+            except IndexError:
+                derived_labels = None
+            if derived_labels is not None:
+                # Build a new group with _labels set (avoid mutating the original).
+                import copy as _copy
+
+                labeled_group = _copy.copy(sym)
+                labeled_group._labels = derived_labels
+                return [labeled_group]
+        return [sym]
+
+    # Build oracle operands that mirror the original identity pattern:
+    # identical operands (same Python id in the original call) must share
+    # the same Python object here so the oracle's Source B generator (identical-
+    # operand swaps) fires correctly for subset queries.
+    oracle_operands = list(dummy_operands)  # start with distinct fresh objects
+    if identity_pattern:
+        for group in identity_pattern:
+            # All positions in `group` referred to the same object originally.
+            # Reuse the dummy for the first position for all positions in the group.
+            canonical_obj = oracle_operands[group[0]]
+            for pos in group[1:]:
+                oracle_operands[pos] = canonical_obj
+
+    oracle = SubgraphSymmetryOracle(
+        operands=oracle_operands,
+        subscript_parts=list(input_parts),
+        per_op_groups=[
+            _group_to_oracle_list(s, sub)
+            for s, sub in zip(per_op_symmetries, input_parts)
+        ],
+        output_chars=output_subscript,
+    )
+
+    def _subset_sym_fingerprint(subset: "frozenset[int]") -> "tuple":
+        """Return an accumulation-cache fingerprint for a step-input subset.
+
+        Queries the oracle for the V-side (output) group of the subset of
+        original operands, then serialises it in the (axes, gens) format
+        expected by get_accumulation_cost_cached's sym_fingerprint.
+        Returns None (dense) when the oracle finds no symmetry.
+        """
+        from flopscope._perm_group import SymmetryGroup as _SG
+
+        ss = oracle.sym(subset)
+        grp = ss.output  # V-side (free-label) group for this subset
+        if grp is None or not isinstance(grp, _SG):
+            return None  # type: ignore[return-value]
+        axes = grp.axes if grp.axes is not None else tuple(range(grp.degree))
+        gens = tuple(tuple(g.array_form) for g in grp.generators)
+        if not gens:
+            return None  # type: ignore[return-value]
+        return (axes, gens)
+
+    # SSA-to-subset: tracks which original operand positions each current
+    # operand covers. Starts as singletons; merged as the path progresses.
+    # We walk path_info.path in parallel with path_info.steps.
+    current_subsets: list["frozenset[int]"] = [
+        frozenset({i}) for i in range(num_ops)
+    ]
+
+    from ._cache import get_accumulation_cost_cached
+
     per_step_costs: list[AccumulationCost] = []
-    for step in path_info.steps:
+    for step_idx, step in enumerate(path_info.steps):
         step_subscript = step.subscript
         if "->" in step_subscript:
             step_lhs, step_output = step_subscript.split("->", 1)
@@ -363,13 +453,57 @@ def _walk_path_and_aggregate(
         step_input_parts = step_lhs.split(",")
         step_shapes = step.input_shapes
 
-        # Binary steps always use dense symmetry (intermediates don't carry
-        # per-operand symmetry through opt_einsum's path decomposition).
-        step_per_op_symmetries: tuple[_Any, ...] = (None,) * len(step_input_parts)
+        # Derive which original operands each step input covers.
+        # path_info.path[step_idx] gives the current-list positions to contract.
+        raw_path_entry = path_info.path[step_idx]
+        # Sort descending so that popping by index doesn't shift earlier indices.
+        contract_positions = tuple(sorted(raw_path_entry, reverse=True))
+
+        # Gather the input subsets matching the opt_einsum operand order in the
+        # step subscript. opt_einsum pops positions from highest to lowest (to
+        # avoid index shifting), so the subscript's left-to-right operand order
+        # corresponds to descending position order in the path entry.
+        # E.g. path entry (0,1) with subscript "jk,ij->..." means position 1
+        # (higher) contributes "jk" first and position 0 contributes "ij" second.
+        step_input_subsets = [
+            current_subsets[pos]
+            for pos in sorted(raw_path_entry, reverse=True)  # descending = subscript order
+        ]
+
+        # Build per-step sym_fingerprint by querying the oracle per input subset.
+        step_sym_fp: tuple = tuple(
+            _subset_sym_fingerprint(subset) for subset in step_input_subsets
+        )
+
+        # Derive the step's identity_pattern from the original expression's
+        # identity_pattern. A step identity exists only when BOTH inputs are:
+        # (a) singleton subsets (original operands, not intermediates), AND
+        # (b) in the same identity group in the original expression.
+        # The wreath/sigma framework correctly handles identical operands even
+        # when they appear with different subscripts in the step — the
+        # swap generator combined with per-operand declared symmetry produces
+        # the correct joint group.
+        step_identity_pattern: "tuple[tuple[int,...], ...] | None" = None
+        if identity_pattern:
+            # Map each singleton original position to its local step index.
+            orig_to_local: dict[int, int] = {}
+            for local_idx_inner, subset in enumerate(step_input_subsets):
+                if len(subset) == 1:
+                    orig_to_local[next(iter(subset))] = local_idx_inner
+            # For each original identity group, restrict to this step's singletons.
+            local_groups = []
+            for orig_group in identity_pattern:
+                step_members = tuple(
+                    orig_to_local[op]
+                    for op in orig_group
+                    if op in orig_to_local
+                )
+                if len(step_members) >= 2:
+                    local_groups.append(step_members)
+            if local_groups:
+                step_identity_pattern = tuple(local_groups)
 
         step_canonical = ",".join(step_input_parts) + "->" + step_output
-
-        from ._cache import get_accumulation_cost_cached
 
         # Route per-step binary calls through the shared LRU cache so that
         # identical sub-steps across different top-level expressions hit once.
@@ -378,11 +512,18 @@ def _walk_path_and_aggregate(
             input_parts=tuple(step_input_parts),
             output_subscript=step_output,
             shapes=tuple(tuple(s) for s in step_shapes),
-            sym_fingerprint=tuple(None for _ in step_input_parts),
-            identity_pattern=None,  # intermediates have no identity pattern
+            sym_fingerprint=step_sym_fp,
+            identity_pattern=step_identity_pattern,
             partition_budget=partition_budget,
         )
         per_step_costs.append(step_cost)
+
+        # Update current_subsets: remove contracted inputs (highest index first
+        # to preserve lower indices), then append the merged output subset.
+        merged_subset: frozenset[int] = frozenset().union(*step_input_subsets)
+        for pos in contract_positions:
+            current_subsets.pop(pos)
+        current_subsets.append(merged_subset)
 
     total = sum(s.total for s in per_step_costs)
     mu_total = sum((s.mu or 0) for s in per_step_costs)

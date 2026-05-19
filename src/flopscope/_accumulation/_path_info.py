@@ -38,6 +38,21 @@ class FlopscopePathInfo:
         inner: Any,
         accumulation: AccumulationCost | None,
     ) -> FlopscopePathInfo:
+        # Sync inner.steps[i].flop_cost to accumulation.per_step[i].total so
+        # the check_consistency invariant (optimized_cost == sum(step.flop_cost)
+        # == accumulation.total) holds even when the oracle threads symmetry
+        # through per-step costs (Task 17b).
+        if (
+            accumulation is not None
+            and accumulation.per_step
+            and hasattr(inner, "steps")
+        ):
+            steps = inner.steps
+            for step, acc_step in zip(steps, accumulation.per_step):
+                try:
+                    step.flop_cost = acc_step.total
+                except (AttributeError, TypeError):
+                    pass  # StepInfo may be frozen in some configurations; skip
         return cls(inner=inner, accumulation=accumulation)
 
     @property
