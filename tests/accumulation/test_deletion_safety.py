@@ -74,9 +74,9 @@ def test_opt_einsum_paths_module_is_importable():
     importlib.import_module("flopscope._opt_einsum._paths")
 
 
-def test_opt_einsum_path_random_module_is_gone():
-    with pytest.raises(ImportError):
-        importlib.import_module("flopscope._opt_einsum._path_random")
+def test_opt_einsum_path_random_module_is_importable():
+    # Restored in Task 16 (symmetry-aware random-greedy branch).
+    importlib.import_module("flopscope._opt_einsum._path_random")
 
 
 def test_opt_einsum_blas_module_is_gone():
