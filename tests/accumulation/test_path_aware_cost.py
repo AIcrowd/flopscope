@@ -144,3 +144,28 @@ def test_fma_cost_affects_multiplication_term_only():
     assert cost2.total == 20, f"fma=2: expected 20, got {cost2.total}"
 
     flops.configure(fma_cost=1)
+
+
+def test_three_costs_agree_for_multi_operand():
+    """info.optimized_cost == sum(s.flop_cost for s in info.steps) ==
+    info.accumulation.total. Holds for every multi-operand expression."""
+    import flopscope.numpy as fnp
+    import flopscope as flops
+
+    cases = [
+        ("ij,jk,kl->il", (fnp.ones((10, 10)),) * 3),
+        ("ij,jk,kl,lm->im", (fnp.ones((4, 4)),) * 4),
+        ("ai,bi,aj,bj->ab", (fnp.ones((4, 4)),) * 4),
+    ]
+    for subs, ops in cases:
+        with flops.BudgetContext(flop_budget=10**12, quiet=True):
+            _, info = fnp.einsum_path(subs, *ops)
+        step_sum = sum(s.flop_cost for s in info.steps)
+        assert info.optimized_cost == step_sum, (
+            f"{subs}: optimized_cost={info.optimized_cost} != "
+            f"sum(steps.flop_cost)={step_sum}"
+        )
+        assert info.optimized_cost == info.accumulation.total, (
+            f"{subs}: optimized_cost={info.optimized_cost} != "
+            f"accumulation.total={info.accumulation.total}"
+        )
