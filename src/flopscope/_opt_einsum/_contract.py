@@ -612,6 +612,7 @@ class PathInfo:
             s.dense_flop_cost > 0 and s.flop_cost != s.dense_flop_cost
             for s in self.steps
         )
+        any_regime = any(hasattr(s, "_regime") for s in self.steps)
 
         contract_width = max(
             len("contract"),
@@ -648,6 +649,15 @@ class PathInfo:
                 default=0,
             ),
         )
+        regime_width = None
+        if any_regime:
+            regime_width = max(
+                len("regime"),
+                max(
+                    (len(getattr(step, "_regime", "-")) for step in self.steps),
+                    default=len("regime"),
+                ),
+            )
         unique_width = None
         if any_unique:
             unique_width = max(
@@ -670,6 +680,8 @@ class PathInfo:
         table.add_column("step", justify="right", no_wrap=True, width=len("step"))
         table.add_column("contract", justify="left", no_wrap=True, width=contract_width)
         table.add_column("subscript", overflow="fold", width=subscript_width)
+        if any_regime:
+            table.add_column("regime", justify="left", no_wrap=True, width=regime_width)
         table.add_column("flops", justify="right", no_wrap=True, width=flops_width)
         table.add_column(
             "dense_flops", justify="right", no_wrap=True, width=dense_width
@@ -691,6 +703,10 @@ class PathInfo:
                 str(i),
                 self._fmt_contract(step),
                 self._rich_subscript_text(step.subscript),
+            ]
+            if any_regime:
+                row.append(getattr(step, "_regime", "-"))
+            row += [
                 f"{step.flop_cost:,}",
                 f"{step.dense_flop_cost:,}",
                 f"{step.symmetry_savings:>7.1%}",
