@@ -365,12 +365,16 @@ def _walk_path_and_aggregate(
 
         step_canonical = ",".join(step_input_parts) + "->" + step_output
 
-        step_cost = compute_accumulation_cost(
+        from ._cache import get_accumulation_cost_cached
+
+        # Route per-step binary calls through the shared LRU cache so that
+        # identical sub-steps across different top-level expressions hit once.
+        step_cost = get_accumulation_cost_cached(
             canonical_subscripts=step_canonical,
             input_parts=tuple(step_input_parts),
             output_subscript=step_output,
             shapes=tuple(tuple(s) for s in step_shapes),
-            per_op_symmetries=step_per_op_symmetries,
+            sym_fingerprint=tuple(None for _ in step_input_parts),
             identity_pattern=None,  # intermediates have no identity pattern
             partition_budget=partition_budget,
         )

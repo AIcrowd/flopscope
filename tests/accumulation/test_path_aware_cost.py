@@ -68,3 +68,29 @@ def test_per_step_path_matches_top_level_path():
     # 4-operand chain produces 3 binary steps.
     assert len(cost.path) == 3, f"expected 3 steps, got {cost.path}"
     assert len(cost.per_step) == 3
+
+
+def test_per_step_cache_hits_across_expressions():
+    """Two different multi-operand expressions sharing a binary sub-step
+    (here 'ij,jk->ik') should produce one cache hit on the shared step."""
+    from flopscope._accumulation._cache import _accumulation_cache
+
+    flops.clear_cache()
+    info_before = _accumulation_cache.cache_info()
+    assert info_before.hits == 0 and info_before.misses == 0
+
+    x = fnp.ones((4, 4))
+    # First call: 1 miss (top-level) + 2 misses (per-step "ij,jk->ik"
+    # and "ik,kl->il"). Total: 3 misses.
+    flops.einsum_accumulation_cost("ij,jk,kl->il", x, x, x)
+    info_mid = _accumulation_cache.cache_info()
+    assert info_mid.misses == 3, f"expected 3 misses, got {info_mid.misses}"
+
+    # Second call shares "ij,jk->ik" step. Top-level miss (different
+    # subscripts), one per-step hit on "ij,jk->ik", one per-step miss
+    # on "ik,km->im". Total: 1 hit + 2 misses (cumulative 1 + 5).
+    flops.einsum_accumulation_cost("ij,jk,km->im", x, x, x)
+    info_after = _accumulation_cache.cache_info()
+    assert info_after.hits >= 1, (
+        f"expected >=1 hit (shared step), got {info_after.hits}"
+    )
