@@ -387,9 +387,18 @@ def _walk_path_and_aggregate(
     total = sum(s.total for s in per_step_costs)
     mu_total = sum((s.mu or 0) for s in per_step_costs)
     alpha_total = sum((s.alpha or 0) for s in per_step_costs)
-    m_total = 1
-    for s in per_step_costs:
-        m_total *= s.m_total
+    # m_total for the path-level result must reflect the number of unique output
+    # elements in the FULL k-ary expression, not the product of per-step intermediate
+    # m_total values (which would multiply intermediate tensor sizes together and
+    # always exceed dense_baseline, making _has_savings() return False).
+    # full_expression_component_costs holds the full-expression per_component data
+    # computed by the wreath/sigma pass before the path decomposition.
+    if full_expression_component_costs:
+        m_total = math.prod(c.m for c in full_expression_component_costs)
+    else:
+        # Fallback: sum of per-step m_total values is still wrong, but if we have
+        # no component data just use dense_baseline as a conservative estimate.
+        m_total = dense_baseline
     fallback_used = any(s.fallback_used for s in per_step_costs)
     unavailable_components: tuple[int, ...] = tuple(
         i for i, s in enumerate(per_step_costs) if s.fallback_used

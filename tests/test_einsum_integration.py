@@ -492,7 +492,9 @@ class TestPathInfoDebugFields:
         table = info.format_table()
 
         assert "Savings:" in table
-        assert "80.0%" in table
+        # Updated for path-aware einsum (spec §6.1). Was 80.0% (single-step k-way formula:
+        # 1 - 250/1250 = 80%); now 64.0% = 1 - 450/1250 where opt=450 = sum of binary-step costs.
+        assert "64.0%" in table
 
     def test_rich_console_renders_table(self):
         pytest.importorskip("rich")
