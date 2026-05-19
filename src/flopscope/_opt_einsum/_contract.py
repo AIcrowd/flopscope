@@ -698,6 +698,19 @@ def build_path_info(
             input_shapes=input_shapes_for_step,
         )
 
+        # Dense cost: what this step would cost without any symmetry reduction.
+        step_dense_flop_cost = helpers.flop_count(
+            idx_contraction, inner, num_terms, size_dict
+        )
+        # Fraction of dense cost saved by symmetry (0.0 when no symmetry or
+        # when the accumulation model costs more than the dense baseline due to
+        # FMA vs. flop_count differences on this branch).
+        step_symmetry_savings = (
+            max(0.0, 1.0 - cost / step_dense_flop_cost)
+            if step_dense_flop_cost > 0
+            else 0.0
+        )
+
         if output_shape_for_step:
             largest_intermediate = max(
                 largest_intermediate, prod(output_shape_for_step)
@@ -726,6 +739,11 @@ def build_path_info(
                 blas_type=do_blas,
                 path_indices=original_path_tuple,
                 merged_subset=new_merged_subset,
+                # Diagnostic fields: dense baseline and symmetry savings.
+                # input_groups / output_group / inner_group remain at defaults
+                # (empty list / None) until Phase 3 restores the oracle.
+                dense_flop_cost=step_dense_flop_cost,
+                symmetry_savings=step_symmetry_savings,
             )
         )
 

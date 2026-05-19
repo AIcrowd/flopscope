@@ -26,3 +26,21 @@ def test_check_consistency_raises_on_forced_desync():
     import pytest
     with pytest.raises(AssertionError, match="check_consistency"):
         info.check_consistency()
+
+
+def test_step_info_populated_with_diagnostics():
+    """Every step in a multi-operand path must have dense_flop_cost,
+    symmetry_savings, input_groups populated (output_group/inner_group
+    may be None for dense intermediates, which is OK)."""
+    x = fnp.ones((10, 10))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+
+    for i, step in enumerate(info.steps):
+        assert step.dense_flop_cost > 0, f"step {i}: dense_flop_cost not populated"
+        assert 0.0 <= step.symmetry_savings <= 1.0, (
+            f"step {i}: symmetry_savings={step.symmetry_savings} out of range"
+        )
+        assert isinstance(step.input_groups, list), (
+            f"step {i}: input_groups not a list"
+        )
