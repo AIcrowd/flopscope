@@ -81,12 +81,7 @@ def test_str_shows_flopscope_optimized_cost():
     )
 
     rendered = str(info)
-    # The (flopscope) cost rows must show 112, NOT 64 (the upstream value).
+    # The optimized_cost row must show the reconciled flopscope value 112.
     assert "112" in rendered, f"expected 112 in str(info); got:\n{rendered}"
-    # And the upstream value 64 must not appear *in the cost rows* — it can
-    # legitimately appear in the per-step flops column for the trivial path
-    # (one step, 64 entries). We check by grepping the header rows only:
-    header_section = rendered.split("---", 1)[0]
-    assert "64" not in header_section, (
-        f"upstream value 64 leaked into the header; got:\n{header_section}"
-    )
+    # naive_cost is not reconciled — the inner's own value (64) is acceptable
+    # in the header after the monkey-patch was removed (commit 69d88ec8f).

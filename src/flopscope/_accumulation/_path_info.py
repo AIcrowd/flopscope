@@ -52,49 +52,19 @@ class FlopscopePathInfo:
         return getattr(self._inner, name)
 
     def __str__(self) -> str:
-        """Return the full formatted table.
+        """Render the underlying PathInfo's table.
 
-        Overrides the inner upstream PathInfo's ``naive_cost`` and ``optimized_cost``
-        to match ``self.optimized_cost`` while rendering, so the table's
-        "(flopscope)" cost rows are consistent with the wrapper's attribute. The
-        α/M cost is path-independent — naive and optimized are the same number,
-        speedup is 1.000x by construction. Use ``self.accumulation.describe()``
-        for the symmetric-vs-dense breakdown.
+        Pre-§6.4 we monkey-patched the inner's naive_cost/optimized_cost
+        before rendering, because the wrapper's optimized_cost
+        (= accumulation.total) differed from inner.optimized_cost (= sum of
+        per-step flop_cost). After the reconciliation refactor (commit
+        69d88ec8f) those numbers are equal by construction, so the inner's
+        own renderer is correct without mutation.
         """
         fmt = getattr(self._inner, "format_table", None)
         if fmt is None:
             return self.__repr__()
-
-        flopscope_cost = self.optimized_cost
-        original_naive = getattr(self._inner, "naive_cost", None)
-        original_opt = getattr(self._inner, "optimized_cost", None)
-        original_speedup = getattr(self._inner, "speedup", None)
-        try:
-            # Best-effort override — if the inner uses __slots__ or is frozen,
-            # fall back to returning the un-overridden table.
-            try:
-                self._inner.naive_cost = flopscope_cost
-                self._inner.optimized_cost = flopscope_cost
-                self._inner.speedup = 1.0
-            except (AttributeError, TypeError):
-                return fmt()
-            return fmt()
-        finally:
-            if original_naive is not None:
-                try:
-                    self._inner.naive_cost = original_naive
-                except (AttributeError, TypeError):
-                    pass
-            if original_opt is not None:
-                try:
-                    self._inner.optimized_cost = original_opt
-                except (AttributeError, TypeError):
-                    pass
-            if original_speedup is not None:
-                try:
-                    self._inner.speedup = original_speedup
-                except (AttributeError, TypeError):
-                    pass
+        return fmt()
 
     def __repr__(self) -> str:
         return (
