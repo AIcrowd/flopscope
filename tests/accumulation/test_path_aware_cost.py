@@ -94,3 +94,14 @@ def test_per_step_cache_hits_across_expressions():
     assert info_after.hits >= 1, (
         f"expected >=1 hit (shared step), got {info_after.hits}"
     )
+
+
+def test_symmetry_group_hash_is_canonical_for_cache_reuse():
+    """Two SymmetryGroups built from equivalent generators should hash and
+    compare equal, so cache lookups reuse entries across construction paths."""
+    from flopscope import SymmetryGroup
+
+    g1 = SymmetryGroup.symmetric(axes=(0, 1))
+    g2 = SymmetryGroup.symmetric(axes=(0, 1))
+    assert g1 == g2, "symmetric(axes=(0,1)) should equal itself across calls"
+    assert hash(g1) == hash(g2), "symmetric(axes=(0,1)) hash must be stable"
