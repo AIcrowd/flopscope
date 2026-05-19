@@ -81,3 +81,19 @@ def test_format_table_includes_regime_column():
     assert ("functionalProjection" in rendered) or ("trivial" in rendered), (
         f"missing per-step regime value:\n{rendered}"
     )
+
+
+def test_verbose_detail_includes_m_alpha_o():
+    x = fnp.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+    # Inner format_table call needs the per-step accumulation attached;
+    # FlopscopePathInfo.__str__ does this attachment, but here we test
+    # the inner directly with attached values (mirror what __str__ does).
+    str(info)  # triggers attachment
+    verbose = info._inner.format_table(verbose=True)
+    assert "M=" in verbose, f"verbose missing M=:\n{verbose[-500:]}"
+    assert "α=" in verbose, f"verbose missing α=:\n{verbose[-500:]}"
+    assert "−O=" in verbose or "-O=" in verbose, (
+        f"verbose missing −O=:\n{verbose[-500:]}"
+    )

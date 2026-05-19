@@ -417,6 +417,22 @@ class PathInfo:
         result.append("\n")
         result.append("cumulative=", style="dim")
         result.append(f"{cumulative:,}", style="bold cyan")
+        # NEW: per-step M / α / −O from attached accumulation.
+        acc_step = getattr(step, "_acc_step", None)
+        if acc_step is not None:
+            m_value = acc_step.m_total
+            alpha_value = acc_step.alpha or 0
+            o_value = (
+                acc_step.per_component[0].num_output_orbits
+                if acc_step.per_component else 0
+            )
+            result.append("\n")
+            result.append("M=", style="dim")
+            result.append(str(m_value), style="bold")
+            result.append("  α=", style="dim")
+            result.append(str(alpha_value), style="bold")
+            result.append("  −O=", style="dim")
+            result.append(str(o_value), style="bold")
         return result
 
     def _fmt_index_sizes(self) -> str:
@@ -834,6 +850,18 @@ class PathInfo:
                     f"out_shape={shape_str}",
                     f"cumulative={cumulative:,}",
                 ]
+                # NEW: per-step M / α / −O from attached accumulation.
+                acc_step = getattr(step, "_acc_step", None)
+                if acc_step is not None:
+                    m_value = acc_step.m_total
+                    alpha_value = acc_step.alpha or 0
+                    o_value = (
+                        acc_step.per_component[0].num_output_orbits
+                        if acc_step.per_component else 0
+                    )
+                    detail_parts.append(
+                        f"M={m_value} α={alpha_value} −O={o_value}"
+                    )
                 lines.append("        " + "  ".join(detail_parts))
 
         return "\n".join(lines)

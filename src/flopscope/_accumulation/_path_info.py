@@ -79,7 +79,7 @@ class FlopscopePathInfo:
         fmt = getattr(self._inner, "format_table", None)
         if fmt is None:
             return self.__repr__()
-        # Attach regime per step from accumulation per_step (if path-aware).
+        # Attach regime and acc_step per step from accumulation per_step (if path-aware).
         if self.accumulation is not None:
             per_step = self.accumulation.per_step or (self.accumulation,)
             for step, acc_step in zip(self._inner.steps, per_step):
@@ -87,6 +87,7 @@ class FlopscopePathInfo:
                     object.__setattr__(step, "_regime", acc_step.per_component[0].regime_id)
                 else:
                     object.__setattr__(step, "_regime", "-")
+                object.__setattr__(step, "_acc_step", acc_step)
         return fmt()
 
     def check_consistency(self) -> bool:
