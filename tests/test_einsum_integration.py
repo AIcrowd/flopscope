@@ -460,13 +460,18 @@ class TestPathInfoDebugFields:
         # data rows must all show "-" (no actual unique/total counts).
         if "unique/total" in table:
             data_rows = [
-                line for line in table.splitlines()
-                if line.strip() and not line.startswith("-") and "unique/total" not in line
-                and not line.startswith("  Complete") and not line.startswith("  ")
+                line
+                for line in table.splitlines()
+                if line.strip()
+                and not line.startswith("-")
+                and "unique/total" not in line
+                and not line.startswith("  Complete")
+                and not line.startswith("  ")
             ]
             for row in data_rows:
                 # Ensure no V:x/y or W:x/y pattern in these rows
                 import re
+
                 assert not re.search(r"[VW]:\d+/\d+", row), (
                     f"unexpected unique/total detail in row:\n{row}"
                 )

@@ -130,6 +130,7 @@ def test_python_matches_js_per_component(case):
     num_ops = len(case.operand_names)
     if num_ops >= 3:
         import pytest
+
         pytest.skip(
             f"{case.case_id}: k={num_ops} JS-parity check deferred "
             f"(JS engine still single-step; see spec §10)"

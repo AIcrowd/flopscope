@@ -21,10 +21,10 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import pytest
-
-from flopscope import _opt_einsum as oe
 from opt_einsum.parser import get_symbol
 from opt_einsum.testing import build_shapes, rand_equation
+
+from flopscope import _opt_einsum as oe
 from flopscope._opt_einsum._typing import (
     ArrayIndexType,
     OptimizeKind,

@@ -126,9 +126,7 @@ def test_path_walker_per_step_cost_matches_accumulation_per_step():
     assert info.accumulation is not None
     assert info.accumulation.per_step, "expected populated per_step for k=3"
     assert len(info.steps) == len(info.accumulation.per_step)
-    for i, (step, acc_step) in enumerate(
-        zip(info.steps, info.accumulation.per_step)
-    ):
+    for i, (step, acc_step) in enumerate(zip(info.steps, info.accumulation.per_step, strict=False)):
         assert step.flop_cost == acc_step.total, (
             f"step {i}: path-walker flop_cost={step.flop_cost} != "
             f"accumulation per-step total={acc_step.total}"
@@ -185,8 +183,8 @@ def test_symmetric_triangle_uses_inherited_symmetry():
 def test_three_costs_agree_for_multi_operand():
     """info.optimized_cost == sum(s.flop_cost for s in info.steps) ==
     info.accumulation.total. Holds for every multi-operand expression."""
-    import flopscope.numpy as fnp
     import flopscope as flops
+    import flopscope.numpy as fnp
 
     cases = [
         ("ij,jk,kl->il", (fnp.ones((10, 10)),) * 3),
@@ -215,9 +213,9 @@ def test_path_cache_distinguishes_on_per_op_symmetries():
     Uses einsum_path() (which routes through _get_path_info → _path_cache)
     to exercise the path-cache key directly.
     """
-    from flopscope._einsum import _path_cache
     import flopscope as flops
     import flopscope.numpy as fnp
+    from flopscope._einsum import _path_cache
 
     flops.clear_cache()
     A = fnp.zeros((4, 4))
@@ -255,10 +253,14 @@ def test_large_k_auto_fallback_to_greedy():
 def test_large_k_einsum_completes_within_one_second():
     """Smoke check: k=8 chain with optimize='auto' completes quickly."""
     import time
-    import flopscope.numpy as fnp
-    import flopscope as flops
 
-    subs = ",".join(f"{chr(ord('a')+i)}{chr(ord('a')+i+1)}" for i in range(8)) + "->ai"
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    subs = (
+        ",".join(f"{chr(ord('a') + i)}{chr(ord('a') + i + 1)}" for i in range(8))
+        + "->ai"
+    )
     ops = tuple(fnp.ones((3, 3)) for _ in range(8))
     flops.clear_cache()
     t0 = time.perf_counter()
@@ -270,8 +272,8 @@ def test_large_k_einsum_completes_within_one_second():
 def test_clear_cache_flushes_all_layers():
     import flopscope as flops
     import flopscope.numpy as fnp
-    from flopscope._einsum import _path_cache
     from flopscope._accumulation._cache import _accumulation_cache, _reduction_cache
+    from flopscope._einsum import _path_cache
 
     x = fnp.ones((4, 4))
     with flops.BudgetContext(flop_budget=10**12, quiet=True):

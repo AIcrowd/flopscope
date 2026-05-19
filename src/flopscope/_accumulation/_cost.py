@@ -159,7 +159,7 @@ class AccumulationCost:
     unavailable_reason: str | None = None
 
     # NEW: path-aware decomposition. Empty for k<=2 (no path walked).
-    per_step: tuple["AccumulationCost", ...] = ()
+    per_step: tuple[AccumulationCost, ...] = ()
     path: tuple[tuple[int, ...], ...] | None = None
 
     def describe(self) -> dict:
@@ -315,8 +315,8 @@ def _walk_path_and_aggregate(
     identity_pattern: tuple[tuple[int, ...], ...] | None,
     partition_budget: int,
     dense_baseline: int,
-    full_expression_component_costs: "tuple[ComponentCost, ...] | None" = None,
-) -> "AccumulationCost":
+    full_expression_component_costs: tuple[ComponentCost, ...] | None = None,
+) -> AccumulationCost:
     """Walk opt_einsum's binary contraction path and sum per-step costs.
 
     Decomposes a k>=3 einsum into binary contractions via opt_einsum.contract_path.
@@ -358,7 +358,7 @@ def _walk_path_and_aggregate(
     # rather than treating every intermediate as dense.
     from flopscope._opt_einsum._subgraph_symmetry import SubgraphSymmetryOracle
 
-    def _group_to_oracle_list(sym: _Any, subscript: str) -> "list | None":
+    def _group_to_oracle_list(sym: _Any, subscript: str) -> list | None:
         """Convert a per_op_symmetry entry to the oracle's per_op_groups format.
 
         The oracle's Source A generator loop requires ``group._labels`` to be
@@ -409,12 +409,12 @@ def _walk_path_and_aggregate(
         subscript_parts=list(input_parts),
         per_op_groups=[
             _group_to_oracle_list(s, sub)
-            for s, sub in zip(per_op_symmetries, input_parts)
+            for s, sub in zip(per_op_symmetries, input_parts, strict=False)
         ],
         output_chars=output_subscript,
     )
 
-    def _subset_sym_fingerprint(subset: "frozenset[int]") -> "tuple":
+    def _subset_sym_fingerprint(subset: frozenset[int]) -> tuple:
         """Return an accumulation-cache fingerprint for a step-input subset.
 
         Queries the oracle for the V-side (output) group of the subset of
@@ -437,9 +437,7 @@ def _walk_path_and_aggregate(
     # SSA-to-subset: tracks which original operand positions each current
     # operand covers. Starts as singletons; merged as the path progresses.
     # We walk path_info.path in parallel with path_info.steps.
-    current_subsets: list["frozenset[int]"] = [
-        frozenset({i}) for i in range(num_ops)
-    ]
+    current_subsets: list[frozenset[int]] = [frozenset({i}) for i in range(num_ops)]
 
     from ._cache import get_accumulation_cost_cached
 
@@ -467,7 +465,9 @@ def _walk_path_and_aggregate(
         # (higher) contributes "jk" first and position 0 contributes "ij" second.
         step_input_subsets = [
             current_subsets[pos]
-            for pos in sorted(raw_path_entry, reverse=True)  # descending = subscript order
+            for pos in sorted(
+                raw_path_entry, reverse=True
+            )  # descending = subscript order
         ]
 
         # Build per-step sym_fingerprint by querying the oracle per input subset.
@@ -483,7 +483,7 @@ def _walk_path_and_aggregate(
         # when they appear with different subscripts in the step — the
         # swap generator combined with per-operand declared symmetry produces
         # the correct joint group.
-        step_identity_pattern: "tuple[tuple[int,...], ...] | None" = None
+        step_identity_pattern: tuple[tuple[int,...], ...] | None = None
         if identity_pattern:
             # Map each singleton original position to its local step index.
             orig_to_local: dict[int, int] = {}
@@ -494,9 +494,7 @@ def _walk_path_and_aggregate(
             local_groups = []
             for orig_group in identity_pattern:
                 step_members = tuple(
-                    orig_to_local[op]
-                    for op in orig_group
-                    if op in orig_to_local
+                    orig_to_local[op] for op in orig_group if op in orig_to_local
                 )
                 if len(step_members) >= 2:
                     local_groups.append(step_members)

@@ -242,15 +242,31 @@ def test_accumulation_cost_has_per_step_and_path_fields():
     """For k=2 einsums these fields default to empty/None.
     Populated for k>=3 (covered in test_path_aware_cost.py)."""
     from flopscope._accumulation._cost import AccumulationCost, ComponentCost
+
     c = ComponentCost(
-        labels=("i",), va=("i",), wa=(), sizes=(3,),
-        m=3, alpha=3, dense_count=3, num_output_orbits=3,
-        regime_id="trivial", shape="trivial",
-        group_name="trivial", group_order=1, regime_trace=(),
+        labels=("i",),
+        va=("i",),
+        wa=(),
+        sizes=(3,),
+        m=3,
+        alpha=3,
+        dense_count=3,
+        num_output_orbits=3,
+        regime_id="trivial",
+        shape="trivial",
+        group_name="trivial",
+        group_order=1,
+        regime_trace=(),
     )
     cost = AccumulationCost(
-        total=3, mu=3, alpha=3, m_total=3, dense_baseline=3, num_terms=2,
-        per_component=(c,), fallback_used=False,
+        total=3,
+        mu=3,
+        alpha=3,
+        m_total=3,
+        dense_baseline=3,
+        num_terms=2,
+        per_component=(c,),
+        fallback_used=False,
     )
     assert cost.per_step == ()
     assert cost.path is None

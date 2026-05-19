@@ -14,9 +14,10 @@ from functools import cached_property
 from hashlib import sha1
 from typing import Any
 
+from flopscope._perm_group import SymmetryGroup
+
 from . import _helpers as helpers
 from ._hsluv import rgb_distance_hex, rich_label_palette
-from flopscope._perm_group import SymmetryGroup
 
 __all__ = [
     "build_path_info",
@@ -271,8 +272,8 @@ class PathInfo:
         from rich.text import Text
 
         in_parts = [self._fmt_sym(s) for s in step.input_groups]
-        out_part = self._fmt_sym(step.output_group)
-        w_part = self._fmt_sym(step.inner_group)
+        out_part = self._fmt_sym(step.output_group)  # type: ignore[arg-type]
+        w_part = self._fmt_sym(step.inner_group)  # type: ignore[arg-type]
         if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
             return Text("-", style="dim")
 
@@ -424,7 +425,8 @@ class PathInfo:
             alpha_value = acc_step.alpha or 0
             o_value = (
                 acc_step.per_component[0].num_output_orbits
-                if acc_step.per_component else 0
+                if acc_step.per_component
+                else 0
             )
             result.append("\n")
             result.append("M=", style="dim")
@@ -528,8 +530,8 @@ class PathInfo:
     def _fmt_step_sym(self, step: StepInfo) -> str:
         """Format inputs→output symmetry transformation for one step."""
         in_parts = [self._fmt_sym(s) for s in step.input_groups]
-        out_part = self._fmt_sym(step.output_group)
-        w_part = self._fmt_sym(step.inner_group)
+        out_part = self._fmt_sym(step.output_group)  # type: ignore[arg-type]
+        w_part = self._fmt_sym(step.inner_group)  # type: ignore[arg-type]
         if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
             return ""
         result = f"{' × '.join(in_parts)} → {out_part}"
@@ -551,7 +553,9 @@ class PathInfo:
             if not indices:
                 return 1
             if perm_group is not None:
-                labels = perm_group._labels or tuple(sorted(indices)[: perm_group.degree])
+                labels = perm_group._labels or tuple(
+                    sorted(indices)[: perm_group.degree]
+                )
                 pg_size_dict: dict[int, int] = {}
                 accounted: set[str] = set()
                 for i, lbl in enumerate(labels):
@@ -573,7 +577,7 @@ class PathInfo:
             out_str = step.subscript.split("->")[1] if "->" in step.subscript else ""
             out_total = prod(step.output_shape)
             out_unique = _unique_elements(
-                frozenset(out_str), self.size_dict, perm_group=step.output_group
+                frozenset(out_str), self.size_dict, perm_group=step.output_group  # type: ignore[arg-type]
             )
             if out_unique != out_total:
                 parts.append(f"V:{out_unique:,}/{out_total:,}")
@@ -589,7 +593,7 @@ class PathInfo:
             if contracted:
                 inner_total = prod(self.size_dict[c] for c in contracted)
                 inner_unique = _unique_elements(
-                    contracted, self.size_dict, perm_group=step.inner_group
+                    contracted, self.size_dict, perm_group=step.inner_group  # type: ignore[arg-type]
                 )
                 if inner_unique != inner_total:
                     parts.append(f"W:{inner_unique:,}/{inner_total:,}")
@@ -857,11 +861,10 @@ class PathInfo:
                     alpha_value = acc_step.alpha or 0
                     o_value = (
                         acc_step.per_component[0].num_output_orbits
-                        if acc_step.per_component else 0
+                        if acc_step.per_component
+                        else 0
                     )
-                    detail_parts.append(
-                        f"M={m_value} α={alpha_value} −O={o_value}"
-                    )
+                    detail_parts.append(f"M={m_value} α={alpha_value} −O={o_value}")
                 lines.append("        " + "  ".join(detail_parts))
 
         return "\n".join(lines)
@@ -932,7 +935,7 @@ def symmetric_flop_count(
     from flopscope._config import get_setting
 
     canonical = ",".join(input_subscripts) + "->" + (output_subscript or "")
-    partition_budget = int(get_setting("partition_budget"))
+    partition_budget = int(get_setting("partition_budget"))  # type: ignore[arg-type]
     cost = get_accumulation_cost_cached(
         canonical_subscripts=canonical,
         input_parts=tuple(input_subscripts),

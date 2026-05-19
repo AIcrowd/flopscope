@@ -48,7 +48,7 @@ class FlopscopePathInfo:
             and hasattr(inner, "steps")
         ):
             steps = inner.steps
-            for step, acc_step in zip(steps, accumulation.per_step):
+            for step, acc_step in zip(steps, accumulation.per_step, strict=False):
                 try:
                     step.flop_cost = acc_step.total
                 except (AttributeError, TypeError):
@@ -82,9 +82,11 @@ class FlopscopePathInfo:
         # Attach regime and acc_step per step from accumulation per_step (if path-aware).
         if self.accumulation is not None:
             per_step = self.accumulation.per_step or (self.accumulation,)
-            for step, acc_step in zip(self._inner.steps, per_step):
+            for step, acc_step in zip(self._inner.steps, per_step, strict=False):
                 if acc_step.per_component:
-                    object.__setattr__(step, "_regime", acc_step.per_component[0].regime_id)
+                    object.__setattr__(
+                        step, "_regime", acc_step.per_component[0].regime_id
+                    )
                 else:
                     object.__setattr__(step, "_regime", "-")
                 object.__setattr__(step, "_acc_step", acc_step)
@@ -100,12 +102,9 @@ class FlopscopePathInfo:
         the wrapper to confirm invariants hold.
         """
         sum_steps = sum(
-            getattr(s, "flop_cost", 0)
-            for s in getattr(self._inner, "steps", [])
+            getattr(s, "flop_cost", 0) for s in getattr(self._inner, "steps", [])
         )
-        acc_total = (
-            self.accumulation.total if self.accumulation is not None else None
-        )
+        acc_total = self.accumulation.total if self.accumulation is not None else None
         opt_cost = self.optimized_cost
         if acc_total is not None and opt_cost != acc_total:
             raise AssertionError(

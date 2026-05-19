@@ -24,6 +24,7 @@ def test_check_consistency_raises_on_forced_desync():
     info.accumulation = bad_acc
 
     import pytest
+
     with pytest.raises(AssertionError, match="check_consistency"):
         info.check_consistency()
 
@@ -41,9 +42,7 @@ def test_step_info_populated_with_diagnostics():
         assert 0.0 <= step.symmetry_savings <= 1.0, (
             f"step {i}: symmetry_savings={step.symmetry_savings} out of range"
         )
-        assert isinstance(step.input_groups, list), (
-            f"step {i}: input_groups not a list"
-        )
+        assert isinstance(step.input_groups, list), f"step {i}: input_groups not a list"
 
 
 def test_format_table_includes_dense_flops_and_savings_columns():
