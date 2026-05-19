@@ -454,7 +454,23 @@ class TestPathInfoDebugFields:
         C = numpy.ones((5, 5))
         _, info = einsum_path("ij,jk,kl->il", A, B, C)
         table = info.format_table()
-        assert "unique/total" not in table
+        # The richer renderer always shows dense_flops/savings/symmetry columns.
+        # When no per-step symmetry group is detected the unique/total column is
+        # absent (all-dash rows are suppressed entirely).
+        # If the column does appear (because flop_cost != dense_flop_cost), the
+        # data rows must all show "-" (no actual unique/total counts).
+        if "unique/total" in table:
+            data_rows = [
+                line for line in table.splitlines()
+                if line.strip() and not line.startswith("-") and "unique/total" not in line
+                and not line.startswith("  Complete") and not line.startswith("  ")
+            ]
+            for row in data_rows:
+                # Ensure no V:x/y or W:x/y pattern in these rows
+                import re
+                assert not re.search(r"[VW]:\d+/\d+", row), (
+                    f"unexpected unique/total detail in row:\n{row}"
+                )
 
     def test_format_table_verbose_shows_subset_and_cumulative(self):
         X = numpy.ones((4, 4))

@@ -16,6 +16,7 @@ from typing import Any
 
 from . import _helpers as helpers
 from ._hsluv import rgb_distance_hex, rich_label_palette
+from flopscope._perm_group import SymmetryGroup
 
 __all__ = [
     "build_path_info",
@@ -359,6 +360,135 @@ class PathInfo:
         return "(" + ",".join(str(p) for p in step.path_indices) + ")"
 
     @staticmethod
+    def _try_named_group(k: int, order: int) -> str | None:
+        """Return the named prefix (e.g. 'S3') if recognised, else None."""
+        if order == 1:
+            return None
+        from math import factorial
+
+        if order == factorial(k):
+            return f"S{k}"
+        if order == k:
+            return f"C{k}"
+        if order == 2 * k and k >= 3:
+            return f"D{k}"
+        return None
+
+    @staticmethod
+    def _fmt_generators(group: SymmetryGroup, labels: tuple) -> str:
+        """Format generators in cycle notation with labels."""
+        parts = []
+        for gen in group.generators:
+            if gen.is_identity:
+                continue
+            cycles = gen.cyclic_form
+            if not cycles:
+                continue
+            perm_str = "".join(
+                "(" + " ".join(labels[i] for i in cycle) + ")" for cycle in cycles
+            )
+            parts.append(perm_str)
+        return ", ".join(parts) if parts else "e"
+
+    def _fmt_sym(self, group: SymmetryGroup | None) -> str:
+        """Format a SymmetryGroup for display."""
+        if group is None:
+            return "-"
+        labels = group._labels or tuple(str(i) for i in range(group.degree))
+        k = group.degree
+        order = group.order()
+
+        name = self._try_named_group(k, order)
+        if name is not None:
+            return f"{name}{{{','.join(labels)}}}"
+
+        orbits = [orb for orb in group.orbits() if len(orb) >= 2]
+        if not orbits:
+            return "-"
+
+        if len(orbits) == 1:
+            orbit = orbits[0]
+            moved_labels = tuple(labels[i] for i in sorted(orbit))
+            mk = len(moved_labels)
+            name = self._try_named_group(mk, order)
+            if name is not None:
+                return f"{name}{{{','.join(moved_labels)}}}"
+
+        gen_str = self._fmt_generators(group, labels)
+        return f"PermGroup⟨{gen_str}⟩"
+
+    def _fmt_step_sym(self, step: StepInfo) -> str:
+        """Format inputs→output symmetry transformation for one step."""
+        in_parts = [self._fmt_sym(s) for s in step.input_groups]
+        out_part = self._fmt_sym(step.output_group)
+        w_part = self._fmt_sym(step.inner_group)
+        if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
+            return ""
+        result = f"{' × '.join(in_parts)} → {out_part}"
+        if w_part != "-":
+            w_prefix = "W✓" if step.inner_applied else "W"
+            result += f"  [{w_prefix}: {w_part}]"
+        return result
+
+    def _fmt_unique_dense(self, step: StepInfo) -> str:
+        """Show output and inner unique/dense element counts."""
+        from math import prod
+
+        def _unique_elements(
+            indices: frozenset[str],
+            size_dict: dict[str, int],
+            perm_group: SymmetryGroup | None,
+        ) -> int:
+            """Count unique elements for a set of subscript indices under symmetry."""
+            if not indices:
+                return 1
+            if perm_group is not None:
+                labels = perm_group._labels or tuple(sorted(indices)[: perm_group.degree])
+                pg_size_dict: dict[int, int] = {}
+                accounted: set[str] = set()
+                for i, lbl in enumerate(labels):
+                    pg_size_dict[i] = size_dict[lbl]
+                    accounted.add(lbl)
+                count = perm_group.burnside_unique_count(pg_size_dict)
+                for idx in indices:
+                    if idx not in accounted:
+                        count *= size_dict[idx]
+                return count
+            return prod(size_dict[i] for i in indices)
+
+        if step.flop_cost == step.dense_flop_cost:
+            return "-"
+
+        parts: list[str] = []
+
+        if step.output_group is not None and step.output_shape:
+            out_str = step.subscript.split("->")[1] if "->" in step.subscript else ""
+            out_total = prod(step.output_shape)
+            out_unique = _unique_elements(
+                frozenset(out_str), self.size_dict, perm_group=step.output_group
+            )
+            if out_unique != out_total:
+                parts.append(f"V:{out_unique:,}/{out_total:,}")
+
+        if step.inner_applied and step.inner_group is not None:
+            lhs = (
+                step.subscript.split("->")[0]
+                if "->" in step.subscript
+                else step.subscript
+            )
+            out_str = step.subscript.split("->")[1] if "->" in step.subscript else ""
+            contracted = frozenset(lhs.replace(",", "")) - frozenset(out_str)
+            if contracted:
+                inner_total = prod(self.size_dict[c] for c in contracted)
+                inner_unique = _unique_elements(
+                    contracted, self.size_dict, perm_group=step.inner_group
+                )
+                if inner_unique != inner_total:
+                    parts.append(f"W:{inner_unique:,}/{inner_total:,}")
+
+        return " ".join(parts) if parts else "-"
+
+    @staticmethod
     def _fmt_subset(s: frozenset[int] | None) -> str:
         if s is None:
             return "-"
@@ -469,24 +599,46 @@ class PathInfo:
         verbose : bool, optional
             When True, emit an additional indented details row under each
             step showing the operand subset covered by the intermediate,
-            its output shape, and the cumulative cost so far.
-            Useful for debugging why a particular step's cost is what
-            it is. Default False.
+            its output shape, the unique-vs-dense element counts that the
+            symmetry savings derive from, and the cumulative cost so far.
+            Useful for debugging why a particular step's savings are what
+            they are. Default False.
         """
+        sym_strs = [self._fmt_step_sym(s) for s in self.steps]
+        max_sym_width = max((len(s) for s in sym_strs), default=0)
         header_lines = self._header_lines()
+
+        # Common columns: step, contract, subscript, flops, dense_flops, savings, blas
+        # Plus: symmetry (when any step has symmetry) and unique/dense (when any
+        # step has reduced cost).
+        any_unique = any(
+            s.dense_flop_cost > 0 and s.flop_cost != s.dense_flop_cost
+            for s in self.steps
+        )
 
         contract_strs = [self._fmt_contract(s) for s in self.steps]
         contract_col_width = max(
             len("contract"), max((len(c) for c in contract_strs), default=0)
         )
+        unique_col_width = max(
+            len("unique/total"),
+            max((len(self._fmt_unique_dense(s)) for s in self.steps), default=0),
+        )
 
+        # Build the header line
         cols = [
             f"{'step':>4}",
             f"{'contract':<{contract_col_width}}",
             f"{'subscript':<30}",
             f"{'flops':>14}",
+            f"{'dense_flops':>14}",
+            f"{'savings':>8}",
             f"{'blas':<8}",
         ]
+        if any_unique:
+            cols.append(f"{'unique/total':<{unique_col_width}}")
+        sym_col_width = min(max(max_sym_width, len("symmetry (inputs → output)")), 60)
+        cols.append(f"{'symmetry (inputs → output)':<{sym_col_width}}")
 
         header_row = "  ".join(cols)
         width = max(len(header_row), 84)
@@ -500,13 +652,22 @@ class PathInfo:
                 f"{contract_strs[i]:<{contract_col_width}}",
                 f"{step.subscript:<30}",
                 f"{step.flop_cost:>14,}",
+                f"{step.dense_flop_cost:>14,}",
+                f"{step.symmetry_savings:>7.1%}",
                 f"{blas_label:<8}",
             ]
+            if any_unique:
+                row_parts.append(f"{self._fmt_unique_dense(step):<{unique_col_width}}")
+            sym_str = sym_strs[i] or "-"
+            if len(sym_str) > sym_col_width:
+                sym_str = sym_str[: sym_col_width - 1] + "…"
+            row_parts.append(f"{sym_str:<{sym_col_width}}")
             lines.append("  ".join(row_parts))
 
             cumulative += step.flop_cost
             if verbose:
                 # Indented details row: subset, out_shape, cumulative cost.
+                # Aligned under the subscript column for visual clarity.
                 subset_str = self._fmt_subset(step.merged_subset)
                 shape_str = (
                     "(" + ",".join(str(d) for d in step.output_shape) + ")"

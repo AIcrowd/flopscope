@@ -44,3 +44,13 @@ def test_step_info_populated_with_diagnostics():
         assert isinstance(step.input_groups, list), (
             f"step {i}: input_groups not a list"
         )
+
+
+def test_format_table_includes_dense_flops_and_savings_columns():
+    x = fnp.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+    rendered = str(info)
+    assert "dense_flops" in rendered, f"missing dense_flops column:\n{rendered}"
+    assert "savings" in rendered, f"missing savings column:\n{rendered}"
+    assert "symmetry" in rendered, f"missing symmetry column:\n{rendered}"
