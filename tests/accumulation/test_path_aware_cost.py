@@ -126,7 +126,9 @@ def test_path_walker_per_step_cost_matches_accumulation_per_step():
     assert info.accumulation is not None
     assert info.accumulation.per_step, "expected populated per_step for k=3"
     assert len(info.steps) == len(info.accumulation.per_step)
-    for i, (step, acc_step) in enumerate(zip(info.steps, info.accumulation.per_step, strict=False)):
+    for i, (step, acc_step) in enumerate(
+        zip(info.steps, info.accumulation.per_step, strict=False)
+    ):
         assert step.flop_cost == acc_step.total, (
             f"step {i}: path-walker flop_cost={step.flop_cost} != "
             f"accumulation per-step total={acc_step.total}"

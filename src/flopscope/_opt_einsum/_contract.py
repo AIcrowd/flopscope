@@ -577,7 +577,9 @@ class PathInfo:
             out_str = step.subscript.split("->")[1] if "->" in step.subscript else ""
             out_total = prod(step.output_shape)
             out_unique = _unique_elements(
-                frozenset(out_str), self.size_dict, perm_group=step.output_group  # type: ignore[arg-type]
+                frozenset(out_str),
+                self.size_dict,
+                perm_group=step.output_group,  # type: ignore[arg-type]
             )
             if out_unique != out_total:
                 parts.append(f"V:{out_unique:,}/{out_total:,}")
@@ -593,7 +595,9 @@ class PathInfo:
             if contracted:
                 inner_total = prod(self.size_dict[c] for c in contracted)
                 inner_unique = _unique_elements(
-                    contracted, self.size_dict, perm_group=step.inner_group  # type: ignore[arg-type]
+                    contracted,
+                    self.size_dict,
+                    perm_group=step.inner_group,  # type: ignore[arg-type]
                 )
                 if inner_unique != inner_total:
                     parts.append(f"W:{inner_unique:,}/{inner_total:,}")

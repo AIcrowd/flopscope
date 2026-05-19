@@ -483,7 +483,7 @@ def _walk_path_and_aggregate(
         # when they appear with different subscripts in the step — the
         # swap generator combined with per-operand declared symmetry produces
         # the correct joint group.
-        step_identity_pattern: tuple[tuple[int,...], ...] | None = None
+        step_identity_pattern: tuple[tuple[int, ...], ...] | None = None
         if identity_pattern:
             # Map each singleton original position to its local step index.
             orig_to_local: dict[int, int] = {}
