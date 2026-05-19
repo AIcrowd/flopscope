@@ -301,6 +301,112 @@ def _per_op_symmetry_for_wreath(sym: _Any) -> _Any:
     return sym
 
 
+def _walk_path_and_aggregate(
+    *,
+    canonical_subscripts: str,
+    input_parts: _Seq[str],
+    output_subscript: str,
+    shapes: _Seq[_Seq[int]],
+    per_op_symmetries: _Seq[_Any],
+    identity_pattern: tuple[tuple[int, ...], ...] | None,
+    partition_budget: int,
+    dense_baseline: int,
+    full_expression_component_costs: "tuple[ComponentCost, ...] | None" = None,
+) -> "AccumulationCost":
+    """Walk opt_einsum's binary contraction path and sum per-step costs.
+
+    Decomposes a k>=3 einsum into binary contractions via opt_einsum.contract_path.
+    Each binary step calls compute_accumulation_cost recursively (k=2 path),
+    treating intermediate tensors as dense (no symmetry carried forward).
+
+    ``full_expression_component_costs``: the ComponentCost tuple from the caller's
+    wreath/sigma computation of the FULL k-ary expression. Stored verbatim in
+    per_component so that JS-parity tests (which inspect per_component directly)
+    remain unaffected by the path decomposition.
+
+    Returns an AccumulationCost with per_step and path populated.
+    """
+    import opt_einsum as _oe
+
+    from flopscope._opt_einsum._contract import build_path_info
+
+    num_ops = len(input_parts)
+
+    # Build shape-only operands for opt_einsum (it only needs shape info).
+    # We use shapes=True to avoid materializing tensors.
+    import numpy as _np
+
+    dummy_operands = [_np.empty(shape) for shape in shapes]
+    upstream_path, upstream_info = _oe.contract_path(
+        canonical_subscripts,
+        *dummy_operands,
+        optimize="auto",
+    )
+
+    path_info = build_path_info(
+        upstream_path,
+        upstream_info,
+        size_dict=upstream_info.size_dict,
+    )
+
+    per_step_costs: list[AccumulationCost] = []
+    for step in path_info.steps:
+        step_subscript = step.subscript
+        if "->" in step_subscript:
+            step_lhs, step_output = step_subscript.split("->", 1)
+        else:
+            step_lhs, step_output = step_subscript, ""
+        step_input_parts = step_lhs.split(",")
+        step_shapes = step.input_shapes
+
+        # Binary steps always use dense symmetry (intermediates don't carry
+        # per-operand symmetry through opt_einsum's path decomposition).
+        step_per_op_symmetries: tuple[_Any, ...] = (None,) * len(step_input_parts)
+
+        step_canonical = ",".join(step_input_parts) + "->" + step_output
+
+        step_cost = compute_accumulation_cost(
+            canonical_subscripts=step_canonical,
+            input_parts=tuple(step_input_parts),
+            output_subscript=step_output,
+            shapes=tuple(tuple(s) for s in step_shapes),
+            per_op_symmetries=step_per_op_symmetries,
+            identity_pattern=None,  # intermediates have no identity pattern
+            partition_budget=partition_budget,
+        )
+        per_step_costs.append(step_cost)
+
+    total = sum(s.total for s in per_step_costs)
+    mu_total = sum((s.mu or 0) for s in per_step_costs)
+    alpha_total = sum((s.alpha or 0) for s in per_step_costs)
+    m_total = 1
+    for s in per_step_costs:
+        m_total *= s.m_total
+    fallback_used = any(s.fallback_used for s in per_step_costs)
+    unavailable_components: tuple[int, ...] = tuple(
+        i for i, s in enumerate(per_step_costs) if s.fallback_used
+    )
+    unavailable_reason = next(
+        (s.unavailable_reason for s in per_step_costs if s.unavailable_reason),
+        None,
+    )
+
+    return AccumulationCost(
+        total=total,
+        mu=mu_total if mu_total > 0 else None,
+        alpha=alpha_total if alpha_total > 0 else None,
+        m_total=m_total,
+        dense_baseline=dense_baseline,
+        num_terms=num_ops,
+        per_component=full_expression_component_costs or (),
+        fallback_used=fallback_used,
+        unavailable_components=unavailable_components,
+        unavailable_reason=unavailable_reason,
+        per_step=tuple(per_step_costs),
+        path=tuple(tuple(p) for p in path_info.path),
+    )
+
+
 def compute_accumulation_cost(
     *,
     canonical_subscripts: str,
@@ -419,6 +525,18 @@ def compute_accumulation_cost(
             unavailable_reason=reason,
         )
 
+    if num_ops >= 3:
+        return _walk_path_and_aggregate(
+            canonical_subscripts=canonical_subscripts,
+            input_parts=input_parts,
+            output_subscript=output_subscript,
+            shapes=shapes,
+            per_op_symmetries=per_op_symmetries,
+            identity_pattern=identity_pattern,
+            partition_budget=partition_budget,
+            dense_baseline=dense_baseline,
+            full_expression_component_costs=component_costs,
+        )
     return aggregate_einsum(
         component_costs=component_costs,
         num_terms=num_ops,
