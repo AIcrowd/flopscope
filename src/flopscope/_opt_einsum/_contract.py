@@ -40,6 +40,24 @@ class StepInfo:
     output_shape: tuple[int, ...]
     """Shape of the output operand for this step."""
 
+    input_groups: list = field(default_factory=list)
+    """SymmetryGroup for each input in this step."""
+
+    output_group: object | None = None
+    """SymmetryGroup of the output, or None."""
+
+    dense_flop_cost: int = 0
+    """FLOP cost without symmetry (FMA = 1 op)."""
+
+    symmetry_savings: float = 0.0
+    """Fraction saved: ``1 - (flop_cost / dense_flop_cost)``. Zero when no symmetry."""
+
+    inner_group: object | None = None
+    """SymmetryGroup among the contracted (summed) labels, or None."""
+
+    inner_applied: bool = False
+    """Whether inner (W-side) symmetry was actually applied at this step."""
+
     blas_type: str | bool = False
     """BLAS classification for this step (e.g. 'GEMM', 'SYMM', False)."""
 
