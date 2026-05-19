@@ -186,3 +186,22 @@ __all__ = [
     "DynamicProgramming",
     "register_path_fn",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazy package-level attribute hook (PEP 562).
+
+    Exposes upstream opt_einsum sub-modules under the private names used by the
+    vendored test suite (``oe._helpers``, ``oe._paths``, ``oe._path_random``)
+    WITHOUT registering them in the package ``__dict__``, so they never shadow
+    the real ``flopscope._opt_einsum._helpers`` submodule that lives on disk.
+    """
+    if name == "_helpers":
+        import opt_einsum.helpers as _m
+        return _m
+    if name == "_paths":
+        import opt_einsum.paths as _m  # type: ignore[no-redef]
+        return _m
+    if name == "_path_random":
+        return _path_random_upstream
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
