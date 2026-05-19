@@ -501,6 +501,14 @@ class PathInfo:
         gen_str = self._fmt_generators(group, labels)
         return f"PermGroup⟨{gen_str}⟩"
 
+    def _fmt_step_regime(self, step) -> str:
+        """Return the regime name for a step, or '-' when unknown.
+
+        FlopscopePathInfo.__str__ patches `_regime` per step from
+        accumulation.per_step before calling format_table.
+        """
+        return getattr(step, "_regime", "-")
+
     def _fmt_step_sym(self, step: StepInfo) -> str:
         """Format inputs→output symmetry transformation for one step."""
         in_parts = [self._fmt_sym(s) for s in step.input_groups]
@@ -733,7 +741,7 @@ class PathInfo:
         max_sym_width = max((len(s) for s in sym_strs), default=0)
         header_lines = self._header_lines()
 
-        # Common columns: step, contract, subscript, flops, dense_flops, savings, blas
+        # Common columns: step, contract, subscript, regime, flops, dense_flops, savings, blas
         # Plus: symmetry (when any step has symmetry) and unique/dense (when any
         # step has reduced cost).
         any_unique = any(
@@ -749,12 +757,17 @@ class PathInfo:
             len("unique/total"),
             max((len(self._fmt_unique_dense(s)) for s in self.steps), default=0),
         )
+        regime_strs = [self._fmt_step_regime(s) for s in self.steps]
+        regime_col_width = max(
+            len("regime"), max((len(r) for r in regime_strs), default=0)
+        )
 
         # Build the header line
         cols = [
             f"{'step':>4}",
             f"{'contract':<{contract_col_width}}",
             f"{'subscript':<30}",
+            f"{'regime':<{regime_col_width}}",
             f"{'flops':>14}",
             f"{'dense_flops':>14}",
             f"{'savings':>8}",
@@ -776,6 +789,7 @@ class PathInfo:
                 f"{i:>4}",
                 f"{contract_strs[i]:<{contract_col_width}}",
                 f"{step.subscript:<30}",
+                f"{regime_strs[i]:<{regime_col_width}}",
                 f"{step.flop_cost:>14,}",
                 f"{step.dense_flop_cost:>14,}",
                 f"{step.symmetry_savings:>7.1%}",

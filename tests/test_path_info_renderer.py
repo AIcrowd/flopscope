@@ -70,3 +70,14 @@ def test_rich_table_renders_without_error():
     # Capture rich output without raising
     info.print(verbose=False)
     info.print(verbose=True)
+
+
+def test_format_table_includes_regime_column():
+    x = fnp.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+    rendered = str(info)
+    assert "regime" in rendered, f"missing regime column:\n{rendered}"
+    assert ("functionalProjection" in rendered) or ("trivial" in rendered), (
+        f"missing per-step regime value:\n{rendered}"
+    )
