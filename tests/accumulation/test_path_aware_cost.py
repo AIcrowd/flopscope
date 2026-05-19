@@ -105,3 +105,21 @@ def test_symmetry_group_hash_is_canonical_for_cache_reuse():
     g2 = SymmetryGroup.symmetric(axes=(0, 1))
     assert g1 == g2, "symmetric(axes=(0,1)) should equal itself across calls"
     assert hash(g1) == hash(g2), "symmetric(axes=(0,1)) hash must be stable"
+
+
+def test_path_walker_per_step_cost_matches_accumulation_per_step():
+    """info.steps[i].flop_cost must equal info.accumulation.per_step[i].total."""
+    x = fnp.ones((10, 10))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", x, x, x)
+
+    assert info.accumulation is not None
+    assert info.accumulation.per_step, "expected populated per_step for k=3"
+    assert len(info.steps) == len(info.accumulation.per_step)
+    for i, (step, acc_step) in enumerate(
+        zip(info.steps, info.accumulation.per_step)
+    ):
+        assert step.flop_cost == acc_step.total, (
+            f"step {i}: path-walker flop_cost={step.flop_cost} != "
+            f"accumulation per-step total={acc_step.total}"
+        )

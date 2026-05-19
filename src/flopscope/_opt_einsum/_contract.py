@@ -538,6 +538,51 @@ class PathInfo:
         return self.__str__()
 
 
+# ── per-step cost helper ───────────────────────────────────────────
+
+
+def symmetric_flop_count(
+    idx_contract,
+    inner,
+    num_terms,
+    size_dict,
+    *,
+    input_subscripts=None,
+    output_subscript=None,
+    input_shapes=None,
+):
+    """Per-step symmetry-aware cost. Delegates to compute_accumulation_cost
+    on the binary sub-expression so path-walker per-step costs match
+    accumulation per-step costs by construction.
+
+    Legacy fallback: when subscripts/shapes are not provided (older callers),
+    falls back to the dense direct-event count from helpers.flop_count.
+    """
+    if input_subscripts is None or input_shapes is None:
+        return helpers.flop_count(
+            idx_contraction=idx_contract,
+            inner=inner,
+            num_terms=num_terms,
+            size_dictionary=size_dict,
+        )
+
+    from flopscope._accumulation._cache import get_accumulation_cost_cached
+    from flopscope._config import get_setting
+
+    canonical = ",".join(input_subscripts) + "->" + (output_subscript or "")
+    partition_budget = int(get_setting("partition_budget"))
+    cost = get_accumulation_cost_cached(
+        canonical_subscripts=canonical,
+        input_parts=tuple(input_subscripts),
+        output_subscript=output_subscript or "",
+        shapes=tuple(tuple(s) for s in input_shapes),
+        sym_fingerprint=tuple(None for _ in input_subscripts),
+        identity_pattern=None,
+        partition_budget=partition_budget,
+    )
+    return cost.total
+
+
 # ── build_path_info adapter (Task 5) ───────────────────────────────
 
 
@@ -620,17 +665,20 @@ def build_path_info(
 
         inner = bool(idx_removed)
 
-        cost = helpers.flop_count(
-            idx_contraction=idx_contraction,
-            inner=inner,
-            num_terms=num_terms,
-            size_dictionary=size_dict,
-        )
-
         input_shapes_for_step: list[tuple[int, ...]] = [
             tuple(size_dict[c] for c in part) for part in lhs_parts
         ]
         output_shape_for_step: tuple[int, ...] = tuple(size_dict[c] for c in rhs)
+
+        cost = symmetric_flop_count(
+            idx_contraction,
+            inner,
+            num_terms,
+            size_dict,
+            input_subscripts=lhs_parts,
+            output_subscript=rhs,
+            input_shapes=input_shapes_for_step,
+        )
 
         if output_shape_for_step:
             largest_intermediate = max(

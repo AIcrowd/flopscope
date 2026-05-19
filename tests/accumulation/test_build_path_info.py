@@ -43,7 +43,10 @@ def test_build_path_info_path_matches_upstream():
 
 def test_build_path_info_uses_fma_one_per_step():
     """For ij,jk->ik with i=3, j=4, k=5, single matmul step:
-    overall_size = 3*4*5 = 60. With fma_cost=1, flop_count = 60."""
+    symmetric_flop_count delegates to compute_accumulation_cost which gives
+    the textbook off-by-one-corrected cost: 2*3*4*5 - 3*5 = 105.
+    Note: per-step cost is independent of fma_cost (accumulation formula
+    doesn't use fma_cost)."""
     original = get_setting("fma_cost")
     try:
         set_setting("fma_cost", 1)
@@ -61,14 +64,17 @@ def test_build_path_info_uses_fma_one_per_step():
             size_dict=upstream_info.size_dict,
         )
         assert len(flop_info.steps) == 1
-        assert flop_info.steps[0].flop_count == 60
-        assert flop_info.optimized_cost == 60
+        assert flop_info.steps[0].flop_count == 105
+        assert flop_info.optimized_cost == 105
     finally:
         set_setting("fma_cost", original)
 
 
 def test_build_path_info_uses_fma_two_when_configured():
-    """Same expression with fma_cost=2: flop_count = 60 * 2 = 120."""
+    """With fma_cost=2, per-step cost from compute_accumulation_cost is
+    unchanged (105) — the accumulation formula is fma_cost-independent.
+    The fma_cost setting affects helpers.flop_count legacy callers, not
+    the accumulation-cost path."""
     original = get_setting("fma_cost")
     try:
         set_setting("fma_cost", 2)
@@ -85,8 +91,8 @@ def test_build_path_info_uses_fma_two_when_configured():
             upstream_info,
             size_dict=upstream_info.size_dict,
         )
-        assert flop_info.steps[0].flop_count == 120
-        assert flop_info.optimized_cost == 120
+        assert flop_info.steps[0].flop_count == 105
+        assert flop_info.optimized_cost == 105
     finally:
         set_setting("fma_cost", original)
 
