@@ -219,12 +219,15 @@ def test_fma_cost_in_path_cache_key():
             _, info2 = fnp.einsum_path("ij,jk->ik", A, B)
         fma2_flop = info2.steps[0].flop_count
 
-        # FMA=2 doubles op_factor on the inner step.
-        assert fma1_flop == 8, (
-            f"expected fma_cost=1 per-step flop_count=8, got {fma1_flop}"
+        # fma_cost doubles the multiplication term (mu), not the accumulation term.
+        # For 'ij,jk->ik' with (2,2)x(2,2): M=8, alpha=8, output_orbits=4
+        #   fma=1: mu=1*8=8, total=8+8-4=12
+        #   fma=2: mu=2*8=16, total=16+8-4=20
+        assert fma1_flop == 12, (
+            f"expected fma_cost=1 per-step flop_count=12, got {fma1_flop}"
         )
-        assert fma2_flop == 16, (
-            f"expected fma_cost=2 per-step flop_count=16, got {fma2_flop}"
+        assert fma2_flop == 20, (
+            f"expected fma_cost=2 per-step flop_count=20, got {fma2_flop}"
         )
         assert fma1_flop != fma2_flop, (
             "fma_cost should partition the cache; got identical per-step "

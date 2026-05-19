@@ -23,6 +23,7 @@ def _make_accumulation_cache(maxsize: int):
         sym_fingerprint: tuple,
         identity_pattern: tuple | None,
         partition_budget: int | None,
+        fma_cost: int,  # included in key so configure(fma_cost=N) invalidates
     ) -> AccumulationCost:
         # Reconstruct per-op symmetries from the fingerprint.
         from flopscope._perm_group import SymmetryGroup
@@ -65,6 +66,8 @@ def get_accumulation_cost_cached(
     partition_budget: int | None,
 ) -> AccumulationCost:
     """Cached entry point. Routed through by both public and einsum-internal callers."""
+    from flopscope._cost_model import fma_cost as _fma_cost
+
     return _accumulation_cache(
         canonical_subscripts,
         tuple(input_parts),
@@ -73,6 +76,7 @@ def get_accumulation_cost_cached(
         sym_fingerprint,
         identity_pattern,
         partition_budget,
+        _fma_cost(),
     )
 
 

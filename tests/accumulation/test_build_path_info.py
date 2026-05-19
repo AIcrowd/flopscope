@@ -71,10 +71,12 @@ def test_build_path_info_uses_fma_one_per_step():
 
 
 def test_build_path_info_uses_fma_two_when_configured():
-    """With fma_cost=2, per-step cost from compute_accumulation_cost is
-    unchanged (105) — the accumulation formula is fma_cost-independent.
-    The fma_cost setting affects helpers.flop_count legacy callers, not
-    the accumulation-cost path."""
+    """With fma_cost=2, the multiplication term in the accumulation formula
+    is doubled. For 'ij,jk->ik' with shapes (3,4) x (4,5):
+      M = 3*4*5 = 60, alpha = 60, num_output_orbits = 15
+      fma=1: mu = 1*60 = 60, total = 60 + 60 - 15 = 105
+      fma=2: mu = 2*60 = 120, total = 120 + 60 - 15 = 165
+    The accumulation (alpha-term) is NOT multiplied by fma_cost."""
     original = get_setting("fma_cost")
     try:
         set_setting("fma_cost", 2)
@@ -91,8 +93,8 @@ def test_build_path_info_uses_fma_two_when_configured():
             upstream_info,
             size_dict=upstream_info.size_dict,
         )
-        assert flop_info.steps[0].flop_count == 105
-        assert flop_info.optimized_cost == 105
+        assert flop_info.steps[0].flop_count == 165
+        assert flop_info.optimized_cost == 165
     finally:
         set_setting("fma_cost", original)
 
