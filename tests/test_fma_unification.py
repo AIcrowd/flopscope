@@ -95,3 +95,35 @@ def test_matrix_norm_cost_doubled():
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
         _ = fnp.linalg.matrix_norm(np.zeros((4, 4)))
     assert bc.flops_used == 32, f"linalg.matrix_norm charged {bc.flops_used}, expected 32"
+
+
+def test_dense_flops_equals_flops_for_unsymmetric_matmul():
+    """For unsymmetric matmul, dense_flop_cost should equal flop_cost
+    (both produced by α/M model with no symmetry).
+    """
+    import numpy as np
+    import flopscope.numpy as fnp
+    for n in [2, 4, 10]:
+        A = np.zeros((n, n))
+        B = np.zeros((n, n))
+        with flops.BudgetContext(flop_budget=10**12, quiet=True):
+            _, info = fnp.einsum_path("ij,jk->ik", A, B)
+        for step in info.steps:
+            assert step.dense_flop_cost == step.flop_cost, (
+                f"n={n}: dense={step.dense_flop_cost} != flop_cost={step.flop_cost}"
+            )
+
+
+def test_dense_flops_exceeds_flops_for_symmetric_matmul():
+    """For symmetric matmul, dense_flop_cost >= flop_cost (savings >= 0)."""
+    import numpy as np
+    import flopscope.numpy as fnp
+    n = 4
+    A = flops.as_symmetric(np.zeros((n, n)), symmetry=(0, 1))
+    B = np.zeros((n, n))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk->ik", A, B)
+    for step in info.steps:
+        assert step.dense_flop_cost >= step.flop_cost, (
+            f"dense={step.dense_flop_cost} < flop_cost={step.flop_cost}; impossible"
+        )
