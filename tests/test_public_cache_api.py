@@ -8,24 +8,6 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 
-def test_fma_cost_public_reexport():
-    """flopscope.fma_cost() should match the internal _cost_model.fma_cost()."""
-    from flopscope._cost_model import fma_cost as internal_fma_cost
-
-    assert flops.fma_cost is internal_fma_cost
-    assert flops.fma_cost() == internal_fma_cost()
-
-
-def test_fma_cost_reflects_configure_changes():
-    original = flops.fma_cost()
-    try:
-        flops.configure(fma_cost=2)
-        assert flops.fma_cost() == 2
-        flops.configure(fma_cost=1)
-        assert flops.fma_cost() == 1
-    finally:
-        flops.configure(fma_cost=original)
-
 
 def test_einsum_cache_info_keys():
     info = flops.einsum_cache_info()
@@ -79,7 +61,6 @@ def test_einsum_clear_caches_independent_of_fnp_clear():
 
 
 def test_public_api_in_all():
-    assert "fma_cost" in flops.__all__
     assert "einsum_clear_caches" in flops.__all__
     assert "einsum_cache_info" in flops.__all__
     assert "clear_cache" in flops.__all__

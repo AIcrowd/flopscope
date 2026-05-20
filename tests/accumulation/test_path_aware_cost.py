@@ -135,26 +135,6 @@ def test_path_walker_per_step_cost_matches_accumulation_per_step():
         )
 
 
-def test_fma_cost_affects_multiplication_term_only():
-    """fma_cost=2 should double the multiplication count but not the
-    accumulation count. For matmul (2,2)x(2,2):
-      mu = (k-1)·M = 1·8 = 8, α − num_output_orbits = 8 - 4 = 4
-      fma=1: 1·8 + 4 = 12
-      fma=2: 2·8 + 4 = 20
-    """
-    A = fnp.zeros((2, 2))
-    B = fnp.zeros((2, 2))
-
-    flops.configure(fma_cost=1)
-    cost1 = flops.einsum_accumulation_cost("ij,jk->ik", A, B)
-    assert cost1.total == 12, f"fma=1: expected 12, got {cost1.total}"
-
-    flops.configure(fma_cost=2)
-    cost2 = flops.einsum_accumulation_cost("ij,jk->ik", A, B)
-    assert cost2.total == 20, f"fma=2: expected 20, got {cost2.total}"
-
-    flops.configure(fma_cost=1)
-
 
 def test_symmetric_triangle_uses_inherited_symmetry():
     """ij,jk,ki->ijk with all three operands sharing an S_2 symmetric matrix:

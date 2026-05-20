@@ -23,7 +23,6 @@ def _make_accumulation_cache(maxsize: int):
         sym_fingerprint: tuple,
         identity_pattern: tuple | None,
         partition_budget: int | None,
-        fma_cost: int,  # included in key so configure(fma_cost=N) invalidates
     ) -> AccumulationCost:
         # Reconstruct per-op symmetries from the fingerprint.
         from flopscope._perm_group import SymmetryGroup
@@ -74,7 +73,6 @@ def get_accumulation_cost_cached(
         sym_fingerprint,
         identity_pattern,
         partition_budget,
-        2,  # FMA=2 fixed convention; hard-coded so cache key is stable
     )
 
 
