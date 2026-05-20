@@ -339,7 +339,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.trim_zeros",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1927",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2026",
   "href": "/docs/api/numpy/trim-zeros/",
   "import_path": "flopscope.numpy.trim_zeros",
   "is_operation_cost_leaf": true,

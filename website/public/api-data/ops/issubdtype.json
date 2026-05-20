@@ -340,7 +340,7 @@
   "schema_version": 1,
   "slug": "issubdtype",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1483",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1564",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/numerictypes.py#L471"
   }
 }

@@ -445,7 +445,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.permute_dims",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1604",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1689",
   "href": "/docs/api/numpy/permute-dims/",
   "import_path": "flopscope.numpy.permute_dims",
   "is_operation_cost_leaf": true,

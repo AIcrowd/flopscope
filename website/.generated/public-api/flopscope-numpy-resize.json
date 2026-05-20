@@ -341,7 +341,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.resize",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1758",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1851",
   "href": "/docs/api/numpy/resize/",
   "import_path": "flopscope.numpy.resize",
   "is_operation_cost_leaf": true,

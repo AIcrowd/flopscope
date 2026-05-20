@@ -673,7 +673,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.allclose",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L56",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L59",
   "href": "/docs/api/numpy/allclose/",
   "legacy_href": "/docs/api/ops/allclose/",
   "module": "numpy",

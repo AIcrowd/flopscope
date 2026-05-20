@@ -467,7 +467,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.apply_over_axes",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L376",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L391",
   "href": "/docs/api/numpy/apply-over-axes/",
   "legacy_href": "/docs/api/ops/apply_over_axes/",
   "module": "numpy",

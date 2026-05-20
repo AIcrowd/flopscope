@@ -397,7 +397,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.dstack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1221",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1278",
   "href": "/docs/api/numpy/dstack/",
   "legacy_href": "/docs/api/ops/dstack/",
   "module": "numpy",

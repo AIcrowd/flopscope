@@ -899,7 +899,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.rfftn",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L510",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L531",
   "href": "/docs/api/numpy/fft/rfftn/",
   "import_path": "flopscope.numpy.fft.rfftn",
   "is_operation_cost_leaf": true,

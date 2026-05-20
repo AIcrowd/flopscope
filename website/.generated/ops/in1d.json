@@ -689,7 +689,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.in1d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L401",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L422",
   "href": "/docs/api/numpy/in1d/",
   "legacy_href": "/docs/api/ops/in1d/",
   "module": "numpy",

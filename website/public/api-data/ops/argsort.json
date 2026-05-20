@@ -853,7 +853,7 @@
   "schema_version": 1,
   "slug": "argsort",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L75",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L77",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/fromnumeric.py#L1130"
   }
 }

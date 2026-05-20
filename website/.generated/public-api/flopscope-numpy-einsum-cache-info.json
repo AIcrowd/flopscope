@@ -197,7 +197,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.einsum_cache_info",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L155",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L109",
   "href": "/docs/api/numpy/einsum-cache-info/",
   "import_path": "flopscope.numpy.einsum_cache_info",
   "is_operation_cost_leaf": true,

@@ -222,7 +222,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.tensorinv_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L320",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329",
   "href": "/docs/api/accounting/tensorinv-cost/",
   "import_path": "flopscope.accounting.tensorinv_cost",
   "is_operation_cost_leaf": false,

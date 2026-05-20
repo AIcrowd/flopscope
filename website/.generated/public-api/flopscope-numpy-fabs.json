@@ -436,7 +436,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fabs",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
   "href": "/docs/api/numpy/fabs/",
   "import_path": "flopscope.numpy.fabs",
   "is_operation_cost_leaf": true,

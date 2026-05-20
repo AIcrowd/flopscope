@@ -630,7 +630,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.median",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L832",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1579",
   "href": "/docs/api/numpy/median/",
   "import_path": "flopscope.numpy.median",
   "is_operation_cost_leaf": true,

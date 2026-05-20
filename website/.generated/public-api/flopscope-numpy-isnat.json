@@ -410,7 +410,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.isnat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
   "href": "/docs/api/numpy/isnat/",
   "import_path": "flopscope.numpy.isnat",
   "is_operation_cost_leaf": true,

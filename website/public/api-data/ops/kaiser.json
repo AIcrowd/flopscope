@@ -375,7 +375,7 @@
   "schema_version": 1,
   "slug": "kaiser",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L158",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L162",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_function_base_impl.py#L3617"
   }
 }

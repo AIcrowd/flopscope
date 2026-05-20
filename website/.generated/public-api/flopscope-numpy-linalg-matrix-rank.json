@@ -615,7 +615,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.matrix_rank",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L478",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L493",
   "href": "/docs/api/numpy/linalg/matrix-rank/",
   "import_path": "flopscope.numpy.linalg.matrix_rank",
   "is_operation_cost_leaf": true,

@@ -363,7 +363,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.multi_dot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L66",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L71",
   "href": "/docs/api/numpy/linalg/multi-dot/",
   "legacy_href": "/docs/api/ops/linalg-multi_dot/",
   "module": "numpy.linalg",

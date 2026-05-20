@@ -35,184 +35,6 @@
                     },
                     {
                       "kind": "code",
-                      "text": "False"
-                    },
-                    {
-                      "kind": "text",
-                      "text": ", suppress "
-                    },
-                    {
-                      "display_text": "SymmetryLossWarning",
-                      "explicit_title": false,
-                      "external_url": "",
-                      "href": "",
-                      "kind": "role_reference",
-                      "original_target": "flopscope.errors.SymmetryLossWarning",
-                      "role": "class",
-                      "suppress_link": false,
-                      "target": "errors.SymmetryLossWarning",
-                      "unresolved": true
-                    },
-                    {
-                      "kind": "text",
-                      "text": "\nwarnings.  Default "
-                    },
-                    {
-                      "kind": "code",
-                      "text": "True"
-                    },
-                    {
-                      "kind": "text",
-                      "text": "."
-                    }
-                  ],
-                  "type": "paragraph"
-                }
-              ],
-              "data_type": "bool",
-              "inline": [
-                {
-                  "kind": "text",
-                  "text": "If "
-                },
-                {
-                  "kind": "code",
-                  "text": "False"
-                },
-                {
-                  "kind": "text",
-                  "text": ", suppress "
-                },
-                {
-                  "display_text": "SymmetryLossWarning",
-                  "explicit_title": false,
-                  "external_url": "",
-                  "href": "",
-                  "kind": "role_reference",
-                  "original_target": "flopscope.errors.SymmetryLossWarning",
-                  "role": "class",
-                  "suppress_link": false,
-                  "target": "errors.SymmetryLossWarning",
-                  "unresolved": true
-                },
-                {
-                  "kind": "text",
-                  "text": "\nwarnings.  Default "
-                },
-                {
-                  "kind": "code",
-                  "text": "True"
-                },
-                {
-                  "kind": "text",
-                  "text": "."
-                }
-              ],
-              "name": "symmetry_warnings",
-              "type": "field_list"
-            },
-            {
-              "body_blocks": [
-                {
-                  "inline": [
-                    {
-                      "kind": "text",
-                      "text": "If "
-                    },
-                    {
-                      "kind": "code",
-                      "text": "True"
-                    },
-                    {
-                      "kind": "text",
-                      "text": ", exploit inner (W-side) symmetry to reduce FLOP costs\nwhen all W-group labels are contracted at the same step.\nDefault "
-                    },
-                    {
-                      "kind": "code",
-                      "text": "True"
-                    },
-                    {
-                      "kind": "text",
-                      "text": "."
-                    }
-                  ],
-                  "type": "paragraph"
-                }
-              ],
-              "data_type": "bool",
-              "inline": [
-                {
-                  "kind": "text",
-                  "text": "If "
-                },
-                {
-                  "kind": "code",
-                  "text": "True"
-                },
-                {
-                  "kind": "text",
-                  "text": ", exploit inner (W-side) symmetry to reduce FLOP costs\nwhen all W-group labels are contracted at the same step.\nDefault "
-                },
-                {
-                  "kind": "code",
-                  "text": "True"
-                },
-                {
-                  "kind": "text",
-                  "text": "."
-                }
-              ],
-              "name": "use_inner_symmetry",
-              "type": "field_list"
-            },
-            {
-              "body_blocks": [
-                {
-                  "inline": [
-                    {
-                      "kind": "text",
-                      "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
-                    },
-                    {
-                      "kind": "code",
-                      "text": "4096"
-                    },
-                    {
-                      "kind": "text",
-                      "text": "."
-                    }
-                  ],
-                  "type": "paragraph"
-                }
-              ],
-              "data_type": "int",
-              "inline": [
-                {
-                  "kind": "text",
-                  "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
-                },
-                {
-                  "kind": "code",
-                  "text": "4096"
-                },
-                {
-                  "kind": "text",
-                  "text": "."
-                }
-              ],
-              "name": "einsum_path_cache_size",
-              "type": "field_list"
-            },
-            {
-              "body_blocks": [
-                {
-                  "inline": [
-                    {
-                      "kind": "text",
-                      "text": "If "
-                    },
-                    {
-                      "kind": "code",
                       "text": "True"
                     },
                     {
@@ -304,6 +126,222 @@
               ],
               "name": "check_nan_inf",
               "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Maximum number of group elements during whole-expression G_pt closure.\nPathological declared-symmetry cases that exceed this budget fall back\nto dense cost with a CostFallbackWarning.  Default "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "500_000"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "int",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Maximum number of group elements during whole-expression G_pt closure.\nPathological declared-symmetry cases that exceed this budget fall back\nto dense cost with a CostFallbackWarning.  Default "
+                },
+                {
+                  "kind": "code",
+                  "text": "500_000"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "dimino_budget",
+              "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "4096"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "int",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
+                },
+                {
+                  "kind": "code",
+                  "text": "4096"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "einsum_path_cache_size",
+              "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Maximum number of typed partitions a single component may have before\nthe partitionCount regime refuses.  Components exceeding this budget\nfall back to the dense cost with a CostFallbackWarning.  Default\n"
+                    },
+                    {
+                      "kind": "code",
+                      "text": "100_000"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " (covers Bell(9)=21_147; Bell(10)=115_975 forces fallback).\nSet to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "0"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " to force fallback for any non-trivial component."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "int",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Maximum number of typed partitions a single component may have before\nthe partitionCount regime refuses.  Components exceeding this budget\nfall back to the dense cost with a CostFallbackWarning.  Default\n"
+                },
+                {
+                  "kind": "code",
+                  "text": "100_000"
+                },
+                {
+                  "kind": "text",
+                  "text": " (covers Bell(9)=21_147; Bell(10)=115_975 forces fallback).\nSet to "
+                },
+                {
+                  "kind": "code",
+                  "text": "0"
+                },
+                {
+                  "kind": "text",
+                  "text": " to force fallback for any non-trivial component."
+                }
+              ],
+              "name": "partition_budget",
+              "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "If "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "False"
+                    },
+                    {
+                      "kind": "text",
+                      "text": ", suppress "
+                    },
+                    {
+                      "display_text": "SymmetryLossWarning",
+                      "explicit_title": false,
+                      "external_url": "",
+                      "href": "",
+                      "kind": "role_reference",
+                      "original_target": "flopscope.errors.SymmetryLossWarning",
+                      "role": "class",
+                      "suppress_link": false,
+                      "target": "errors.SymmetryLossWarning",
+                      "unresolved": true
+                    },
+                    {
+                      "kind": "text",
+                      "text": "\nwarnings.  Default "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "True"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "bool",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "If "
+                },
+                {
+                  "kind": "code",
+                  "text": "False"
+                },
+                {
+                  "kind": "text",
+                  "text": ", suppress "
+                },
+                {
+                  "display_text": "SymmetryLossWarning",
+                  "explicit_title": false,
+                  "external_url": "",
+                  "href": "",
+                  "kind": "role_reference",
+                  "original_target": "flopscope.errors.SymmetryLossWarning",
+                  "role": "class",
+                  "suppress_link": false,
+                  "target": "errors.SymmetryLossWarning",
+                  "unresolved": true
+                },
+                {
+                  "kind": "text",
+                  "text": "\nwarnings.  Default "
+                },
+                {
+                  "kind": "code",
+                  "text": "True"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "symmetry_warnings",
+              "type": "field_list"
             }
           ],
           "title": "Parameters",
@@ -368,6 +406,16 @@
               "kind": "input",
               "prompt": ">>>",
               "text": "flops.configure(check_nan_inf=True)"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "flops.configure(partition_budget=50_000)"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "flops.configure(dimino_budget=1_000_000)"
             }
           ],
           "type": "doctest_block"
@@ -388,7 +436,7 @@
   "related_guides": [],
   "signature": "flops.configure(**kwargs: 'object') -> 'None'",
   "slug": "configure",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_config.py#L13",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_config.py#L31",
   "status_note": "",
   "summary": "Update flopscope global settings.",
   "upstream_source_url": ""

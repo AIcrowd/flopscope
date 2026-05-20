@@ -221,7 +221,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.matrix_transpose",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L115",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L119",
   "href": "/docs/api/numpy/linalg/matrix-transpose/",
   "import_path": "flopscope.numpy.linalg.matrix_transpose",
   "is_operation_cost_leaf": true,

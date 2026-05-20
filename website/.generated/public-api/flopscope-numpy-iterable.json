@@ -206,7 +206,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.iterable",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1491",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1572",
   "href": "/docs/api/numpy/iterable/",
   "import_path": "flopscope.numpy.iterable",
   "is_operation_cost_leaf": true,

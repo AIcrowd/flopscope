@@ -810,7 +810,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.insert",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1420",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1495",
   "href": "/docs/api/numpy/insert/",
   "import_path": "flopscope.numpy.insert",
   "is_operation_cost_leaf": true,

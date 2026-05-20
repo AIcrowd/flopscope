@@ -305,12 +305,12 @@
     "signature": "fnp.hanning(M: 'int') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the Hanning window.",
-    "weight": 16.0
+    "weight": 8.0
   },
   "schema_version": 1,
   "slug": "hanning",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L127",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L130",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_function_base_impl.py#L3265"
   }
 }

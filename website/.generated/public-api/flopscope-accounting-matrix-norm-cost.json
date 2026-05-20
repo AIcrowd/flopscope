@@ -186,11 +186,11 @@
                     },
                     {
                       "kind": "code",
-                      "text": "numel"
+                      "text": "2 * numel"
                     },
                     {
                       "kind": "text",
-                      "text": " (weight=1 baked in)."
+                      "text": " (FMA=2, weight=1 baked in)."
                     }
                   ],
                   "type": "paragraph"
@@ -239,7 +239,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.matrix_norm_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L320",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L331",
   "href": "/docs/api/accounting/matrix-norm-cost/",
   "import_path": "flopscope.accounting.matrix_norm_cost",
   "is_operation_cost_leaf": false,
@@ -251,7 +251,7 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "- Elementwise norms (Frobenius, L1, Linf): ``numel`` (weight=1 baked in). - SVD-based norms (2-norm, nuclear): ``4 * m * n * min(m, n)`` (weight=4 baked in, consistent with linalg.svd weight=4)."
+    "- Elementwise norms (Frobenius, L1, Linf): ``2 * numel`` (FMA=2, weight=1 baked in). - SVD-based norms (2-norm, nuclear): ``4 * m * n * min(m, n)`` (weight=4 baked in, consistent with linalg.svd weight=4)."
   ],
   "numpy_ref": "",
   "operation": null,

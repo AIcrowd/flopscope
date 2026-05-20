@@ -24,39 +24,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Delegates to "
-            },
-            {
-              "kind": "code",
-              "text": "contract_path"
-            },
-            {
-              "kind": "text",
-              "text": " from opt_einsum, which uses "
-            },
-            {
-              "kind": "code",
-              "text": "flop_count"
-            },
-            {
-              "kind": "text",
-              "text": "\nwith "
-            },
-            {
-              "kind": "code",
-              "text": "op_factor"
-            },
-            {
-              "kind": "text",
-              "text": " (FMA = 1 FLOP; see "
-            },
-            {
-              "kind": "code",
-              "text": "_cost_model.FMA_COST"
-            },
-            {
-              "kind": "text",
-              "text": ")."
+              "text": "Uses the whole-expression direct-event accumulation model:\ntotal = (k-1) * prod(M) + prod(alpha), where M is the number of\nunique output elements and alpha is the number of unique output+\nreduction-axis combinations. FMA = 2 (textbook): the \u03b1/M formula counts\nmultiplies and adds separately by construction."
             }
           ],
           "type": "paragraph"

@@ -540,7 +540,7 @@
   "schema_version": 1,
   "slug": "bincount",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L269",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L279",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.bincount.html"
   }
 }

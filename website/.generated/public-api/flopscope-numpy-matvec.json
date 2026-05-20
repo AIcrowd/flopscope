@@ -544,7 +544,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.matvec",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1268",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1294",
   "href": "/docs/api/numpy/matvec/",
   "import_path": "flopscope.numpy.matvec",
   "is_operation_cost_leaf": true,

@@ -486,7 +486,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.matmul",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L20",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L21",
   "href": "/docs/api/numpy/linalg/matmul/",
   "legacy_href": "/docs/api/ops/linalg-matmul/",
   "module": "numpy.linalg",
@@ -495,7 +495,7 @@
     "href": "/docs/api/numpy/linalg/matrix-norm/",
     "label": "fnp.linalg.matrix_norm"
   },
-  "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (FMA=1).",
+  "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (weight-calibrated).",
   "notes_sections": [],
   "numpy_ref": "np.linalg.matmul",
   "parameters": [

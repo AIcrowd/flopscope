@@ -282,7 +282,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.mintypecode",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1552",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1635",
   "href": "/docs/api/numpy/mintypecode/",
   "import_path": "flopscope.numpy.mintypecode",
   "is_operation_cost_leaf": true,

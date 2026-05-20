@@ -395,7 +395,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.cosh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
   "href": "/docs/api/numpy/cosh/",
   "import_path": "flopscope.numpy.cosh",
   "is_operation_cost_leaf": true,

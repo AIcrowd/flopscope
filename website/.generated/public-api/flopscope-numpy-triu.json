@@ -221,7 +221,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.triu",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L676",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L705",
   "href": "/docs/api/numpy/triu/",
   "import_path": "flopscope.numpy.triu",
   "is_operation_cost_leaf": true,

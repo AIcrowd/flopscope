@@ -195,7 +195,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.array_equiv",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L93",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L98",
   "href": "/docs/api/numpy/array-equiv/",
   "legacy_href": "/docs/api/ops/array_equiv/",
   "module": "numpy",

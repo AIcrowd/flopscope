@@ -418,7 +418,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.vector_norm",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L285",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L291",
   "href": "/docs/api/numpy/linalg/vector-norm/",
   "legacy_href": "/docs/api/ops/linalg-vector_norm/",
   "module": "numpy.linalg",

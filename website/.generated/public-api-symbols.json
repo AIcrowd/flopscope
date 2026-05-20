@@ -262,7 +262,7 @@
     ],
     "signature": "flops.BudgetContext(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None)",
     "slug": "budget-context",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L229",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344",
     "status_note": "",
     "summary": "Context manager for FLOP budget enforcement.",
     "upstream_source_url": ""
@@ -383,7 +383,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Information about a contraction path with per-step symmetry diagnostics."
+                "text": "Information about a contraction path."
               }
             ],
             "type": "paragraph"
@@ -407,11 +407,11 @@
         "title": "Einsum Guide"
       }
     ],
-    "signature": "flops.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list[tuple[typing.Any, frozenset[str], str, tuple[str, ...] | None, str | bool]] = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
+    "signature": "flops.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
     "slug": "path-info",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L103",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L90",
     "status_note": "",
-    "summary": "Information about a contraction path with per-step symmetry diagnostics.",
+    "summary": "Information about a contraction path.",
     "upstream_source_url": ""
   },
   "StepInfo": {
@@ -453,9 +453,9 @@
         "title": "Einsum Guide"
       }
     ],
-    "signature": "flops.StepInfo(subscript: str, flop_cost: int, input_shapes: list[tuple[int, ...]], output_shape: tuple[int, ...], input_groups: list[flopscope._perm_group.SymmetryGroup | None], output_group: flopscope._perm_group.SymmetryGroup | None, dense_flop_cost: int, symmetry_savings: float, blas_type: str | bool = False, inner_group: flopscope._perm_group.SymmetryGroup | None = None, path_indices: tuple[int, ...] = (), inner_applied: bool = False, merged_subset: frozenset[int] | None = None) -> None",
+    "signature": "flops.StepInfo(subscript: str, flop_cost: int, input_shapes: list[tuple[int, ...]], output_shape: tuple[int, ...], input_groups: list = <factory>, output_group: object | None = None, dense_flop_cost: int = 0, symmetry_savings: float = 0.0, inner_group: object | None = None, inner_applied: bool = False, blas_type: str | bool = False, path_indices: tuple[int, ...] = (), merged_subset: frozenset[int] | None = None) -> None",
     "slug": "step-info",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L47",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L36",
     "status_note": "",
     "summary": "Per-step diagnostics for a contraction path.",
     "upstream_source_url": ""
@@ -1173,7 +1173,7 @@
     "related_guides": [],
     "signature": "fnp.base_repr(number, base=2, padding=0)",
     "slug": "base-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L941",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L985",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return a string representation of a number in the given base system.",
     "upstream_source_url": ""
@@ -1613,7 +1613,7 @@
     "related_guides": [],
     "signature": "fnp.binary_repr(num, width=None)",
     "slug": "binary-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L954",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L999",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return the binary representation of the input number as a string.",
     "upstream_source_url": ""
@@ -2190,7 +2190,7 @@
     "related_guides": [],
     "signature": "flops.budget(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None) -> 'BudgetContext'",
     "slug": "budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L506",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731",
     "status_note": "",
     "summary": "Create a ``BudgetContext`` usable as a context manager or decorator.",
     "upstream_source_url": ""
@@ -2380,7 +2380,7 @@
     "related_guides": [],
     "signature": "flops.budget_live(by_namespace: 'bool' = False)",
     "slug": "budget-live",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L370",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L391",
     "status_note": "",
     "summary": "Return a live-updating budget summary context manager.",
     "upstream_source_url": ""
@@ -2549,7 +2549,7 @@
     "related_guides": [],
     "signature": "flops.budget_reset() -> 'None'",
     "slug": "budget-reset",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L714",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948",
     "status_note": "",
     "summary": "Clear accumulated session-wide budget data.",
     "upstream_source_url": ""
@@ -2739,7 +2739,7 @@
     "related_guides": [],
     "signature": "flops.budget_summary(by_namespace: 'bool' = False)",
     "slug": "budget-summary",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L422",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L443",
     "status_note": "",
     "summary": "Render the session-wide budget summary.",
     "upstream_source_url": ""
@@ -3082,7 +3082,7 @@
     "related_guides": [],
     "signature": "flops.budget_summary_dict(by_namespace: 'bool' = False) -> 'dict'",
     "slug": "budget-summary-dict",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L682",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916",
     "status_note": "",
     "summary": "Return aggregated budget data across all recorded contexts.",
     "upstream_source_url": ""
@@ -3224,7 +3224,7 @@
     "related_guides": [],
     "signature": "fnp.clear_einsum_cache()",
     "slug": "clear-einsum-cache",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L130",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L84",
     "status_note": "",
     "summary": "Clear the einsum path cache.",
     "upstream_source_url": ""
@@ -3256,184 +3256,6 @@
         "blocks": [
           {
             "items": [
-              {
-                "body_blocks": [
-                  {
-                    "inline": [
-                      {
-                        "kind": "text",
-                        "text": "If "
-                      },
-                      {
-                        "kind": "code",
-                        "text": "False"
-                      },
-                      {
-                        "kind": "text",
-                        "text": ", suppress "
-                      },
-                      {
-                        "display_text": "SymmetryLossWarning",
-                        "explicit_title": false,
-                        "external_url": "",
-                        "href": "",
-                        "kind": "role_reference",
-                        "original_target": "flopscope.errors.SymmetryLossWarning",
-                        "role": "class",
-                        "suppress_link": false,
-                        "target": "errors.SymmetryLossWarning",
-                        "unresolved": true
-                      },
-                      {
-                        "kind": "text",
-                        "text": "\nwarnings.  Default "
-                      },
-                      {
-                        "kind": "code",
-                        "text": "True"
-                      },
-                      {
-                        "kind": "text",
-                        "text": "."
-                      }
-                    ],
-                    "type": "paragraph"
-                  }
-                ],
-                "data_type": "bool",
-                "inline": [
-                  {
-                    "kind": "text",
-                    "text": "If "
-                  },
-                  {
-                    "kind": "code",
-                    "text": "False"
-                  },
-                  {
-                    "kind": "text",
-                    "text": ", suppress "
-                  },
-                  {
-                    "display_text": "SymmetryLossWarning",
-                    "explicit_title": false,
-                    "external_url": "",
-                    "href": "",
-                    "kind": "role_reference",
-                    "original_target": "flopscope.errors.SymmetryLossWarning",
-                    "role": "class",
-                    "suppress_link": false,
-                    "target": "errors.SymmetryLossWarning",
-                    "unresolved": true
-                  },
-                  {
-                    "kind": "text",
-                    "text": "\nwarnings.  Default "
-                  },
-                  {
-                    "kind": "code",
-                    "text": "True"
-                  },
-                  {
-                    "kind": "text",
-                    "text": "."
-                  }
-                ],
-                "name": "symmetry_warnings",
-                "type": "field_list"
-              },
-              {
-                "body_blocks": [
-                  {
-                    "inline": [
-                      {
-                        "kind": "text",
-                        "text": "If "
-                      },
-                      {
-                        "kind": "code",
-                        "text": "True"
-                      },
-                      {
-                        "kind": "text",
-                        "text": ", exploit inner (W-side) symmetry to reduce FLOP costs\nwhen all W-group labels are contracted at the same step.\nDefault "
-                      },
-                      {
-                        "kind": "code",
-                        "text": "True"
-                      },
-                      {
-                        "kind": "text",
-                        "text": "."
-                      }
-                    ],
-                    "type": "paragraph"
-                  }
-                ],
-                "data_type": "bool",
-                "inline": [
-                  {
-                    "kind": "text",
-                    "text": "If "
-                  },
-                  {
-                    "kind": "code",
-                    "text": "True"
-                  },
-                  {
-                    "kind": "text",
-                    "text": ", exploit inner (W-side) symmetry to reduce FLOP costs\nwhen all W-group labels are contracted at the same step.\nDefault "
-                  },
-                  {
-                    "kind": "code",
-                    "text": "True"
-                  },
-                  {
-                    "kind": "text",
-                    "text": "."
-                  }
-                ],
-                "name": "use_inner_symmetry",
-                "type": "field_list"
-              },
-              {
-                "body_blocks": [
-                  {
-                    "inline": [
-                      {
-                        "kind": "text",
-                        "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
-                      },
-                      {
-                        "kind": "code",
-                        "text": "4096"
-                      },
-                      {
-                        "kind": "text",
-                        "text": "."
-                      }
-                    ],
-                    "type": "paragraph"
-                  }
-                ],
-                "data_type": "int",
-                "inline": [
-                  {
-                    "kind": "text",
-                    "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
-                  },
-                  {
-                    "kind": "code",
-                    "text": "4096"
-                  },
-                  {
-                    "kind": "text",
-                    "text": "."
-                  }
-                ],
-                "name": "einsum_path_cache_size",
-                "type": "field_list"
-              },
               {
                 "body_blocks": [
                   {
@@ -3535,6 +3357,222 @@
                 ],
                 "name": "check_nan_inf",
                 "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Maximum number of group elements during whole-expression G_pt closure.\nPathological declared-symmetry cases that exceed this budget fall back\nto dense cost with a CostFallbackWarning.  Default "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "500_000"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Maximum number of group elements during whole-expression G_pt closure.\nPathological declared-symmetry cases that exceed this budget fall back\nto dense cost with a CostFallbackWarning.  Default "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "500_000"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "dimino_budget",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "4096"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Maximum number of entries in the einsum path cache.\nChanging this rebuilds the cache (old entries are discarded).\nDefault "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "4096"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "einsum_path_cache_size",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Maximum number of typed partitions a single component may have before\nthe partitionCount regime refuses.  Components exceeding this budget\nfall back to the dense cost with a CostFallbackWarning.  Default\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "100_000"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " (covers Bell(9)=21_147; Bell(10)=115_975 forces fallback).\nSet to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "0"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " to force fallback for any non-trivial component."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Maximum number of typed partitions a single component may have before\nthe partitionCount regime refuses.  Components exceeding this budget\nfall back to the dense cost with a CostFallbackWarning.  Default\n"
+                  },
+                  {
+                    "kind": "code",
+                    "text": "100_000"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " (covers Bell(9)=21_147; Bell(10)=115_975 forces fallback).\nSet to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "0"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " to force fallback for any non-trivial component."
+                  }
+                ],
+                "name": "partition_budget",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "False"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", suppress "
+                      },
+                      {
+                        "display_text": "SymmetryLossWarning",
+                        "explicit_title": false,
+                        "external_url": "",
+                        "href": "",
+                        "kind": "role_reference",
+                        "original_target": "flopscope.errors.SymmetryLossWarning",
+                        "role": "class",
+                        "suppress_link": false,
+                        "target": "errors.SymmetryLossWarning",
+                        "unresolved": true
+                      },
+                      {
+                        "kind": "text",
+                        "text": "\nwarnings.  Default "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "True"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "bool",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "False"
+                  },
+                  {
+                    "kind": "text",
+                    "text": ", suppress "
+                  },
+                  {
+                    "display_text": "SymmetryLossWarning",
+                    "explicit_title": false,
+                    "external_url": "",
+                    "href": "",
+                    "kind": "role_reference",
+                    "original_target": "flopscope.errors.SymmetryLossWarning",
+                    "role": "class",
+                    "suppress_link": false,
+                    "target": "errors.SymmetryLossWarning",
+                    "unresolved": true
+                  },
+                  {
+                    "kind": "text",
+                    "text": "\nwarnings.  Default "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "True"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "symmetry_warnings",
+                "type": "field_list"
               }
             ],
             "title": "Parameters",
@@ -3599,6 +3637,16 @@
                 "kind": "input",
                 "prompt": ">>>",
                 "text": "flops.configure(check_nan_inf=True)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "flops.configure(partition_budget=50_000)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "flops.configure(dimino_budget=1_000_000)"
               }
             ],
             "type": "doctest_block"
@@ -3619,7 +3667,7 @@
     "related_guides": [],
     "signature": "flops.configure(**kwargs: 'object') -> 'None'",
     "slug": "configure",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_config.py#L13",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_config.py#L31",
     "status_note": "",
     "summary": "Update flopscope global settings.",
     "upstream_source_url": ""
@@ -3639,7 +3687,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Return einsum path cache statistics."
+                "text": "Return cache statistics for the einsum path + accumulation caches."
               }
             ],
             "type": "paragraph"
@@ -3652,30 +3700,16 @@
           {
             "items": [
               {
-                "body_blocks": [],
-                "data_type": "",
-                "inline": [],
-                "name": "None",
-                "type": "field_list"
-              }
-            ],
-            "title": "Parameters",
-            "type": "field_list"
-          }
-        ],
-        "title": "Parameters"
-      },
-      {
-        "blocks": [
-          {
-            "items": [
-              {
                 "body_blocks": [
                   {
                     "inline": [
                       {
+                        "kind": "code",
+                        "text": "{\"path\": CacheInfo, \"accumulation\": CacheInfo}"
+                      },
+                      {
                         "kind": "text",
-                        "text": "The standard "
+                        "text": " where each value\nis a standard "
                       },
                       {
                         "kind": "code",
@@ -3683,7 +3717,7 @@
                       },
                       {
                         "kind": "text",
-                        "text": " statistics tuple with "
+                        "text": " info tuple with "
                       },
                       {
                         "kind": "code",
@@ -3715,17 +3749,21 @@
                       },
                       {
                         "kind": "text",
-                        "text": " fields."
+                        "text": "."
                       }
                     ],
                     "type": "paragraph"
                   }
                 ],
-                "data_type": "object",
+                "data_type": "dict",
                 "inline": [
                   {
+                    "kind": "code",
+                    "text": "{\"path\": CacheInfo, \"accumulation\": CacheInfo}"
+                  },
+                  {
                     "kind": "text",
-                    "text": "The standard "
+                    "text": " where each value\nis a standard "
                   },
                   {
                     "kind": "code",
@@ -3733,7 +3771,7 @@
                   },
                   {
                     "kind": "text",
-                    "text": " statistics tuple with "
+                    "text": " info tuple with "
                   },
                   {
                     "kind": "code",
@@ -3765,7 +3803,7 @@
                   },
                   {
                     "kind": "text",
-                    "text": " fields."
+                    "text": "."
                   }
                 ],
                 "name": "",
@@ -3777,53 +3815,23 @@
           }
         ],
         "title": "Returns"
-      },
-      {
-        "blocks": [
-          {
-            "lines": [
-              {
-                "kind": "input",
-                "prompt": ">>>",
-                "text": "import flopscope.numpy as fnp"
-              },
-              {
-                "kind": "input",
-                "prompt": ">>>",
-                "text": "info = fnp.einsum_cache_info()"
-              },
-              {
-                "kind": "input",
-                "prompt": ">>>",
-                "text": "total = info.hits + info.misses"
-              },
-              {
-                "kind": "input",
-                "prompt": ">>>",
-                "text": "rate = info.hits / max(total, 1)"
-              }
-            ],
-            "type": "doctest_block"
-          }
-        ],
-        "title": "Examples"
       }
     ],
     "canonical_name": "einsum_cache_info",
     "canonical_path": "einsum-cache-info",
-    "display_name": "fnp.einsum_cache_info",
+    "display_name": "flops.einsum_cache_info",
     "href": "/docs/api/einsum-cache-info/",
-    "import_path": "fnp.einsum_cache_info",
+    "import_path": "flops.einsum_cache_info",
     "kind": "function",
     "members": [],
-    "module": "flopscope._einsum",
+    "module": "flopscope",
     "name": "einsum_cache_info",
     "related_guides": [],
-    "signature": "fnp.einsum_cache_info()",
+    "signature": "flops.einsum_cache_info() -> dict",
     "slug": "einsum-cache-info",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L155",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/__init__.py#L112",
     "status_note": "",
-    "summary": "Return einsum path cache statistics.",
+    "summary": "Return cache statistics for the einsum path + accumulation caches.",
     "upstream_source_url": ""
   },
   "errstate": {
@@ -4139,7 +4147,7 @@
     "module": "numpy",
     "name": "errstate",
     "related_guides": [],
-    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x101b58ec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10937cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "errstate",
     "source_url": "",
     "status_note": "",
@@ -4699,7 +4707,7 @@
     ],
     "signature": "flops.flops.blackman_cost(n: 'int') -> 'int'",
     "slug": "flops-blackman-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L45",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L46",
     "status_note": "",
     "summary": "Weighted FLOP cost of Blackman window generation.",
     "upstream_source_url": ""
@@ -4856,7 +4864,7 @@
     ],
     "signature": "flops.flops.cholesky_cost(n: 'int') -> 'int'",
     "slug": "flops-cholesky-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L20",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L21",
     "status_note": "",
     "summary": "Weighted FLOP cost of Cholesky decomposition.",
     "upstream_source_url": ""
@@ -5147,7 +5155,7 @@
     ],
     "signature": "flops.flops.cond_cost(m: 'int', n: 'int', p=None) -> 'int'",
     "slug": "flops-cond-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L377",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L391",
     "status_note": "",
     "summary": "Weighted FLOP cost of condition number.",
     "upstream_source_url": ""
@@ -5360,7 +5368,7 @@
     ],
     "signature": "flops.flops.det_cost(n: 'int', symmetric: 'bool' = False) -> 'int'",
     "slug": "flops-det-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L64",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L68",
     "status_note": "",
     "summary": "Weighted FLOP cost of determinant.",
     "upstream_source_url": ""
@@ -5517,7 +5525,7 @@
     ],
     "signature": "flops.flops.eig_cost(n: 'int') -> 'int'",
     "slug": "flops-eig-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L127",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L130",
     "status_note": "",
     "summary": "Weighted FLOP cost of eigendecomposition.",
     "upstream_source_url": ""
@@ -5674,7 +5682,7 @@
     ],
     "signature": "flops.flops.eigh_cost(n: 'int') -> 'int'",
     "slug": "flops-eigh-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L170",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L174",
     "status_note": "",
     "summary": "Weighted FLOP cost of symmetric eigendecomposition.",
     "upstream_source_url": ""
@@ -5827,7 +5835,7 @@
     ],
     "signature": "flops.flops.eigvals_cost(n: 'int') -> 'int'",
     "slug": "flops-eigvals-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L213",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L218",
     "status_note": "",
     "summary": "Weighted FLOP cost of computing eigenvalues.",
     "upstream_source_url": ""
@@ -5980,7 +5988,7 @@
     ],
     "signature": "flops.flops.eigvalsh_cost(n: 'int') -> 'int'",
     "slug": "flops-eigvalsh-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L254",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L260",
     "status_note": "",
     "summary": "Weighted FLOP cost of computing eigenvalues of a symmetric matrix.",
     "upstream_source_url": ""
@@ -6013,39 +6021,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Delegates to "
-              },
-              {
-                "kind": "code",
-                "text": "contract_path"
-              },
-              {
-                "kind": "text",
-                "text": " from opt_einsum, which uses "
-              },
-              {
-                "kind": "code",
-                "text": "flop_count"
-              },
-              {
-                "kind": "text",
-                "text": "\nwith "
-              },
-              {
-                "kind": "code",
-                "text": "op_factor"
-              },
-              {
-                "kind": "text",
-                "text": " (FMA = 1 FLOP; see "
-              },
-              {
-                "kind": "code",
-                "text": "_cost_model.FMA_COST"
-              },
-              {
-                "kind": "text",
-                "text": ")."
+                "text": "Uses the whole-expression direct-event accumulation model:\ntotal = (k-1) * prod(M) + prod(alpha), where M is the number of\nunique output elements and alpha is the number of unique output+\nreduction-axis combinations. FMA = 2 (textbook): the \u03b1/M formula counts\nmultiplies and adds separately by construction."
               }
             ],
             "type": "paragraph"
@@ -6443,7 +6419,7 @@
     ],
     "signature": "flops.flops.fft_cost(n: 'int') -> 'int'",
     "slug": "flops-fft-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L21",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L22",
     "status_note": "",
     "summary": "Weighted FLOP cost of a 1-D complex FFT.",
     "upstream_source_url": ""
@@ -6608,7 +6584,7 @@
     ],
     "signature": "flops.flops.fftn_cost(shape: 'tuple[int, ...]') -> 'int'",
     "slug": "flops-fftn-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L67",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L68",
     "status_note": "",
     "summary": "Weighted FLOP cost of an N-D complex FFT.",
     "upstream_source_url": ""
@@ -6735,7 +6711,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "One FMA (cosine + scale) per sample, counted as 1 op under FMA=1."
+                "text": "Two ops per sample under FMA=2 convention (1 multiply + 1 add)."
               }
             ],
             "type": "paragraph"
@@ -6761,7 +6737,7 @@
     ],
     "signature": "flops.flops.hamming_cost(n: 'int') -> 'int'",
     "slug": "flops-hamming-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L76",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L78",
     "status_note": "",
     "summary": "Weighted FLOP cost of Hamming window generation.",
     "upstream_source_url": ""
@@ -6888,7 +6864,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "One FMA (cosine + scale) per sample, counted as 1 op under FMA=1."
+                "text": "Two ops per sample under FMA=2 convention (1 multiply + 1 add)."
               }
             ],
             "type": "paragraph"
@@ -6914,7 +6890,7 @@
     ],
     "signature": "flops.flops.hanning_cost(n: 'int') -> 'int'",
     "slug": "flops-hanning-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L107",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L110",
     "status_note": "",
     "summary": "Weighted FLOP cost of Hanning window generation.",
     "upstream_source_url": ""
@@ -7093,7 +7069,7 @@
     ],
     "signature": "flops.flops.hfft_cost(n_out: 'int') -> 'int'",
     "slug": "flops-hfft-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L123",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L124",
     "status_note": "",
     "summary": "Weighted FLOP cost of a Hermitian FFT.",
     "upstream_source_url": ""
@@ -7310,7 +7286,7 @@
     ],
     "signature": "flops.flops.inv_cost(n: 'int', symmetric: 'bool' = False) -> 'int'",
     "slug": "flops-inv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L89",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L91",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix inverse.",
     "upstream_source_url": ""
@@ -7463,7 +7439,7 @@
     ],
     "signature": "flops.flops.kaiser_cost(n: 'int') -> 'int'",
     "slug": "flops-kaiser-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L138",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L142",
     "status_note": "",
     "summary": "Weighted FLOP cost of Kaiser window generation.",
     "upstream_source_url": ""
@@ -7650,7 +7626,7 @@
     ],
     "signature": "flops.flops.lstsq_cost(m: 'int', n: 'int') -> 'int'",
     "slug": "flops-lstsq-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L149",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L152",
     "status_note": "",
     "summary": "Weighted FLOP cost of least-squares solution.",
     "upstream_source_url": ""
@@ -7845,11 +7821,11 @@
                       },
                       {
                         "kind": "code",
-                        "text": "numel"
+                        "text": "2 * numel"
                       },
                       {
                         "kind": "text",
-                        "text": " (weight=1 baked in)."
+                        "text": " (FMA=2, weight=1 baked in)."
                       }
                     ],
                     "type": "paragraph"
@@ -7902,7 +7878,7 @@
     ],
     "signature": "flops.flops.matrix_norm_cost(shape: 'tuple', ord=None) -> 'int'",
     "slug": "flops-matrix-norm-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L320",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L331",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix norm.",
     "upstream_source_url": ""
@@ -8077,7 +8053,7 @@
     ],
     "signature": "flops.flops.matrix_power_cost(n: 'int', k: 'int') -> 'int'",
     "slug": "flops-matrix-power-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L95",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L102",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix power A**k.",
     "upstream_source_url": ""
@@ -8252,7 +8228,7 @@
     ],
     "signature": "flops.flops.matrix_rank_cost(m: 'int', n: 'int') -> 'int'",
     "slug": "flops-matrix-rank-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L456",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L471",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix rank.",
     "upstream_source_url": ""
@@ -8388,6 +8364,23 @@
               {
                 "kind": "text",
                 "text": " (CLRS), \u00a715.2."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Each binary matmul step (m x k) @ (k x n) costs "
+              },
+              {
+                "kind": "code",
+                "text": "2 * m * k * n"
+              },
+              {
+                "kind": "text",
+                "text": " FLOPs\nunder the FMA=2 textbook convention (m*k*n multiplies + m*k*n adds,\nignoring the \u2212m*n off-by-one for accumulation at this level of\napproximation).  FMA=2 unification 2026-05-20."
               }
             ],
             "type": "paragraph"
@@ -8625,11 +8618,11 @@
                       },
                       {
                         "kind": "code",
-                        "text": "numel"
+                        "text": "2 * numel"
                       },
                       {
                         "kind": "text",
-                        "text": " (weight=1 baked in)."
+                        "text": " (FMA=2, weight=1 baked in)."
                       }
                     ],
                     "type": "paragraph"
@@ -8682,7 +8675,7 @@
     ],
     "signature": "flops.flops.norm_cost(shape: 'tuple', ord=None) -> 'int'",
     "slug": "flops-norm-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L165",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L171",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix or vector norm.",
     "upstream_source_url": ""
@@ -8861,7 +8854,7 @@
     ],
     "signature": "flops.flops.pinv_cost(m: 'int', n: 'int') -> 'int'",
     "slug": "flops-pinv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L209",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215",
     "status_note": "",
     "summary": "Weighted FLOP cost of pseudoinverse.",
     "upstream_source_url": ""
@@ -9251,7 +9244,7 @@
     ],
     "signature": "flops.flops.poly_cost(n: 'int') -> 'int'",
     "slug": "flops-poly-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L60",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L65",
     "status_note": "",
     "summary": "Cost for poly: $n^2$ FLOPs.",
     "upstream_source_url": ""
@@ -9461,7 +9454,7 @@
     ],
     "signature": "flops.flops.polyadd_cost(n1: 'int', n2: 'int') -> 'int'",
     "slug": "flops-polyadd-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L25",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L30",
     "status_note": "",
     "summary": "Cost for polyadd: max(n1, n2) FLOPs.",
     "upstream_source_url": ""
@@ -9605,7 +9598,7 @@
     ],
     "signature": "flops.flops.polyder_cost(n: 'int') -> 'int'",
     "slug": "flops-polyder-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L35",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L40",
     "status_note": "",
     "summary": "Cost for polyder: n FLOPs (n = len of coeffs).",
     "upstream_source_url": ""
@@ -9815,7 +9808,7 @@
     ],
     "signature": "flops.flops.polydiv_cost(n1: 'int', n2: 'int') -> 'int'",
     "slug": "flops-polydiv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L50",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L55",
     "status_note": "",
     "summary": "Cost for polydiv: n1 * n2 FLOPs.",
     "upstream_source_url": ""
@@ -10003,7 +9996,7 @@
     ],
     "signature": "flops.flops.polyfit_cost(m: 'int', deg: 'int') -> 'int'",
     "slug": "flops-polyfit-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L55",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L60",
     "status_note": "",
     "summary": "Cost for polyfit: 2 * m * (deg+1)^2 FLOPs.",
     "upstream_source_url": ""
@@ -10147,7 +10140,7 @@
     ],
     "signature": "flops.flops.polyint_cost(n: 'int') -> 'int'",
     "slug": "flops-polyint-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L40",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
     "status_note": "",
     "summary": "Cost for polyint: n FLOPs (n = len of coeffs).",
     "upstream_source_url": ""
@@ -10357,7 +10350,7 @@
     ],
     "signature": "flops.flops.polymul_cost(n1: 'int', n2: 'int') -> 'int'",
     "slug": "flops-polymul-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L50",
     "status_note": "",
     "summary": "Cost for polymul: n1 * n2 FLOPs.",
     "upstream_source_url": ""
@@ -10567,7 +10560,7 @@
     ],
     "signature": "flops.flops.polysub_cost(n1: 'int', n2: 'int') -> 'int'",
     "slug": "flops-polysub-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L30",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L35",
     "status_note": "",
     "summary": "Cost for polysub: max(n1, n2) FLOPs.",
     "upstream_source_url": ""
@@ -10586,13 +10579,27 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op)."
+                "text": "Cost for polyval: Horner's method under FMA=2 textbook convention."
               }
             ],
             "type": "paragraph"
           }
         ],
         "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Per coefficient: 1 multiply + 1 add (FMA=2). m output cells, deg coefficients.\nReturns 2 * m * deg FLOPs."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Extended Summary"
       },
       {
         "blocks": [
@@ -10755,9 +10762,9 @@
     ],
     "signature": "flops.flops.polyval_cost(deg: 'int', m: 'int') -> 'int'",
     "slug": "flops-polyval-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L20",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L21",
     "status_note": "",
-    "summary": "Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op).",
+    "summary": "Cost for polyval: Horner's method under FMA=2 textbook convention.",
     "upstream_source_url": ""
   },
   "flops.qr_cost": {
@@ -10934,7 +10941,7 @@
     ],
     "signature": "flops.flops.qr_cost(m: 'int', n: 'int') -> 'int'",
     "slug": "flops-qr-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L61",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L63",
     "status_note": "",
     "summary": "Weighted FLOP cost of QR decomposition.",
     "upstream_source_url": ""
@@ -11379,7 +11386,7 @@
     ],
     "signature": "flops.flops.rfft_cost(n: 'int') -> 'int'",
     "slug": "flops-rfft-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L44",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L45",
     "status_note": "",
     "summary": "Weighted FLOP cost of a 1-D real FFT.",
     "upstream_source_url": ""
@@ -11536,7 +11543,7 @@
     ],
     "signature": "flops.flops.rfftn_cost(shape: 'tuple[int, ...]') -> 'int'",
     "slug": "flops-rfftn-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L96",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L97",
     "status_note": "",
     "summary": "Weighted FLOP cost of an N-D real FFT.",
     "upstream_source_url": ""
@@ -11680,7 +11687,7 @@
     ],
     "signature": "flops.flops.roots_cost(n: 'int') -> 'int'",
     "slug": "flops-roots-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L65",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L70",
     "status_note": "",
     "summary": "Cost for roots: $n^3$ FLOPs (companion matrix eigendecomposition, simplified).",
     "upstream_source_url": ""
@@ -11893,7 +11900,7 @@
     ],
     "signature": "flops.flops.slogdet_cost(n: 'int', symmetric: 'bool' = False) -> 'int'",
     "slug": "flops-slogdet-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L110",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L115",
     "status_note": "",
     "summary": "Weighted FLOP cost of sign and log-determinant.",
     "upstream_source_url": ""
@@ -12170,7 +12177,7 @@
     ],
     "signature": "flops.flops.solve_cost(n: 'int', nrhs: 'int' = 1, symmetric: 'bool' = False) -> 'int'",
     "slug": "flops-solve-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L33",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L34",
     "status_note": "",
     "summary": "Weighted FLOP cost of solving a linear system Ax = b.",
     "upstream_source_url": ""
@@ -12416,7 +12423,7 @@
     ],
     "signature": "flops.flops.svd_cost(m: 'int', n: 'int', k: 'int | None' = None) -> 'int'",
     "slug": "flops-svd-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L175",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L173",
     "status_note": "",
     "summary": "Weighted FLOP cost of a (truncated) SVD.",
     "upstream_source_url": ""
@@ -12629,7 +12636,7 @@
     ],
     "signature": "flops.flops.svdvals_cost(m: 'int', n: 'int', k: 'int | None' = None) -> 'int'",
     "slug": "flops-svdvals-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L295",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L302",
     "status_note": "",
     "summary": "Weighted FLOP cost of computing singular values.",
     "upstream_source_url": ""
@@ -12864,7 +12871,7 @@
     ],
     "signature": "flops.flops.tensorinv_cost(a_shape: 'tuple', ind: 'int' = 2) -> 'int'",
     "slug": "flops-tensorinv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L320",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329",
     "status_note": "",
     "summary": "Weighted FLOP cost of tensor inverse.",
     "upstream_source_url": ""
@@ -13099,7 +13106,7 @@
     ],
     "signature": "flops.flops.tensorsolve_cost(a_shape: 'tuple', ind: 'int | None' = None) -> 'int'",
     "slug": "flops-tensorsolve-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L265",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272",
     "status_note": "",
     "summary": "Weighted FLOP cost of tensor solve.",
     "upstream_source_url": ""
@@ -13252,7 +13259,7 @@
     ],
     "signature": "flops.flops.trace_cost(n: 'int') -> 'int'",
     "slug": "flops-trace-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L19",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L20",
     "status_note": "",
     "summary": "Weighted FLOP cost of matrix trace.",
     "upstream_source_url": ""
@@ -13405,7 +13412,7 @@
     ],
     "signature": "flops.flops.unwrap_cost(shape: 'tuple[int, ...]') -> 'int'",
     "slug": "flops-unwrap-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L14",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L15",
     "status_note": "",
     "summary": "Weighted FLOP cost of phase unwrapping.",
     "upstream_source_url": ""
@@ -13592,7 +13599,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Most norms cost n FLOPs (one pass over elements). General p-norms\ncost 2n due to exponentiation."
+                "text": "All norms cost 2*numel FLOPs (FMA=2: one multiply + accumulate per element)."
               }
             ],
             "type": "paragraph"
@@ -13618,7 +13625,7 @@
     ],
     "signature": "flops.flops.vector_norm_cost(shape: 'tuple', ord=None) -> 'int'",
     "slug": "flops-vector-norm-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L257",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L264",
     "status_note": "",
     "summary": "Weighted FLOP cost of vector norm.",
     "upstream_source_url": ""
@@ -14140,7 +14147,7 @@
     "related_guides": [],
     "signature": "fnp.fromfile(*args, **kwargs)",
     "slug": "fromfile",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1342",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1411",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from data in a text or binary file.",
     "upstream_source_url": ""
@@ -14555,7 +14562,7 @@
     "related_guides": [],
     "signature": "fnp.fromregex(file, regexp, dtype, encoding=None)",
     "slug": "fromregex",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1381",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1453",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from a text file, using regular expression parsing.",
     "upstream_source_url": ""
@@ -14959,7 +14966,7 @@
     "related_guides": [],
     "signature": "fnp.fromstring(*args, **kwargs)",
     "slug": "fromstring",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1394",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1467",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "A new 1-D array initialized from text data in a string.",
     "upstream_source_url": ""
@@ -16519,7 +16526,7 @@
     "related_guides": [],
     "signature": "fnp.isnat(*args, **kwargs)",
     "slug": "isnat",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
     "upstream_source_url": ""
@@ -16794,7 +16801,7 @@
     "related_guides": [],
     "signature": "flops.namespace(name: 'str') -> '_NamespaceScope'",
     "slug": "namespace",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L134",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240",
     "status_note": "",
     "summary": "Create a nested namespace scope for the active budget context.",
     "upstream_source_url": ""
@@ -19007,13 +19014,294 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "numpy Generator subclass with FLOP-counted sampler methods."
+                "text": "numpy "
+              },
+              {
+                "kind": "code",
+                "text": "Generator"
+              },
+              {
+                "kind": "text",
+                "text": " subclass with FLOP-counted sampler methods."
               }
             ],
             "type": "paragraph"
           }
         ],
         "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Each sampler method ("
+              },
+              {
+                "kind": "code",
+                "text": "standard_normal"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "normal"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "uniform"
+              },
+              {
+                "kind": "text",
+                "text": ",\n"
+              },
+              {
+                "kind": "code",
+                "text": "integers"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "choice"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "shuffle"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "permutation"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "bytes"
+              },
+              {
+                "kind": "text",
+                "text": ", ...)\ndeducts FLOPs from the active "
+              },
+              {
+                "kind": "code",
+                "text": "BudgetContext"
+              },
+              {
+                "kind": "text",
+                "text": " and returns\n"
+              },
+              {
+                "kind": "code",
+                "text": "FlopscopeArray"
+              },
+              {
+                "kind": "text",
+                "text": ". Free attribute access ("
+              },
+              {
+                "kind": "code",
+                "text": "bit_generator"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "spawn"
+              },
+              {
+                "kind": "text",
+                "text": ")\nis allowed; anything else raises "
+              },
+              {
+                "kind": "code",
+                "text": "UnsupportedFunctionError"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Construct via "
+              },
+              {
+                "display_text": "flopscope.flops.random.default_rng",
+                "explicit_title": false,
+                "external_url": "",
+                "href": "",
+                "kind": "role_reference",
+                "original_target": "flopscope.flops.random.default_rng",
+                "role": "func",
+                "suppress_link": false,
+                "target": "flops.random.default_rng",
+                "unresolved": true
+              },
+              {
+                "kind": "text",
+                "text": " (canonical) or by\npassing a "
+              },
+              {
+                "kind": "code",
+                "text": "BitGenerator"
+              },
+              {
+                "kind": "text",
+                "text": " directly: "
+              },
+              {
+                "kind": "code",
+                "text": "Generator(flops.random.PCG64(42))"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Extended Summary"
+      },
+      {
+        "blocks": [
+          {
+            "links": [
+              {
+                "description": "canonical constructor.",
+                "description_inline": [
+                  {
+                    "kind": "text",
+                    "text": "canonical constructor."
+                  }
+                ],
+                "external_url": "",
+                "href": "/docs/api/numpy/random/default-rng/",
+                "label": "flops.random.default_rng",
+                "original_target": "fnp.random.default_rng",
+                "role": "",
+                "target": "random.default_rng",
+                "unresolved": false
+              }
+            ],
+            "type": "link_list"
+          }
+        ],
+        "title": "See also"
+      },
+      {
+        "blocks": [
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "from flopscope import BudgetContext"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "rng = fnp.random.default_rng(42)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "with BudgetContext(flop_budget=10**6):"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "x = rng.standard_normal((10,))"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "type(x).__name__"
+              },
+              {
+                "kind": "output",
+                "text": "'FlopscopeArray'"
+              }
+            ],
+            "type": "doctest_block"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Pickle / "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/copy/",
+                "kind": "link",
+                "target": "copy",
+                "text": "copy"
+              },
+              {
+                "kind": "text",
+                "text": " round-trips preserve counting:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import pickle"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "revived = pickle.loads(pickle.dumps(rng))"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "isinstance(revived, type(rng))"
+              },
+              {
+                "kind": "output",
+                "text": "True"
+              }
+            ],
+            "type": "doctest_block"
+          }
+        ],
+        "title": "Examples"
       }
     ],
     "canonical_name": "random.Generator",
@@ -19028,9 +19316,9 @@
     "related_guides": [],
     "signature": "flops.random.Generator",
     "slug": "random-generator",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L109",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L112",
     "status_note": "",
-    "summary": "numpy Generator subclass with FLOP-counted sampler methods.",
+    "summary": "numpy ``Generator`` subclass with FLOP-counted sampler methods.",
     "upstream_source_url": ""
   },
   "random.RandomState": {
@@ -19046,13 +19334,258 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "numpy RandomState subclass with FLOP-counted sampler methods."
+                "text": "numpy legacy "
+              },
+              {
+                "kind": "code",
+                "text": "RandomState"
+              },
+              {
+                "kind": "text",
+                "text": " subclass with FLOP-counted sampler methods."
               }
             ],
             "type": "paragraph"
           }
         ],
         "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Mirrors "
+              },
+              {
+                "display_text": "_CountedGenerator",
+                "explicit_title": false,
+                "external_url": "https://numpy.org/doc/stable/reference/generated/numpy._CountedGenerator.html",
+                "href": "",
+                "kind": "role_reference",
+                "original_target": "_CountedGenerator",
+                "role": "class",
+                "suppress_link": false,
+                "target": "_CountedGenerator",
+                "unresolved": false
+              },
+              {
+                "kind": "text",
+                "text": " for the legacy API: each sampler\n("
+              },
+              {
+                "kind": "code",
+                "text": "randn"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "normal"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "uniform"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "randint"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "choice"
+              },
+              {
+                "kind": "text",
+                "text": ",\n"
+              },
+              {
+                "kind": "code",
+                "text": "shuffle"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "permutation"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "bytes"
+              },
+              {
+                "kind": "text",
+                "text": ", ...) deducts FLOPs from the\nactive "
+              },
+              {
+                "kind": "code",
+                "text": "BudgetContext"
+              },
+              {
+                "kind": "text",
+                "text": " and returns "
+              },
+              {
+                "kind": "code",
+                "text": "FlopscopeArray"
+              },
+              {
+                "kind": "text",
+                "text": ". Free methods\n("
+              },
+              {
+                "kind": "code",
+                "text": "seed"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "get_state"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "kind": "code",
+                "text": "set_state"
+              },
+              {
+                "kind": "text",
+                "text": ") pass through; everything else\nraises "
+              },
+              {
+                "kind": "code",
+                "text": "UnsupportedFunctionError"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Modern code should prefer "
+              },
+              {
+                "display_text": "flopscope.flops.random.default_rng",
+                "explicit_title": false,
+                "external_url": "",
+                "href": "",
+                "kind": "role_reference",
+                "original_target": "flopscope.flops.random.default_rng",
+                "role": "func",
+                "suppress_link": false,
+                "target": "flops.random.default_rng",
+                "unresolved": true
+              },
+              {
+                "kind": "text",
+                "text": ";\nuse this only when porting code that relies on the legacy API."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Extended Summary"
+      },
+      {
+        "blocks": [
+          {
+            "links": [
+              {
+                "description": "canonical (modern) RNG constructor.",
+                "description_inline": [
+                  {
+                    "kind": "text",
+                    "text": "canonical (modern) RNG constructor."
+                  }
+                ],
+                "external_url": "",
+                "href": "/docs/api/numpy/random/default-rng/",
+                "label": "flops.random.default_rng",
+                "original_target": "fnp.random.default_rng",
+                "role": "",
+                "target": "random.default_rng",
+                "unresolved": false
+              }
+            ],
+            "type": "link_list"
+          }
+        ],
+        "title": "See also"
+      },
+      {
+        "blocks": [
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "from flopscope import BudgetContext"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "rs = fnp.random.RandomState(42)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "with BudgetContext(flop_budget=10**6):"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "z = rs.randn(10)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "type(z).__name__"
+              },
+              {
+                "kind": "output",
+                "text": "'FlopscopeArray'"
+              }
+            ],
+            "type": "doctest_block"
+          }
+        ],
+        "title": "Examples"
       }
     ],
     "canonical_name": "random.RandomState",
@@ -19067,9 +19600,9 @@
     "related_guides": [],
     "signature": "flops.random.RandomState",
     "slug": "random-random-state",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L138",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L174",
     "status_note": "",
-    "summary": "numpy RandomState subclass with FLOP-counted sampler methods.",
+    "summary": "numpy legacy ``RandomState`` subclass with FLOP-counted sampler methods.",
     "upstream_source_url": ""
   },
   "random.SeedSequence": {
@@ -19444,7 +19977,7 @@
     "related_guides": [],
     "signature": "flops.random.ranf(*args, **kwargs)",
     "slug": "random-ranf",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L301",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L371",
     "status_note": "",
     "summary": "Counted version of ``flops.random.random.ranf``. Cost: numel(output) FLOPs.",
     "upstream_source_url": ""
@@ -19494,7 +20027,7 @@
     "related_guides": [],
     "signature": "flops.random.sample(*args, **kwargs)",
     "slug": "random-sample",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L301",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L371",
     "status_note": "",
     "summary": "Counted version of ``flops.random.random.sample``. Cost: numel(output) FLOPs.",
     "upstream_source_url": ""
@@ -20286,7 +20819,7 @@
     "related_guides": [],
     "signature": "flops.random.symmetric(shape: 'int | Sequence[int]', symmetry: 'SymmetryGroup', distribution: 'str | Callable[..., Any]' = 'randn', **distribution_kwargs: 'Any') -> 'FlopscopeArray'",
     "slug": "random-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L404",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L478",
     "status_note": "",
     "summary": "Sample random data and project it to a symmetry group.",
     "upstream_source_url": ""

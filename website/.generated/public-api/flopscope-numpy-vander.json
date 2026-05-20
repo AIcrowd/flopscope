@@ -489,7 +489,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.vander",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L324",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L337",
   "href": "/docs/api/numpy/vander/",
   "import_path": "flopscope.numpy.vander",
   "is_operation_cost_leaf": true,

@@ -495,7 +495,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isinf",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L823",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L858",
   "href": "/docs/api/numpy/isinf/",
   "import_path": "flopscope.numpy.isinf",
   "is_operation_cost_leaf": true,

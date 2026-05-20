@@ -307,7 +307,7 @@
   "related_guides": [],
   "signature": "fnp.base_repr(number, base=2, padding=0)",
   "slug": "base-repr",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L941",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L985",
   "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
   "summary": "Return a string representation of a number in the given base system.",
   "upstream_source_url": ""

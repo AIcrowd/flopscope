@@ -303,7 +303,7 @@
     "name": "random.Generator.spawn",
     "notes": "Returns child Generators; subclass override wraps them as _CountedGenerator.",
     "numpy_ref": "np.random.Generator.spawn",
-    "signature": "fnp.random.Generator.spawn(self, n_children: 'int') -> \"list['_CountedGenerator']\"",
+    "signature": "fnp.random.Generator.spawn(self, n_children: 'int') -> 'list[_np.random.Generator]'",
     "status": "supported",
     "summary": "Create new independent child generators.",
     "weight": 1.0
@@ -311,7 +311,7 @@
   "schema_version": 1,
   "slug": "random-Generator-spawn",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L128",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L164",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.Generator.spawn.html"
   }
 }

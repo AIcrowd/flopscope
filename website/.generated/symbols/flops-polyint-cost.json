@@ -137,7 +137,7 @@
   ],
   "signature": "flops.flops.polyint_cost(n: 'int') -> 'int'",
   "slug": "flops-polyint-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L40",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
   "status_note": "",
   "summary": "Cost for polyint: n FLOPs (n = len of coeffs).",
   "upstream_source_url": ""

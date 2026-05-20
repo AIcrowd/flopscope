@@ -346,7 +346,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ravel_multi_index",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1736",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1829",
   "href": "/docs/api/numpy/ravel-multi-index/",
   "import_path": "flopscope.numpy.ravel_multi_index",
   "is_operation_cost_leaf": true,

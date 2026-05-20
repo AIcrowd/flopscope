@@ -251,7 +251,7 @@
   "schema_version": 1,
   "slug": "typename",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1958",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2058",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_type_check_impl.py#L574"
   }
 }

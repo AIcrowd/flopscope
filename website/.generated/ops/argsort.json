@@ -860,7 +860,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.argsort",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L75",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L77",
   "href": "/docs/api/numpy/argsort/",
   "legacy_href": "/docs/api/ops/argsort/",
   "module": "numpy",

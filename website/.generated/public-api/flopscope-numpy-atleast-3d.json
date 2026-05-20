@@ -326,7 +326,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.atleast_3d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L931",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L975",
   "href": "/docs/api/numpy/atleast-3d/",
   "import_path": "flopscope.numpy.atleast_3d",
   "is_operation_cost_leaf": true,

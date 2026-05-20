@@ -682,7 +682,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.fft",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L169",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L170",
   "href": "/docs/api/numpy/fft/fft/",
   "import_path": "flopscope.numpy.fft.fft",
   "is_operation_cost_leaf": true,

@@ -484,7 +484,7 @@
   "schema_version": 1,
   "slug": "histogramdd",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L201",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L209",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_histograms_impl.py#L917"
   }
 }

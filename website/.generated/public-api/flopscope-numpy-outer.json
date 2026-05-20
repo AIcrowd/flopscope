@@ -496,7 +496,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.outer",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1623",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1909",
   "href": "/docs/api/numpy/outer/",
   "import_path": "flopscope.numpy.outer",
   "is_operation_cost_leaf": true,

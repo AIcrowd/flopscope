@@ -79,7 +79,7 @@
   "schema_version": 1,
   "slug": "random-seed",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L157",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L225",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.seed.html"
   }
 }

@@ -336,7 +336,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.packbits",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1583",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1667",
   "href": "/docs/api/numpy/packbits/",
   "legacy_href": "/docs/api/ops/packbits/",
   "module": "numpy",

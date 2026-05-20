@@ -280,7 +280,7 @@
   "example": null,
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.get_state",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L162",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L230",
   "href": "/docs/api/numpy/random/get-state/",
   "import_path": "flopscope.numpy.random.get_state",
   "is_operation_cost_leaf": true,

@@ -428,7 +428,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.vdot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1768",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2059",
   "href": "/docs/api/numpy/vdot/",
   "import_path": "flopscope.numpy.vdot",
   "is_operation_cost_leaf": true,
@@ -440,7 +440,7 @@
     "href": "/docs/api/numpy/vecdot/",
     "label": "fnp.vecdot"
   },
-  "notes": "Dot product with conjugation; cost = N (FMA=1).",
+  "notes": "Dot product with conjugation; cost = N (weight-calibrated).",
   "notes_sections": [],
   "numpy_ref": "np.vdot",
   "operation": {

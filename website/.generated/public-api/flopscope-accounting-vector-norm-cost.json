@@ -178,7 +178,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Most norms cost n FLOPs (one pass over elements). General p-norms\ncost 2n due to exponentiation."
+              "text": "All norms cost 2*numel FLOPs (FMA=2: one multiply + accumulate per element)."
             }
           ],
           "type": "paragraph"
@@ -200,7 +200,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.vector_norm_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L257",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L264",
   "href": "/docs/api/accounting/vector-norm-cost/",
   "import_path": "flopscope.accounting.vector_norm_cost",
   "is_operation_cost_leaf": false,
@@ -212,7 +212,7 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "Most norms cost n FLOPs (one pass over elements). General p-norms cost 2n due to exponentiation."
+    "All norms cost 2*numel FLOPs (FMA=2: one multiply + accumulate per element)."
   ],
   "numpy_ref": "",
   "operation": null,

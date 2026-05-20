@@ -774,7 +774,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.meshgrid",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L742",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L773",
   "href": "/docs/api/numpy/meshgrid/",
   "legacy_href": "/docs/api/ops/meshgrid/",
   "module": "numpy",

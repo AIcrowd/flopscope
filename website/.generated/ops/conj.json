@@ -426,7 +426,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.conj",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
   "href": "/docs/api/numpy/conj/",
   "legacy_href": "/docs/api/ops/conj/",
   "module": "numpy",

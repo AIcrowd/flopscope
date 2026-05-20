@@ -855,7 +855,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.histogram",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L122",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L128",
   "href": "/docs/api/numpy/histogram/",
   "import_path": "flopscope.numpy.histogram",
   "is_operation_cost_leaf": true,

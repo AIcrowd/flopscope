@@ -716,7 +716,7 @@
   "schema_version": 1,
   "slug": "logspace",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L290",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L301",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/function_base.py#L195"
   }
 }

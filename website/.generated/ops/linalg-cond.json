@@ -390,7 +390,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.cond",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L408",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L422",
   "href": "/docs/api/numpy/linalg/cond/",
   "legacy_href": "/docs/api/ops/linalg-cond/",
   "module": "numpy.linalg",

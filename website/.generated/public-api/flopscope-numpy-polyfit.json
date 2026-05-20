@@ -1248,7 +1248,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polyfit",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L203",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L215",
   "href": "/docs/api/numpy/polyfit/",
   "import_path": "flopscope.numpy.polyfit",
   "is_operation_cost_leaf": true,

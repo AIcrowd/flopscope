@@ -687,7 +687,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.apply_along_axis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L348",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L362",
   "href": "/docs/api/numpy/apply-along-axis/",
   "legacy_href": "/docs/api/ops/apply_along_axis/",
   "module": "numpy",

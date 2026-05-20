@@ -717,7 +717,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.logspace",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L290",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L301",
   "href": "/docs/api/numpy/logspace/",
   "import_path": "flopscope.numpy.logspace",
   "is_operation_cost_leaf": true,

@@ -266,7 +266,7 @@
   "schema_version": 1,
   "slug": "min_scalar_type",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1544",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1627",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.min_scalar_type.html"
   }
 }

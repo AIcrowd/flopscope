@@ -404,7 +404,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.solve",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L57",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L58",
   "href": "/docs/api/numpy/linalg/solve/",
   "legacy_href": "/docs/api/ops/linalg-solve/",
   "module": "numpy.linalg",

@@ -384,7 +384,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.roots",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L241",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L255",
   "href": "/docs/api/numpy/roots/",
   "legacy_href": "/docs/api/ops/roots/",
   "module": "flopscope._polynomial",

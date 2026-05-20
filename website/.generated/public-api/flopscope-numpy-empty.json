@@ -529,7 +529,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.empty",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L305",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L314",
   "href": "/docs/api/numpy/empty/",
   "import_path": "flopscope.numpy.empty",
   "is_operation_cost_leaf": true,

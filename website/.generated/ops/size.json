@@ -242,7 +242,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.size",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1849",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1946",
   "href": "/docs/api/numpy/size/",
   "legacy_href": "/docs/api/ops/size/",
   "module": "numpy",

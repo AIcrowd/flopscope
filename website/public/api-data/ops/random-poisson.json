@@ -471,7 +471,7 @@
   "schema_version": 1,
   "slug": "random-poisson",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.poisson.html"
   }
 }

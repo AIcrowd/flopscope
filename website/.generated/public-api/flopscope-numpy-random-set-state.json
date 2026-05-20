@@ -341,7 +341,7 @@
   "example": null,
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.set_state",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L167",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L235",
   "href": "/docs/api/numpy/random/set-state/",
   "import_path": "flopscope.numpy.random.set_state",
   "is_operation_cost_leaf": true,

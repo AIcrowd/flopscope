@@ -614,7 +614,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.choice",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L364",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L437",
   "href": "/docs/api/numpy/random/choice/",
   "import_path": "flopscope.numpy.random.choice",
   "is_operation_cost_leaf": true,

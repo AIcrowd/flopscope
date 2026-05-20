@@ -337,7 +337,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.kron",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1786",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2078",
   "href": "/docs/api/numpy/kron/",
   "legacy_href": "/docs/api/ops/kron/",
   "module": "numpy",

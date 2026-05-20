@@ -880,7 +880,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.histogram_bin_edges",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L248",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L257",
   "href": "/docs/api/numpy/histogram-bin-edges/",
   "import_path": "flopscope.numpy.histogram_bin_edges",
   "is_operation_cost_leaf": true,

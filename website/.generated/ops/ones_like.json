@@ -471,7 +471,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ones_like",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L256",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L262",
   "href": "/docs/api/numpy/ones-like/",
   "legacy_href": "/docs/api/ops/ones_like/",
   "module": "numpy",

@@ -546,7 +546,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.round",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1076",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1095",
   "href": "/docs/api/numpy/round/",
   "import_path": "flopscope.numpy.round",
   "is_operation_cost_leaf": true,

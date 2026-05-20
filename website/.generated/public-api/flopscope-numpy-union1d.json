@@ -169,7 +169,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.union1d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L468",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L499",
   "href": "/docs/api/numpy/union1d/",
   "import_path": "flopscope.numpy.union1d",
   "is_operation_cost_leaf": true,

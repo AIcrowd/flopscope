@@ -827,7 +827,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.lstsq",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L171",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L174",
   "href": "/docs/api/numpy/linalg/lstsq/",
   "import_path": "flopscope.numpy.linalg.lstsq",
   "is_operation_cost_leaf": true,

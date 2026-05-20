@@ -658,7 +658,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.concat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1111",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1162",
   "href": "/docs/api/numpy/concat/",
   "import_path": "flopscope.numpy.concat",
   "is_operation_cost_leaf": true,

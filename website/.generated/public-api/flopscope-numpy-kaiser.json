@@ -393,7 +393,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.kaiser",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L158",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L162",
   "href": "/docs/api/numpy/kaiser/",
   "import_path": "flopscope.numpy.kaiser",
   "is_operation_cost_leaf": true,

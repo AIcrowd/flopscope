@@ -736,7 +736,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.piecewise",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L402",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L418",
   "href": "/docs/api/numpy/piecewise/",
   "import_path": "flopscope.numpy.piecewise",
   "is_operation_cost_leaf": true,

@@ -496,7 +496,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.ihfft",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L631",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L658",
   "href": "/docs/api/numpy/fft/ihfft/",
   "legacy_href": "/docs/api/ops/fft-ihfft/",
   "module": "numpy.fft",

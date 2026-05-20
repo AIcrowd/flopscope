@@ -553,7 +553,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.einsum_path",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L412",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L405",
   "href": "/docs/api/numpy/einsum-path/",
   "import_path": "flopscope.numpy.einsum_path",
   "is_operation_cost_leaf": true,

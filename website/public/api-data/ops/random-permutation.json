@@ -321,7 +321,7 @@
   "schema_version": 1,
   "slug": "random-permutation",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L332",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L403",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.permutation.html"
   }
 }

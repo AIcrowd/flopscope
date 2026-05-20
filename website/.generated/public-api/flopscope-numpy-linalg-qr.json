@@ -715,7 +715,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.qr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L83",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L85",
   "href": "/docs/api/numpy/linalg/qr/",
   "import_path": "flopscope.numpy.linalg.qr",
   "is_operation_cost_leaf": true,

@@ -736,7 +736,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.ifft",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L198",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L201",
   "href": "/docs/api/numpy/fft/ifft/",
   "import_path": "flopscope.numpy.fft.ifft",
   "is_operation_cost_leaf": true,

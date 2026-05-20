@@ -441,7 +441,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.trace",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L27",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L28",
   "href": "/docs/api/numpy/trace/",
   "legacy_href": "/docs/api/ops/trace/",
   "module": "numpy",

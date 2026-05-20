@@ -542,7 +542,7 @@
   "schema_version": 1,
   "slug": "random-negative_binomial",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.negative_binomial.html"
   }
 }

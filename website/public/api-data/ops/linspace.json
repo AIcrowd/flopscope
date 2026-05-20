@@ -857,7 +857,7 @@
   "schema_version": 1,
   "slug": "linspace",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L217",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L222",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/function_base.py#L25"
   }
 }

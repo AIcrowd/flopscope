@@ -137,7 +137,7 @@
   ],
   "signature": "flops.flops.polyder_cost(n: 'int') -> 'int'",
   "slug": "flops-polyder-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L35",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L40",
   "status_note": "",
   "summary": "Cost for polyder: n FLOPs (n = len of coeffs).",
   "upstream_source_url": ""

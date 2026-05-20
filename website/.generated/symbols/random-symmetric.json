@@ -785,7 +785,7 @@
   "related_guides": [],
   "signature": "flops.random.symmetric(shape: 'int | Sequence[int]', symmetry: 'SymmetryGroup', distribution: 'str | Callable[..., Any]' = 'randn', **distribution_kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "random-symmetric",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L404",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L478",
   "status_note": "",
   "summary": "Sample random data and project it to a symmetry group.",
   "upstream_source_url": ""

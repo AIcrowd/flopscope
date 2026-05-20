@@ -342,7 +342,7 @@
   "schema_version": 1,
   "slug": "fromiter",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1368",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1439",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.fromiter.html"
   }
 }

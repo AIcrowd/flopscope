@@ -432,7 +432,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.logaddexp",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L414",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
   "href": "/docs/api/numpy/logaddexp/",
   "import_path": "flopscope.numpy.logaddexp",
   "is_operation_cost_leaf": true,

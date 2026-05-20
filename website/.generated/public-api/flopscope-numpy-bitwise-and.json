@@ -579,7 +579,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_and",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L414",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
   "href": "/docs/api/numpy/bitwise-and/",
   "import_path": "flopscope.numpy.bitwise_and",
   "is_operation_cost_leaf": true,

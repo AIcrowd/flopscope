@@ -475,7 +475,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.expand_dims",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L528",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L548",
   "href": "/docs/api/numpy/expand-dims/",
   "legacy_href": "/docs/api/ops/expand_dims/",
   "module": "numpy",

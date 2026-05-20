@@ -183,7 +183,7 @@
   "related_guides": [],
   "signature": "flops.budget_live(by_namespace: 'bool' = False)",
   "slug": "budget-live",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L370",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L391",
   "status_note": "",
   "summary": "Return a live-updating budget summary context manager.",
   "upstream_source_url": ""

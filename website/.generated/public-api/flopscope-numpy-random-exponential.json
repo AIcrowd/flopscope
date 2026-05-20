@@ -500,7 +500,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.exponential",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
   "href": "/docs/api/numpy/random/exponential/",
   "import_path": "flopscope.numpy.random.exponential",
   "is_operation_cost_leaf": true,

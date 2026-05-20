@@ -239,7 +239,7 @@
   ],
   "signature": "flops.flops.svd_cost(m: 'int', n: 'int', k: 'int | None' = None) -> 'int'",
   "slug": "flops-svd-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L175",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L173",
   "status_note": "",
   "summary": "Weighted FLOP cost of a (truncated) SVD.",
   "upstream_source_url": ""

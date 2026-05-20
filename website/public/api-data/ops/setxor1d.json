@@ -172,7 +172,7 @@
   "schema_version": 1,
   "slug": "setxor1d",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L507",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L542",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_arraysetops_impl.py#L713"
   }
 }

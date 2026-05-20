@@ -256,7 +256,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unique_inverse",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L352",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L371",
   "href": "/docs/api/numpy/unique-inverse/",
   "import_path": "flopscope.numpy.unique_inverse",
   "is_operation_cost_leaf": true,

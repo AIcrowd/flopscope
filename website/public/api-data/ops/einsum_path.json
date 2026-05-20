@@ -552,7 +552,7 @@
   "schema_version": 1,
   "slug": "einsum_path",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L412",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L405",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/einsumfunc.py#L742"
   }
 }

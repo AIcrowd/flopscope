@@ -397,7 +397,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.slogdet",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L132",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L137",
   "href": "/docs/api/numpy/linalg/slogdet/",
   "import_path": "flopscope.numpy.linalg.slogdet",
   "is_operation_cost_leaf": true,

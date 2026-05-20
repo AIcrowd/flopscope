@@ -131,7 +131,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.roots_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L65",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L70",
   "href": "/docs/api/accounting/roots-cost/",
   "import_path": "flopscope.accounting.roots_cost",
   "is_operation_cost_leaf": false,

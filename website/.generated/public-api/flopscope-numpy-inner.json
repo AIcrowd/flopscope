@@ -596,7 +596,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.inner",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1601",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1886",
   "href": "/docs/api/numpy/inner/",
   "import_path": "flopscope.numpy.inner",
   "is_operation_cost_leaf": true,
@@ -608,7 +608,7 @@
     "href": "/docs/api/numpy/insert/",
     "label": "fnp.insert"
   },
-  "notes": "Inner product; cost = N (FMA=1).",
+  "notes": "Inner product; cost = N (weight-calibrated).",
   "notes_sections": [
     "For vectors (1-D arrays) it computes the ordinary inner-product::",
     "flops.inner(a, b) = sum(a[:]*b[:])",

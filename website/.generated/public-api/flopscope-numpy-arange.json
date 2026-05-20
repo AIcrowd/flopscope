@@ -936,7 +936,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arange",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L202",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L206",
   "href": "/docs/api/numpy/arange/",
   "import_path": "flopscope.numpy.arange",
   "is_operation_cost_leaf": true,

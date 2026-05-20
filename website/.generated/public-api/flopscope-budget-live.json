@@ -185,7 +185,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.budget_live",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L370",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L391",
   "href": "/docs/api/flopscope/budget-live/",
   "import_path": "flopscope.budget_live",
   "is_operation_cost_leaf": false,

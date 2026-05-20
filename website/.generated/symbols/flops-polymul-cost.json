@@ -203,7 +203,7 @@
   ],
   "signature": "flops.flops.polymul_cost(n1: 'int', n2: 'int') -> 'int'",
   "slug": "flops-polymul-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L50",
   "status_note": "",
   "summary": "Cost for polymul: n1 * n2 FLOPs.",
   "upstream_source_url": ""

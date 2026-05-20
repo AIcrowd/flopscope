@@ -861,7 +861,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.irfft",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L256",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L263",
   "href": "/docs/api/numpy/fft/irfft/",
   "import_path": "flopscope.numpy.fft.irfft",
   "is_operation_cost_leaf": true,

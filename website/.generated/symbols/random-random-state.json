@@ -11,13 +11,258 @@
           "inline": [
             {
               "kind": "text",
-              "text": "numpy RandomState subclass with FLOP-counted sampler methods."
+              "text": "numpy legacy "
+            },
+            {
+              "kind": "code",
+              "text": "RandomState"
+            },
+            {
+              "kind": "text",
+              "text": " subclass with FLOP-counted sampler methods."
             }
           ],
           "type": "paragraph"
         }
       ],
       "title": "Summary"
+    },
+    {
+      "blocks": [
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Mirrors "
+            },
+            {
+              "display_text": "_CountedGenerator",
+              "explicit_title": false,
+              "external_url": "https://numpy.org/doc/stable/reference/generated/numpy._CountedGenerator.html",
+              "href": "",
+              "kind": "role_reference",
+              "original_target": "_CountedGenerator",
+              "role": "class",
+              "suppress_link": false,
+              "target": "_CountedGenerator",
+              "unresolved": false
+            },
+            {
+              "kind": "text",
+              "text": " for the legacy API: each sampler\n("
+            },
+            {
+              "kind": "code",
+              "text": "randn"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "normal"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "uniform"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "randint"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "choice"
+            },
+            {
+              "kind": "text",
+              "text": ",\n"
+            },
+            {
+              "kind": "code",
+              "text": "shuffle"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "permutation"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "bytes"
+            },
+            {
+              "kind": "text",
+              "text": ", ...) deducts FLOPs from the\nactive "
+            },
+            {
+              "kind": "code",
+              "text": "BudgetContext"
+            },
+            {
+              "kind": "text",
+              "text": " and returns "
+            },
+            {
+              "kind": "code",
+              "text": "FlopscopeArray"
+            },
+            {
+              "kind": "text",
+              "text": ". Free methods\n("
+            },
+            {
+              "kind": "code",
+              "text": "seed"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "get_state"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "set_state"
+            },
+            {
+              "kind": "text",
+              "text": ") pass through; everything else\nraises "
+            },
+            {
+              "kind": "code",
+              "text": "UnsupportedFunctionError"
+            },
+            {
+              "kind": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Modern code should prefer "
+            },
+            {
+              "display_text": "flopscope.flops.random.default_rng",
+              "explicit_title": false,
+              "external_url": "",
+              "href": "",
+              "kind": "role_reference",
+              "original_target": "flopscope.flops.random.default_rng",
+              "role": "func",
+              "suppress_link": false,
+              "target": "flops.random.default_rng",
+              "unresolved": true
+            },
+            {
+              "kind": "text",
+              "text": ";\nuse this only when porting code that relies on the legacy API."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "title": "Extended Summary"
+    },
+    {
+      "blocks": [
+        {
+          "links": [
+            {
+              "description": "canonical (modern) RNG constructor.",
+              "description_inline": [
+                {
+                  "kind": "text",
+                  "text": "canonical (modern) RNG constructor."
+                }
+              ],
+              "external_url": "",
+              "href": "/docs/api/numpy/random/default-rng/",
+              "label": "flops.random.default_rng",
+              "original_target": "fnp.random.default_rng",
+              "role": "",
+              "target": "random.default_rng",
+              "unresolved": false
+            }
+          ],
+          "type": "link_list"
+        }
+      ],
+      "title": "See also"
+    },
+    {
+      "blocks": [
+        {
+          "lines": [
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "import flopscope.numpy as fnp"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "from flopscope import BudgetContext"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "rs = fnp.random.RandomState(42)"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "with BudgetContext(flop_budget=10**6):"
+            },
+            {
+              "kind": "input",
+              "prompt": "...",
+              "text": "z = rs.randn(10)"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "type(z).__name__"
+            },
+            {
+              "kind": "output",
+              "text": "'FlopscopeArray'"
+            }
+          ],
+          "type": "doctest_block"
+        }
+      ],
+      "title": "Examples"
     }
   ],
   "canonical_name": "random.RandomState",
@@ -32,8 +277,8 @@
   "related_guides": [],
   "signature": "flops.random.RandomState",
   "slug": "random-random-state",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L138",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L174",
   "status_note": "",
-  "summary": "numpy RandomState subclass with FLOP-counted sampler methods.",
+  "summary": "numpy legacy ``RandomState`` subclass with FLOP-counted sampler methods.",
   "upstream_source_url": ""
 }

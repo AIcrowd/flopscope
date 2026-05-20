@@ -226,7 +226,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.bytes",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L547",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L622",
   "href": "/docs/api/numpy/random/bytes/",
   "import_path": "flopscope.numpy.random.bytes",
   "is_operation_cost_leaf": true,

@@ -326,7 +326,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isfortran",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1449",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1530",
   "href": "/docs/api/numpy/isfortran/",
   "legacy_href": "/docs/api/ops/isfortran/",
   "module": "numpy",

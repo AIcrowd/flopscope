@@ -588,7 +588,7 @@
   "schema_version": 1,
   "slug": "nan_to_num",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_type_check_impl.py#L373"
   }
 }

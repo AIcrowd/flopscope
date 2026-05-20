@@ -148,7 +148,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.fftn_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L67",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L68",
   "href": "/docs/api/accounting/fftn-cost/",
   "import_path": "flopscope.accounting.fftn_cost",
   "is_operation_cost_leaf": false,

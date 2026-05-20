@@ -1124,7 +1124,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.histogram2d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L151",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L158",
   "href": "/docs/api/numpy/histogram2d/",
   "import_path": "flopscope.numpy.histogram2d",
   "is_operation_cost_leaf": true,

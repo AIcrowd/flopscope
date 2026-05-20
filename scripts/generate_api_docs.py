@@ -181,7 +181,7 @@ GENERATED_PAGES: dict[str, dict] = {
 
             | Operation | Cost Formula |
             |-----------|-------------|
-            | `polyval` | $m \\cdot \\text{deg}$ (Horner's method, FMA=1) |
+            | `polyval` | $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2) |
             | `polyadd`, `polysub` | $\\max(n_1, n_2)$ |
             | `polymul`, `polydiv` | $n_1 \\cdot n_2$ |
             | `polyfit` | $2m \\cdot (\\text{deg}+1)^2$ |
@@ -391,8 +391,8 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         r"$\text{op\_factor} \cdot \prod_i d_i$",
     ),
     "einsum_path": ("0 (planning only)", "$0$"),
-    "dot": ("m * k * n (FMA=1)", r"$m \cdot k \cdot n$"),
-    "matmul": ("m * k * n (FMA=1)", r"$m \cdot k \cdot n$"),
+    "dot": ("2 * m * k * n - m * n (FMA=2)", r"$2 \cdot m \cdot k \cdot n - m \cdot n$"),
+    "matmul": ("2 * m * k * n - m * n (FMA=2)", r"$2 \cdot m \cdot k \cdot n - m \cdot n$"),
     "inner": ("n", "$n$"),
     "outer": ("m * n", r"$m \cdot n$"),
     "tensordot": ("product of contracted dims * output size", r"$\prod_i d_i$"),
@@ -454,7 +454,7 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "fft.irfftn": ("5(N/2) * ceil(log2(N))", r"$5(N/2) \cdot \lceil\log_2 N\rceil$"),
     "fft.hfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
     "fft.ihfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
-    "polyval": ("m * deg (FMA=1)", r"$m \cdot \text{deg}$"),
+    "polyval": ("2 * m * deg (FMA=2)", r"$2 \cdot m \cdot \text{deg}$"),
     "polyadd": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
     "polysub": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
     "polyder": ("n", "$n$"),

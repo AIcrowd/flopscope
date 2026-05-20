@@ -580,7 +580,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.argpartition",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L161",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L168",
   "href": "/docs/api/numpy/argpartition/",
   "legacy_href": "/docs/api/ops/argpartition/",
   "module": "numpy",

@@ -118,7 +118,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "One FMA (cosine + scale) per sample, counted as 1 op under FMA=1."
+              "text": "Two ops per sample under FMA=2 convention (1 multiply + 1 add)."
             }
           ],
           "type": "paragraph"
@@ -140,7 +140,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.hanning_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L107",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L110",
   "href": "/docs/api/accounting/hanning-cost/",
   "import_path": "flopscope.accounting.hanning_cost",
   "is_operation_cost_leaf": false,
@@ -152,7 +152,7 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "One FMA (cosine + scale) per sample, counted as 1 op under FMA=1."
+    "Two ops per sample under FMA=2 convention (1 multiply + 1 add)."
   ],
   "numpy_ref": "",
   "operation": null,

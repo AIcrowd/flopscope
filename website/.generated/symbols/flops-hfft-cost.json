@@ -172,7 +172,7 @@
   ],
   "signature": "flops.flops.hfft_cost(n_out: 'int') -> 'int'",
   "slug": "flops-hfft-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L123",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L124",
   "status_note": "",
   "summary": "Weighted FLOP cost of a Hermitian FFT.",
   "upstream_source_url": ""

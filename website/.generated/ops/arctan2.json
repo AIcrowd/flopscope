@@ -702,7 +702,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arctan2",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L414",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
   "href": "/docs/api/numpy/arctan2/",
   "legacy_href": "/docs/api/ops/arctan2/",
   "module": "numpy",

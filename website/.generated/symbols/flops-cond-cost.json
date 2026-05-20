@@ -284,7 +284,7 @@
   ],
   "signature": "flops.flops.cond_cost(m: 'int', n: 'int', p=None) -> 'int'",
   "slug": "flops-cond-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L377",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L391",
   "status_note": "",
   "summary": "Weighted FLOP cost of condition number.",
   "upstream_source_url": ""
