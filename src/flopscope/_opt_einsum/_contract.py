@@ -1048,25 +1048,44 @@ def build_path_info(
                         for part in _orig_parts_list
                     ]
 
-                    def _sym_to_group_list(sym: Any) -> list | None:
-                        """Convert per_op_symmetry entry → oracle per_op_groups list."""
+                    def _sym_to_group_list(sym: Any, subscript: str) -> list | None:
+                        """Convert per_op_symmetry entry → oracle per_op_groups list.
+
+                        Source A generators in ``_collect_pi_permutations`` require
+                        ``group._labels`` to be populated (the function short-circuits
+                        on ``group._labels is None``).  User-supplied groups created
+                        via ``SymmetryGroup.symmetric(axes=...)`` have ``axes`` set
+                        but ``_labels`` empty, so we synthesize labels here from the
+                        operand's subscript at the symmetry's axis positions.
+
+                        We build a fresh ``SymmetryGroup`` so the user's object
+                        stays untouched (the oracle is per-call and these clones
+                        live only for its duration).
+                        """
                         if sym is None:
                             return None
                         if not isinstance(sym, SymmetryGroup):
                             return None
-                        # Ensure _labels is set for Source A generators.
-                        if sym._labels is None and sym.axes is not None:
-                            try:
-                                return [sym]
-                            except Exception:
-                                return None
-                        return [sym]
+                        if sym._labels is not None:
+                            return [sym]
+                        if sym.axes is None:
+                            return [sym]
+                        try:
+                            labels = tuple(subscript[ax] for ax in sym.axes)
+                        except (IndexError, TypeError):
+                            return None
+                        clone = SymmetryGroup(*sym.generators, axes=sym.axes)
+                        clone._labels = labels
+                        return [clone]
 
                     oracle = SubgraphSymmetryOracle(
                         operands=_dummy_ops,
                         subscript_parts=_orig_parts_list,
                         per_op_groups=[
-                            _sym_to_group_list(s) for s in per_op_symmetries
+                            _sym_to_group_list(s, part)
+                            for s, part in zip(
+                                per_op_symmetries, _orig_parts_list, strict=False
+                            )
                         ],
                         output_chars=orig_output,
                     )
