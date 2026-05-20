@@ -210,6 +210,41 @@ def _get_path_info(
         syms_key,
         identity_pattern,
     )
+
+    # Bug B fix: if any operand has declared symmetry, rebuild path_info with
+    # per_op_symmetries so that per-step input_groups / output_group /
+    # inner_group are populated by the SubgraphSymmetryOracle.  The _path_cache
+    # result is a shared cached object and must not be mutated; build_path_info
+    # returns a fresh PathInfo each time.  We skip the rebuild when all
+    # per_op_symmetries are None (the common case) to keep the fast path.
+    if any(s is not None for s in per_op_symmetries):
+        from flopscope._opt_einsum._contract import build_path_info as _bpi
+
+        # We need the upstream opt_einsum PathInfo to reconstruct contraction_list.
+        # Retrieve it from the cached PathInfo's contraction_list (it's preserved).
+        # The cached path_info IS the flopscope PathInfo returned by build_path_info;
+        # its contraction_list and path were stored as fields.
+        # We can re-run build_path_info using the cached path + contraction_list,
+        # but we need to access the upstream-form contraction_list.
+        # Simplest: call the upstream opt_einsum contract_path again (cheap, shapes-only).
+        import opt_einsum as _oe
+        import numpy as _np_tmp
+
+        _dummy_ops = [_np_tmp.empty(sh) for sh in shapes]
+        _upstream_path, _upstream_info = _oe.contract_path(
+            canonical_subscripts,
+            *_dummy_ops,
+            optimize=_normalize_optimize(effective_optimize)
+            if not isinstance(_normalize_optimize(effective_optimize), tuple)
+            else list(_normalize_optimize(effective_optimize)),
+        )
+        path_info = _bpi(
+            _upstream_path,
+            _upstream_info,
+            size_dict=_upstream_info.size_dict,
+            per_op_symmetries=per_op_symmetries,
+        )
+
     return canonical_subscripts, input_parts, output_subscript, shapes, path_info
 
 

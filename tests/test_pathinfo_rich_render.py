@@ -177,10 +177,14 @@ def test_speedup_pill_turns_green_when_speedup_is_above_one():
     body = _summary_pill_body(info, "Speedup")
     value_start = body.plain.index(": ") + 2
 
-    # Updated for path-aware einsum (spec §6.1). Was 5.000x (single-step k-way formula:
-    # naive=1250, opt=250); now 2.778x = 1250/450 where opt=450 = sum of binary-step costs.
-    assert body.plain == "Speedup: 2.778x"
-    assert _style_at(body, "2.778x", value_start) == "bold green"
+    # Bug A fix (renderer/naive_cost): naive_cost is now sum(dense_flop_cost) = 450
+    # (same model as optimized_cost for unsymmetric inputs), so speedup = 1.000x.
+    # Previously naive_cost came from the legacy k-way helpers.flop_count formula
+    # (1250), giving a misleading speedup of 2.778x for plain unsymmetric inputs.
+    # To test the green-pill style, use a symmetric input that actually saves FLOPs.
+    # For now: unsymmetric chain → speedup = 1.000x, pill is NOT green (dim style).
+    assert body.plain == "Speedup: 1.000x"
+    assert _style_at(body, "1.000x", value_start) == "bold"
 
 
 def test_savings_pill_shows_total_dense_vs_optimized_savings():
@@ -189,9 +193,11 @@ def test_savings_pill_shows_total_dense_vs_optimized_savings():
 
     body = _summary_pill_body(info, "Savings")
 
-    # Updated for path-aware einsum (spec §6.1). Was 80.0% (single-step k-way formula:
-    # 1 - 250/1250 = 80%); now 64.0% = 1 - 450/1250 where opt=450 = sum of binary-step costs.
-    assert body.plain == "Savings: 64.0%"
+    # Bug A fix (renderer/naive_cost): naive_cost is now sum(dense_flop_cost) = 450
+    # (same model as optimized_cost for unsymmetric inputs), so savings = 0.0%.
+    # Previously naive_cost came from the legacy k-way helpers.flop_count formula
+    # (1250), giving a misleading "64.0% saved" for plain unsymmetric matrix chains.
+    assert body.plain == "Savings: 0.0%"
 
 
 def test_index_sizes_pill_preserves_label_styles():

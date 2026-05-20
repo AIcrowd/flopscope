@@ -956,7 +956,12 @@ def symmetric_flop_count(
 
 
 def build_path_info(
-    upstream_path, upstream_info, *, size_dict, optimizer_used: str = ""
+    upstream_path,
+    upstream_info,
+    *,
+    size_dict,
+    optimizer_used: str = "",
+    per_op_symmetries=None,
 ):
     """Adapt upstream opt_einsum's PathInfo to flopscope's PathInfo.
 
@@ -976,6 +981,11 @@ def build_path_info(
     optimizer_used : str, optional
         Name of the optimizer that produced ``upstream_path``. Propagated
         into the returned PathInfo for display. Defaults to ``''``.
+    per_op_symmetries : sequence of SymmetryGroup or None, optional
+        Per-operand declared symmetries (parallel to operands). When provided,
+        a SubgraphSymmetryOracle is built and queried per step to populate
+        ``input_groups``, ``output_group``, and ``inner_group`` on each
+        StepInfo. Defaults to ``None`` (all dense, no symmetry).
 
     Returns
     -------
@@ -1010,6 +1020,66 @@ def build_path_info(
     }
     ssa_ids: list[int] = list(range(num_ops))
     next_ssa = num_ops
+
+    # Bug B fix: build a SubgraphSymmetryOracle from the declared operand
+    # symmetries so per-step input_groups / output_group / inner_group are
+    # populated correctly instead of always being empty / None.
+    # The oracle is built once here and queried per step below.
+    oracle = None
+    if per_op_symmetries is not None:
+        orig_input_parts = getattr(upstream_info, "input_subscripts", None)
+        orig_output = getattr(upstream_info, "output_subscript", "")
+        if orig_input_parts is not None:
+            _orig_parts_list = orig_input_parts.split(",")
+            if len(_orig_parts_list) == num_ops:
+                try:
+                    import numpy as _np
+
+                    from flopscope._opt_einsum._subgraph_symmetry import (
+                        SubgraphSymmetryOracle,
+                    )
+
+                    # Build dummy operands with the right shapes. Operands that
+                    # share object-identity in the original call are not
+                    # tracked here; identity_pattern is handled by the oracle
+                    # via per_op_groups declared symmetry.
+                    _dummy_ops = [
+                        _np.empty(tuple(size_dict[c] for c in part))
+                        for part in _orig_parts_list
+                    ]
+
+                    def _sym_to_group_list(sym: Any) -> list | None:
+                        """Convert per_op_symmetry entry → oracle per_op_groups list."""
+                        if sym is None:
+                            return None
+                        if not isinstance(sym, SymmetryGroup):
+                            return None
+                        # Ensure _labels is set for Source A generators.
+                        if sym._labels is None and sym.axes is not None:
+                            try:
+                                return [sym]
+                            except Exception:
+                                return None
+                        return [sym]
+
+                    oracle = SubgraphSymmetryOracle(
+                        operands=_dummy_ops,
+                        subscript_parts=_orig_parts_list,
+                        per_op_groups=[
+                            _sym_to_group_list(s)
+                            for s in per_op_symmetries
+                        ],
+                        output_chars=orig_output,
+                    )
+                except Exception:
+                    oracle = None
+
+    # SSA current-subsets list for oracle queries — parallel to ssa_ids list.
+    # Each entry is the frozenset of original operand indices covered by the
+    # corresponding current operand.  Starts as singletons.
+    current_oracle_subsets: list[frozenset[int]] = [
+        frozenset({k}) for k in range(num_ops)
+    ]
 
     for step_idx, entry in enumerate(upstream_info.contraction_list):
         idx_removed = entry[1]  # frozenset of label chars removed (inner product)
@@ -1087,6 +1157,53 @@ def build_path_info(
         ssa_ids.append(next_ssa)
         next_ssa += 1
 
+        # Bug B fix: query the oracle for per-step symmetry groups.
+        # The oracle uses merged_subsets of the step's input operands to derive
+        # the V-side (output_group) and W-side (inner_group) symmetries.
+        # For the input_groups list we use the per-input subset groups.
+        step_input_groups: list = []
+        step_output_group: object | None = None
+        step_inner_group: object | None = None
+        if oracle is not None:
+            try:
+                # Gather which oracle-tracked subsets map to each lhs input.
+                # opt_einsum pops positions highest-to-lowest (contract_positions
+                # is sorted descending), so the lhs subscript order matches
+                # the descending-position order of the path entry.
+                step_input_subsets = [
+                    current_oracle_subsets[pos]
+                    for pos in sorted(original_path_tuple, reverse=True)
+                    if pos < len(current_oracle_subsets)
+                ]
+                for inp_subset in step_input_subsets:
+                    ss = oracle.sym(inp_subset)
+                    step_input_groups.append(ss.output)  # V-side group for this input
+                # For output_group and inner_group, query the merged subset.
+                merged_ss = oracle.sym(new_merged_subset)
+                step_output_group = merged_ss.output
+                step_inner_group = merged_ss.inner
+            except Exception:
+                step_input_groups = []
+                step_output_group = None
+                step_inner_group = None
+
+        # Update current_oracle_subsets to mirror the SSA merge above.
+        # Guard against out-of-range indices the same way the ssa_ids loop does.
+        _oracle_contract_positions = tuple(
+            pos
+            for pos in sorted(original_path_tuple, reverse=True)
+            if pos < len(current_oracle_subsets)
+        )
+        if _oracle_contract_positions:
+            merged_oracle_subset: frozenset[int] = frozenset().union(
+                *(current_oracle_subsets[pos] for pos in _oracle_contract_positions)
+            )
+            for pos in _oracle_contract_positions:
+                current_oracle_subsets.pop(pos)
+            current_oracle_subsets.append(merged_oracle_subset)
+        else:
+            current_oracle_subsets.append(frozenset())
+
         steps_out.append(
             StepInfo(
                 subscript=einsum_str,
@@ -1097,32 +1214,24 @@ def build_path_info(
                 path_indices=original_path_tuple,
                 merged_subset=new_merged_subset,
                 # Diagnostic fields: dense baseline and symmetry savings.
-                # input_groups / output_group / inner_group remain at defaults
-                # (empty list / None) until Phase 3 restores the oracle.
                 dense_flop_cost=step_dense_flop_cost,
                 symmetry_savings=step_symmetry_savings,
+                # Bug B fix: symmetry groups from oracle (empty list / None when
+                # per_op_symmetries was not provided or oracle build failed).
+                input_groups=step_input_groups,
+                output_group=step_output_group,
+                inner_group=step_inner_group,
             )
         )
 
     optimized_cost = sum(s.flop_cost for s in steps_out)
 
-    # Recompute naive_cost: single-step contraction over all labels.
-    all_labels: frozenset[str] = frozenset(size_dict.keys())
-    n_ops = (
-        len(upstream_info.contraction_list[0][3]) + 1
-        if upstream_info.contraction_list
-        and upstream_info.contraction_list[0][3] is not None
-        else 2
-    )
-    try:
-        naive_cost = helpers.flop_count(
-            idx_contraction=all_labels,
-            inner=True,
-            num_terms=n_ops,
-            size_dictionary=size_dict,
-        )
-    except Exception:
-        naive_cost = int(upstream_info.naive_cost)
+    # Bug A fix: naive_cost uses the same α/M model as the per-step dense_flop_cost
+    # (helpers.flop_count, no symmetry), so header "Savings" and per-step "savings"
+    # columns are computed from the same model.  The old approach used
+    # helpers.flop_count over ALL labels as if they were contracted in one shot,
+    # which can be a very different number than the sum of per-step dense costs.
+    naive_cost = sum(s.dense_flop_cost for s in steps_out)
 
     speedup = (naive_cost / optimized_cost) if optimized_cost > 0 else 1.0
 

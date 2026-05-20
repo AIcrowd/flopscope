@@ -154,3 +154,59 @@ def test_dense_flops_exceeds_flops_for_symmetric_matmul():
         assert step.dense_flop_cost >= step.flop_cost, (
             f"dense={step.dense_flop_cost} < flop_cost={step.flop_cost}; impossible"
         )
+
+
+# ── Bug A / B regression tests (renderer fix) ──────────────────────────
+
+
+def test_bug_a_unsymmetric_chain_savings_header_zero():
+    """Bug A regression: for unsymmetric 3-matrix chain, header Savings must be 0.0%.
+
+    Before the fix, naive_cost was computed via the legacy helpers.flop_count over
+    ALL labels (single-shot k-way contraction) which gave a different model than
+    the per-step dense_flop_cost.  The header showed e.g. "56.2% saved" while
+    per-step columns both showed 0.0%, because naive_cost and dense_flop_cost came
+    from different models.  After the fix, naive_cost = sum(dense_flop_cost), so
+    both columns agree at 0.0%.
+    """
+    import numpy as np
+
+    import flopscope.numpy as fnp
+
+    A = np.ones((4, 4))
+    B = np.ones((4, 4))
+    C = np.ones((4, 4))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ij,jk,kl->il", A, B, C)
+    rendered = str(info)
+    assert "Savings:  0.0%" in rendered or "Savings: 0.0%" in rendered, (
+        f"Bug A: header Savings should be 0.0% for unsymmetric chain.\nrendered:\n{rendered}"
+    )
+
+
+def test_bug_b_symmetric_frobenius_cost_matches_direct():
+    """Bug B regression: einsum_path for S3-symmetric Frobenius inner matches
+    einsum_accumulation_cost, and step input_groups are non-empty.
+
+    Before the fix, _contract.py::build_path_info called
+    symmetric_flop_count(input_groups=[], ...) at every step because the path
+    walker had no mechanism to extract per-operand declared symmetries.  This
+    caused info.optimized_cost to disagree with the direct accumulation cost.
+    After the fix, per_op_symmetries is threaded into build_path_info via
+    the SubgraphSymmetryOracle, giving the correct (lower) cost.
+    """
+    import numpy as np
+
+    import flopscope.numpy as fnp
+
+    T = flops.as_symmetric(np.zeros((4, 4, 4)), symmetry=(0, 1, 2))
+    direct = flops.einsum_accumulation_cost("ijk,ijk->", T, T).total
+    with flops.BudgetContext(flop_budget=10**12, quiet=True):
+        _, info = fnp.einsum_path("ijk,ijk->", T, T)
+    assert info.optimized_cost == direct, (
+        f"Bug B: info.optimized_cost={info.optimized_cost} != direct={direct}"
+    )
+    # input_groups must be a non-empty list (operand symmetries were propagated).
+    assert info.steps[0].input_groups, (
+        f"Bug B: input_groups is empty: {info.steps[0].input_groups!r}"
+    )
