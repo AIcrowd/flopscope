@@ -1066,8 +1066,7 @@ def build_path_info(
                         operands=_dummy_ops,
                         subscript_parts=_orig_parts_list,
                         per_op_groups=[
-                            _sym_to_group_list(s)
-                            for s in per_op_symmetries
+                            _sym_to_group_list(s) for s in per_op_symmetries
                         ],
                         output_chars=orig_output,
                     )

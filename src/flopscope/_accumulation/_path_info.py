@@ -42,17 +42,54 @@ class FlopscopePathInfo:
         # the check_consistency invariant (optimized_cost == sum(step.flop_cost)
         # == accumulation.total) holds even when the oracle threads symmetry
         # through per-step costs (Task 17b).
-        if (
-            accumulation is not None
-            and accumulation.per_step
-            and hasattr(inner, "steps")
-        ):
+        if accumulation is not None and hasattr(inner, "steps"):
             steps = inner.steps
-            for step, acc_step in zip(steps, accumulation.per_step, strict=False):
+            if accumulation.per_step:
+                # Multi-step path: per_step is populated by _walk_path_and_aggregate.
+                for step, acc_step in zip(steps, accumulation.per_step, strict=False):
+                    try:
+                        step.flop_cost = acc_step.total
+                    except (AttributeError, TypeError):
+                        pass  # StepInfo may be frozen in some configurations; skip
+            elif len(steps) == 1:
+                # Bug B fix: single-step (2-op) einsum — aggregate_einsum returns a
+                # flat AccumulationCost with no per_step entries.  The single step's
+                # flop_cost must still be updated so that the renderer header and
+                # per-step "flops" column agree with info.optimized_cost.
                 try:
-                    step.flop_cost = acc_step.total
+                    steps[0].flop_cost = accumulation.total
                 except (AttributeError, TypeError):
-                    pass  # StepInfo may be frozen in some configurations; skip
+                    pass
+
+            # After syncing step flop_cost values, recompute inner.optimized_cost,
+            # inner.naive_cost (dense baseline), and inner.speedup so the renderer
+            # header agrees with the per-step column.  inner.naive_cost is already
+            # the sum of dense_flop_cost (Bug A fix in build_path_info); we must
+            # not change it here — only optimized_cost and speedup need updating.
+            new_opt_cost = sum(
+                getattr(s, "flop_cost", 0) for s in steps
+            )
+            try:
+                inner.optimized_cost = new_opt_cost
+            except (AttributeError, TypeError):
+                pass
+            try:
+                naive = getattr(inner, "naive_cost", 0)
+                inner.speedup = (naive / new_opt_cost) if new_opt_cost > 0 else 1.0
+            except (AttributeError, TypeError):
+                pass
+
+            # Recompute per-step symmetry_savings now that flop_cost is correct.
+            for step in steps:
+                dense = getattr(step, "dense_flop_cost", 0)
+                sym_cost = getattr(step, "flop_cost", dense)
+                try:
+                    step.symmetry_savings = (
+                        max(0.0, 1.0 - sym_cost / dense) if dense > 0 else 0.0
+                    )
+                except (AttributeError, TypeError):
+                    pass
+
         return cls(inner=inner, accumulation=accumulation)
 
     @property
@@ -111,11 +148,7 @@ class FlopscopePathInfo:
                 f"check_consistency: optimized_cost ({opt_cost}) != "
                 f"accumulation.total ({acc_total})"
             )
-        if (
-            opt_cost != sum_steps
-            and self.accumulation is not None
-            and self.accumulation.per_step
-        ):
+        if opt_cost != sum_steps and self.accumulation is not None:
             raise AssertionError(
                 f"check_consistency: optimized_cost ({opt_cost}) != "
                 f"sum(steps.flop_cost) ({sum_steps})"

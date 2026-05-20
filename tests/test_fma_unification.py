@@ -186,14 +186,18 @@ def test_bug_a_unsymmetric_chain_savings_header_zero():
 
 def test_bug_b_symmetric_frobenius_cost_matches_direct():
     """Bug B regression: einsum_path for S3-symmetric Frobenius inner matches
-    einsum_accumulation_cost, and step input_groups are non-empty.
+    einsum_accumulation_cost on all three cost surfaces.
 
-    Before the fix, _contract.py::build_path_info called
-    symmetric_flop_count(input_groups=[], ...) at every step because the path
-    walker had no mechanism to extract per-operand declared symmetries.  This
-    caused info.optimized_cost to disagree with the direct accumulation cost.
-    After the fix, per_op_symmetries is threaded into build_path_info via
-    the SubgraphSymmetryOracle, giving the correct (lower) cost.
+    Before the fix, FlopscopePathInfo.from_inner() only synced step.flop_cost
+    when accumulation.per_step was non-empty (populated by _walk_path_and_aggregate
+    for 3+-op paths).  For 2-op binary einsums, aggregate_einsum() returns a flat
+    AccumulationCost with per_step=(), so step.flop_cost stayed at the dense 127
+    even though info.optimized_cost correctly returned 39 via accumulation.total.
+    The renderer header and per-step "flops" column both showed the wrong 127.
+
+    After the fix, from_inner() handles the single-step case by setting
+    steps[0].flop_cost = accumulation.total, and also updates inner.optimized_cost
+    and inner.speedup so the renderer is consistent.
     """
     import numpy as np
 
@@ -203,10 +207,21 @@ def test_bug_b_symmetric_frobenius_cost_matches_direct():
     direct = flops.einsum_accumulation_cost("ijk,ijk->", T, T).total
     with flops.BudgetContext(flop_budget=10**12, quiet=True):
         _, info = fnp.einsum_path("ijk,ijk->", T, T)
+    # All three cost surfaces must agree.
     assert info.optimized_cost == direct, (
         f"Bug B: info.optimized_cost={info.optimized_cost} != direct={direct}"
     )
-    # input_groups must be a non-empty list (operand symmetries were propagated).
-    assert info.steps[0].input_groups, (
-        f"Bug B: input_groups is empty: {info.steps[0].input_groups!r}"
+    step_sum = sum(s.flop_cost for s in info.steps)
+    assert step_sum == direct, (
+        f"Bug B: sum(steps.flop_cost)={step_sum} != direct={direct}"
+    )
+    assert info.accumulation.total == direct, (
+        f"Bug B: info.accumulation.total={info.accumulation.total} != direct={direct}"
+    )
+    # check_consistency must pass (all three surfaces in agreement).
+    assert info.check_consistency()
+    # Renderer must show the symmetric cost, not the dense fallback.
+    rendered = str(info)
+    assert f"Optimized cost (flopscope):  {direct}" in rendered, (
+        f"Bug B: renderer header shows wrong cost:\n{rendered}"
     )
