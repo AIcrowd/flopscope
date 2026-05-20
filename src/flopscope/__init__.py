@@ -60,7 +60,6 @@ from flopscope._budget import (  # noqa: F401,E402
     namespace,
 )
 from flopscope._config import configure  # noqa: F401,E402
-from flopscope._cost_model import fma_cost  # noqa: F401,E402
 from flopscope._display import budget_live, budget_summary  # noqa: F401,E402
 
 # --- Array type (flopscope-specific) ---
@@ -246,7 +245,6 @@ __all__ = [
     "einsum_accumulation_cost",
     "einsum_cache_info",
     "einsum_clear_caches",
-    "fma_cost",
     "is_symmetric",
     "namespace",
     "numpy",
