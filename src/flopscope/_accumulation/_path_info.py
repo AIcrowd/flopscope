@@ -66,9 +66,7 @@ class FlopscopePathInfo:
             # header agrees with the per-step column.  inner.naive_cost is already
             # the sum of dense_flop_cost (Bug A fix in build_path_info); we must
             # not change it here — only optimized_cost and speedup need updating.
-            new_opt_cost = sum(
-                getattr(s, "flop_cost", 0) for s in steps
-            )
+            new_opt_cost = sum(getattr(s, "flop_cost", 0) for s in steps)
             try:
                 inner.optimized_cost = new_opt_cost
             except (AttributeError, TypeError):
