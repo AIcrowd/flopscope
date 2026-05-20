@@ -38,7 +38,7 @@ class TestAnalyticalCost:
         assert _analytical_cost("linalg.cross") == 6 * 1_000_000
 
     def test_matmul_cost(self):
-        assert _analytical_cost("linalg.matmul") == 512 * 512 * 512
+        assert _analytical_cost("linalg.matmul") == 2 * 512 * 512 * 512 - 512 * 512  # FMA=2
 
     def test_matrix_norm_cost(self):
         assert _analytical_cost("linalg.matrix_norm") == 2 * 512 * 512
@@ -50,7 +50,7 @@ class TestAnalyticalCost:
         assert _analytical_cost("linalg.matrix_rank") == 512**3
 
     def test_multi_dot_cost(self):
-        expected = 128 * 64 * 128 + 128 * 128 * 64  # FMA=1
+        expected = 128 * 64 * 128 + 128 * 128 * 64  # FMA=2 optimal chain (coincidentally equals FMA=1 value)
         assert _analytical_cost("linalg.multi_dot") == expected
 
     def test_norm_cost(self):

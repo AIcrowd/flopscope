@@ -27,7 +27,7 @@ _FORMULA_STRINGS: dict[str, str] = {
     "outer": "M*N",
     "tensordot": "product of free * contracted dims",
     "kron": "numel(output)",
-    "einsum": "product of index dims (FMA=1)",
+    "einsum": "α/M model (FMA=2 textbook)",
 }
 
 _BENCHMARK_SIZE_STRINGS: dict[str, str] = {
@@ -59,19 +59,20 @@ def _analytical_cost(op: str, **kwargs: int) -> int:
         Analytical FLOP count.
     """
     costs: dict[str, int] = {
-        # dot: 2D matrix multiply A(512,512) @ B(512,512), FMA=1 op
+        # dot: 2D matrix multiply A(512,512) @ B(512,512), FMA=2 textbook
         "dot": 512 * 512 * 512,
         # matmul: identical to dot for 2D
         "matmul": 512 * 512 * 512,
         # inner: dot product of two 1M-element vectors.
-        # Runtime charges a.size — matches flopscope's convention (FMA=1).
+        # Runtime charges a.size — matches flopscope's convention (FMA=2, but
+        # a.size is pointwise-shaped so the FMA off-by-one doesn't apply here).
         "inner": 1_000_000,
         # vdot: same as inner for 1D real inputs.
-        # Runtime charges a.size (FMA=1).
+        # Runtime charges a.size (FMA=2, pointwise-shaped — no off-by-one).
         "vdot": 1_000_000,
         # vecdot: batched dot product A(1000,512) . B(1000,512)
         # Output (1000,) with contracted axis 512.
-        # Runtime charges result.size * contracted = 1000 * 512 (FMA=1).
+        # Runtime charges result.size * contracted = 1000 * 512 (FMA=2 textbook).
         "vecdot": 1000 * 512,
         # outer: outer product of two 5000-element vectors
         "outer": 5000 * 5000,
@@ -79,7 +80,7 @@ def _analytical_cost(op: str, **kwargs: int) -> int:
         "tensordot": 64**5,
         # kron: Kronecker product A(64,64) x B(64,64)
         "kron": 64**4,
-        # einsum: 'ij,jk->ik' is matrix multiply (512,512)x(512,512), FMA=1
+        # einsum: 'ij,jk->ik' is matrix multiply (512,512)x(512,512), FMA=2 textbook
         "einsum": 512 * 512 * 512,
     }
     return costs[op]
