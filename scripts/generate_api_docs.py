@@ -391,8 +391,14 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         r"$\text{op\_factor} \cdot \prod_i d_i$",
     ),
     "einsum_path": ("0 (planning only)", "$0$"),
-    "dot": ("2 * m * k * n - m * n (FMA=2)", r"$2 \cdot m \cdot k \cdot n - m \cdot n$"),
-    "matmul": ("2 * m * k * n - m * n (FMA=2)", r"$2 \cdot m \cdot k \cdot n - m \cdot n$"),
+    "dot": (
+        "2 * m * k * n - m * n (FMA=2)",
+        r"$2 \cdot m \cdot k \cdot n - m \cdot n$",
+    ),
+    "matmul": (
+        "2 * m * k * n - m * n (FMA=2)",
+        r"$2 \cdot m \cdot k \cdot n - m \cdot n$",
+    ),
     "inner": ("n", "$n$"),
     "outer": ("m * n", r"$m \cdot n$"),
     "tensordot": ("product of contracted dims * output size", r"$\prod_i d_i$"),

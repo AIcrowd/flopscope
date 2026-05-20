@@ -860,7 +860,9 @@ def create_summary_sheet(sid: str, rows: list[list[str]]) -> None:
     summary.append(
         ["4. Weight = 1.0 means same cost as np.add per analytical FLOP", ""]
     )
-    summary.append(["5. Weight < 1.0 means cheaper than np.add per analytical FLOP", ""])
+    summary.append(
+        ["5. Weight < 1.0 means cheaper than np.add per analytical FLOP", ""]
+    )
     summary.append(["6. Weight > 1.0 means more expensive (e.g., sin=18.39)", ""])
 
     gws(

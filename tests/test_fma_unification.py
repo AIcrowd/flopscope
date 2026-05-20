@@ -24,11 +24,15 @@ def test_configure_fma_cost_raises():
 
 
 def test_fma_cost_constant_removed():
-    """The private FMA_COST constant + its module should be gone."""
+    """The private FMA_COST constant + its module should be gone.
+
+    The pyright/ruff suppressions are necessary because we deliberately
+    import a deleted module to verify the deletion.
+    """
+    import importlib
+
     with pytest.raises(ImportError):
-        from flopscope._cost_model import (
-            fma_cost,  # noqa: F401  # pyright: ignore[reportMissingImports]
-        )
+        importlib.import_module("flopscope._cost_model")
 
 
 def test_hamming_cost_doubled():

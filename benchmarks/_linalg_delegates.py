@@ -79,14 +79,19 @@ def _analytical_cost(op_name: str) -> int:
     costs: dict[str, int] = {
         "cond": 512 * 512 * 512,  # m*n*min(m,n) via SVD
         "cross": 6 * 1_000_000,  # 6*n
-        "matmul": 2 * 512 * 512 * 512 - 512 * 512,  # 2*M*N*K - M*N (FMA=2); = 268,173,312
+        "matmul": 2 * 512 * 512 * 512
+        - 512 * 512,  # 2*M*N*K - M*N (FMA=2); = 268,173,312
         "matrix_norm": 2 * 512 * 512,  # 2*numel (Frobenius)
         "matrix_power": 3 * 64**3,  # 3 matmuls for n=5
         "matrix_rank": 512 * 512 * 512,  # m*n*min(m,n) via SVD
-        "multi_dot": 128 * 64 * 128 + 128 * 128 * 64,  # optimal chain (FMA=2); coincidentally same as FMA=1 value = 2,097,152
+        "multi_dot": 128 * 64 * 128
+        + 128
+        * 128
+        * 64,  # optimal chain (FMA=2); coincidentally same as FMA=1 value = 2,097,152
         "norm": 2 * 10_000_000,  # 2*numel (FMA=2, vector L2)
         "outer": 5000 * 5000,  # M*N
-        "tensordot": 64**5,  # d^5 (FMA=2 textbook; matches flopscope charge = 1,073,741,824)
+        "tensordot": 64
+        ** 5,  # d^5 (FMA=2 textbook; matches flopscope charge = 1,073,741,824)
         "tensorinv": 64**3,  # n^3 after reshape
         "tensorsolve": 64**3,  # n^3 after reshape
         "trace": 10_000,  # min(m,n)

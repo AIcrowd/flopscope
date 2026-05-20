@@ -740,7 +740,9 @@ def generate_markdown(rows: list[dict], data: dict) -> str:
     w()
     w("**Note on BLAS/linalg FMA ops:** Both flopscope's analytical FLOP count and")
     w("`fp_arith_inst_retired` count each FMA as 2 ops (one multiply + one add).")
-    w("Pure-FMA ops like matmul therefore show weights near 1.0 (no convention mismatch).")
+    w(
+        "Pure-FMA ops like matmul therefore show weights near 1.0 (no convention mismatch)."
+    )
     w()
 
     # ------------------------------------------------------------------
