@@ -83,21 +83,29 @@ For inputs with declared symmetry, both terms drop — see the new [Symmetry-awa
 
 ---
 
-## FMA convention is now configurable
+## FMA convention flip (2026-05-20)
 
-The `FMA_COST` constant in `flopscope._cost_model` has been removed. Read the current value with `flops.fma_cost()` (a function, not a constant) and override with `flops.configure(fma_cost=...)`. Only values `1` (default, hardware convention) and `2` (textbook) are valid.
+Flopscope previously counted a fused multiply-add (FMA) as **1 operation** by
+default and exposed a `fma_cost` setting toggling 1 or 2. As of this version:
 
-```python
-# Before:
-from flopscope._cost_model import FMA_COST  # removed
+- **The `fma_cost` setting and `FMA_COST` constant are removed.** Flopscope
+  now uses the FMA=2 textbook convention (multiplies and adds counted
+  separately) everywhere. There is no longer a knob.
+- **Seven ops doubled their analytical FLOP count:** `hamming`, `hanning`,
+  `polyval`, `linalg.multi_dot`, `linalg.norm`, `linalg.vector_norm`,
+  `linalg.matrix_norm`.
+- **For `hamming` and `hanning`, the empirical weight halved (16 → 8)**
+  so runtime predictions are invariant. For the other five, weights stay
+  at 1.0 and runtime predictions shift ~2× higher.
+- **The α/M formula was already FMA=2-textbook by construction.** Any
+  einsum cost (via `einsum_accumulation_cost`, `fnp.einsum`, etc.) is
+  numerically unchanged.
+- **`info.steps[i].dense_flop_cost` semantics changed.** Previously the
+  upstream opt_einsum FMA-fused count; now the α/M-no-symmetry count.
+  For unsymmetric matmul, `dense_flop_cost == flop_cost` now.
 
-# After:
-import flopscope as flops
-flops.fma_cost()            # → 1 by default
-flops.configure(fma_cost=2)  # textbook convention
-```
-
-All flopscope cost surfaces consult `fma_cost()` uniformly — no module diverges.
+If you depended on `flops.fma_cost()` or `flops.configure(fma_cost=...)`,
+remove the call. There is no replacement — flopscope is FMA=2-only.
 
 ---
 

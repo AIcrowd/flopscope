@@ -49,7 +49,8 @@ def einsum_cost(
     Uses the whole-expression direct-event accumulation model:
     total = (k-1) * prod(M) + prod(alpha), where M is the number of
     unique output elements and alpha is the number of unique output+
-    reduction-axis combinations. FMA = 1 operation (see _cost_model.FMA_COST).
+    reduction-axis combinations. FMA = 2 (textbook): the α/M formula counts
+    multiplies and adds separately by construction.
 
     Parameters
     ----------

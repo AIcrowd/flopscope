@@ -831,12 +831,12 @@ REGISTRY: dict[str, dict] = {
     "dot": {
         "category": "counted_custom",
         "module": "numpy",
-        "notes": "Dot product; cost = M*K*N (FMA=1).",
+        "notes": "Dot product; cost = M*K*N (weight-calibrated).",
     },
     "matmul": {
         "category": "counted_custom",
         "module": "numpy",
-        "notes": "Matrix multiplication; cost = M*K*N (FMA=1).",
+        "notes": "Matrix multiplication; cost = M*K*N (weight-calibrated).",
     },
     "einsum": {
         "category": "counted_custom",
@@ -856,7 +856,7 @@ REGISTRY: dict[str, dict] = {
     "inner": {
         "category": "counted_custom",
         "module": "numpy",
-        "notes": "Inner product; cost = N (FMA=1).",
+        "notes": "Inner product; cost = N (weight-calibrated).",
     },
     "outer": {
         "category": "counted_custom",
@@ -871,7 +871,7 @@ REGISTRY: dict[str, dict] = {
     "vdot": {
         "category": "counted_custom",
         "module": "numpy",
-        "notes": "Dot product with conjugation; cost = N (FMA=1).",
+        "notes": "Dot product with conjugation; cost = N (weight-calibrated).",
     },
     "kron": {
         "category": "counted_custom",
@@ -1000,7 +1000,7 @@ REGISTRY: dict[str, dict] = {
     "linalg.matmul": {
         "category": "counted_custom",
         "module": "numpy.linalg",
-        "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (FMA=1).",
+        "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (weight-calibrated).",
     },
     "linalg.matrix_norm": {
         "category": "counted_custom",
@@ -2981,7 +2981,7 @@ REGISTRY: dict[str, dict] = {
     "polyval": {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
-        "notes": "Evaluate polynomial at given points. Cost: $m \\cdot \\text{deg}$ (Horner's method, FMA=1).",
+        "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
     },
     # counted_custom — window functions
     "bartlett": {
