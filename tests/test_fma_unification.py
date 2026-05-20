@@ -42,3 +42,14 @@ def test_hanning_cost_doubled():
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
         _ = fnp.hanning(400)
     assert bc.flops_used == 800, f"hanning(400) charged {bc.flops_used}, expected 800"
+
+
+def test_polyval_cost_doubled():
+    """polyval(c, x) with len(c)=4, x.shape=(10,): m=10, deg=3.
+    Was m*deg = 30, now 2*m*deg = 60.
+    """
+    import numpy as np
+    import flopscope.numpy as fnp
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
+        _ = fnp.polyval(np.array([1.0, 2.0, 3.0, 4.0]), np.zeros(10))
+    assert bc.flops_used == 60, f"polyval charged {bc.flops_used}, expected 60"

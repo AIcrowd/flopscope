@@ -6083,7 +6083,7 @@
       "polyval": {
         "category": "counted_custom",
         "measurement_mode": "custom",
-        "analytical_formula": "n * degree (FMA=1)",
+        "analytical_formula": "2 * n * degree (FMA=2)",
         "analytical_flops": 100000000,
         "benchmark_size": "c: (101,), x: (1000000,)",
         "bench_code": "np.polyval(c, x)",
@@ -6107,7 +6107,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Evaluate polynomial at given points. Cost: $m \\cdot \\text{deg}$ (Horner's method, FMA=1).",
+        "notes": "Evaluate polynomial at given points. Cost: $2m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L78"
       },
       "polyfit": {

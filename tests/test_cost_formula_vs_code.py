@@ -577,13 +577,15 @@ class TestLinalgDelegates:
 
 class TestPolynomial:
     def test_polyval_m_times_deg(self, we):
+        # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
+        # 5 coeffs → deg=4, m=20 → 2*20*4 = 160
         assert (
             _cost_of(
                 we.polyval,
                 numpy.array([1.0, 2.0, 3.0, 4.0, 5.0]),
                 numpy.random.rand(20),
             )
-            == 80
+            == 160
         )
 
     def test_polyadd(self, we):

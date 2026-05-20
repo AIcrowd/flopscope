@@ -19,8 +19,12 @@ from flopscope._validation import require_budget
 
 
 def polyval_cost(deg: int, m: int) -> int:
-    """Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op)."""
-    return max(m * deg, 1)
+    """Cost for polyval: Horner's method under FMA=2 textbook convention.
+
+    Per coefficient: 1 multiply + 1 add (FMA=2). m output cells, deg coefficients.
+    Returns 2 * m * deg FLOPs.
+    """
+    return max(2 * m * deg, 1)
 
 
 def polyadd_cost(n1: int, n2: int) -> int:

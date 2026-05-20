@@ -30,12 +30,13 @@ def test_polyval_result():
 
 
 def test_polyval_cost():
-    # coeffs [1, -2, 3] -> deg=2, 5 points -> cost = 5*2 = 10 (FMA=1)
+    # coeffs [1, -2, 3] -> deg=2, 5 points -> cost = 2*5*2 = 20 (FMA=2)
+    # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
     p = numpy.array([1.0, -2.0, 3.0])
     x = numpy.array([0.0, 1.0, 2.0, 3.0, 4.0])
     with BudgetContext(flop_budget=10**6) as budget:
         polyval(p, x)
-        assert budget.flops_used == 10
+        assert budget.flops_used == 20
 
 
 def test_polyval_no_budget():

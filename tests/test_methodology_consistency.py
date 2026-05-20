@@ -155,7 +155,7 @@ class TestReductionConsistency:
 
 
 class TestPolynomialConsistency:
-    """polyval: cost = m * deg (Horner's method, FMA=1)."""
+    """polyval: cost = 2 * m * deg (Horner's method, FMA=2)."""
 
     def test_polyval(self):
         degree = 10
