@@ -113,6 +113,8 @@ export function computeExactCostModel({ labels, vLabels, groupElements, dimensio
   }
 
   const orbitCount = orbitRows.length;
+  // α/M model is FMA=2-textbook by construction (multiplies AND adds
+  // counted separately). No fma multiplier needed.
   const evaluationCostExact = Math.max(numTerms - 1, 0) * orbitCount;
 
   return {
@@ -173,6 +175,8 @@ export function aggregateComponentCosts(components, numTerms) {
     });
   }
 
+  // α/M model is FMA=2-textbook by construction (multiplies AND adds
+  // counted separately). No fma multiplier needed.
   const mu = Math.max(numTerms - 1, 0) * mTotal;
   const total = mu + alpha - outputOrbitProduct;
   return { mu, alpha, mTotal, outputOrbitProduct, total, perComponent };
