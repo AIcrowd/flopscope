@@ -193,5 +193,3 @@ def test_public_api_cache_info():
     assert hasattr(info, "misses")
     assert hasattr(info, "maxsize")
     assert hasattr(info, "currsize")
-
-

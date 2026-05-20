@@ -11,7 +11,6 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-
 from ._burnside import size_aware_burnside
 from ._components import Component
 from ._ladder import (

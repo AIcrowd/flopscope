@@ -520,16 +520,22 @@ class TestLinalgProperties:
         assert _cost_of(we.linalg.trace, numpy.random.rand(8, 8)) == 8
 
     def test_vector_norm_numel(self, we):
-        assert _cost_of(we.linalg.vector_norm, numpy.random.rand(20)) == 40  # FMA=2: 2*numel
+        assert (
+            _cost_of(we.linalg.vector_norm, numpy.random.rand(20)) == 40
+        )  # FMA=2: 2*numel
 
     def test_matrix_norm_numel(self, we):
-        assert _cost_of(we.linalg.matrix_norm, numpy.random.rand(8, 8)) == 128  # FMA=2: 2*numel
+        assert (
+            _cost_of(we.linalg.matrix_norm, numpy.random.rand(8, 8)) == 128
+        )  # FMA=2: 2*numel
 
     def test_norm_vector_numel(self, we):
         assert _cost_of(we.linalg.norm, numpy.random.rand(20)) == 40  # FMA=2: 2*numel
 
     def test_norm_matrix_numel(self, we):
-        assert _cost_of(we.linalg.norm, numpy.random.rand(8, 8)) == 128  # FMA=2: 2*numel
+        assert (
+            _cost_of(we.linalg.norm, numpy.random.rand(8, 8)) == 128
+        )  # FMA=2: 2*numel
 
 
 class TestLinalgDelegates:

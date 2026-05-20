@@ -40,7 +40,6 @@ def test_build_path_info_path_matches_upstream():
     assert list(flop_info.path) == list(upstream_path)
 
 
-
 def test_build_path_info_step_has_subscript():
     A = np.zeros((3, 4))
     B = np.zeros((4, 5))

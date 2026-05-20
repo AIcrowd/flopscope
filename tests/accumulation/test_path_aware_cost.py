@@ -135,7 +135,6 @@ def test_path_walker_per_step_cost_matches_accumulation_per_step():
         )
 
 
-
 def test_symmetric_triangle_uses_inherited_symmetry():
     """ij,jk,ki->ijk with all three operands sharing an S_2 symmetric matrix:
     the path walker should INHERIT the full-expression group's restriction

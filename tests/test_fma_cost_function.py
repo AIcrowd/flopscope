@@ -3,7 +3,7 @@
 import pytest
 
 from flopscope._config import get_setting, set_setting
-from flopscope._cost_model import fma_cost
+from flopscope._cost_model import fma_cost  # pyright: ignore[reportMissingImports]
 
 
 def test_fma_cost_function_exists():

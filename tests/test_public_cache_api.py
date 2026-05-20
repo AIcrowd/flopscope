@@ -8,7 +8,6 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 
-
 def test_einsum_cache_info_keys():
     info = flops.einsum_cache_info()
     assert set(info.keys()) == {"path", "accumulation"}
