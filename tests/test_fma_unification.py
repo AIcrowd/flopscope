@@ -53,3 +53,18 @@ def test_polyval_cost_doubled():
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
         _ = fnp.polyval(np.array([1.0, 2.0, 3.0, 4.0]), np.zeros(10))
     assert bc.flops_used == 60, f"polyval charged {bc.flops_used}, expected 60"
+
+
+def test_multi_dot_cost_doubled():
+    """multi_dot([A,B,C]) for (M,K)x(K,N)x(N,P) with M=4,K=3,N=2,P=5:
+    optimal order pairs (A@B) first → 4*3*2 = 24, then (AB)@C → 4*2*5 = 40.
+    Under FMA=1: 24 + 40 = 64. Under FMA=2: 2*(64) = 128.
+    """
+    import numpy as np
+    import flopscope.numpy as fnp
+    A = np.zeros((4, 3))
+    B = np.zeros((3, 2))
+    C = np.zeros((2, 5))
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
+        _ = fnp.linalg.multi_dot([A, B, C])
+    assert bc.flops_used == 128, f"multi_dot charged {bc.flops_used}, expected 128"

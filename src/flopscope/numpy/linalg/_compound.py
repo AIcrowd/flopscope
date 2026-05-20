@@ -40,13 +40,18 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
     -----
     Uses dynamic programming for optimal parenthesization.
     Source: Cormen et al., *Introduction to Algorithms* (CLRS), §15.2.
+
+    Each binary matmul step (m x k) @ (k x n) costs ``2 * m * k * n`` FLOPs
+    under the FMA=2 textbook convention (m*k*n multiplies + m*k*n adds,
+    ignoring the −m*n off-by-one for accumulation at this level of
+    approximation).  FMA=2 unification 2026-05-20.
     """
     n = len(shapes)
     if n < 2:
         return 0
     dims = [s[0] for s in shapes] + [shapes[-1][-1]]
     if n == 2:
-        return dims[0] * dims[1] * dims[2]
+        return 2 * dims[0] * dims[1] * dims[2]
     cost_table = [[0] * n for _ in range(n)]
     for chain_len in range(2, n + 1):
         for i in range(n - chain_len + 1):
@@ -56,7 +61,7 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
                 cost = (
                     cost_table[i][k]
                     + cost_table[k + 1][j]
-                    + dims[i] * dims[k + 1] * dims[j + 1]
+                    + 2 * dims[i] * dims[k + 1] * dims[j + 1]
                 )
                 if cost < cost_table[i][j]:
                     cost_table[i][j] = cost

@@ -2704,7 +2704,7 @@
       "linalg.multi_dot": {
         "category": "counted_custom",
         "measurement_mode": "blas",
-        "analytical_formula": "sum of chain MNK costs",
+        "analytical_formula": "2 * sum of chain MNK costs (FMA=2)",
         "analytical_flops": 2097152,
         "benchmark_size": "A: (128,64), B: (64,128), C: (128,64)",
         "bench_code": "np.linalg.multi_dot([A, B, C])",
@@ -2728,7 +2728,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Chain matmul. Cost: sum of optimal chain matmul costs (CLRS \u00a715.2).",
+        "notes": "Chain matmul. Cost: 2 * sum of optimal chain matmul costs (CLRS \u00a715.2) (FMA=2).",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_compound.py#L68"
       },
       "linalg.norm": {
