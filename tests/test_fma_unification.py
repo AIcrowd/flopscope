@@ -68,3 +68,30 @@ def test_multi_dot_cost_doubled():
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
         _ = fnp.linalg.multi_dot([A, B, C])
     assert bc.flops_used == 128, f"multi_dot charged {bc.flops_used}, expected 128"
+
+
+def test_norm_cost_doubled():
+    """linalg.norm(x) for x.shape=(8,): numel=8. Was 8, now 2*8 = 16."""
+    import numpy as np
+    import flopscope.numpy as fnp
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
+        _ = fnp.linalg.norm(np.zeros(8))
+    assert bc.flops_used == 16, f"linalg.norm charged {bc.flops_used}, expected 16"
+
+
+def test_vector_norm_cost_doubled():
+    """linalg.vector_norm(x) for x.shape=(8,): was 8, now 16."""
+    import numpy as np
+    import flopscope.numpy as fnp
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
+        _ = fnp.linalg.vector_norm(np.zeros(8))
+    assert bc.flops_used == 16, f"linalg.vector_norm charged {bc.flops_used}, expected 16"
+
+
+def test_matrix_norm_cost_doubled():
+    """linalg.matrix_norm(x) for x.shape=(4,4): numel=16. Was 16, now 2*16 = 32."""
+    import numpy as np
+    import flopscope.numpy as fnp
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
+        _ = fnp.linalg.matrix_norm(np.zeros((4, 4)))
+    assert bc.flops_used == 32, f"linalg.matrix_norm charged {bc.flops_used}, expected 32"

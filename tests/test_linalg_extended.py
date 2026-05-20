@@ -59,29 +59,29 @@ def test_slogdet_cost_symmetric():
 
 
 def test_norm_cost_1d_ord_none():
-    assert norm_cost((10,), ord=None) == 10
+    assert norm_cost((10,), ord=None) == 20  # FMA=2: 2*numel
 
 
 def test_norm_cost_1d_ord_inf():
-    assert norm_cost((10,), ord=numpy.inf) == 10
+    assert norm_cost((10,), ord=numpy.inf) == 20  # FMA=2: 2*numel
 
 
 def test_norm_cost_1d_ord_minus_inf():
-    assert norm_cost((10,), ord=-numpy.inf) == 10
+    assert norm_cost((10,), ord=-numpy.inf) == 20  # FMA=2: 2*numel
 
 
 def test_norm_cost_1d_ord_0():
-    assert norm_cost((10,), ord=0) == 10
+    assert norm_cost((10,), ord=0) == 20  # FMA=2: 2*numel
 
 
 def test_norm_cost_1d_p_norm():
-    # FMA=1: all vector norms cost numel
-    assert norm_cost((10,), ord=3) == 10
+    # FMA=2: all vector norms cost 2*numel
+    assert norm_cost((10,), ord=3) == 20  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_fro():
-    # FMA=1: Frobenius norm costs numel
-    assert norm_cost((4, 5), ord="fro") == 20
+    # FMA=2: Frobenius norm costs 2*numel
+    assert norm_cost((4, 5), ord="fro") == 40  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_nuc():
@@ -96,40 +96,40 @@ def test_norm_cost_2d_minus2():
 
 
 def test_norm_cost_2d_1():
-    assert norm_cost((4, 5), ord=1) == 20
+    assert norm_cost((4, 5), ord=1) == 40  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_minus1():
-    assert norm_cost((4, 5), ord=-1) == 20
+    assert norm_cost((4, 5), ord=-1) == 40  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_inf():
-    assert norm_cost((4, 5), ord=numpy.inf) == 20
+    assert norm_cost((4, 5), ord=numpy.inf) == 40  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_minus_inf():
-    assert norm_cost((4, 5), ord=-numpy.inf) == 20
+    assert norm_cost((4, 5), ord=-numpy.inf) == 40  # FMA=2: 2*numel
 
 
 def test_norm_cost_2d_fallback():
-    # Unrecognised ord for 2-D triggers return numel
-    assert norm_cost((4, 5), ord="xyz") == 20
+    # Unrecognised ord for 2-D triggers fallback: 2*numel (FMA=2)
+    assert norm_cost((4, 5), ord="xyz") == 40  # FMA=2: 2*numel
 
 
 def test_vector_norm_cost_p_norm():
-    # FMA=1: all norms cost numel (one pass over elements)
-    assert vector_norm_cost((10,), ord=3) == 10
+    # FMA=2: all norms cost 2*numel (one multiply + accumulate per element)
+    assert vector_norm_cost((10,), ord=3) == 20  # FMA=2: 2*numel
 
 
 def test_vector_norm_cost_special_ords():
     for o in (None, 2, -2, 1, -1, numpy.inf, -numpy.inf, 0):
-        assert vector_norm_cost((10,), ord=o) == 10
+        assert vector_norm_cost((10,), ord=o) == 20  # FMA=2: 2*numel
 
 
 def test_matrix_norm_cost_fro():
-    # FMA=1: Frobenius norm costs numel (one pass: square + accumulate)
+    # FMA=2: Frobenius norm costs 2*numel (one multiply + accumulate per element)
     m, n = 3, 4
-    assert matrix_norm_cost((m, n), ord="fro") == m * n
+    assert matrix_norm_cost((m, n), ord="fro") == 2 * m * n  # FMA=2
 
 
 def test_matrix_norm_cost_nuc():
@@ -150,26 +150,26 @@ def test_matrix_norm_cost_minus2():
 
 def test_matrix_norm_cost_1():
     m, n = 3, 4
-    assert matrix_norm_cost((m, n), ord=1) == m * n
+    assert matrix_norm_cost((m, n), ord=1) == 2 * m * n  # FMA=2
 
 
 def test_matrix_norm_cost_minus1():
     m, n = 3, 4
-    assert matrix_norm_cost((m, n), ord=-1) == m * n
+    assert matrix_norm_cost((m, n), ord=-1) == 2 * m * n  # FMA=2
 
 
 def test_matrix_norm_cost_inf():
     m, n = 3, 4
-    assert matrix_norm_cost((m, n), ord=numpy.inf) == m * n
+    assert matrix_norm_cost((m, n), ord=numpy.inf) == 2 * m * n  # FMA=2
 
 
 def test_matrix_norm_cost_minus_inf():
     m, n = 3, 4
-    assert matrix_norm_cost((m, n), ord=-numpy.inf) == m * n
+    assert matrix_norm_cost((m, n), ord=-numpy.inf) == 2 * m * n  # FMA=2
 
 
 def test_matrix_norm_cost_fallback():
-    assert matrix_norm_cost((3, 4), ord="xyz") == 12
+    assert matrix_norm_cost((3, 4), ord="xyz") == 2 * 12  # FMA=2: 2*numel
 
 
 # ---------------------------------------------------------------------------

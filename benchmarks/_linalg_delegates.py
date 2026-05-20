@@ -84,14 +84,14 @@ def _analytical_cost(op_name: str) -> int:
         "matrix_power": 3 * 64**3,  # 3 matmuls for n=5
         "matrix_rank": 512 * 512 * 512,  # m*n*min(m,n) via SVD
         "multi_dot": 128 * 64 * 128 + 128 * 128 * 64,  # FMA=1
-        "norm": 10_000_000,  # numel (L2)
+        "norm": 2 * 10_000_000,  # 2*numel (FMA=2, vector L2)
         "outer": 5000 * 5000,  # M*N
         "tensordot": 64**5,  # d^5 (FMA=1)
         "tensorinv": 64**3,  # n^3 after reshape
         "tensorsolve": 64**3,  # n^3 after reshape
         "trace": 10_000,  # min(m,n)
         "vecdot": 1000 * 512,  # batch*K
-        "vector_norm": 10_000_000,  # numel (L2)
+        "vector_norm": 2 * 10_000_000,  # 2*numel (FMA=2)
     }
     return costs[short]
 

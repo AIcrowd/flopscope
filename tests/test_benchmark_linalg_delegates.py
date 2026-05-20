@@ -54,7 +54,7 @@ class TestAnalyticalCost:
         assert _analytical_cost("linalg.multi_dot") == expected
 
     def test_norm_cost(self):
-        assert _analytical_cost("linalg.norm") == 10_000_000
+        assert _analytical_cost("linalg.norm") == 2 * 10_000_000  # FMA=2: 2*numel
 
     def test_outer_cost(self):
         assert _analytical_cost("linalg.outer") == 5000 * 5000
@@ -75,7 +75,7 @@ class TestAnalyticalCost:
         assert _analytical_cost("linalg.vecdot") == 1000 * 512
 
     def test_vector_norm_cost(self):
-        assert _analytical_cost("linalg.vector_norm") == 10_000_000
+        assert _analytical_cost("linalg.vector_norm") == 2 * 10_000_000  # FMA=2: 2*numel
 
     def test_unknown_op_raises(self):
         with pytest.raises((ValueError, KeyError)):

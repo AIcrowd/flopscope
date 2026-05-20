@@ -945,8 +945,8 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([1.0, 2.0, 3.0])
         with BudgetContext(flop_budget=10**9) as budget:
             norm(x, ord=3)
-        # FMA=1: all vector norms cost numel
-        assert budget.flops_used == 3
+        # FMA=2: all vector norms cost 2*numel
+        assert budget.flops_used == 6  # FMA=2: 2*numel
 
     def test_norm_matrix_2(self):
         from flopscope.numpy.linalg._properties import norm
@@ -971,7 +971,7 @@ class TestLinalgPropertiesExtended:
         a = numpy.random.rand(3, 4)
         with BudgetContext(flop_budget=10**9) as budget:
             norm(a, ord=1)
-        assert budget.flops_used == 12  # numel
+        assert budget.flops_used == 24  # FMA=2: 2*numel
 
     def test_norm_with_axis_tuple(self):
         from flopscope.numpy.linalg._properties import norm
@@ -1012,8 +1012,8 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([1.0, 2.0, 3.0])
         with BudgetContext(flop_budget=10**9) as budget:
             vector_norm(x, ord=3)
-        # FMA=1: all norms cost numel
-        assert budget.flops_used == 3
+        # FMA=2: all norms cost 2*numel
+        assert budget.flops_used == 6  # FMA=2: 2*numel
 
     def test_vector_norm_default(self):
         from flopscope.numpy.linalg._properties import vector_norm
@@ -1021,7 +1021,7 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([3.0, 4.0])
         with BudgetContext(flop_budget=10**9) as budget:
             vector_norm(x)
-        assert budget.flops_used == 2
+        assert budget.flops_used == 4  # FMA=2: 2*numel
 
     def test_vector_norm_with_axis(self):
         from flopscope.numpy.linalg._properties import vector_norm
@@ -1037,8 +1037,8 @@ class TestLinalgPropertiesExtended:
         a = numpy.random.rand(3, 4)
         with BudgetContext(flop_budget=10**9) as budget:
             matrix_norm(a)
-        # FMA=1: Frobenius norm costs numel
-        assert budget.flops_used == 3 * 4
+        # FMA=2: Frobenius norm costs 2*numel
+        assert budget.flops_used == 2 * 3 * 4  # FMA=2: 2*numel
 
     def test_matrix_norm_2(self):
         from flopscope.numpy.linalg._properties import matrix_norm
