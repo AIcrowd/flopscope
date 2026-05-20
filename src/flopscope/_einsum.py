@@ -40,12 +40,8 @@ def _identity_pattern(operands):
 def _make_path_cache(maxsize):
     """Create a new lru_cache-wrapped path computation function.
 
-    The cache key includes ``fma_cost`` because per-step ``flop_count`` values
-    on the returned ``PathInfo`` are computed under the active FMA convention
-    at build time. Without this, toggling ``flopscope.configure(fma_cost=...)``
-    would not invalidate cached PathInfos and would return stale per-step
-    counts. The arg itself is unused inside the body — the path builder reads
-    the setting transparently via ``_helpers.flop_count``.
+    The cache key includes subscripts, shapes, optimizer, per_op_symmetries,
+    and identity_pattern. Re-runs with the same inputs return the cached path.
 
     The key also includes ``per_op_symmetries`` (a tuple of per-operand
     SymmetryGroup-or-None, canonicalized as a hashable fingerprint) and
@@ -60,7 +56,6 @@ def _make_path_cache(maxsize):
         subscripts,
         shapes,
         optimize,
-        fma_cost,  # noqa: ARG001
         per_op_symmetries,
         identity_pattern,
     ):
@@ -185,8 +180,6 @@ def _get_path_info(
     per_op_symmetries=None,
     identity_pattern=None,
 ):
-    from flopscope._cost_model import fma_cost
-
     canonical_subscripts, input_parts, output_subscript = _parse_einsum_parts(
         subscripts,
         operands,
@@ -214,7 +207,6 @@ def _get_path_info(
         canonical_subscripts,
         shapes,
         _normalize_optimize(effective_optimize),
-        fma_cost(),
         syms_key,
         identity_pattern,
     )
@@ -299,14 +291,12 @@ def einsum(
     optimal pairwise decomposition. The charged FLOP cost comes from the
     path-independent symmetry-aware accumulation total
     (``path_info.accumulation.total``); per-step ``flop_count`` values on
-    each ``StepInfo`` use flopscope's FMA convention via ``fma_cost()``
-    (default 1 op per FMA, configurable to 2 via
-    ``flopscope.configure(fma_cost=2)``).
+    each ``StepInfo`` use flopscope's FMA=2 textbook convention throughout.
 
     Contraction paths are cached in a module-level LRU cache keyed on
-    (subscripts, shapes, optimizer, fma_cost). Repeated calls with the same
-    inputs skip path recomputation entirely. See ``clear_einsum_cache()``
-    and ``einsum_cache_info()``.
+    (subscripts, shapes, optimizer, per_op_symmetries, identity_pattern).
+    Repeated calls with the same inputs skip path recomputation entirely.
+    See ``clear_einsum_cache()`` and ``einsum_cache_info()``.
 
     Parameters
     ----------

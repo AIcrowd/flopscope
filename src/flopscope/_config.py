@@ -6,7 +6,6 @@ _SETTINGS: dict[str, object] = {
     "check_nan_inf": False,
     "dimino_budget": 500_000,
     "einsum_path_cache_size": 4096,
-    "fma_cost": 1,
     "partition_budget": 100_000,
     "symmetry_warnings": True,
 }
@@ -16,16 +15,8 @@ _SETTINGS: dict[str, object] = {
 # if the value is invalid.
 _VALIDATORS: dict[str, object] = {
     "dimino_budget": lambda v: _require_non_negative_int("dimino_budget", v),
-    "fma_cost": lambda v: _require_fma_cost(v),
     "partition_budget": lambda v: _require_non_negative_int("partition_budget", v),
 }
-
-
-def _require_fma_cost(value: object) -> None:
-    if not isinstance(value, int) or isinstance(value, bool) or value not in (1, 2):
-        raise ValueError(
-            f"Setting 'fma_cost' must be exactly 1 or 2 (int); got {value!r}"
-        )
 
 
 def _require_non_negative_int(name: str, value: object) -> None:
