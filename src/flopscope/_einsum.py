@@ -211,27 +211,38 @@ def _get_path_info(
         identity_pattern,
     )
 
-    # Bug B fix: if any operand has declared symmetry, rebuild path_info with
-    # per_op_symmetries so that per-step input_groups / output_group /
-    # inner_group are populated by the SubgraphSymmetryOracle.  The _path_cache
-    # result is a shared cached object and must not be mutated; build_path_info
-    # returns a fresh PathInfo each time.  We skip the rebuild when all
-    # per_op_symmetries are None (the common case) to keep the fast path.
-    if any(s is not None for s in per_op_symmetries):
+    # Bug B fix: if any operand has declared symmetry OR multiple operand
+    # positions alias to the same array (identity_pattern), rebuild path_info
+    # through the SubgraphSymmetryOracle so that per-step input_groups /
+    # output_group / inner_group reflect the true residual symmetry of each
+    # intermediate.  Without this rebuild, Source-A (declared groups),
+    # Source-B (identical-operand swap), and Source-C (coordinated relabel)
+    # π-generators never reach the renderer.
+    #
+    # _path_cache returns a shared cached object that must not be mutated;
+    # build_path_info returns a fresh PathInfo each time.  The rebuild is
+    # skipped when there's no symmetry signal at all (the common case) to
+    # keep the fast path.
+    _has_identity_alias = bool(identity_pattern) and any(
+        len(group) > 1 for group in identity_pattern
+    )
+    if any(s is not None for s in per_op_symmetries) or _has_identity_alias:
         import numpy as _np_tmp
-
-        # We need the upstream opt_einsum PathInfo to reconstruct contraction_list.
-        # Retrieve it from the cached PathInfo's contraction_list (it's preserved).
-        # The cached path_info IS the flopscope PathInfo returned by build_path_info;
-        # its contraction_list and path were stored as fields.
-        # We can re-run build_path_info using the cached path + contraction_list,
-        # but we need to access the upstream-form contraction_list.
-        # Simplest: call the upstream opt_einsum contract_path again (cheap, shapes-only).
         import opt_einsum as _oe
 
         from flopscope._opt_einsum._contract import build_path_info as _bpi
 
-        _dummy_ops = [_np_tmp.empty(sh) for sh in shapes]
+        # Build dummy operands with the correct shapes, then alias positions
+        # listed in the same identity-group to share object identity — this
+        # is the signal the oracle uses to fire Source-B (identical-operand
+        # swap) and Source-C (coordinated axis relabel) generators.
+        _dummy_ops: list = [_np_tmp.empty(sh) for sh in shapes]
+        if identity_pattern is not None:
+            for group in identity_pattern:
+                canonical = _dummy_ops[group[0]]
+                for pos in group[1:]:
+                    _dummy_ops[pos] = canonical
+
         _norm_optimize = _normalize_optimize(effective_optimize)
         if isinstance(_norm_optimize, tuple):
             _norm_optimize = list(_norm_optimize)
@@ -240,11 +251,20 @@ def _get_path_info(
             *_dummy_ops,
             optimize=_norm_optimize,  # type: ignore[arg-type]
         )
+        # Carry the optimizer label through the rebuild so the renderer's
+        # "Optimizer:" pill stays populated.  effective_optimize is whatever
+        # was actually used for path search; coerce to a string label.
+        if isinstance(effective_optimize, str):
+            _optimizer_label = effective_optimize
+        else:
+            _optimizer_label = getattr(_upstream_info, "_path_type", "") or ""
         path_info = _bpi(
             _upstream_path,
             _upstream_info,
             size_dict=_upstream_info.size_dict,
+            optimizer_used=_optimizer_label,
             per_op_symmetries=per_op_symmetries,
+            identity_pattern=identity_pattern,
         )
 
     return canonical_subscripts, input_parts, output_subscript, shapes, path_info

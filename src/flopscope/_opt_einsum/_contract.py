@@ -962,6 +962,7 @@ def build_path_info(
     size_dict,
     optimizer_used: str = "",
     per_op_symmetries=None,
+    identity_pattern=None,
 ):
     """Adapt upstream opt_einsum's PathInfo to flopscope's PathInfo.
 
@@ -1039,14 +1040,23 @@ def build_path_info(
                         SubgraphSymmetryOracle,
                     )
 
-                    # Build dummy operands with the right shapes. Operands that
-                    # share object-identity in the original call are not
-                    # tracked here; identity_pattern is handled by the oracle
-                    # via per_op_groups declared symmetry.
-                    _dummy_ops = [
+                    # Build dummy operands with the right shapes, then alias
+                    # positions in the same identity-group to share object
+                    # identity.  The oracle's Source-B (identical-operand
+                    # swap) and Source-C (coordinated relabel) π-generators
+                    # rely on object identity (``_dummy_ops[i] is _dummy_ops[j]``);
+                    # without aliasing, residual symmetries that come from
+                    # identical operands (e.g. A @ A → S₂ on output) would
+                    # silently be omitted from the per-step annotation.
+                    _dummy_ops: list = [
                         _np.empty(tuple(size_dict[c] for c in part))
                         for part in _orig_parts_list
                     ]
+                    if identity_pattern is not None:
+                        for _group in identity_pattern:
+                            _canonical = _dummy_ops[_group[0]]
+                            for _pos in _group[1:]:
+                                _dummy_ops[_pos] = _canonical
 
                     def _sym_to_group_list(sym: Any, subscript: str) -> list | None:
                         """Convert per_op_symmetry entry → oracle per_op_groups list.
