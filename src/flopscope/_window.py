@@ -86,13 +86,13 @@ def hamming_cost(n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: n (FMA = 1 op).
+        Estimated FLOP count: 2n (FMA=2 textbook: 1 multiply + 1 add per sample).
 
     Notes
     -----
-    One FMA (cosine + scale) per sample, counted as 1 op under FMA=1.
+    Two ops per sample under FMA=2 convention (1 multiply + 1 add).
     """
-    return max(n, 1)
+    return max(2 * n, 1)
 
 
 @_counted_wrapper
@@ -104,7 +104,7 @@ def hamming(M: int) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(hamming, _np.hamming, "counted_custom", "n FLOPs (FMA=1)")
+attach_docstring(hamming, _np.hamming, "counted_custom", "2n FLOPs (FMA=2)")
 
 
 def hanning_cost(n: int) -> int:
@@ -118,13 +118,13 @@ def hanning_cost(n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: n (FMA = 1 op).
+        Estimated FLOP count: 2n (FMA=2 textbook: 1 multiply + 1 add per sample).
 
     Notes
     -----
-    One FMA (cosine + scale) per sample, counted as 1 op under FMA=1.
+    Two ops per sample under FMA=2 convention (1 multiply + 1 add).
     """
-    return max(n, 1)
+    return max(2 * n, 1)
 
 
 @_counted_wrapper
@@ -136,7 +136,7 @@ def hanning(M: int) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(hanning, _np.hanning, "counted_custom", "n FLOPs (FMA=1)")
+attach_docstring(hanning, _np.hanning, "counted_custom", "2n FLOPs (FMA=2)")
 
 
 def kaiser_cost(n: int) -> int:

@@ -694,10 +694,12 @@ class TestWindows:
         assert _cost_of(we.bartlett, 20) == 20
 
     def test_hamming_n(self, we):
-        assert _cost_of(we.hamming, 20) == 20
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        assert _cost_of(we.hamming, 20) == 40
 
     def test_hanning_n(self, we):
-        assert _cost_of(we.hanning, 20) == 20
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        assert _cost_of(we.hanning, 20) == 40
 
     def test_blackman_3n(self, we):
         assert _cost_of(we.blackman, 20) == 60
