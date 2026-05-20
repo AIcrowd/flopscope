@@ -1,6 +1,6 @@
 """Contains helper functions for opt_einsum testing scripts."""
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from typing import Any, overload
 
 # Inline type aliases (formerly from ._typing, deleted in Task 7+8).
@@ -111,24 +111,22 @@ def flop_count(
     inner: bool,
     num_terms: int,
     size_dictionary: dict[str, int],
+    *,
+    input_subscripts: Sequence[str] | None = None,
+    output_subscript: str | None = None,
+    input_shapes: Sequence[Sequence[int]] | None = None,
 ) -> int:
-    """Computes the number of FLOPS in the contraction.
+    """Per-step dense FLOP count (no declared symmetry).
 
-    Parameters
-    ----------
-    idx_contraction : iterable
-        The indices involved in the contraction
-    inner : bool
-        Does this contraction require an inner product?
-    num_terms : int
-        The number of terms in a contraction
-    size_dictionary : dict
-        The size of each of the indices in idx_contraction
+    Routes through compute_accumulation_cost so the result is consistent
+    with what ``einsum_accumulation_cost`` would return for an einsum with
+    no declared input symmetry. The α/M formula produces textbook FMA=2
+    scalar-op counts (multiplies and adds counted separately, with the
+    off-by-one accumulator-init credit applied).
 
-    Returns:
-    -------
-    flop_count : int
-        The total number of FLOPS required for the contraction.
+    Legacy fallback (when subscripts/shapes are not provided): the old
+    overall_size * op_factor formula with FMA=1 (inner does not add an extra
+    op).
 
     Examples:
     --------
@@ -139,10 +137,24 @@ def flop_count(
     30
 
     """
-    overall_size = compute_size_by_dict(idx_contraction, size_dictionary)
-    # FMA=1 convention (default): inner products do not add an extra op.
-    op_factor = max(1, num_terms - 1)
-    return overall_size * op_factor
+    if input_subscripts is None or input_shapes is None:
+        overall_size = compute_size_by_dict(idx_contraction, size_dictionary)
+        op_factor = max(1, num_terms - 1)
+        return overall_size * op_factor
+
+    from flopscope._accumulation._cost import compute_accumulation_cost
+
+    canonical = ",".join(input_subscripts) + "->" + (output_subscript or "")
+    per_op_syms = (None,) * len(input_subscripts)
+    cost = compute_accumulation_cost(
+        canonical_subscripts=canonical,
+        input_parts=tuple(input_subscripts),
+        output_subscript=output_subscript or "",
+        shapes=tuple(tuple(s) for s in input_shapes),
+        per_op_symmetries=per_op_syms,
+        identity_pattern=None,
+    )
+    return max(cost.total, 1)
 
 
 def has_array_interface(array: ArrayType) -> ArrayType:

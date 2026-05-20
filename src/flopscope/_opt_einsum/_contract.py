@@ -1051,7 +1051,13 @@ def build_path_info(
 
         # Dense cost: what this step would cost without any symmetry reduction.
         step_dense_flop_cost = helpers.flop_count(
-            idx_contraction, inner, num_terms, size_dict
+            idx_contraction,
+            inner,
+            num_terms,
+            size_dict,
+            input_subscripts=lhs_parts,
+            output_subscript=rhs,
+            input_shapes=input_shapes_for_step,
         )
         # Fraction of dense cost saved by symmetry (0.0 when no symmetry or
         # when the accumulation model costs more than the dense baseline due to
