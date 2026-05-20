@@ -66,8 +66,6 @@ def get_accumulation_cost_cached(
     partition_budget: int | None,
 ) -> AccumulationCost:
     """Cached entry point. Routed through by both public and einsum-internal callers."""
-    from flopscope._cost_model import fma_cost as _fma_cost
-
     return _accumulation_cache(
         canonical_subscripts,
         tuple(input_parts),
@@ -76,7 +74,7 @@ def get_accumulation_cost_cached(
         sym_fingerprint,
         identity_pattern,
         partition_budget,
-        _fma_cost(),
+        2,  # FMA=2 fixed convention; hard-coded so cache key is stable
     )
 
 

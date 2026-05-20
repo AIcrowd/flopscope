@@ -3,8 +3,6 @@
 from collections.abc import Collection, Iterable
 from typing import Any, overload
 
-from flopscope._cost_model import fma_cost
-
 # Inline type aliases (formerly from ._typing, deleted in Task 7+8).
 ArrayIndexType = frozenset  # frozenset[str]
 ArrayType = object  # Any
@@ -142,12 +140,8 @@ def flop_count(
 
     """
     overall_size = compute_size_by_dict(idx_contraction, size_dictionary)
-    fma = fma_cost()
-    if fma not in (1, 2):
-        raise ValueError(f"fma_cost must be 1 or 2, got {fma}")
+    # FMA=1 convention (default): inner products do not add an extra op.
     op_factor = max(1, num_terms - 1)
-    if inner and fma == 2:
-        op_factor += 1
     return overall_size * op_factor
 
 

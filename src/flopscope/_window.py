@@ -6,7 +6,6 @@ from __future__ import annotations
 import numpy as _np
 
 from flopscope._budget import _call_numpy, _counted_wrapper
-from flopscope._cost_model import fma_cost
 from flopscope._docstrings import attach_docstring
 from flopscope._ndarray import FlopscopeArray
 from flopscope._validation import require_budget
@@ -93,7 +92,7 @@ def hamming_cost(n: int) -> int:
     -----
     One FMA (cosine + scale) per sample, counted as 1 op under FMA=1.
     """
-    return max(fma_cost() * n, 1)
+    return max(n, 1)
 
 
 @_counted_wrapper
@@ -125,7 +124,7 @@ def hanning_cost(n: int) -> int:
     -----
     One FMA (cosine + scale) per sample, counted as 1 op under FMA=1.
     """
-    return max(fma_cost() * n, 1)
+    return max(n, 1)
 
 
 @_counted_wrapper

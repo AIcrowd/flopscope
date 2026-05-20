@@ -9,7 +9,6 @@ import numpy as _np
 from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
-from flopscope._cost_model import fma_cost
 from flopscope._docstrings import attach_docstring
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import require_budget
@@ -47,7 +46,7 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
         return 0
     dims = [s[0] for s in shapes] + [shapes[-1][-1]]
     if n == 2:
-        return fma_cost() * dims[0] * dims[1] * dims[2]
+        return dims[0] * dims[1] * dims[2]
     cost_table = [[0] * n for _ in range(n)]
     for chain_len in range(2, n + 1):
         for i in range(n - chain_len + 1):
@@ -57,7 +56,7 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
                 cost = (
                     cost_table[i][k]
                     + cost_table[k + 1][j]
-                    + fma_cost() * dims[i] * dims[k + 1] * dims[j + 1]
+                    + dims[i] * dims[k + 1] * dims[j + 1]
                 )
                 if cost < cost_table[i][j]:
                     cost_table[i][j] = cost

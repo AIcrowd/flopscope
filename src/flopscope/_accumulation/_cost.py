@@ -11,7 +11,6 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from flopscope._cost_model import fma_cost as _fma_cost
 
 from ._burnside import size_aware_burnside
 from ._components import Component
@@ -207,9 +206,7 @@ def aggregate_einsum(
             assert c.alpha is not None  # for type narrowing
             alpha_product *= c.alpha
             output_orbit_product *= c.num_output_orbits
-        # fma_cost multiplies the multiplication term only; accumulation
-        # adds (the α − num_output_orbits term) are 1 op regardless.
-        mu = _fma_cost() * (num_terms - 1) * m_total
+        mu = (num_terms - 1) * m_total
         total = mu + alpha_product - output_orbit_product
         return AccumulationCost(
             total=total,
