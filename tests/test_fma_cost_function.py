@@ -1,9 +1,9 @@
 """Tests for the new fma_cost() function in _cost_model.py."""
 
 import pytest
+from flopscope._cost_model import fma_cost  # pyright: ignore[reportMissingImports]
 
 from flopscope._config import get_setting, set_setting
-from flopscope._cost_model import fma_cost  # pyright: ignore[reportMissingImports]
 
 
 def test_fma_cost_function_exists():

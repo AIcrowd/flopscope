@@ -26,7 +26,9 @@ def test_configure_fma_cost_raises():
 def test_fma_cost_constant_removed():
     """The private FMA_COST constant + its module should be gone."""
     with pytest.raises(ImportError):
-        from flopscope._cost_model import fma_cost  # noqa: F401  # pyright: ignore[reportMissingImports]
+        from flopscope._cost_model import (
+            fma_cost,  # noqa: F401  # pyright: ignore[reportMissingImports]
+        )
 
 
 def test_hamming_cost_doubled():
