@@ -145,7 +145,7 @@ separately into the official artifacts with weight `0.0`.
 
 where `alpha_raw(op)` depends on the active measurement mode:
 
-- in **perf** mode, it is the median ratio of counter-observed retired instructions to the analytical FLOP count (FMA = 1 op)
+- in **perf** mode, it is the median ratio of counter-observed retired instructions to the analytical FLOP count (FMA = 2 ops, textbook)
 - in **timing** mode, it is the median ratio of wall-clock cost relative to `np.add`, normalized against the same analytical FLOP count
 
 In other words, perf-mode weights are instruction-oriented calibration factors, while timing-mode weights are relative cost proxies. Both are useful for scaling analytical FLOPs, but timing-mode results should not be read as literal hardware instruction counts.
@@ -158,7 +158,7 @@ Each measurement uses pre-allocated output arrays to eliminate memory allocation
 
 - **weight = 1.0** -- the operation has the same calibrated cost per analytical FLOP as `np.add` under the chosen measurement mode
 - **weight > 1.0** -- the operation is more expensive per analytical FLOP than `np.add` under the chosen calibration mode (for example, transcendental functions such as `exp`)
-- **weight < 1.0** -- the operation is cheaper per analytical FLOP than `np.add` under the chosen calibration mode. This can happen because of efficient kernels, vectorization, library implementation details, or benchmarking noise; it should not be interpreted using the old “FMA counts as 2 FLOPs” convention, because Flopscope uses FMA = 1 throughout the model
+- **weight < 1.0** -- the operation is cheaper per analytical FLOP than `np.add` under the chosen calibration mode. Under flopscope's FMA=2 textbook convention, BLAS/linalg ops measured against `fp_arith_inst_retired` (which also counts FMAs as 2 ops) should give weights near 1.0; deviations reflect kernel efficiency or benchmarking noise.
 
 Weights are platform-specific -- different CPUs, BLAS libraries, and libm implementations produce different values. Always measure on the target platform. Symmetry reductions are independent of weights: symmetry reduces the element count while the weight scales the per-element cost.
 

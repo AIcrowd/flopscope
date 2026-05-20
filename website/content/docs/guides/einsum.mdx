@@ -54,7 +54,7 @@ For each pairwise contraction step the cost decomposes into a multiplicative ter
 cost = μ + α
 ```
 
-where `μ` is the product of all index dimensions (the FMAs you'd issue) and `α` charges the accumulation across the contracted axes. Each FMA counts as 1 operation; the factor-of-2 you see for dense matmul comes from `α ≈ μ`, not from double-counting FMAs.
+where `μ` is the product of all index dimensions (the FMAs you'd issue) and `α` charges the accumulation across the contracted axes. The α/M model counts multiplies and adds separately (FMA=2 textbook); the factor-of-2 you see for dense matmul comes from `μ` counting multiplies and `α` counting accumulation adds.
 
 For `'ij,jk->ik'` with shapes `(256, 256)` and `(256, 256)`:
 - Indices: i=256, j=256, k=256

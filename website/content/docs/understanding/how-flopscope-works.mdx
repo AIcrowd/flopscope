@@ -39,7 +39,7 @@ When you call a counted operation, flopscope computes its FLOP cost analytically
 
 The cost is always deterministic -- the same shapes produce the same FLOP count regardless of the data values or the hardware running the code.
 
-Each FMA (fused multiply-add) counts as 1 operation, not 2. A matrix multiply of dimensions (m, k) x (k, n) costs `m * k * n` FLOPs.
+Each FMA (fused multiply-add) counts as 2 operations (one multiply + one add). A matrix multiply of dimensions (m, k) x (k, n) costs `2*m*k*n − m*n` FLOPs.
 
 ## Budget enforcement
 

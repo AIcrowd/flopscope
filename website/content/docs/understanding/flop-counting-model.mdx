@@ -10,11 +10,17 @@ title: "FLOP Counting Model"
 - How symmetry savings and per-operation weights modify costs
 - How the FLOP multiplier and namespaces interact with the cost model
 
-## Default convention: FMA = 1 operation (configurable)
+## FMA convention: textbook (multiply + add = 2 operations)
 
-By default, flopscope counts a fused multiply-add (`a * b + c`) as a **single operation**. Hardware FMA units execute this in one instruction; the common textbook convention of counting it as 2 (one multiply + one add) is not the default.
+flopscope counts a fused multiply-add (`a * b + c`) as **2 operations** —
+one multiply + one add, counted separately. This matches the textbook /
+opt_einsum convention. Under this model, dense matmul of `(m, k)` × `(k, n)`
+costs `2·m·k·n − m·n` FLOPs (m·n output cells, each doing k multiplies and
+k−1 adds with the accumulator initialized from the first product).
 
-For the textbook convention, set `flops.configure(fma_cost=2)`. The current value is readable via `flops.fma_cost()`. All cost formulas throughout flopscope consult this setting uniformly — no surface diverges.
+There is no longer a configurable knob — the previous `flops.fma_cost()` /
+`flops.configure(fma_cost=...)` API was removed in the 2026-05-20
+unification. flopscope is FMA=2-only.
 
 ## Why FLOPs instead of wall-clock time
 
@@ -132,7 +138,7 @@ The formula is:
 $$w(\text\{op\}) = \max\bigl(\alpha_\{\text\{raw\}\}(\text\{op\}) - \text\{overhead\}_\{\text\{category\}\}, \ 0\bigr)$$
 
 where $\alpha_\{\text\{raw\}\}$ is the median ratio of hardware-observed FP
-instructions to analytical FLOPs (FMA = 1 op), measured via
+instructions to analytical FLOPs (FMA = 2 ops, textbook), measured via
 `fp_arith_inst_retired` performance counters. The ufunc dispatch overhead
 (measured from `np.abs`, which generates zero FP arithmetic) is subtracted
 per category to remove numpy implementation noise from the weight.

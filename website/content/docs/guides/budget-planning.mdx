@@ -20,7 +20,7 @@ import flopscope.numpy as fnp
 
 # Einsum cost
 cost = flops.accounting.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
-print(f"Matmul cost: {cost:,}")         # 16,777,216 (256^3, FMA=1)
+print(f"Matmul cost: {cost:,}")         # 33,488,896 (2*256^3 − 256^2, FMA=2)
 
 # SVD cost
 cost = flops.accounting.svd_cost(m=256, n=256, k=10)
