@@ -23,6 +23,92 @@ from ._ladder import (
 from ._output_orbit import restrict_stabilizer_to_positions
 
 
+def compute_step_cost_from_joint_group(
+    joint_group: object,
+    v_labels: tuple[str, ...],
+    w_labels: tuple[str, ...],
+    sizes: dict[str, int],
+    num_terms: int,
+    dimino_budget: int,
+) -> int | None:
+    """Per-step cost via Burnside on the merged-subset's joint group.
+
+    Sprint 2 / Cat C: complements the per-input fingerprint cost by handling
+    cross-step identity-swap cases (e.g. §5(a) step 2 = 160 → 55) that
+    per-input cannot see because intermediates lose their "from the same
+    original operand" identity.
+
+    Cost formula (Regime 1 / functionalProjection):
+        M = |orbits of joint_group on (V ∪ W)-tuples|
+        O = |orbits of joint_group's V-projection on V-tuples|
+        total = (num_terms − 1) · M + M − O   (for k = 2: 2M − O)
+
+    Returns:
+        The computed total cost, or None when:
+          - joint_group is None / has no generators (trivial),
+          - V is not preserved setwise by joint_group (Regime 2 — caller
+            must fall back to per-input path),
+          - dimino enumeration exceeds dimino_budget,
+          - joint_group's _labels does not cover (v_labels + w_labels).
+    """
+    from flopscope._config import get_setting, set_setting
+    from flopscope._perm_group import _dimino
+    from flopscope._perm_group import _PermutationCompat as _Perm
+
+    if joint_group is None:
+        return None
+    if not getattr(joint_group, "generators", None):
+        return None
+
+    joint_labels = getattr(joint_group, "_labels", None)
+    if joint_labels is None:
+        return None
+
+    canonical_labels = tuple(v_labels) + tuple(w_labels)
+    if set(joint_labels) != set(canonical_labels):
+        return None
+
+    n_v = len(v_labels)
+    n_total = len(canonical_labels)
+    canonical_idx = {lbl: i for i, lbl in enumerate(canonical_labels)}
+    joint_idx = {lbl: i for i, lbl in enumerate(joint_labels)}
+
+    canonical_gens: list[_Perm] = []
+    for gen in joint_group.generators:  # type: ignore[union-attr]
+        arr = gen.array_form
+        canonical_perm = [0] * n_total
+        for lbl in canonical_labels:
+            src_jpos = joint_idx[lbl]
+            dst_jlbl = joint_labels[arr[src_jpos]]
+            canonical_perm[canonical_idx[lbl]] = canonical_idx[dst_jlbl]
+        for vpos in range(n_v):
+            if canonical_perm[vpos] >= n_v:
+                return None
+        canonical_gens.append(_Perm(canonical_perm))
+
+    if not canonical_gens:
+        return None
+
+    # Temporarily override dimino_budget to honour the caller's request.
+    prev_budget = int(get_setting("dimino_budget"))  # type: ignore[arg-type]
+    try:
+        set_setting("dimino_budget", dimino_budget)
+        all_elems = _dimino(tuple(canonical_gens))
+    except Exception:
+        return None
+    finally:
+        set_setting("dimino_budget", prev_budget)
+
+    combined_sizes = tuple(sizes[lbl] for lbl in canonical_labels)
+    M = size_aware_burnside(all_elems, combined_sizes)
+
+    v_elems = [_Perm(list(elem.array_form[:n_v])) for elem in all_elems]
+    v_sizes = combined_sizes[:n_v]
+    num_v_orbits = size_aware_burnside(v_elems, v_sizes)
+
+    return (num_terms - 1) * M + M - num_v_orbits
+
+
 @dataclass(frozen=True)
 class ComponentCost:
     """Per-component cost. alpha is None when this component's regime returned
