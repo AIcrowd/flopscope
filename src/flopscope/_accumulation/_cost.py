@@ -570,9 +570,7 @@ def _walk_path_and_aggregate(
             step_dense_baseline_val = math.prod(
                 step_size_dict.get(c, 1) for c in step_all_chars
             )
-            step_output_dense = math.prod(
-                step_size_dict.get(c, 1) for c in step_output
-            )
+            step_output_dense = math.prod(step_size_dict.get(c, 1) for c in step_output)
             step_dense_fma = 2 * step_dense_baseline_val - step_output_dense
 
             if step_cost.total == step_dense_fma and step_dense_fma > 0:
@@ -592,12 +590,8 @@ def _walk_path_and_aggregate(
                     # space for the step output subscript.
                     labels = merged_output_grp._labels
                     if labels is not None:
-                        char_to_axis = {
-                            c: i for i, c in enumerate(step_output)
-                        }
-                        label_to_lpos = {
-                            lbl: k for k, lbl in enumerate(labels)
-                        }
+                        char_to_axis = {c: i for i, c in enumerate(step_output)}
+                        label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
                         axis_gens: list[_Perm] = []
                         for gen in merged_output_grp.generators:
                             arr = list(gen.array_form)
@@ -617,18 +611,18 @@ def _walk_path_and_aggregate(
                         output_sizes = tuple(
                             step_size_dict.get(c, 1) for c in step_output
                         )
-                        corrected_orbits = size_aware_burnside(
-                            all_elems, output_sizes
-                        )
+                        corrected_orbits = size_aware_burnside(all_elems, output_sizes)
                         if corrected_orbits < step_output_dense:
                             # Orbit reduction found; compute corrected cost.
                             step_w_chars = step_all_chars - set(step_output)
-                            step_w_size = math.prod(
-                                step_size_dict.get(c, 1) for c in step_w_chars
-                            ) if step_w_chars else 1
-                            corrected_total = (
-                                corrected_orbits * (2 * step_w_size - 1)
+                            step_w_size = (
+                                math.prod(
+                                    step_size_dict.get(c, 1) for c in step_w_chars
+                                )
+                                if step_w_chars
+                                else 1
                             )
+                            corrected_total = corrected_orbits * (2 * step_w_size - 1)
                             if corrected_total < step_cost.total:
                                 # Replace step_cost total while preserving other fields.
                                 step_cost = AccumulationCost(

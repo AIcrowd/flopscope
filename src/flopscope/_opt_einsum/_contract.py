@@ -958,9 +958,7 @@ def symmetric_flop_count(
         from flopscope._perm_group import SymmetryGroup as _SG
         from flopscope._perm_group import _PermutationCompat as _Perm
 
-        def _oracle_group_to_tensor_axes(
-            group: _SG, subscript: str
-        ) -> _SG | None:
+        def _oracle_group_to_tensor_axes(group: _SG, subscript: str) -> _SG | None:
             """Re-express an oracle label-sorted group in tensor-axis space.
 
             The oracle creates SymmetryGroup with _labels = sorted char tuple
