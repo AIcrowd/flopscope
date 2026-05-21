@@ -410,22 +410,54 @@ def _walk_path_and_aggregate(
         output_chars=output_subscript,
     )
 
-    def _subset_sym_fingerprint(subset: frozenset[int]) -> tuple:
+    def _subset_sym_fingerprint(subset: frozenset[int], step_subscript: str) -> tuple:
         """Return an accumulation-cache fingerprint for a step-input subset.
 
         Queries the oracle for the V-side (output) group of the subset of
         original operands, then serialises it in the (axes, gens) format
         expected by get_accumulation_cost_cached's sym_fingerprint.
         Returns None (dense) when the oracle finds no symmetry.
+
+        Oracle groups encode generators in label-sorted space (_labels gives the
+        sorted char tuple and each generator acts on positions of that tuple).
+        The cache reconstructs a group with _labels derived from the step
+        subscript in axis order, so the generator would be misinterpreted unless
+        we convert it to tensor-axis space first.
         """
         from flopscope._perm_group import SymmetryGroup as _SG
+        from flopscope._perm_group import _PermutationCompat as _Perm
 
         ss = oracle.sym(subset)
         grp = ss.output  # V-side (free-label) group for this subset
         if grp is None or not isinstance(grp, _SG):
             return None  # type: ignore[return-value]
-        axes = grp.axes if grp.axes is not None else tuple(range(grp.degree))
-        gens = tuple(tuple(g.array_form) for g in grp.generators)
+        if not grp.generators:
+            return None  # type: ignore[return-value]
+
+        # Convert oracle's label-sorted generators to tensor-axis-space so that
+        # when the cache reconstructs the group (with _labels derived from the
+        # step subscript in axis order), the generator is correctly interpreted.
+        if grp._labels is not None:
+            labels = grp._labels  # sorted char tuple
+            char_to_axis = {c: i for i, c in enumerate(step_subscript)}
+            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+            new_gens = []
+            for gen in grp.generators:
+                arr = list(gen.array_form)
+                axis_gen = list(range(len(step_subscript)))
+                for ax, char in enumerate(step_subscript):
+                    if char in label_to_lpos:
+                        lpos = label_to_lpos[char]
+                        target_char = labels[arr[lpos]]
+                        if target_char in char_to_axis:
+                            axis_gen[ax] = char_to_axis[target_char]
+                new_gens.append(_Perm(axis_gen))
+            axes = tuple(range(len(step_subscript)))
+            gens = tuple(tuple(g.array_form) for g in new_gens)
+        else:
+            axes = grp.axes if grp.axes is not None else tuple(range(grp.degree))
+            gens = tuple(tuple(g.array_form) for g in grp.generators)
+
         if not gens:
             return None  # type: ignore[return-value]
         return (axes, gens)
@@ -467,8 +499,13 @@ def _walk_path_and_aggregate(
         ]
 
         # Build per-step sym_fingerprint by querying the oracle per input subset.
+        # Pass the step subscript so generators can be converted from oracle
+        # label-sorted space to tensor-axis space matching the step subscript.
         step_sym_fp: tuple = tuple(
-            _subset_sym_fingerprint(subset) for subset in step_input_subsets
+            _subset_sym_fingerprint(subset, sub_part)
+            for subset, sub_part in zip(
+                step_input_subsets, step_input_parts, strict=False
+            )
         )
 
         # Derive the step's identity_pattern from the original expression's
@@ -510,6 +547,108 @@ def _walk_path_and_aggregate(
             identity_pattern=step_identity_pattern,
             partition_budget=partition_budget,
         )
+
+        # Sprint 1 Cat B: if the per-input fingerprint detected no savings
+        # (step_cost == dense FMA baseline), query the oracle for the merged
+        # subset's OUTPUT group.  This captures symmetry that arises from the
+        # global context (e.g. identical W matrices) but cannot be detected from
+        # the individual input subsets alone (e.g. when the input's b-c swap
+        # crosses the V/W boundary in this binary step).
+        #
+        # Discriminator: we apply the correction ONLY when step_cost equals the
+        # dense FMA cost — meaning per-input analysis found no savings.  This
+        # prevents double-counting in steps that already benefited from per-input
+        # symmetry reduction.
+        if oracle is not None:
+            # Compute dense FMA for this binary step:
+            #   dense_fma = 2 * dense_baseline - output_dense
+            step_size_dict: dict[str, int] = {}
+            for sub, shape in zip(step_input_parts, step_shapes, strict=False):
+                for char, sz in zip(sub, shape, strict=False):
+                    step_size_dict[char] = sz
+            step_all_chars = set("".join(step_input_parts))
+            step_dense_baseline_val = math.prod(
+                step_size_dict.get(c, 1) for c in step_all_chars
+            )
+            step_output_dense = math.prod(
+                step_size_dict.get(c, 1) for c in step_output
+            )
+            step_dense_fma = 2 * step_dense_baseline_val - step_output_dense
+
+            if step_cost.total == step_dense_fma and step_dense_fma > 0:
+                # No savings detected; check global oracle's merged output group.
+                merged_subset_local = frozenset().union(*step_input_subsets)
+                try:
+                    ss_merged = oracle.sym(merged_subset_local)
+                    merged_output_grp = ss_merged.output if ss_merged else None
+                except Exception:
+                    merged_output_grp = None
+
+                if merged_output_grp is not None and merged_output_grp.generators:
+                    from flopscope._perm_group import _dimino
+                    from flopscope._perm_group import _PermutationCompat as _Perm
+
+                    # Convert oracle's label-sorted generators to tensor-axis
+                    # space for the step output subscript.
+                    labels = merged_output_grp._labels
+                    if labels is not None:
+                        char_to_axis = {
+                            c: i for i, c in enumerate(step_output)
+                        }
+                        label_to_lpos = {
+                            lbl: k for k, lbl in enumerate(labels)
+                        }
+                        axis_gens: list[_Perm] = []
+                        for gen in merged_output_grp.generators:
+                            arr = list(gen.array_form)
+                            axis_gen = list(range(len(step_output)))
+                            for ax, char in enumerate(step_output):
+                                if char in label_to_lpos:
+                                    lpos = label_to_lpos[char]
+                                    tgt = labels[arr[lpos]]
+                                    if tgt in char_to_axis:
+                                        axis_gen[ax] = char_to_axis[tgt]
+                            axis_gens.append(_Perm(axis_gen))
+                    else:
+                        axis_gens = list(merged_output_grp.generators)
+
+                    try:
+                        all_elems = _dimino(tuple(axis_gens))
+                        output_sizes = tuple(
+                            step_size_dict.get(c, 1) for c in step_output
+                        )
+                        corrected_orbits = size_aware_burnside(
+                            all_elems, output_sizes
+                        )
+                        if corrected_orbits < step_output_dense:
+                            # Orbit reduction found; compute corrected cost.
+                            step_w_chars = step_all_chars - set(step_output)
+                            step_w_size = math.prod(
+                                step_size_dict.get(c, 1) for c in step_w_chars
+                            ) if step_w_chars else 1
+                            corrected_total = (
+                                corrected_orbits * (2 * step_w_size - 1)
+                            )
+                            if corrected_total < step_cost.total:
+                                # Replace step_cost total while preserving other fields.
+                                step_cost = AccumulationCost(
+                                    total=corrected_total,
+                                    mu=step_w_size * corrected_orbits
+                                    - corrected_orbits,
+                                    alpha=step_w_size * corrected_orbits,
+                                    m_total=step_w_size * corrected_orbits,
+                                    dense_baseline=step_dense_baseline_val,
+                                    num_terms=step_cost.num_terms,
+                                    per_component=step_cost.per_component,
+                                    fallback_used=step_cost.fallback_used,
+                                    unavailable_components=step_cost.unavailable_components,
+                                    unavailable_reason=step_cost.unavailable_reason,
+                                    per_step=step_cost.per_step,
+                                    path=step_cost.path,
+                                )
+                    except Exception:
+                        pass  # Burnside failed (e.g. dimino budget); keep original
+
         per_step_costs.append(step_cost)
 
         # Update current_subsets: remove contracted inputs (highest index first

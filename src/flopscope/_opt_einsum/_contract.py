@@ -919,10 +919,16 @@ def symmetric_flop_count(
     input_subscripts=None,
     output_subscript=None,
     input_shapes=None,
+    per_input_groups=None,
 ):
     """Per-step symmetry-aware cost. Delegates to compute_accumulation_cost
     on the binary sub-expression so path-walker per-step costs match
     accumulation per-step costs by construction.
+
+    When ``per_input_groups`` is provided (a sequence of SymmetryGroup-or-None,
+    one per input), the cache call uses those as the per-operand symmetry
+    fingerprint so propagated intermediate symmetries reduce the per-step
+    cost.  When None, falls back to all-None fingerprints (legacy/dense path).
 
     Legacy fallback: when subscripts/shapes are not provided (older callers),
     falls back to the dense direct-event count from helpers.flop_count.
@@ -940,12 +946,77 @@ def symmetric_flop_count(
 
     canonical = ",".join(input_subscripts) + "->" + (output_subscript or "")
     partition_budget = int(get_setting("partition_budget"))  # type: ignore[arg-type]
+
+    if per_input_groups is not None:
+        # Oracle-derived groups encode generators in label-sorted space:
+        # group._labels = alphabetically sorted tuple of subscript chars;
+        # generator[i] = j means label _labels[i] maps to _labels[j].
+        # Source A in _collect_pi_permutations instead expects generators in
+        # tensor-axis space: generator[i] = j means axis i maps to axis j.
+        # Convert by re-expressing each generator via the subscript char order.
+        from flopscope._accumulation._cost import compute_accumulation_cost
+        from flopscope._perm_group import SymmetryGroup as _SG
+        from flopscope._perm_group import _PermutationCompat as _Perm
+
+        def _oracle_group_to_tensor_axes(
+            group: _SG, subscript: str
+        ) -> _SG | None:
+            """Re-express an oracle label-sorted group in tensor-axis space.
+
+            The oracle creates SymmetryGroup with _labels = sorted char tuple
+            and axes = identity range.  Source A in the subgraph oracle uses
+            axes[g_pos] as a tensor axis index, so passing the oracle group
+            directly maps position 0 to axis 0, which is wrong when the chars
+            are sorted (not in subscript order).
+
+            This function builds a new SymmetryGroup whose generators act on
+            axis indices of ``subscript`` directly, so Source A interprets them
+            correctly.
+            """
+            if group is None or group._labels is None:
+                return group  # type: ignore[return-value]
+            labels = group._labels  # e.g. ('b', 'c', 'i') sorted
+            char_to_axis = {c: i for i, c in enumerate(subscript)}
+            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+
+            new_gens = []
+            for gen in group.generators:
+                arr = list(gen.array_form)  # label-space permutation
+                axis_gen = list(range(len(subscript)))
+                for ax, char in enumerate(subscript):
+                    if char in label_to_lpos:
+                        lpos = label_to_lpos[char]
+                        target_char = labels[arr[lpos]]
+                        if target_char in char_to_axis:
+                            axis_gen[ax] = char_to_axis[target_char]
+                new_gens.append(_Perm(axis_gen))
+            if not new_gens:
+                return None
+            new_grp = _SG(*new_gens, axes=tuple(range(len(subscript))))
+            return new_grp
+
+        converted = tuple(
+            _oracle_group_to_tensor_axes(g, sub) if g is not None else None
+            for g, sub in zip(per_input_groups, input_subscripts, strict=False)
+        )
+        cost = compute_accumulation_cost(
+            canonical_subscripts=canonical,
+            input_parts=tuple(input_subscripts),
+            output_subscript=output_subscript or "",
+            shapes=tuple(tuple(s) for s in input_shapes),
+            per_op_symmetries=converted,
+            identity_pattern=None,
+            partition_budget=partition_budget,
+        )
+        return cost.total
+
+    sym_fingerprint = tuple(None for _ in input_subscripts)
     cost = get_accumulation_cost_cached(
         canonical_subscripts=canonical,
         input_parts=tuple(input_subscripts),
         output_subscript=output_subscript or "",
         shapes=tuple(tuple(s) for s in input_shapes),
-        sym_fingerprint=tuple(None for _ in input_subscripts),
+        sym_fingerprint=sym_fingerprint,
         identity_pattern=None,
         partition_budget=partition_budget,
     )
@@ -1137,6 +1208,45 @@ def build_path_info(
         ]
         output_shape_for_step: tuple[int, ...] = tuple(size_dict[c] for c in rhs)
 
+        # Bug B fix: query the oracle for per-step symmetry groups BEFORE computing
+        # cost so that propagated intermediate symmetries reduce the per-step cost.
+        # The oracle uses current_oracle_subsets (not yet updated for this step)
+        # so querying before the SSA merge gives us the current inputs' symmetries.
+        step_input_groups: list = []
+        step_output_group: object | None = None
+        step_inner_group: object | None = None
+
+        # Reconstruct merged_subset by tracking which original operands each
+        # SSA id covers. The path gives us the positions to contract.
+        contract_positions = tuple(sorted(original_path_tuple, reverse=True))
+        new_merged_subset: frozenset[int] = frozenset()
+        for ci in contract_positions:
+            if ci < len(ssa_ids):
+                new_merged_subset = new_merged_subset | ssa_to_subset[ssa_ids[ci]]
+
+        if oracle is not None:
+            try:
+                # Gather which oracle-tracked subsets map to each lhs input.
+                # opt_einsum pops positions highest-to-lowest (contract_positions
+                # is sorted descending), so the lhs subscript order matches
+                # the descending-position order of the path entry.
+                step_input_subsets = [
+                    current_oracle_subsets[pos]
+                    for pos in sorted(original_path_tuple, reverse=True)
+                    if pos < len(current_oracle_subsets)
+                ]
+                for inp_subset in step_input_subsets:
+                    ss = oracle.sym(inp_subset)
+                    step_input_groups.append(ss.output)  # V-side group for this input
+                # For output_group and inner_group, query the merged subset.
+                merged_ss = oracle.sym(new_merged_subset)
+                step_output_group = merged_ss.output
+                step_inner_group = merged_ss.inner
+            except Exception:
+                step_input_groups = []
+                step_output_group = None
+                step_inner_group = None
+
         cost = symmetric_flop_count(
             idx_contraction,
             inner,
@@ -1145,6 +1255,7 @@ def build_path_info(
             input_subscripts=lhs_parts,
             output_subscript=rhs,
             input_shapes=input_shapes_for_step,
+            per_input_groups=step_input_groups if step_input_groups else None,
         )
 
         # Dense cost: what this step would cost without any symmetry reduction.
@@ -1171,49 +1282,13 @@ def build_path_info(
                 largest_intermediate, prod(output_shape_for_step)
             )
 
-        # Reconstruct merged_subset by tracking which original operands each
-        # SSA id covers. The path gives us the positions to contract.
-        contract_positions = tuple(sorted(original_path_tuple, reverse=True))
-        new_merged_subset: frozenset[int] = frozenset()
-        for ci in contract_positions:
-            if ci < len(ssa_ids):
-                new_merged_subset = new_merged_subset | ssa_to_subset[ssa_ids[ci]]
+        # Complete the SSA merge (popping positions into next_ssa).
         for ci in contract_positions:
             if ci < len(ssa_ids):
                 ssa_ids.pop(ci)
         ssa_to_subset[next_ssa] = new_merged_subset
         ssa_ids.append(next_ssa)
         next_ssa += 1
-
-        # Bug B fix: query the oracle for per-step symmetry groups.
-        # The oracle uses merged_subsets of the step's input operands to derive
-        # the V-side (output_group) and W-side (inner_group) symmetries.
-        # For the input_groups list we use the per-input subset groups.
-        step_input_groups: list = []
-        step_output_group: object | None = None
-        step_inner_group: object | None = None
-        if oracle is not None:
-            try:
-                # Gather which oracle-tracked subsets map to each lhs input.
-                # opt_einsum pops positions highest-to-lowest (contract_positions
-                # is sorted descending), so the lhs subscript order matches
-                # the descending-position order of the path entry.
-                step_input_subsets = [
-                    current_oracle_subsets[pos]
-                    for pos in sorted(original_path_tuple, reverse=True)
-                    if pos < len(current_oracle_subsets)
-                ]
-                for inp_subset in step_input_subsets:
-                    ss = oracle.sym(inp_subset)
-                    step_input_groups.append(ss.output)  # V-side group for this input
-                # For output_group and inner_group, query the merged subset.
-                merged_ss = oracle.sym(new_merged_subset)
-                step_output_group = merged_ss.output
-                step_inner_group = merged_ss.inner
-            except Exception:
-                step_input_groups = []
-                step_output_group = None
-                step_inner_group = None
 
         # Update current_oracle_subsets to mirror the SSA merge above.
         # Guard against out-of-range indices the same way the ssa_ids loop does.
