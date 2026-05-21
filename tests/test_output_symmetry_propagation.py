@@ -10,6 +10,7 @@ import numpy as np
 
 import flopscope as flops
 import flopscope.numpy as fnp
+from flopscope._symmetric import SymmetricTensor
 
 
 def test_hadamard_of_S2_inherits_S2():
@@ -20,9 +21,10 @@ def test_hadamard_of_S2_inherits_S2():
     """
     S = fnp.zeros((4, 4))
     T = fnp.einsum("ij,ij->ij", S, S)
-    assert getattr(T, "symmetry", None) is not None, (
+    assert isinstance(T, SymmetricTensor), (
         f"expected SymmetricTensor with symmetry, got {type(T).__name__}"
     )
+    assert T.symmetry is not None
     # Order-2 group on the 2 axes of the output
     assert len(list(T.symmetry.elements())) == 2
     assert T.symmetry.axes == (0, 1)
@@ -39,9 +41,10 @@ def test_K_W_W_W_inherits_S3():
     K = flops.symmetrize(K, symmetry=(0, 1, 2))
     W = fnp.random.default_rng(0).standard_normal((n, n))
     R = fnp.einsum("abc,ai,bj,ck->ijk", K, W, W, W)
-    assert getattr(R, "symmetry", None) is not None, (
+    assert isinstance(R, SymmetricTensor), (
         f"expected SymmetricTensor with symmetry, got {type(R).__name__}"
     )
+    assert R.symmetry is not None
     assert len(list(R.symmetry.elements())) == 6  # |S₃| = 6
     assert R.symmetry.axes == (0, 1, 2)
 
@@ -72,7 +75,8 @@ def test_single_operand_path_preserved():
     """
     T = fnp.zeros((4, 4, 4))  # auto-tagged S₃
     R = fnp.einsum("ijk->ijk", T)
-    assert getattr(R, "symmetry", None) is not None
+    assert isinstance(R, SymmetricTensor)
+    assert R.symmetry is not None
     assert len(list(R.symmetry.elements())) == 6  # S₃ preserved
     assert R.symmetry.axes == (0, 1, 2)
 
@@ -87,9 +91,11 @@ def test_partial_axes_symmetry_on_output():
     """
     X = fnp.random.default_rng(0).standard_normal((4, 4))
     R = fnp.einsum("ab,cd->abcd", X, X)
-    assert getattr(R, "symmetry", None) is not None
+    assert isinstance(R, SymmetricTensor)
+    assert R.symmetry is not None
     # Group should have at least one non-identity element acting on the output axes
     assert len(list(R.symmetry.elements())) >= 2
+    assert R.symmetry.axes is not None
     assert set(R.symmetry.axes).issubset({0, 1, 2, 3})
 
 
