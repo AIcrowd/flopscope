@@ -68,10 +68,10 @@ def test_distinct_dense_operands_no_symmetry():
 def test_single_operand_path_preserved():
     """Regression guard: single-operand einsum (no summing) preserves symmetry tagging.
 
-    The existing single-operand inference path handles cases where every operand label
-    survives in the output (no axes summed out).  Cases with summed axes hit a
-    separate bug in `_relabel_group_to_output` that is out of scope for Sprint 1;
-    see the project tracker for the missing-label restriction follow-up.
+    Covers the simple no-reduction case where every operand label survives in
+    the output.  The reduction case (operand labels summed out, requiring the
+    setwise-stabilizer-then-restrict pipeline) is covered by the dedicated
+    file ``tests/test_output_symmetry_reduction.py``.
     """
     T = fnp.zeros((4, 4, 4))  # auto-tagged S₃
     R = fnp.einsum("ijk->ijk", T)

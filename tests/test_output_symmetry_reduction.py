@@ -8,11 +8,11 @@ helper) when the operand's declared symmetry covers axes that get summed out.
 """
 
 import numpy as np
-from sympy.combinatorics import Permutation
 
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope import SymmetryGroup
+from flopscope._perm_group import _Permutation as Permutation
 from flopscope._symmetric import SymmetricTensor
 
 

@@ -312,8 +312,47 @@ def _infer_pathless_output_symmetry(operands, input_parts, output_subscript: str
     if not isinstance(operand, SymmetricTensor) or operand.symmetry is None:
         return None
     group = operand.symmetry
+    operand_subscript = input_parts[0]
+    operand_rank = len(operand_subscript)
+
+    # Detect axes that get summed out (label appears in operand but not output).
+    summed_axes = tuple(
+        i for i, label in enumerate(operand_subscript) if label not in output_subscript
+    )
+
+    if summed_axes:
+        # Compute the setwise-stabilizer of the summed axes inside the group,
+        # then project onto the surviving axes via the existing reduce_group
+        # helper (which composes setwise_stabilizer + restrict + axis remap
+        # into one numpy-reduction-style call).  This is the
+        # stabilizer-restriction operation Wilson's review asked for.
+        from flopscope._symmetry_utils import reduce_group
+
+        reduced_group = reduce_group(group, ndim=operand_rank, axis=summed_axes)
+        if reduced_group is None:
+            return None
+        # reduce_group's keepdims=False shifts surviving operand axes to
+        # contiguous 0..k-1 positions in the reduced-tensor frame.  Recover
+        # operand-subscript labels for the reduced group's axes so that the
+        # subsequent _relabel_group_to_output call can map them to the
+        # einsum's output_subscript positions (which may further reorder).
+        kept_operand_axes = [
+            i for i in range(operand_rank) if i not in set(summed_axes)
+        ]
+        new_to_operand_axis = dict(enumerate(kept_operand_axes))
+        reduced_axes = (
+            reduced_group.axes
+            if reduced_group.axes is not None
+            else tuple(range(reduced_group.degree))
+        )
+        source_labels = tuple(
+            operand_subscript[new_to_operand_axis[ax]] for ax in reduced_axes
+        )
+        return _relabel_group_to_output(reduced_group, source_labels, output_subscript)
+
+    # No reduction — surviving labels all appear in output; existing direct path.
     axes = group.axes if group.axes is not None else tuple(range(group.degree))
-    source_labels = tuple(input_parts[0][axis] for axis in axes)
+    source_labels = tuple(operand_subscript[axis] for axis in axes)
     return _relabel_group_to_output(group, source_labels, output_subscript)
 
 
