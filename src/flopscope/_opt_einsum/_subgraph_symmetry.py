@@ -77,8 +77,8 @@ def _collect_pi_permutations(
     row_order: tuple[int, ...],
     col_of: dict[str, tuple[int, ...]],
     fp_to_labels: dict[tuple[int, ...], set[str]],
-) -> tuple[list[Perm], list[Perm]]:
-    """Collect V and W permutation generators via the expanded σ-loop.
+) -> tuple[list[Perm], list[Perm], list[Perm]]:
+    """Collect V, W, and joint permutation generators via the expanded σ-loop.
 
     Generators come from two sources:
 
@@ -100,14 +100,19 @@ def _collect_pi_permutations(
         Non-identity permutations on V labels (output / free side).
     w_perms : list[Perm]
         Non-identity permutations on W labels (inner / summed side).
+    joint_perms : list[Perm]
+        Non-identity permutations on sorted(V ∪ W) labels (joint group).
     """
     v_perms: list[Perm] = []
     w_perms: list[Perm] = []
+    joint_perms: list[Perm] = []
     all_labels = sub.v_labels | sub.w_labels
     v_sorted = tuple(sorted(sub.v_labels))
     w_sorted = tuple(sorted(sub.w_labels))
+    all_sorted = tuple(sorted(all_labels))
     v_idx = {lbl: i for i, lbl in enumerate(v_sorted)}
     w_idx = {lbl: i for i, lbl in enumerate(w_sorted)}
+    all_idx = {lbl: i for i, lbl in enumerate(all_sorted)}
 
     n_rows = len(row_order)
     identity_row = tuple(range(n_rows))
@@ -130,8 +135,6 @@ def _collect_pi_permutations(
         if not positions:
             continue
         for group in groups:
-            if group._labels is None:
-                continue
             # Map group axis indices to positions within this operand's
             # block in row_order. group.axes[i] is the tensor axis index
             # that group position i acts on. Since we no longer merge,
@@ -241,7 +244,7 @@ def _collect_pi_permutations(
 
     # --- Build a group on row positions and enumerate all elements ---
     if not row_perm_generators:
-        return v_perms, w_perms
+        return v_perms, w_perms, joint_perms
 
     row_gens = [Perm(list(g)) for g in row_perm_generators]
     row_group = SymmetryGroup(*row_gens)
@@ -277,7 +280,12 @@ def _collect_pi_permutations(
             arr = [w_idx[pi.get(lbl, lbl)] for lbl in w_sorted]
             w_perms.append(Perm(arr))
 
-    return v_perms, w_perms
+        # Joint permutation on sorted(V ∪ W) — emit Perm if non-identity.
+        if any(pi.get(lbl, lbl) != lbl for lbl in all_sorted):
+            arr_joint = [all_idx[pi.get(lbl, lbl)] for lbl in all_sorted]
+            joint_perms.append(Perm(arr_joint))
+
+    return v_perms, w_perms, joint_perms
 
 
 @dataclass(frozen=True)
@@ -508,11 +516,12 @@ def _compute_subset_symmetry(
         fp_to_labels.setdefault(fp, set()).add(lbl)
 
     # Collect exact π generators via σ-loop.
-    v_perms, w_perms = _collect_pi_permutations(
+    v_perms, w_perms, joint_perms = _collect_pi_permutations(
         graph, sub, row_order, col_of, fp_to_labels
     )
     v_sorted = tuple(sorted(sub.v_labels))
     w_sorted = tuple(sorted(sub.w_labels))
+    all_sorted = tuple(sorted(all_labels))
 
     # Build V-side group (only from σ-loop results, no fast path).
     v_group: SymmetryGroup | None = None
@@ -526,4 +535,10 @@ def _compute_subset_symmetry(
         w_group = SymmetryGroup(*w_perms, axes=tuple(range(len(w_sorted))))
         w_group._labels = w_sorted
 
-    return SubsetSymmetry(output=v_group, inner=w_group)
+    # Build joint group on sorted(V ∪ W).
+    joint_group: SymmetryGroup | None = None
+    if joint_perms:
+        joint_group = SymmetryGroup(*joint_perms, axes=tuple(range(len(all_sorted))))
+        joint_group._labels = all_sorted
+
+    return SubsetSymmetry(output=v_group, inner=w_group, joint=joint_group)
