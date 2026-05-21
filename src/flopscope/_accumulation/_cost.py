@@ -838,6 +838,36 @@ def _walk_path_and_aggregate(
 
             # --- Cat C path: joint group ---
             joint_group = ss_merged.joint
+            # Sprint 3 (#55): project joint group to surviving labels when
+            # pre-reduction removed labels from this step's subscripts.
+            removed_labels_in_step = set(left_only_summed) | set(right_only_summed)
+            if joint_group is not None and removed_labels_in_step:
+                joint_labels = joint_group._labels
+                if joint_labels is not None:
+                    removed_positions = {
+                        i
+                        for i, lbl in enumerate(joint_labels)
+                        if lbl in removed_labels_in_step
+                    }
+                    if removed_positions:
+                        stabilized = joint_group.setwise_stabilizer(removed_positions)
+                        surviving_positions = tuple(
+                            i
+                            for i in range(len(joint_labels))
+                            if i not in removed_positions
+                        )
+                        joint_group = stabilized.restrict(surviving_positions)
+                        if joint_group is not None:
+                            # restrict() may drop _labels; restore them so the
+                            # downstream helper can match them to the step's
+                            # effective V/W labels.
+                            new_labels = tuple(
+                                joint_labels[i] for i in surviving_positions
+                            )
+                            if joint_group._labels is None:
+                                joint_group._labels = new_labels
+                            if joint_group.order() <= 1:
+                                joint_group = None
             joint_improved = False
             if joint_group is not None and joint_group.generators:
                 # V/W label tuples in canonical order (V first, then W).
