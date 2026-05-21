@@ -22,6 +22,7 @@ from ._hsluv import rgb_distance_hex, rich_label_palette
 __all__ = [
     "build_path_info",
     "PathInfo",
+    "PreReduction",
     "StepInfo",
 ]
 
@@ -31,6 +32,33 @@ _RICH_SYMMETRY_STYLES = {
     "D": "bold bright_yellow",
     "W": "bold bright_green",
 }
+
+
+@dataclass(frozen=True)
+class PreReduction:
+    """Metadata for a single pre-reduction performed on a binary step's input.
+
+    When a label is summed in this step AND appears in only ONE of the two
+    inputs, that input is pre-reduced along the isolated axis BEFORE the
+    main contraction.  This mirrors PyTorch's `sumproduct_pair` optimization
+    (`aten/src/ATen/native/Linear.cpp`).
+
+    Attributes:
+        operand_index: 0 or 1 — which input of the binary step (left or right).
+        removed_labels: labels dropped from this input's subscript (sorted tuple).
+        cost: flops charged by this pre-reduction (from reduction_accumulation_cost).
+        surviving_subscript: this input's subscript after dropping removed_labels.
+        reduced_symmetry_fingerprint: canonical sym fingerprint of the post-
+            reduction operand symmetry; fed to the residual contraction's
+            per-input fingerprint.  None when the operand had no declared
+            symmetry or the reduction killed all surviving symmetry.
+    """
+
+    operand_index: int
+    removed_labels: tuple[str, ...]
+    cost: int
+    surviving_subscript: str
+    reduced_symmetry_fingerprint: tuple | None = None
 
 
 @dataclass
@@ -80,6 +108,13 @@ class StepInfo:
     intermediate covers. For step 0 contracting two original operands i
     and j, this is ``frozenset({i, j})``. For later steps it's the union
     of the subsets of all SSA inputs being contracted."""
+
+    pre_reductions: tuple[PreReduction, ...] = field(default_factory=tuple)
+    """Pre-reductions applied to binary step inputs before the main contraction.
+
+    Each entry records a label that was summed out of exactly one input prior
+    to the contraction itself (mirroring PyTorch's ``sumproduct_pair``
+    optimization).  Empty for all existing steps — populated by Task 4."""
 
     @property
     def flop_count(self) -> int:
