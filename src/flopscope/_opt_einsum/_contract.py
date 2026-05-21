@@ -775,6 +775,47 @@ class PathInfo:
                 row.append(self._fmt_unique_dense(step))
             row.append(self._rich_step_sym_text(step) or "-")
             table.add_row(*row)
+            # Sprint 3 (#55): pre-reduction sub-rows
+            pre_reductions = step.pre_reductions
+            if pre_reductions:
+                from rich.text import Text
+
+                lhs = step.subscript.split("->")[0]
+                operand_subs = lhs.split(",")
+                for pre in pre_reductions:
+                    op_name = f"op{pre.operand_index}"
+                    labels_str = ",".join(pre.removed_labels)
+                    original_sub = (
+                        operand_subs[pre.operand_index]
+                        if 0 <= pre.operand_index < len(operand_subs)
+                        else ""
+                    )
+                    sub_text = Text(
+                        f"  pre-reduce {op_name} {{{labels_str}}}: "
+                        f"{pre.cost:,} ops  "
+                        f"(subscript: {original_sub} → {pre.surviving_subscript})",
+                        style="dim",
+                    )
+                    detail_row = [""] * len(table.columns)
+                    detail_row[2] = sub_text  # type: ignore[call-overload, assignment]
+                    table.add_row(*detail_row)
+                # Residual contraction sub-row
+                residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
+                effective_subs = list(operand_subs)
+                for pre in pre_reductions:
+                    if 0 <= pre.operand_index < len(effective_subs):
+                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                step_output_part = (
+                    step.subscript.split("->")[1] if "->" in step.subscript else ""
+                )
+                residual_subscript = ",".join(effective_subs) + "->" + step_output_part
+                detail_row = [""] * len(table.columns)
+                detail_row[2] = Text(  # type: ignore[call-overload, assignment]
+                    f"  residual contraction: {residual_subscript}  → "
+                    f"{residual_cost:,} ops",
+                    style="dim",
+                )
+                table.add_row(*detail_row)
             if verbose:
                 cumulative += step.flop_cost
                 detail_row = [""] * len(table.columns)
@@ -877,6 +918,42 @@ class PathInfo:
                 sym_str = sym_str[: sym_col_width - 1] + "…"
             row_parts.append(f"{sym_str:<{sym_col_width}}")
             lines.append("  ".join(row_parts))
+
+            # Sprint 3 (#55): pre-reduction sub-rows
+            pre_reductions = step.pre_reductions
+            if pre_reductions:
+                indent = " " * 8
+                lhs = step.subscript.split("->")[0]
+                operand_subs = lhs.split(",")
+                # Per-pre-reduction sub-row
+                for pre in pre_reductions:
+                    op_name = f"op{pre.operand_index}"
+                    labels_str = ",".join(pre.removed_labels)
+                    original_sub = (
+                        operand_subs[pre.operand_index]
+                        if 0 <= pre.operand_index < len(operand_subs)
+                        else ""
+                    )
+                    sub_line = (
+                        f"{indent}pre-reduce {op_name} {{{labels_str}}}: "
+                        f"{pre.cost:,} ops  "
+                        f"(subscript: {original_sub} → {pre.surviving_subscript})"
+                    )
+                    lines.append(sub_line)
+                # Residual contraction sub-row
+                residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
+                effective_subs = list(operand_subs)
+                for pre in pre_reductions:
+                    if 0 <= pre.operand_index < len(effective_subs):
+                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                step_output_part = (
+                    step.subscript.split("->")[1] if "->" in step.subscript else ""
+                )
+                residual_subscript = ",".join(effective_subs) + "->" + step_output_part
+                lines.append(
+                    f"{indent}residual contraction: {residual_subscript}  → "
+                    f"{residual_cost:,} ops"
+                )
 
             cumulative += step.flop_cost
             if verbose:
