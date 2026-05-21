@@ -46,11 +46,22 @@ class FlopscopePathInfo:
             steps = inner.steps
             if accumulation.per_step:
                 # Multi-step path: per_step is populated by _walk_path_and_aggregate.
-                for step, acc_step in zip(steps, accumulation.per_step, strict=False):
+                per_step_pre = (
+                    accumulation.pre_reductions_per_step
+                    if accumulation.pre_reductions_per_step
+                    else ((),) * len(accumulation.per_step)
+                )
+                for step, acc_step, pre_red in zip(
+                    steps, accumulation.per_step, per_step_pre, strict=False
+                ):
                     try:
                         step.flop_cost = acc_step.total
                     except (AttributeError, TypeError):
                         pass  # StepInfo may be frozen in some configurations; skip
+                    try:
+                        step.pre_reductions = pre_red
+                    except (AttributeError, TypeError):
+                        pass
             elif len(steps) == 1:
                 # Bug B fix: single-step (2-op) einsum — aggregate_einsum returns a
                 # flat AccumulationCost with no per_step entries.  The single step's
@@ -60,6 +71,14 @@ class FlopscopePathInfo:
                     steps[0].flop_cost = accumulation.total
                 except (AttributeError, TypeError):
                     pass
+                # Sprint 3: wire pre_reductions for single-step einsums.
+                if accumulation.pre_reductions_per_step:
+                    try:
+                        steps[0].pre_reductions = accumulation.pre_reductions_per_step[
+                            0
+                        ]
+                    except (AttributeError, TypeError, IndexError):
+                        pass
 
             # After syncing step flop_cost values, recompute inner.optimized_cost,
             # inner.naive_cost (dense baseline), and inner.speedup so the renderer
@@ -114,10 +133,18 @@ class FlopscopePathInfo:
         fmt = getattr(self._inner, "format_table", None)
         if fmt is None:
             return self.__repr__()
-        # Attach regime and acc_step per step from accumulation per_step (if path-aware).
+        # Attach regime, acc_step, and pre_reductions per step from accumulation
+        # per_step (if path-aware).
         if self.accumulation is not None:
             per_step = self.accumulation.per_step or (self.accumulation,)
-            for step, acc_step in zip(self._inner.steps, per_step, strict=False):
+            per_step_pre = (
+                self.accumulation.pre_reductions_per_step
+                if self.accumulation.pre_reductions_per_step
+                else ((),) * len(per_step)
+            )
+            for step, acc_step, pre_red in zip(
+                self._inner.steps, per_step, per_step_pre, strict=False
+            ):
                 if acc_step.per_component:
                     object.__setattr__(
                         step, "_regime", acc_step.per_component[0].regime_id
@@ -125,6 +152,7 @@ class FlopscopePathInfo:
                 else:
                     object.__setattr__(step, "_regime", "-")
                 object.__setattr__(step, "_acc_step", acc_step)
+                object.__setattr__(step, "pre_reductions", pre_red)
         return fmt()
 
     def check_consistency(self) -> bool:

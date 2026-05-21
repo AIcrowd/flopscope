@@ -23,6 +23,27 @@ from ._ladder import (
 from ._output_orbit import restrict_stabilizer_to_positions
 
 
+def _build_symmetric_proxy(shape, sym):
+    """Build a proxy operand for reduction_accumulation_cost.
+
+    reduction_accumulation_cost only inspects shape + symmetry on its input;
+    a numpy.empty(shape) wrapped in a SymmetricTensor (if sym is non-None) is
+    sufficient and avoids materializing actual values.  We bypass validation
+    (as_symmetric would raise for uninitialized data) since we only need the
+    symmetry metadata, not correct tensor values.  Used by per-step
+    pre-reduction detection to compute Tier-1 reduction cost without owning
+    the operand data itself.
+    """
+    import numpy as np
+
+    arr = np.empty(shape)
+    if sym is None:
+        return arr
+    from flopscope._symmetric import SymmetricTensor
+
+    return SymmetricTensor(arr, symmetry=sym)
+
+
 def compute_step_cost_from_joint_group(
     joint_group: object,
     v_labels: tuple[str, ...],
@@ -221,6 +242,7 @@ def run_ladder_per_component(
 
 import warnings
 
+from flopscope._opt_einsum._contract import PreReduction
 from flopscope.errors import CostFallbackWarning
 
 
@@ -245,6 +267,9 @@ class AccumulationCost:
     # NEW: path-aware decomposition. Empty for k<=2 (no path walked).
     per_step: tuple[AccumulationCost, ...] = ()
     path: tuple[tuple[int, ...], ...] | None = None
+
+    # Sprint 3 (#55): per-step pre-reductions, one tuple per step (empty when no isolation).
+    pre_reductions_per_step: tuple[tuple[PreReduction, ...], ...] = ()
 
     def describe(self) -> dict:
         """Human-readable + LaTeX summary, built on demand."""
@@ -556,6 +581,7 @@ def _walk_path_and_aggregate(
     from ._cache import get_accumulation_cost_cached
 
     per_step_costs: list[AccumulationCost] = []
+    pre_reductions_per_step: list[tuple[PreReduction, ...]] = []
     for step_idx, step in enumerate(path_info.steps):
         step_subscript = step.subscript
         if "->" in step_subscript:
@@ -584,15 +610,169 @@ def _walk_path_and_aggregate(
             )  # descending = subscript order
         ]
 
+        # ── Sprint 3 (#55): per-binary-step pre-reduction of isolated summed labels ──
+        # When a label is summed in this step AND appears in only one input, pre-reduce
+        # that operand along the isolated axis BEFORE the main contraction.  Mirrors
+        # PyTorch's sumproduct_pair.
+        from flopscope._accumulation._public import (
+            _per_op_sym_fingerprint,
+            reduction_accumulation_cost,
+        )
+        from flopscope._symmetry_utils import reduce_group
+
+        # Per-input symmetries for this step (pre-reduction).
+        # For single-original-operand inputs (no upstream contraction), the input's
+        # symmetry is per_op_symmetries[only_original].  Multi-original inputs
+        # (intermediates) have no declared per-input symmetry.
+        def _input_sym(subset):
+            if len(subset) == 1:
+                only = next(iter(subset))
+                return per_op_symmetries[only]
+            return None
+
+        left_sym_pre = _input_sym(step_input_subsets[0])
+        right_sym_pre = (
+            _input_sym(step_input_subsets[1]) if len(step_input_subsets) > 1 else None
+        )
+
+        # Detect isolated summed labels.
+        summed_set = set("".join(step_input_parts)) - set(step_output)
+        left_labels_set = (
+            set(step_input_parts[0]) if len(step_input_parts) > 0 else set()
+        )
+        right_labels_set = (
+            set(step_input_parts[1]) if len(step_input_parts) > 1 else set()
+        )
+        left_only_summed = (left_labels_set & summed_set) - right_labels_set
+        right_only_summed = (right_labels_set & summed_set) - left_labels_set
+
+        pre_reductions_for_step: list[PreReduction] = []
+        pre_reduce_cost_total = 0
+
+        # Defaults: no rewrite.
+        effective_left_part = step_input_parts[0]
+        effective_right_part = step_input_parts[1] if len(step_input_parts) > 1 else ""
+        effective_left_shape = step_shapes[0]
+        effective_right_shape = step_shapes[1] if len(step_shapes) > 1 else ()
+        effective_left_sym = left_sym_pre
+        effective_right_sym = right_sym_pre
+
+        # Pre-reduce left operand
+        if left_only_summed and len(step_input_parts) > 0:
+            reduce_axes = tuple(
+                i for i, c in enumerate(step_input_parts[0]) if c in left_only_summed
+            )
+            left_proxy = _build_symmetric_proxy(step_shapes[0], left_sym_pre)
+            reduce_cost = reduction_accumulation_cost(
+                left_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in step_input_parts[0] if c not in left_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(step_shapes[0]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                left_sym_pre,
+                ndim=len(step_input_parts[0]),
+                axis=reduce_axes,
+            )
+
+            effective_left_part = surviving_subscript
+            effective_left_shape = surviving_shape
+            effective_left_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=0,
+                    removed_labels=tuple(sorted(left_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Pre-reduce right operand
+        if right_only_summed and len(step_input_parts) > 1:
+            reduce_axes = tuple(
+                i for i, c in enumerate(step_input_parts[1]) if c in right_only_summed
+            )
+            right_proxy = _build_symmetric_proxy(step_shapes[1], right_sym_pre)
+            reduce_cost = reduction_accumulation_cost(
+                right_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in step_input_parts[1] if c not in right_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(step_shapes[1]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                right_sym_pre,
+                ndim=len(step_input_parts[1]),
+                axis=reduce_axes,
+            )
+
+            effective_right_part = surviving_subscript
+            effective_right_shape = surviving_shape
+            effective_right_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=1,
+                    removed_labels=tuple(sorted(right_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Override step_input_parts / step_shapes to the EFFECTIVE versions so the
+        # downstream existing code (per-input fingerprint + cache lookup + Cat C
+        # joint-Burnside + V-only fallback) sees the rewritten step.
+        if pre_reductions_for_step:
+            if len(step_input_parts) >= 2:
+                step_input_parts = [effective_left_part, effective_right_part]
+                step_shapes = [effective_left_shape, effective_right_shape]
+            else:
+                step_input_parts = [effective_left_part]
+                step_shapes = [effective_left_shape]
+
         # Build per-step sym_fingerprint by querying the oracle per input subset.
         # Pass the step subscript so generators can be converted from oracle
         # label-sorted space to tensor-axis space matching the step subscript.
-        step_sym_fp: tuple = tuple(
-            _subset_sym_fingerprint(subset, sub_part)
-            for subset, sub_part in zip(
-                step_input_subsets, step_input_parts, strict=False
-            )
-        )
+        # Override per-input fingerprints when pre-reduction occurred, since the
+        # effective symmetry differs from what _subset_sym_fingerprint would compute
+        # by querying the oracle on the (unreduced) subset.
+        step_sym_fp_list = []
+        for idx, (subset, sub_part) in enumerate(
+            zip(step_input_subsets, step_input_parts, strict=False)
+        ):
+            if idx == 0 and left_only_summed:
+                step_sym_fp_list.append(
+                    _per_op_sym_fingerprint(effective_left_sym)
+                    if effective_left_sym is not None
+                    else None
+                )
+            elif idx == 1 and right_only_summed:
+                step_sym_fp_list.append(
+                    _per_op_sym_fingerprint(effective_right_sym)
+                    if effective_right_sym is not None
+                    else None
+                )
+            else:
+                step_sym_fp_list.append(_subset_sym_fingerprint(subset, sub_part))
+        step_sym_fp: tuple = tuple(step_sym_fp_list)
 
         # Derive the step's identity_pattern from the original expression's
         # identity_pattern. A step identity exists only when BOTH inputs are:
@@ -774,7 +954,25 @@ def _walk_path_and_aggregate(
                         except Exception:
                             pass  # Burnside failed (e.g. dimino budget); keep original
 
+        # Sprint 3: step total = pre_reductions + residual contraction
+        if pre_reduce_cost_total > 0:
+            step_cost = AccumulationCost(
+                total=step_cost.total + pre_reduce_cost_total,
+                mu=step_cost.mu,
+                alpha=step_cost.alpha,
+                m_total=step_cost.m_total,
+                dense_baseline=step_cost.dense_baseline,
+                num_terms=step_cost.num_terms,
+                per_component=step_cost.per_component,
+                fallback_used=step_cost.fallback_used,
+                unavailable_components=step_cost.unavailable_components,
+                unavailable_reason=step_cost.unavailable_reason,
+                per_step=step_cost.per_step,
+                path=step_cost.path,
+            )
+
         per_step_costs.append(step_cost)
+        pre_reductions_per_step.append(tuple(pre_reductions_for_step))
 
         # Update current_subsets: remove contracted inputs (highest index first
         # to preserve lower indices), then append the merged output subset.
@@ -820,6 +1018,7 @@ def _walk_path_and_aggregate(
         unavailable_reason=unavailable_reason,
         per_step=tuple(per_step_costs),
         path=tuple(tuple(p) for p in path_info.path),
+        pre_reductions_per_step=tuple(pre_reductions_per_step),
     )
 
 
@@ -953,6 +1152,157 @@ def compute_accumulation_cost(
             dense_baseline=dense_baseline,
             full_expression_component_costs=component_costs,
         )
+
+    # ── Sprint 3 (#55): 2-op case — pre-reduce isolated summed labels ────────
+    # For binary (2-operand) einsums, detect isolated summed labels, compute
+    # pre-reduction costs, then re-evaluate the RESIDUAL contraction on the
+    # reduced subscripts.  Total = pre_reduction_costs + residual_cost.
+    if num_ops == 2:
+        from flopscope._accumulation._public import (
+            _per_op_sym_fingerprint,
+            reduction_accumulation_cost,
+        )
+        from flopscope._symmetry_utils import reduce_group
+
+        input_parts_list = list(input_parts)
+        shapes_list = [tuple(s) for s in shapes]
+
+        summed_set = set("".join(input_parts_list)) - set(output_subscript)
+        left_labels_set = set(input_parts_list[0])
+        right_labels_set = set(input_parts_list[1])
+        left_only_summed = (left_labels_set & summed_set) - right_labels_set
+        right_only_summed = (right_labels_set & summed_set) - left_labels_set
+
+        pre_reductions_for_step: list[PreReduction] = []
+        pre_reduce_cost_total = 0
+
+        left_sym = per_op_symmetries[0] if per_op_symmetries else None
+        right_sym = per_op_symmetries[1] if per_op_symmetries else None
+
+        # Default effective values (no-op if no pre-reduction).
+        eff_left_part = input_parts_list[0]
+        eff_right_part = input_parts_list[1]
+        eff_left_shape = shapes_list[0]
+        eff_right_shape = shapes_list[1]
+        eff_left_sym = left_sym
+        eff_right_sym = right_sym
+
+        # Pre-reduce left operand
+        if left_only_summed:
+            reduce_axes = tuple(
+                i for i, c in enumerate(input_parts_list[0]) if c in left_only_summed
+            )
+            left_proxy = _build_symmetric_proxy(shapes_list[0], left_sym)
+            reduce_cost = reduction_accumulation_cost(
+                left_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in input_parts_list[0] if c not in left_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(shapes_list[0]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                left_sym,
+                ndim=len(input_parts_list[0]),
+                axis=reduce_axes,
+            )
+            eff_left_part = surviving_subscript
+            eff_left_shape = surviving_shape
+            eff_left_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=0,
+                    removed_labels=tuple(sorted(left_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Pre-reduce right operand
+        if right_only_summed:
+            reduce_axes = tuple(
+                i for i, c in enumerate(input_parts_list[1]) if c in right_only_summed
+            )
+            right_proxy = _build_symmetric_proxy(shapes_list[1], right_sym)
+            reduce_cost = reduction_accumulation_cost(
+                right_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in input_parts_list[1] if c not in right_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(shapes_list[1]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                right_sym,
+                ndim=len(input_parts_list[1]),
+                axis=reduce_axes,
+            )
+            eff_right_part = surviving_subscript
+            eff_right_shape = surviving_shape
+            eff_right_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=1,
+                    removed_labels=tuple(sorted(right_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        if pre_reductions_for_step:
+            # Compute residual cost on the REDUCED subscripts/shapes/symmetries.
+            from ._cache import get_accumulation_cost_cached
+
+            eff_canonical = f"{eff_left_part},{eff_right_part}->{output_subscript}"
+            eff_sym_fp = (
+                _per_op_sym_fingerprint(eff_left_sym)
+                if eff_left_sym is not None
+                else None,
+                _per_op_sym_fingerprint(eff_right_sym)
+                if eff_right_sym is not None
+                else None,
+            )
+            residual_cost = get_accumulation_cost_cached(
+                canonical_subscripts=eff_canonical,
+                input_parts=(eff_left_part, eff_right_part),
+                output_subscript=output_subscript,
+                shapes=(eff_left_shape, eff_right_shape),
+                sym_fingerprint=eff_sym_fp,
+                identity_pattern=identity_pattern,
+                partition_budget=partition_budget,
+            )
+            return AccumulationCost(
+                total=residual_cost.total + pre_reduce_cost_total,
+                mu=residual_cost.mu,
+                alpha=residual_cost.alpha,
+                m_total=residual_cost.m_total,
+                dense_baseline=dense_baseline,
+                num_terms=residual_cost.num_terms,
+                per_component=component_costs,
+                fallback_used=residual_cost.fallback_used,
+                unavailable_components=residual_cost.unavailable_components,
+                unavailable_reason=residual_cost.unavailable_reason,
+                per_step=residual_cost.per_step,
+                path=residual_cost.path,
+                pre_reductions_per_step=(tuple(pre_reductions_for_step),),
+            )
+
     return aggregate_einsum(
         component_costs=component_costs,
         num_terms=num_ops,
