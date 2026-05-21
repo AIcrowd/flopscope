@@ -634,100 +634,145 @@ def _walk_path_and_aggregate(
             partition_budget=partition_budget,
         )
 
-        # Sprint 1 Cat B: if the per-input fingerprint detected no savings
-        # (step_cost == dense FMA baseline), query the oracle for the merged
-        # subset's OUTPUT group.  This captures symmetry that arises from the
-        # global context (e.g. identical W matrices) but cannot be detected from
-        # the individual input subsets alone (e.g. when the input's b-c swap
-        # crosses the V/W boundary in this binary step).
+        # Sprint 2 Cat C: also compute joint-Burnside cost via the merged-subset
+        # oracle.  Cross-step identity-swap cases (e.g. §5(a) step 2 with shared
+        # operands across step boundaries) produce a joint group that strictly
+        # refines what per-input fingerprints can express.  When joint-Burnside
+        # gives a lower cost (and is valid: Regime 1, V preserved setwise),
+        # prefer it.
         #
-        # Discriminator: we apply the correction ONLY when step_cost equals the
-        # dense FMA cost — meaning per-input analysis found no savings.  This
-        # prevents double-counting in steps that already benefited from per-input
-        # symmetry reduction.
+        # Sprint 1 Cat B (fallback): when the joint group does not provide
+        # savings (e.g. when operand symmetry crosses the V/W boundary so
+        # V-preservation fails), fall back to the merged output group.
+        # This captures V-only symmetries (e.g. Wilson #6 step 1: S₂{b,c}
+        # on the intermediate propagates to S₂{c,j} in the output).
         if oracle is not None:
-            # Compute dense FMA for this binary step:
-            #   dense_fma = 2 * dense_baseline - output_dense
+            merged_subset_local = frozenset().union(*step_input_subsets)
+            ss_merged = oracle.sym(merged_subset_local)
+
+            # Step-local size dict (used by both paths).
             step_size_dict: dict[str, int] = {}
             for sub, shape in zip(step_input_parts, step_shapes, strict=False):
                 for char, sz in zip(sub, shape, strict=False):
                     step_size_dict[char] = sz
-            step_all_chars = set("".join(step_input_parts))
-            step_dense_baseline_val = math.prod(
-                step_size_dict.get(c, 1) for c in step_all_chars
-            )
-            step_output_dense = math.prod(step_size_dict.get(c, 1) for c in step_output)
-            step_dense_fma = 2 * step_dense_baseline_val - step_output_dense
 
-            if step_cost.total == step_dense_fma and step_dense_fma > 0:
-                # No savings detected; check global oracle's merged output group.
-                merged_subset_local = frozenset().union(*step_input_subsets)
-                try:
-                    ss_merged = oracle.sym(merged_subset_local)
+            # --- Cat C path: joint group ---
+            joint_group = ss_merged.joint
+            joint_improved = False
+            if joint_group is not None and joint_group.generators:
+                # V/W label tuples in canonical order (V first, then W).
+                v_labels_tup = tuple(step_output)
+                seen_w: set[str] = set()
+                w_labels_tup = tuple(
+                    c
+                    for sub in step_input_parts
+                    for c in sub
+                    if c not in v_labels_tup and not (c in seen_w or seen_w.add(c))
+                )
+                from flopscope._config import get_setting
+
+                joint_total = compute_step_cost_from_joint_group(
+                    joint_group=joint_group,
+                    v_labels=v_labels_tup,
+                    w_labels=w_labels_tup,
+                    sizes=step_size_dict,
+                    num_terms=len(step_input_parts),
+                    dimino_budget=int(get_setting("dimino_budget")),  # type: ignore[arg-type]
+                )
+                if joint_total is not None and joint_total < step_cost.total:
+                    # Joint-Burnside is strictly tighter (and valid Regime 1).
+                    step_cost = AccumulationCost(
+                        total=joint_total,
+                        mu=step_cost.mu,
+                        alpha=step_cost.alpha,
+                        m_total=step_cost.m_total,
+                        dense_baseline=step_cost.dense_baseline,
+                        num_terms=step_cost.num_terms,
+                        per_component=step_cost.per_component,
+                        fallback_used=step_cost.fallback_used,
+                        unavailable_components=step_cost.unavailable_components,
+                        unavailable_reason=step_cost.unavailable_reason,
+                        per_step=step_cost.per_step,
+                        path=step_cost.path,
+                    )
+                    joint_improved = True
+
+            # --- Cat B path: output group (fallback when joint didn't help) ---
+            # Applies only when per-input path found no savings (step_cost
+            # equals the dense FMA baseline) AND joint path didn't improve.
+            if not joint_improved:
+                step_all_chars = set("".join(step_input_parts))
+                step_dense_baseline_val = math.prod(
+                    step_size_dict.get(c, 1) for c in step_all_chars
+                )
+                step_output_dense = math.prod(
+                    step_size_dict.get(c, 1) for c in step_output
+                )
+                step_dense_fma = 2 * step_dense_baseline_val - step_output_dense
+
+                if step_cost.total == step_dense_fma and step_dense_fma > 0:
                     merged_output_grp = ss_merged.output if ss_merged else None
-                except Exception:
-                    merged_output_grp = None
 
-                if merged_output_grp is not None and merged_output_grp.generators:
-                    from flopscope._perm_group import _dimino
-                    from flopscope._perm_group import _PermutationCompat as _Perm
+                    if merged_output_grp is not None and merged_output_grp.generators:
+                        from flopscope._perm_group import _dimino
+                        from flopscope._perm_group import _PermutationCompat as _Perm
 
-                    # Convert oracle's label-sorted generators to tensor-axis
-                    # space for the step output subscript.
-                    labels = merged_output_grp._labels
-                    if labels is not None:
-                        char_to_axis = {c: i for i, c in enumerate(step_output)}
-                        label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
-                        axis_gens: list[_Perm] = []
-                        for gen in merged_output_grp.generators:
-                            arr = list(gen.array_form)
-                            axis_gen = list(range(len(step_output)))
-                            for ax, char in enumerate(step_output):
-                                if char in label_to_lpos:
-                                    lpos = label_to_lpos[char]
-                                    tgt = labels[arr[lpos]]
-                                    if tgt in char_to_axis:
-                                        axis_gen[ax] = char_to_axis[tgt]
-                            axis_gens.append(_Perm(axis_gen))
-                    else:
-                        axis_gens = list(merged_output_grp.generators)
+                        labels = merged_output_grp._labels
+                        if labels is not None:
+                            char_to_axis = {c: i for i, c in enumerate(step_output)}
+                            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+                            axis_gens: list[_Perm] = []
+                            for gen in merged_output_grp.generators:
+                                arr = list(gen.array_form)
+                                axis_gen = list(range(len(step_output)))
+                                for ax, char in enumerate(step_output):
+                                    if char in label_to_lpos:
+                                        lpos = label_to_lpos[char]
+                                        tgt = labels[arr[lpos]]
+                                        if tgt in char_to_axis:
+                                            axis_gen[ax] = char_to_axis[tgt]
+                                axis_gens.append(_Perm(axis_gen))
+                        else:
+                            axis_gens = list(merged_output_grp.generators)
 
-                    try:
-                        all_elems = _dimino(tuple(axis_gens))
-                        output_sizes = tuple(
-                            step_size_dict.get(c, 1) for c in step_output
-                        )
-                        corrected_orbits = size_aware_burnside(all_elems, output_sizes)
-                        if corrected_orbits < step_output_dense:
-                            # Orbit reduction found; compute corrected cost.
-                            step_w_chars = step_all_chars - set(step_output)
-                            step_w_size = (
-                                math.prod(
-                                    step_size_dict.get(c, 1) for c in step_w_chars
-                                )
-                                if step_w_chars
-                                else 1
+                        try:
+                            all_elems = _dimino(tuple(axis_gens))
+                            output_sizes = tuple(
+                                step_size_dict.get(c, 1) for c in step_output
                             )
-                            corrected_total = corrected_orbits * (2 * step_w_size - 1)
-                            if corrected_total < step_cost.total:
-                                # Replace step_cost total while preserving other fields.
-                                step_cost = AccumulationCost(
-                                    total=corrected_total,
-                                    mu=step_w_size * corrected_orbits
-                                    - corrected_orbits,
-                                    alpha=step_w_size * corrected_orbits,
-                                    m_total=step_w_size * corrected_orbits,
-                                    dense_baseline=step_dense_baseline_val,
-                                    num_terms=step_cost.num_terms,
-                                    per_component=step_cost.per_component,
-                                    fallback_used=step_cost.fallback_used,
-                                    unavailable_components=step_cost.unavailable_components,
-                                    unavailable_reason=step_cost.unavailable_reason,
-                                    per_step=step_cost.per_step,
-                                    path=step_cost.path,
+                            corrected_orbits = size_aware_burnside(
+                                all_elems, output_sizes
+                            )
+                            if corrected_orbits < step_output_dense:
+                                step_w_chars = step_all_chars - set(step_output)
+                                step_w_size = (
+                                    math.prod(
+                                        step_size_dict.get(c, 1) for c in step_w_chars
+                                    )
+                                    if step_w_chars
+                                    else 1
                                 )
-                    except Exception:
-                        pass  # Burnside failed (e.g. dimino budget); keep original
+                                corrected_total = corrected_orbits * (
+                                    2 * step_w_size - 1
+                                )
+                                if corrected_total < step_cost.total:
+                                    step_cost = AccumulationCost(
+                                        total=corrected_total,
+                                        mu=step_w_size * corrected_orbits
+                                        - corrected_orbits,
+                                        alpha=step_w_size * corrected_orbits,
+                                        m_total=step_w_size * corrected_orbits,
+                                        dense_baseline=step_dense_baseline_val,
+                                        num_terms=step_cost.num_terms,
+                                        per_component=step_cost.per_component,
+                                        fallback_used=step_cost.fallback_used,
+                                        unavailable_components=step_cost.unavailable_components,
+                                        unavailable_reason=step_cost.unavailable_reason,
+                                        per_step=step_cost.per_step,
+                                        path=step_cost.path,
+                                    )
+                        except Exception:
+                            pass  # Burnside failed (e.g. dimino budget); keep original
 
         per_step_costs.append(step_cost)
 
