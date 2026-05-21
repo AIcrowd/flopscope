@@ -80,24 +80,23 @@ def test_4cycle_steps_01_correct_regression_guard():
     assert info.steps[1].flop_cost == 40, info.steps[1].flop_cost
 
 
-def test_4cycle_step2_partial_fix_per_input_groups_only():
+def test_4cycle_step2_full_close_after_sprint2():
     """§5(a) step 2: lik,jki->ijkl.  Both inputs have S₂{i,k} from steps 0/1.
 
-    After Sprint 1 (per-input groups threaded), the cost should drop from
-    256 (current) to 160 (Burnside on (i,j,k,l) under S₂{i,k} on each input
-    → orbit count 160 for n=4).
+    Trajectory:
+        pre-Sprint-1: 256 (dense, no per-step symmetry threading)
+        post-Sprint-1: 160 (per-input S₂{i,k} threaded; orbit count under
+                            S₂{i,k} on each input is 160 for n=4)
+        post-Sprint-2: 55  (merged-subset D₄ joint group sees all 4 original
+                            S's are identical; orbit count under D₄ is 55)
 
-    Sprint 2 (Cat C) will further drop to 55 (D₄ orbits) by recognizing
-    that both intermediates trace back to the same original S, but that's
-    explicitly out of scope here.  When Sprint 2 lands and this test breaks,
-    update the assertion to 55 with the test renamed accordingly.
+    Sprint 2 Cat C closes the remaining gap via the joint-Burnside path.
     """
     S = fnp.zeros((4, 4))  # auto-tagged S₂
     info = _einsum_path_info("ij,jk,kl,li->ijkl", S, S, S, S)
     cost = info.steps[2].flop_cost
-    assert cost == 160, (
-        f"step 2 cost {cost} should be 160 (Sprint 1 target); "
-        "becomes 55 in Sprint 2 (Cat C joint-identity)"
+    assert cost == 55, (
+        f"step 2 cost {cost} should be 55 (Sprint 2 Cat C joint-identity)"
     )
 
 
