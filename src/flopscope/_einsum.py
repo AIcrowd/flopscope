@@ -317,16 +317,58 @@ def _infer_pathless_output_symmetry(operands, input_parts, output_subscript: str
     return _relabel_group_to_output(group, source_labels, output_subscript)
 
 
+def _infer_multi_operand_output_symmetry(path_info, output_subscript: str):
+    """Infer the output tensor's symmetry from the path walker's last step.
+
+    Returns the SymmetryGroup acting on the einsum's output_subscript labels,
+    or None if no symmetry was derived or relabel fails.
+
+    The path walker's oracle stores `output_group` on each StepInfo with axes
+    indexing the *step's* output subscript.  We must relabel those axes to
+    positions in the *einsum's* output_subscript, which may differ (opt_einsum
+    can permute labels for BLAS-friendly orientation).
+    """
+    if path_info is None:
+        return None
+    steps = getattr(path_info, "steps", None)
+    if not steps:
+        return None
+    last = steps[-1]
+    group = getattr(last, "output_group", None)
+    if group is None:
+        return None
+    if not output_subscript:
+        return None
+    # Derive the step's output labels from its subscript string ("lhs->rhs").
+    step_subscript = getattr(last, "subscript", "")
+    if "->" not in step_subscript:
+        return None
+    _, step_out = step_subscript.split("->", 1)
+    if not step_out:
+        return None
+    # group.axes are positions in step_out; map each to its label, then relabel
+    # to positions in output_subscript.
+    axes = group.axes if group.axes is not None else tuple(range(group.degree))
+    try:
+        source_labels = tuple(step_out[ax] for ax in axes)
+    except IndexError:
+        return None
+    return _relabel_group_to_output(group, source_labels, output_subscript)
+
+
 def _resolve_output_symmetry(
     *,
     symmetry,
     operands,
     input_parts,
     output_subscript: str,
+    path_info=None,
 ):
     if symmetry is not None:
         return normalize_symmetry_input(symmetry, ndim=len(output_subscript))
-    return _infer_pathless_output_symmetry(operands, input_parts, output_subscript)
+    if len(operands) == 1:
+        return _infer_pathless_output_symmetry(operands, input_parts, output_subscript)
+    return _infer_multi_operand_output_symmetry(path_info, output_subscript)
 
 
 @_counted_wrapper
@@ -422,6 +464,7 @@ def einsum(
         operands=operands,
         input_parts=input_parts,
         output_subscript=output_subscript,
+        path_info=path_info,
     )
     effective_out_symmetry = target_symmetry
     if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
