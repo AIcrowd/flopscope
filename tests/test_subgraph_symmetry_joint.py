@@ -26,6 +26,7 @@ def test_subset_symmetry_joint_for_4_identical_S2():
     )
     ss = oracle.sym(frozenset({0, 1, 2, 3}))
     assert ss.joint is not None
+    assert ss.output is not None
     # Joint must equal output when V = full label set (no W).
     output_order = len(list(ss.output.elements()))
     joint_order = len(list(ss.joint.elements()))
