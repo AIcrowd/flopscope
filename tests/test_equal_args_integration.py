@@ -115,11 +115,14 @@ class TestTripleProductInduction:
         n = 10
         X = np.ones((n, n))
         _, info = fnp.einsum_path("ij,ik,il->jkl", X, X, X)
-        # Updated for Task 17b: SubgraphSymmetryOracle now threads symmetry across
-        # binary steps (was conservative dense-intermediate value of 20000).
-        # With oracle: step1=550 (ij,ik->jk with S2 inherited) + step2=10450 (jk,il->jkl).
-        # Total = 11000 (tighter symmetry-aware path cost).
-        assert info.optimized_cost == 11000
+        # Trajectory:
+        #   pre-Sprint-1: 20000 (dense intermediate, no symmetry threading)
+        #   post-Sprint-1: 11000 (per-input S₂ inherited; step 0 = 550, step 1 = 10450)
+        #   post-Sprint-2: 4730  (joint-Burnside on the merged subset captures the
+        #                          full S₃ across all 3 identical X's; step 0 = 550,
+        #                          step 1 = 4180 = 2·M − O with M = 2200, O = 220)
+        # Sprint 2 reaches joint S₃{j,k,l} on the output, dropping step 1 by ~6,270.
+        assert info.optimized_cost == 4730
         acc = info.accumulation
         assert acc.m_total < acc.dense_baseline  # savings from S3
 
