@@ -62,6 +62,13 @@ class FlopscopePathInfo:
                         step.pre_reductions = pre_red
                     except (AttributeError, TypeError):
                         pass
+                    # Sprint 4: thread cost_source from AccumulationCost to
+                    # StepInfo so tests / renderers can inspect the winning
+                    # category (per-input / joint-burnside / output-burnside).
+                    try:
+                        step.cost_source = acc_step.cost_source
+                    except (AttributeError, TypeError):
+                        pass
             elif len(steps) == 1:
                 # Bug B fix: single-step (2-op) einsum — aggregate_einsum returns a
                 # flat AccumulationCost with no per_step entries.  The single step's
@@ -79,6 +86,18 @@ class FlopscopePathInfo:
                         ]
                     except (AttributeError, TypeError, IndexError):
                         pass
+                # Sprint 4: thread cost_source for single-step einsums.
+                # Single-step (2-op) path goes through aggregate_einsum
+                # directly, which always uses per-input (Cat A). Default to
+                # "per-input" when the aggregate cost_source is None and the
+                # cost is not a fallback.
+                try:
+                    src = accumulation.cost_source
+                    if src is None and not accumulation.fallback_used:
+                        src = "per-input"
+                    steps[0].cost_source = src
+                except (AttributeError, TypeError):
+                    pass
 
             # After syncing step flop_cost values, recompute inner.optimized_cost,
             # inner.naive_cost (dense baseline), and inner.speedup so the renderer
@@ -153,6 +172,9 @@ class FlopscopePathInfo:
                     object.__setattr__(step, "_regime", "-")
                 object.__setattr__(step, "_acc_step", acc_step)
                 object.__setattr__(step, "pre_reductions", pre_red)
+                # Sprint 4: thread cost_source from AccumulationCost to StepInfo
+                # so tests / renderers can inspect the winning category.
+                object.__setattr__(step, "cost_source", acc_step.cost_source)
         return fmt()
 
     def check_consistency(self) -> bool:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace as _dc_replace
 
 from ._burnside import size_aware_burnside
 from ._components import Component
@@ -819,29 +820,30 @@ def _walk_path_and_aggregate(
             partition_budget=partition_budget,
         )
 
-        # Sprint 2 Cat C: also compute joint-Burnside cost via the merged-subset
-        # oracle.  Cross-step identity-swap cases (e.g. §5(a) step 2 with shared
-        # operands across step boundaries) produce a joint group that strictly
-        # refines what per-input fingerprints can express.  When joint-Burnside
-        # gives a lower cost (and is valid: Regime 1, V preserved setwise),
-        # prefer it.
+        # Sprint 4: candidate-list cost selection.
+        # Compute all valid Burnside-based candidates and pick the min.
         #
-        # Sprint 1 Cat B (fallback): when the joint group does not provide
-        # savings (e.g. when operand symmetry crosses the V/W boundary so
-        # V-preservation fails), fall back to the merged output group.
-        # This captures V-only symmetries (e.g. Wilson #6 step 1: S₂{b,c}
-        # on the intermediate propagates to S₂{c,j} in the output).
+        # - Cat A (per-input wreath/sigma): always valid, baseline (step_cost).
+        # - Cat B (output-orbit Burnside): valid when merged_output_group is
+        #   non-trivial; formula ``O_out · (2·W − 1)``. Previously gated to
+        #   fire only when Cat A found no savings; now competes unconditionally.
+        # - Cat C (joint-Burnside on V ∪ W): valid in Regime 1 with V preserved
+        #   setwise; via compute_step_cost_from_joint_group().
+        #
+        # The winning category is threaded into AccumulationCost.cost_source.
+        candidates: list[tuple[AccumulationCost, str]] = [(step_cost, "per-input")]
+
         if oracle is not None:
             merged_subset_local = frozenset().union(*step_input_subsets)
             ss_merged = oracle.sym(merged_subset_local)
 
-            # Step-local size dict (used by both paths).
+            # Step-local size dict (used by both Cat B and Cat C).
             step_size_dict: dict[str, int] = {}
             for sub, shape in zip(step_input_parts, step_shapes, strict=False):
                 for char, sz in zip(sub, shape, strict=False):
                     step_size_dict[char] = sz
 
-            # --- Cat C path: joint group ---
+            # --- Cat C candidate: joint group ---
             joint_group = ss_merged.joint
             # Sprint 3 (#55): project joint group to surviving labels when
             # pre-reduction removed labels from this step's subscripts.
@@ -873,7 +875,6 @@ def _walk_path_and_aggregate(
                                 joint_group._labels = new_labels
                             if joint_group.order() <= 1:
                                 joint_group = None
-            joint_improved = False
             if joint_group is not None and joint_group.generators:
                 # V/W label tuples in canonical order (V first, then W).
                 v_labels_tup = tuple(step_output)
@@ -894,9 +895,8 @@ def _walk_path_and_aggregate(
                     num_terms=len(step_input_parts),
                     dimino_budget=int(get_setting("dimino_budget")),  # type: ignore[arg-type]
                 )
-                if joint_total is not None and joint_total < step_cost.total:
-                    # Joint-Burnside is strictly tighter (and valid Regime 1).
-                    step_cost = AccumulationCost(
+                if joint_total is not None:
+                    joint_cost = AccumulationCost(
                         total=joint_total,
                         mu=step_cost.mu,
                         alpha=step_cost.alpha,
@@ -910,100 +910,82 @@ def _walk_path_and_aggregate(
                         per_step=step_cost.per_step,
                         path=step_cost.path,
                     )
-                    joint_improved = True
+                    candidates.append((joint_cost, "joint-burnside"))
 
-            # --- Cat B path: output group (fallback when joint didn't help) ---
-            # Applies only when per-input path found no savings (step_cost
-            # equals the dense FMA baseline) AND joint path didn't improve.
-            if not joint_improved:
-                step_all_chars = set("".join(step_input_parts))
-                step_dense_baseline_val = math.prod(
-                    step_size_dict.get(c, 1) for c in step_all_chars
-                )
-                step_output_dense = math.prod(
-                    step_size_dict.get(c, 1) for c in step_output
-                )
-                step_dense_fma = 2 * step_dense_baseline_val - step_output_dense
+            # --- Cat B candidate: output-orbit Burnside (UNCONDITIONAL) ---
+            # Previously fallback-only (fires only when Cat A == dense FMA);
+            # now competes with Cat A and Cat C in the candidate list.
+            step_all_chars = set("".join(step_input_parts))
+            step_dense_baseline_val = math.prod(
+                step_size_dict.get(c, 1) for c in step_all_chars
+            )
+            step_output_dense = math.prod(step_size_dict.get(c, 1) for c in step_output)
+            merged_output_grp = ss_merged.output if ss_merged else None
+            if merged_output_grp is not None and merged_output_grp.generators:
+                from flopscope._perm_group import _dimino
+                from flopscope._perm_group import _PermutationCompat as _Perm
 
-                if step_cost.total == step_dense_fma and step_dense_fma > 0:
-                    merged_output_grp = ss_merged.output if ss_merged else None
+                labels = merged_output_grp._labels
+                if labels is not None:
+                    char_to_axis = {c: i for i, c in enumerate(step_output)}
+                    label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+                    axis_gens: list[_Perm] = []
+                    for gen in merged_output_grp.generators:
+                        arr = list(gen.array_form)
+                        axis_gen = list(range(len(step_output)))
+                        for ax, char in enumerate(step_output):
+                            if char in label_to_lpos:
+                                lpos = label_to_lpos[char]
+                                tgt = labels[arr[lpos]]
+                                if tgt in char_to_axis:
+                                    axis_gen[ax] = char_to_axis[tgt]
+                        axis_gens.append(_Perm(axis_gen))
+                else:
+                    axis_gens = list(merged_output_grp.generators)
 
-                    if merged_output_grp is not None and merged_output_grp.generators:
-                        from flopscope._perm_group import _dimino
-                        from flopscope._perm_group import _PermutationCompat as _Perm
-
-                        labels = merged_output_grp._labels
-                        if labels is not None:
-                            char_to_axis = {c: i for i, c in enumerate(step_output)}
-                            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
-                            axis_gens: list[_Perm] = []
-                            for gen in merged_output_grp.generators:
-                                arr = list(gen.array_form)
-                                axis_gen = list(range(len(step_output)))
-                                for ax, char in enumerate(step_output):
-                                    if char in label_to_lpos:
-                                        lpos = label_to_lpos[char]
-                                        tgt = labels[arr[lpos]]
-                                        if tgt in char_to_axis:
-                                            axis_gen[ax] = char_to_axis[tgt]
-                                axis_gens.append(_Perm(axis_gen))
-                        else:
-                            axis_gens = list(merged_output_grp.generators)
-
-                        try:
-                            all_elems = _dimino(tuple(axis_gens))
-                            output_sizes = tuple(
-                                step_size_dict.get(c, 1) for c in step_output
+                try:
+                    all_elems = _dimino(tuple(axis_gens))
+                    output_sizes = tuple(step_size_dict.get(c, 1) for c in step_output)
+                    corrected_orbits = size_aware_burnside(all_elems, output_sizes)
+                    if 0 < corrected_orbits < step_output_dense:
+                        step_w_chars = step_all_chars - set(step_output)
+                        step_w_size = (
+                            math.prod(step_size_dict.get(c, 1) for c in step_w_chars)
+                            if step_w_chars
+                            else 1
+                        )
+                        corrected_total = corrected_orbits * (2 * step_w_size - 1)
+                        if corrected_total > 0:
+                            cat_b_cost = AccumulationCost(
+                                total=corrected_total,
+                                mu=step_w_size * corrected_orbits - corrected_orbits,
+                                alpha=step_w_size * corrected_orbits,
+                                m_total=step_w_size * corrected_orbits,
+                                dense_baseline=step_dense_baseline_val,
+                                num_terms=step_cost.num_terms,
+                                per_component=step_cost.per_component,
+                                fallback_used=step_cost.fallback_used,
+                                unavailable_components=step_cost.unavailable_components,
+                                unavailable_reason=step_cost.unavailable_reason,
+                                per_step=step_cost.per_step,
+                                path=step_cost.path,
                             )
-                            corrected_orbits = size_aware_burnside(
-                                all_elems, output_sizes
-                            )
-                            if corrected_orbits < step_output_dense:
-                                step_w_chars = step_all_chars - set(step_output)
-                                step_w_size = (
-                                    math.prod(
-                                        step_size_dict.get(c, 1) for c in step_w_chars
-                                    )
-                                    if step_w_chars
-                                    else 1
-                                )
-                                corrected_total = corrected_orbits * (
-                                    2 * step_w_size - 1
-                                )
-                                if corrected_total < step_cost.total:
-                                    step_cost = AccumulationCost(
-                                        total=corrected_total,
-                                        mu=step_w_size * corrected_orbits
-                                        - corrected_orbits,
-                                        alpha=step_w_size * corrected_orbits,
-                                        m_total=step_w_size * corrected_orbits,
-                                        dense_baseline=step_dense_baseline_val,
-                                        num_terms=step_cost.num_terms,
-                                        per_component=step_cost.per_component,
-                                        fallback_used=step_cost.fallback_used,
-                                        unavailable_components=step_cost.unavailable_components,
-                                        unavailable_reason=step_cost.unavailable_reason,
-                                        per_step=step_cost.per_step,
-                                        path=step_cost.path,
-                                    )
-                        except Exception:
-                            pass  # Burnside failed (e.g. dimino budget); keep original
+                            candidates.append((cat_b_cost, "output-burnside"))
+                except Exception:
+                    pass  # dimino budget exceeded or other; skip Cat B
 
-        # Sprint 3: step total = pre_reductions + residual contraction
+        # Pick the tightest candidate.
+        step_cost, cost_source_chosen = min(candidates, key=lambda x: x[0].total)
+
+        # Stamp cost_source onto the winning AccumulationCost (frozen
+        # dataclass → use dataclasses.replace).
+        step_cost = _dc_replace(step_cost, cost_source=cost_source_chosen)
+
+        # Sprint 3: step total = pre_reductions + residual contraction.
+        # Runs AFTER candidate selection so the chosen cost_source is preserved.
         if pre_reduce_cost_total > 0:
-            step_cost = AccumulationCost(
-                total=step_cost.total + pre_reduce_cost_total,
-                mu=step_cost.mu,
-                alpha=step_cost.alpha,
-                m_total=step_cost.m_total,
-                dense_baseline=step_cost.dense_baseline,
-                num_terms=step_cost.num_terms,
-                per_component=step_cost.per_component,
-                fallback_used=step_cost.fallback_used,
-                unavailable_components=step_cost.unavailable_components,
-                unavailable_reason=step_cost.unavailable_reason,
-                per_step=step_cost.per_step,
-                path=step_cost.path,
+            step_cost = _dc_replace(
+                step_cost, total=step_cost.total + pre_reduce_cost_total
             )
 
         per_step_costs.append(step_cost)
