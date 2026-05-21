@@ -11,9 +11,10 @@ Migration note (direct-event accumulation model with off-by-one correction):
   is a free copy. For a 2-term expression with S2 savings (output orbits = 55):
   cost = 1 * 550 + 550 - 55 = 1045.
 
-  Output auto-tagging as SymmetricTensor has also been removed (the oracle that
-  inferred output symmetry from equal-operand detection is gone). Results are plain
-  FlopscopeArrays; use flops.as_symmetric() explicitly if you need the tag.
+  Sprint 1 Cat A re-enables output auto-tagging as SymmetricTensor via the
+  path-walker's SubgraphSymmetryOracle.  For multi-operand einsum with identical
+  operands the oracle infers output symmetry automatically; use
+  flops.as_symmetric() only when the oracle cannot infer it.
 """
 
 import numpy as np
@@ -54,7 +55,7 @@ class TestGramMatrixInduction:
         assert acc.m_total == acc.dense_baseline  # no savings
 
     def test_einsum_numerically_correct(self):
-        """The gram matrix result is numerically correct."""
+        """The gram matrix result is numerically correct and tagged S₂."""
         X = np.arange(1.0, 17.0).reshape(4, 4)
 
         with BudgetContext(flop_budget=10**8, quiet=True):
@@ -62,9 +63,12 @@ class TestGramMatrixInduction:
 
         expected = np.einsum("ij,ik->jk", X, X)
         np.testing.assert_allclose(result, expected, rtol=1e-10)
-        # The accumulation model detects savings but does NOT auto-tag output
-        # as SymmetricTensor (the oracle that did that has been removed).
-        assert not isinstance(result, SymmetricTensor)
+        # Sprint 1 Cat A: multi-operand einsum auto-tags output symmetry via
+        # the path-walker's SubgraphSymmetryOracle.  X @ X.T for identical X
+        # is provably symmetric, so the result is tagged S₂.
+        assert isinstance(result, SymmetricTensor)
+        assert len(list(result.symmetry.elements())) == 2
+        assert result.symmetry.axes == (0, 1)
 
     def test_einsum_with_plain_out_preserves_output_identity(self):
         X = np.arange(1.0, 17.0).reshape(4, 4)
