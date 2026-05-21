@@ -116,6 +116,17 @@ class StepInfo:
     to the contraction itself (mirroring PyTorch's ``sumproduct_pair``
     optimization).  Empty for all existing steps — populated by Task 4."""
 
+    cost_source: str | None = None
+    """Which cost category produced ``flop_cost`` (Sprint 4).
+
+    One of ``"per-input"`` (Cat A wreath/sigma), ``"joint-burnside"`` (Cat C
+    on the merged-subset joint group), or ``"output-burnside"`` (Cat B on
+    the merged output group's orbit count).  ``None`` only on stale
+    pre-Sprint-4 instances.
+
+    Surfaced by the renderer for transparency ("why this number?") and used
+    by regression tests to pin which category was selected."""
+
     @property
     def flop_count(self) -> int:
         """Alias for ``flop_cost`` (adapter compatibility)."""

@@ -271,6 +271,11 @@ class AccumulationCost:
     # Sprint 3 (#55): per-step pre-reductions, one tuple per step (empty when no isolation).
     pre_reductions_per_step: tuple[tuple[PreReduction, ...], ...] = ()
 
+    # Sprint 4: which cost category produced this step's total ("per-input",
+    # "joint-burnside", or "output-burnside"). None for aggregate (multi-step)
+    # AccumulationCost objects and pre-Sprint-4 stale instances.
+    cost_source: str | None = None
+
     def describe(self) -> dict:
         """Human-readable + LaTeX summary, built on demand."""
         from ._cost_descriptions import describe_total
