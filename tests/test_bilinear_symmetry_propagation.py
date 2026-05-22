@@ -214,3 +214,18 @@ def test_inner_sym_self_matches_einsum_1d():
         with flopscope.namespace("ein"):
             y = fnp.einsum("i,i->", v, v)
     assert _flops(bc, "in") == _flops(bc, "ein")
+
+
+# --- vdot (Task 8) -------------------------------------------------------
+
+def test_vdot_sym_self_matches_einsum():
+    """vdot(v, v) cost matches einsum('i,i->', v, v)."""
+    n = 8
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        v = fnp.array(rs.randn(n))
+        with flopscope.namespace("vd"):
+            x = fnp.vdot(v, v)
+        with flopscope.namespace("ein"):
+            y = fnp.einsum("i,i->", v, v)
+    assert _flops(bc, "vd") == _flops(bc, "ein")

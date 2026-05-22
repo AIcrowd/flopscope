@@ -869,7 +869,7 @@ class TestCustomOps:
         with BudgetContext(flop_budget=10**6) as budget:
             result = vdot(a, b)
         assert numpy.isclose(result, 32.0)
-        assert budget.flops_used == 3
+        assert budget.flops_used == 5  # einsum "i,i->": 2*n-1 = 5 for n=3
 
     def test_tensordot_int_axes(self):
         a = numpy.ones((3, 4, 5))

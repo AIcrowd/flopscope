@@ -2102,12 +2102,19 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    cost = a.size
+    from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+    a_flat = a.ravel() if a.ndim != 1 else a
+    b_flat = b.ravel() if b.ndim != 1 else b
+    info = _resolve_cost_and_output_symmetry("i,i->", a_flat, b_flat)
+    cost = info.accumulation.total
+    canonical_subs = info.canonical_subscripts
     with budget.deduct(
-        "vdot", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "vdot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(_np.vdot, _to_base_ndarray(a), _to_base_ndarray(b))
-    return result  # type: ignore[return-value]  # wrapped at fnp.vdot import time
+    # vdot returns a scalar, never a SymmetricTensor.
+    return result  # type: ignore[return-value]
 
 
 attach_docstring(vdot, _np.vdot, "counted_custom", "size of input FLOPs")
