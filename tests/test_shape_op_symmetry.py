@@ -157,3 +157,40 @@ class TestTransportSplit:
         # dsplit on (3, 3, 6) splits along axis 2 (outside block) -> preserves.
         result = transport_dsplit(G, input_shape=(3, 3, 6))
         assert result is not None and set(result.axes) == {0, 1}
+
+
+class TestTransportRepeatRoll:
+    def test_repeat_outside_block_preserves(self):
+        from flopscope._symmetry_transport import transport_repeat
+        G = _sym(0, 1)
+        result = transport_repeat(G, input_shape=(3, 3, 4), axis=2)
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_repeat_inside_block_drops(self):
+        from flopscope._symmetry_transport import transport_repeat
+        G = _sym(0, 1)
+        assert transport_repeat(G, input_shape=(3, 3), axis=1) is None
+
+    def test_repeat_axis_negative_normalized(self):
+        from flopscope._symmetry_transport import transport_repeat
+        G = _sym(0, 1)
+        # axis=-1 on (3, 3, 4) -> axis 2, outside block.
+        result = transport_repeat(G, input_shape=(3, 3, 4), axis=-1)
+        assert result is not None
+
+    def test_roll_outside_block_preserves(self):
+        from flopscope._symmetry_transport import transport_roll
+        G = _sym(0, 1)
+        result = transport_roll(G, input_shape=(3, 3, 4), axis=2)
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_roll_inside_block_drops(self):
+        from flopscope._symmetry_transport import transport_roll
+        G = _sym(0, 1)
+        assert transport_roll(G, input_shape=(3, 3), axis=0) is None
+
+    def test_roll_multi_axis_any_in_block_drops(self):
+        from flopscope._symmetry_transport import transport_roll
+        G = _sym(0, 1)
+        # Even one block axis rolled => drop.
+        assert transport_roll(G, input_shape=(3, 3, 4), axis=(0, 2)) is None

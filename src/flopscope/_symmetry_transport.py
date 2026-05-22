@@ -140,9 +140,46 @@ def transport_squeeze(
     axis_map = {a: new_index[a] for a in A}
     return remap_group_axes(group, axis_map)
 transport_flip = _stub("flip")
-transport_roll = _stub("roll")
 transport_tile = _stub("tile")
-transport_repeat = _stub("repeat")
+
+
+def transport_repeat(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    axis: int | None,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    if axis is None:
+        # repeat(axis=None) ravels first -> never preserves multi-axis sym.
+        return None
+    a = axis % len(input_shape)
+    A = set(group.axes or range(group.degree))
+    if a in A:
+        return None
+    return group
+
+
+def transport_roll(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    axis: int | tuple[int, ...] | None,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    if axis is None:
+        # roll(axis=None) flattens first -> always drops.
+        return None
+    if isinstance(axis, int):
+        rolled = {axis % len(input_shape)}
+    else:
+        rolled = {a % len(input_shape) for a in axis}
+    A = set(group.axes or range(group.degree))
+    if rolled & A:
+        return None
+    return group
 transport_transpose = _stub("transpose")
 transport_swapaxes = _stub("swapaxes")
 transport_moveaxis = _stub("moveaxis")
