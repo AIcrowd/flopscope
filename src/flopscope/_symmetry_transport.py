@@ -36,9 +36,46 @@ transport_split = _stub("split")
 transport_hsplit = _stub("hsplit")
 transport_vsplit = _stub("vsplit")
 transport_dsplit = _stub("dsplit")
-transport_atleast_1d = _stub("atleast_1d")
-transport_atleast_2d = _stub("atleast_2d")
-transport_atleast_3d = _stub("atleast_3d")
+def transport_atleast_1d(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    # For any input with rank >= 1, atleast_1d is identity.
+    # (Rank 0 -> rank 1, but rank 0 can't carry a multi-axis group.)
+    return group
+
+
+def transport_atleast_2d(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    # For any input with rank >= 2 (which is the only case that can carry
+    # a non-trivial multi-axis group), atleast_2d is identity.
+    return group
+
+
+def transport_atleast_3d(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    if len(input_shape) >= 3:
+        # No-op.
+        return group
+    if len(input_shape) == 2:
+        # NumPy appends a trailing length-1 axis: (M, N) -> (M, N, 1).
+        # Block axes don't shift.
+        return group
+    # len(input_shape) <= 1: cannot carry a multi-axis group; defensive None.
+    return None
 transport_broadcast_to = _stub("broadcast_to")
 transport_expand_dims = _stub("expand_dims")
 def transport_squeeze(

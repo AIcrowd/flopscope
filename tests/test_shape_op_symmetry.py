@@ -69,3 +69,40 @@ class TestTransportSqueeze:
     def test_squeeze_none_input_returns_none(self):
         from flopscope._symmetry_transport import transport_squeeze
         assert transport_squeeze(None, input_shape=(1, 3, 3), axis=0) is None
+
+
+class TestTransportAtleast:
+    def test_atleast_1d_noop_on_2d(self):
+        from flopscope._symmetry_transport import transport_atleast_1d
+        G = _sym(0, 1)
+        result = transport_atleast_1d(G, input_shape=(3, 3))
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_atleast_2d_noop_on_2d(self):
+        from flopscope._symmetry_transport import transport_atleast_2d
+        G = _sym(0, 1)
+        result = transport_atleast_2d(G, input_shape=(3, 3))
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_atleast_3d_appends_trailing_axis_for_2d(self):
+        from flopscope._symmetry_transport import transport_atleast_3d
+        G = _sym(0, 1)
+        # NumPy: (M, N) -> (M, N, 1). Block axes unchanged.
+        result = transport_atleast_3d(G, input_shape=(3, 3))
+        assert result is not None
+        assert set(result.axes) == {0, 1}
+        assert result.order() == 2
+
+    def test_atleast_3d_noop_on_3d(self):
+        from flopscope._symmetry_transport import transport_atleast_3d
+        G = _sym(1, 2)
+        result = transport_atleast_3d(G, input_shape=(4, 3, 3))
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_atleast_kd_none_input(self):
+        from flopscope._symmetry_transport import (
+            transport_atleast_1d, transport_atleast_2d, transport_atleast_3d,
+        )
+        assert transport_atleast_1d(None, input_shape=(3, 3)) is None
+        assert transport_atleast_2d(None, input_shape=(3, 3)) is None
+        assert transport_atleast_3d(None, input_shape=(3, 3)) is None
