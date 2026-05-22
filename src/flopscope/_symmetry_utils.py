@@ -349,8 +349,19 @@ def group_orbits_on_axes(
     return orbits
 
 
-def _normalize_reps_for_output(*args, **kwargs):  # populated in Task 4
-    raise NotImplementedError("_normalize_reps_for_output implemented in Task 4")
+def _normalize_reps_for_output(reps, *, output_ndim: int) -> tuple[int, ...]:
+    """Normalize `reps` arg to a tuple of length `output_ndim`.
+
+    Matches NumPy.tile's right-alignment rule: if `reps` is shorter, it's
+    prepended with 1s. If `reps` is a scalar, treat as `(reps,)`.
+    """
+    if isinstance(reps, int):
+        reps_tup = (reps,)
+    else:
+        reps_tup = tuple(reps)
+    if len(reps_tup) < output_ndim:
+        reps_tup = (1,) * (output_ndim - len(reps_tup)) + reps_tup
+    return reps_tup
 
 
 def broadcast_group(

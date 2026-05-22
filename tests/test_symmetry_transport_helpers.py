@@ -88,3 +88,24 @@ class TestGroupOrbitsOnAxes:
         orbits = group_orbits_on_axes(G, [0, 1, 5])
         as_sets = {frozenset(o) for o in orbits}
         assert as_sets == {frozenset({0, 1}), frozenset({5})}
+
+
+class TestNormalizeRepsForOutput:
+    def test_scalar_reps(self):
+        # tile(arr, 2) with output_ndim=3 -> (1, 1, 2)? No - scalar reps means
+        # replicate every axis by that count. NumPy behavior: scalar => (reps,)
+        # then right-align. For output_ndim=3 with reps=2: output rank stays
+        # max(1, ndim)=3 so reps padded to (1, 1, 2).
+        assert _normalize_reps_for_output(2, output_ndim=3) == (1, 1, 2)
+
+    def test_tuple_shorter_than_output(self):
+        assert _normalize_reps_for_output((2, 3), output_ndim=4) == (1, 1, 2, 3)
+
+    def test_tuple_equal_length(self):
+        assert _normalize_reps_for_output((2, 3, 4), output_ndim=3) == (2, 3, 4)
+
+    def test_tuple_already_padded(self):
+        assert _normalize_reps_for_output((1, 2, 3), output_ndim=3) == (1, 2, 3)
+
+    def test_list_input(self):
+        assert _normalize_reps_for_output([2, 3], output_ndim=3) == (1, 2, 3)
