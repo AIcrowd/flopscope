@@ -80,6 +80,17 @@ _PASSTHROUGH_NAMES = (
     "mintypecode",
     # Test-harness assertion that should not count FLOPs:
     "array_equal",
+    # Zero-FLOP memory-layout queries (#72):
+    "may_share_memory",
+    "shares_memory",
+    "byte_bounds",
+    # Zero-FLOP boolean predicates (#72 audit):
+    "iscomplexobj",
+    "isrealobj",
+    "isfortran",
+    "isscalar",
+    # Zero-FLOP shape arithmetic (#72 audit):
+    "broadcast_shapes",
 )
 
 
