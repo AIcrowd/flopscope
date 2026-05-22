@@ -31,6 +31,15 @@ from flopscope._validation import require_budget
 from flopscope.errors import SymmetryError, UnsupportedFunctionError, _warn_symmetry_loss
 
 
+def _warn_if_symmetric(arr, op_name: str) -> None:
+    """Emit SymmetryLossWarning if `arr` is a SymmetricTensor with a group."""
+    if isinstance(arr, SymmetricTensor) and arr.symmetry is not None:
+        _warn_symmetry_loss(
+            lost_dims=[arr.symmetry.axes or tuple(range(arr.symmetry.degree))],
+            reason=f"op '{op_name}' is not symmetry-aware",
+        )
+
+
 @lru_cache(maxsize=1024)
 def _infer_constant_shape_symmetry(shape):
     if len(shape) < 2:
@@ -821,6 +830,7 @@ attach_docstring(roll, _np.roll, "free", "0 FLOPs")
 def pad(array: ArrayLike, pad_width: Any, **kwargs: Any) -> FlopscopeArray:
     """Pad an array. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(array, "pad")
     # cost depends on result; duration is post-hoc
     # pad_width parsing is complex (scalar, per-axis, per-side) — not worth replicating
     result = _np.pad(_to_base_ndarray(array), pad_width, **kwargs)
@@ -835,6 +845,7 @@ attach_docstring(pad, _np.pad, "free", "0 FLOPs")
 
 def triu(m: ArrayLike, k: int = 0) -> FlopscopeArray:
     """Upper triangle. Wraps ``numpy.triu``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(m, "triu")
     return _np.triu(_to_base_ndarray(m), k=k)  # type: ignore[return-value]
 
 
@@ -843,6 +854,7 @@ attach_docstring(triu, _np.triu, "free", "0 FLOPs")
 
 def tril(m: ArrayLike, k: int = 0) -> FlopscopeArray:
     """Lower triangle. Wraps ``numpy.tril``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(m, "tril")
     return _np.tril(_to_base_ndarray(m), k=k)  # type: ignore[return-value]
 
 
@@ -858,6 +870,7 @@ def diagonal(
 ) -> FlopscopeArray:
     """Return diagonal. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(a, "diagonal")
     a_arr = _np.asarray(a)
     # Diagonal length along axis1/axis2
     m, n = a_arr.shape[axis1], a_arr.shape[axis2]
@@ -1011,6 +1024,7 @@ def append(
 ) -> FlopscopeArray:
     """Append values. Cost: numel(appended values)."""
     budget = require_budget()
+    _warn_if_symmetric(arr, "append")
     values_arr = _np.asarray(values)
     cost = values_arr.size  # num appended
     with budget.deduct("append", flop_cost=cost, subscripts=None, shapes=()):
@@ -1047,6 +1061,7 @@ attach_docstring(argwhere, _np.argwhere, "free", "0 FLOPs")
 def array_split(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
     """Split array into sub-arrays. Cost: numel(input)."""
     budget = require_budget()
+    _warn_if_symmetric(ary, "array_split")
     ary_arr = _np.asarray(ary)
     cost = ary_arr.size
     with budget.deduct(
@@ -1188,6 +1203,15 @@ attach_docstring(binary_repr, _np.binary_repr, "free", "0 FLOPs")
 def block(*args, **kwargs):
     """Assemble array from nested lists. Cost: numel(output)."""
     budget = require_budget()
+    # Warn for any SymmetricTensor found in the nested structure.
+    def _walk_warn(obj):
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                _walk_warn(item)
+        else:
+            _warn_if_symmetric(obj, "block")
+    for a in args:
+        _walk_warn(a)
     result = _np.block(*[_to_base_ndarray_tree(a) for a in args], **kwargs)
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct("block", flop_cost=cost, subscripts=None, shapes=()):
@@ -1265,6 +1289,9 @@ attach_docstring(can_cast, _np.can_cast, "free", "0 FLOPs")
 def choose(*args, **kwargs):
     """Construct array from index array. Cost: numel(output)."""
     budget = require_budget()
+    # Warn if the first arg (index array) carries symmetry.
+    if args:
+        _warn_if_symmetric(args[0], "choose")
     # Args: (a, choices, ...) or just (a, choices) — strip arrays.
     stripped_args = []
     for arg in args:
@@ -1323,6 +1350,7 @@ def compress(
 ) -> FlopscopeArray:
     """Return selected slices along an axis. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(a, "compress")
     result = _np.compress(
         _to_base_ndarray(condition),  # type: ignore[arg-type]
         _to_base_ndarray(a),
@@ -1397,6 +1425,7 @@ def delete(
 ) -> FlopscopeArray:
     """Return new array with sub-arrays deleted. Cost: num elements removed."""
     budget = require_budget()
+    _warn_if_symmetric(arr, "delete")
     arr_np = _np.asarray(arr)
     result = _np.delete(_to_base_ndarray(arr), obj, axis=axis, **kwargs)
     cost = max(arr_np.size - result.size, 0)  # num deleted
@@ -1475,6 +1504,8 @@ attach_docstring(dsplit, _np.dsplit, "free", "0 FLOPs")
 def dstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     """Stack arrays along third axis. Cost: numel(output)."""
     budget = require_budget()
+    for a in tup:
+        _warn_if_symmetric(a, "dstack")
     result = _np.dstack(_to_base_ndarray_tree(tup))  # type: ignore[arg-type]
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct("dstack", flop_cost=cost, subscripts=None, shapes=()):

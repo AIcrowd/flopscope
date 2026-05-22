@@ -587,3 +587,89 @@ class TestTransportBroadcastExpand:
         G = _sym(0, 1)
         result = transport_expand_dims(G, input_ndim=2, axis=2)
         assert result is not None and set(result.axes) == {0, 1}
+
+
+class TestOutOfScopeOpsWarn:
+    @pytest.fixture(autouse=True)
+    def _enable_warnings(self):
+        flops.configure(symmetry_warnings=True)
+        yield
+        flops.configure(symmetry_warnings=True)
+
+    def test_pad_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.pad(T, 1)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_diagonal_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.diagonal(T)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_triu_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.triu(T)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_tril_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.tril(T)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_array_split_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.array_split(T, 3)
+        assert not any(isinstance(r, SymmetricTensor) for r in result)
+
+    def test_append_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.append(T, np.zeros((1, 3)), axis=0)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_dstack_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.dstack([T, np.eye(3)])
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_compress_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.compress([True, False, True], T, axis=0)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_delete_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.delete(T, 0, axis=0)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_choose_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        indices = as_symmetric(np.zeros((3, 3), dtype=int), symmetry=_sym(0, 1))
+        choices = [np.eye(3), np.ones((3, 3))]
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.choose(indices, choices)
+        assert not isinstance(result, SymmetricTensor)
+
+    def test_block_warns_and_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.block([T, np.eye(3)])
+        assert not isinstance(result, SymmetricTensor)
