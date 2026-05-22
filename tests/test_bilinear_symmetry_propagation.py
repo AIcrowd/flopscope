@@ -45,3 +45,33 @@ def test_helper_returns_none_symmetry_for_distinct_matmul():
         "matmul(A, B) with distinct A, B (no identity-alias) must not "
         "infer joint output symmetry"
     )
+
+
+# --- _flops.einsum_cost side-fix (Task 3) ---------------------------------
+
+def test_einsum_cost_forwards_identity_pattern():
+    """Public-introspection einsum_cost must respect identity_pattern to
+    detect A @ A joint savings. Before the fix it always passed
+    identity_pattern=None, so cost matched A @ B (distinct ops)."""
+    from flopscope._flops import einsum_cost
+
+    n = 10
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    shape = (n, n)
+    # Cost with identity_pattern indicating both positions share one operand.
+    cost_aliased = einsum_cost(
+        "ij,jk->ik",
+        shapes=[shape, shape],
+        operand_symmetries=[sym, sym],
+        identity_pattern=((0, 1),),
+    )
+    # Cost without the alias (treats operands as independent).
+    cost_distinct = einsum_cost(
+        "ij,jk->ik",
+        shapes=[shape, shape],
+        operand_symmetries=[sym, sym],
+        identity_pattern=None,
+    )
+    assert cost_aliased <= cost_distinct, (
+        "Aliased A@A cost should be no greater than two-distinct-operand cost"
+    )

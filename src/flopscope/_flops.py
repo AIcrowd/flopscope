@@ -43,6 +43,7 @@ def einsum_cost(
     subscripts: str,
     shapes: list[tuple[int, ...]],
     operand_symmetries: list[SymmetryGroup | None] | None = None,
+    identity_pattern: tuple[tuple[int, ...], ...] | None = None,
 ) -> int:
     """FLOP cost of an einsum operation.
 
@@ -60,13 +61,17 @@ def einsum_cost(
         Shapes of the input operands.
     operand_symmetries : list of SymmetryGroup or None, optional
         Exact symmetry group for each input operand.
+    identity_pattern : tuple of tuple of int, optional
+        Groups of operand positions that alias to the same underlying
+        array. Each inner tuple lists ≥2 positions sharing identity. When
+        provided, the cost path applies repeated-operand savings (e.g.,
+        the joint symmetry of ``A @ A``).
 
     Returns
     -------
     int
         Estimated FLOP count.
     """
-    # Build dummy arrays of the right shape for the parser
     import numpy as _np
 
     from flopscope._accumulation._cost import compute_accumulation_cost
@@ -91,7 +96,7 @@ def einsum_cost(
         output_subscript=output_subscript,
         shapes=shapes,
         per_op_symmetries=per_op_syms,
-        identity_pattern=None,
+        identity_pattern=identity_pattern,
     )
     return cost.total
 
