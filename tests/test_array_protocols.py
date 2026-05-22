@@ -917,3 +917,33 @@ def test_perf_warm_inplace_add_scalar_on_symmetric_is_fast():
         "warm in-place add lost symmetry object identity; "
         "_inplace_from_result is constructing a fresh group somewhere"
     )
+
+
+# ----- #72 spot-check (RED in Task 1, deleted in Task 3) -----
+
+
+def test_may_share_memory_bypasses_array_function_dispatch(monkeypatch):
+    """np.may_share_memory must NOT enter __array_function__ dispatch.
+    It is a zero-FLOP memory-layout query; #72 audit adds it to
+    _PASSTHROUGH_NAMES."""
+    dispatch_called = []
+    real = FlopscopeArray._get_array_function_dispatch.__func__
+
+    def spy(cls):
+        dispatch_called.append("may_share_memory")
+        return real(cls)
+
+    monkeypatch.setattr(
+        FlopscopeArray,
+        "_get_array_function_dispatch",
+        classmethod(spy),
+    )
+    a = fnp.empty(4)
+    b = fnp.empty(4)
+    with flops.BudgetContext(flop_budget=int(1e9)) as bc:
+        np.may_share_memory(a, b)
+    assert bc.flops_used == 0
+    assert not dispatch_called, (
+        "np.may_share_memory entered __array_function__ dispatch; "
+        "should be in _PASSTHROUGH_NAMES"
+    )
