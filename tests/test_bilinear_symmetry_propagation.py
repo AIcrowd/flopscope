@@ -4,11 +4,9 @@ and apply joint-operand cost savings via the einsum cost path."""
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 import flopscope
-import flopscope.numpy as fnp
-from flopscope import SymmetryGroup, SymmetricTensor, BudgetContext
+from flopscope import SymmetryGroup, BudgetContext
 
 
 # --- _resolve_cost_and_output_symmetry helper (Task 1) -------------------
