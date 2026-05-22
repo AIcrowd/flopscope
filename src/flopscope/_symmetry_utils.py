@@ -220,9 +220,7 @@ def remap_group_for_expand_dims(
     inserted_axes = tuple(
         axis_idx for axis_idx, size in enumerate(expanded_shape) if size == 1
     )
-    inserted = None
-    if len(inserted_axes) >= 2:
-        inserted = SymmetryGroup.symmetric(axes=inserted_axes)
+    inserted = inserted_axes_symmetry(inserted_axes)
     return direct_product_groups(remapped, inserted)
 
 
