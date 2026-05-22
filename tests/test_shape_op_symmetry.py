@@ -673,3 +673,17 @@ class TestOutOfScopeOpsWarn:
         with pytest.warns(SymmetryLossWarning):
             result = fnp.block([T, np.eye(3)])
         assert not isinstance(result, SymmetricTensor)
+
+
+class TestZeroSizeDefensive:
+    def test_reshape_zero_size_input_drops(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 1)
+        result = transport_reshape(G, input_shape=(0, 3), output_shape=(0, 3))
+        assert result is None
+
+    def test_split_zero_size_input_drops(self):
+        from flopscope._symmetry_transport import transport_split
+        G = _sym(1, 2)
+        result = transport_split(G, input_shape=(0, 3, 3), axis=0)
+        assert result is None

@@ -10,6 +10,7 @@ for the per-op rules and rationale.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Iterable, Sequence
 from typing import Any
@@ -34,6 +35,19 @@ def _stub(name: str):
     return _impl
 
 
+def _zero_size_guard(fn):
+    """Decorator: any transport receiving a zero-size shape drops to None."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        for key in ("input_shape", "output_shape"):
+            shape = kwargs.get(key)
+            if shape is not None and 0 in shape:
+                return None
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+@_zero_size_guard
 def transport_reshape(
     group: SymmetryGroup | None,
     *,
@@ -83,6 +97,7 @@ def transport_reshape(
     return remap_group_axes(group, axis_map)
 
 
+@_zero_size_guard
 def transport_ravel(
     group: SymmetryGroup | None,
     *,
@@ -191,6 +206,7 @@ def transport_column_stack(
         else:
             promoted.append(None)
     return transport_concatenate(promoted, output_ndim=output_ndim, axis=1)
+@_zero_size_guard
 def transport_split(
     group: SymmetryGroup | None,
     *,
@@ -207,6 +223,7 @@ def transport_split(
     return restrict_group_to_axes(group, keep)
 
 
+@_zero_size_guard
 def transport_hsplit(
     group: SymmetryGroup | None,
     *,
@@ -218,6 +235,7 @@ def transport_hsplit(
     return transport_split(group, input_shape=input_shape, axis=1)
 
 
+@_zero_size_guard
 def transport_vsplit(
     group: SymmetryGroup | None,
     *,
@@ -226,12 +244,14 @@ def transport_vsplit(
     return transport_split(group, input_shape=input_shape, axis=0)
 
 
+@_zero_size_guard
 def transport_dsplit(
     group: SymmetryGroup | None,
     *,
     input_shape: tuple[int, ...],
 ) -> SymmetryGroup | None:
     return transport_split(group, input_shape=input_shape, axis=2)
+@_zero_size_guard
 def transport_atleast_1d(
     group: SymmetryGroup | None,
     *,
@@ -244,6 +264,7 @@ def transport_atleast_1d(
     return group
 
 
+@_zero_size_guard
 def transport_atleast_2d(
     group: SymmetryGroup | None,
     *,
@@ -256,6 +277,7 @@ def transport_atleast_2d(
     return group
 
 
+@_zero_size_guard
 def transport_atleast_3d(
     group: SymmetryGroup | None,
     *,
@@ -272,6 +294,7 @@ def transport_atleast_3d(
         return group
     # len(input_shape) <= 1: cannot carry a multi-axis group; defensive None.
     return None
+@_zero_size_guard
 def transport_broadcast_to(
     group: SymmetryGroup | None,
     *,
@@ -293,6 +316,7 @@ def transport_expand_dims(
     axis,
 ) -> SymmetryGroup | None:
     return remap_group_for_expand_dims(group, ndim=input_ndim, axis=axis)
+@_zero_size_guard
 def transport_squeeze(
     group: SymmetryGroup | None,
     *,
@@ -337,6 +361,7 @@ def transport_flip(
     if not F_A or F_A == A:
         return group
     return setwise_stabilizer(group, fixed_set=F_A)
+@_zero_size_guard
 def transport_tile(
     group: SymmetryGroup | None,
     *,
@@ -361,6 +386,7 @@ def transport_tile(
     return remap_group_axes(group, axis_map)
 
 
+@_zero_size_guard
 def transport_repeat(
     group: SymmetryGroup | None,
     *,
@@ -379,6 +405,7 @@ def transport_repeat(
     return group
 
 
+@_zero_size_guard
 def transport_roll(
     group: SymmetryGroup | None,
     *,
