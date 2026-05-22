@@ -81,9 +81,52 @@ def transport_stack(
         if result is None:
             return None
     return result
-transport_vstack = _stub("vstack")
-transport_hstack = _stub("hstack")
-transport_column_stack = _stub("column_stack")
+def transport_vstack(
+    groups: Sequence[SymmetryGroup | None],
+    *,
+    output_ndim: int,
+    input_ndims: Sequence[int],
+) -> SymmetryGroup | None:
+    # vstack: atleast_2d each input, then concat axis=0.
+    # For any input that's 1-D, the promoted form has the data axis at position 1,
+    # and 1-D inputs carry no multi-axis group anyway -> None for them.
+    promoted = []
+    for g, nd in zip(groups, input_ndims):
+        if nd >= 2:
+            promoted.append(g)
+        else:
+            # 1-D input promoted to (1, N) -- no multi-axis group.
+            promoted.append(None)
+    return transport_concatenate(promoted, output_ndim=output_ndim, axis=0)
+
+
+def transport_hstack(
+    groups: Sequence[SymmetryGroup | None],
+    *,
+    output_ndim: int,
+    input_ndims: Sequence[int],
+) -> SymmetryGroup | None:
+    # hstack: concat axis=0 if all 1-D, else axis=1.
+    if all(nd == 1 for nd in input_ndims):
+        return transport_concatenate(groups, output_ndim=output_ndim, axis=0)
+    return transport_concatenate(groups, output_ndim=output_ndim, axis=1)
+
+
+def transport_column_stack(
+    groups: Sequence[SymmetryGroup | None],
+    *,
+    output_ndim: int,
+    input_ndims: Sequence[int],
+) -> SymmetryGroup | None:
+    # column_stack: promote 1-D (N,) -> (N, 1), then concat axis=1.
+    # 1-D inputs become column vectors with no multi-axis group.
+    promoted = []
+    for g, nd in zip(groups, input_ndims):
+        if nd >= 2:
+            promoted.append(g)
+        else:
+            promoted.append(None)
+    return transport_concatenate(promoted, output_ndim=output_ndim, axis=1)
 def transport_split(
     group: SymmetryGroup | None,
     *,

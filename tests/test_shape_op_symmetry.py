@@ -316,3 +316,48 @@ class TestTransportStack:
         result = transport_stack([G, G], output_ndim=3, axis=2)
         assert result is not None
         assert set(result.axes) == {0, 1}
+
+
+class TestTransportVHColumnStack:
+    def test_vstack_two_2d_concat_along_0(self):
+        from flopscope._symmetry_transport import transport_vstack
+        G = _sym(0, 1)
+        # vstack of two (3,3) S_2 along axis 0; restrict to {1} -> degree-1 -> drop.
+        result = transport_vstack(
+            [G, G], output_ndim=2, input_ndims=[2, 2],
+        )
+        assert result is None
+
+    def test_vstack_two_3d_along_0(self):
+        from flopscope._symmetry_transport import transport_vstack
+        G = _sym(1, 2)
+        # vstack of two (2,3,3) S_2(1,2) along axis 0 (outside block).
+        result = transport_vstack(
+            [G, G], output_ndim=3, input_ndims=[3, 3],
+        )
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_hstack_2d_along_1(self):
+        from flopscope._symmetry_transport import transport_hstack
+        G = _sym(0, 1)
+        # hstack of two (3,3) S_2; axis=1 in block -> drop.
+        result = transport_hstack(
+            [G, G], output_ndim=2, input_ndims=[2, 2],
+        )
+        assert result is None
+
+    def test_hstack_1d_all(self):
+        from flopscope._symmetry_transport import transport_hstack
+        # All 1-D inputs -> concat axis 0. 1-D inputs have no multi-axis group.
+        assert transport_hstack(
+            [None, None], output_ndim=1, input_ndims=[1, 1],
+        ) is None
+
+    def test_column_stack_2d_inputs(self):
+        from flopscope._symmetry_transport import transport_column_stack
+        G = _sym(0, 1)
+        # Two (3,3) S_2 inputs concat along axis 1; axis 1 in block -> drop.
+        result = transport_column_stack(
+            [G, G], output_ndim=2, input_ndims=[2, 2],
+        )
+        assert result is None
