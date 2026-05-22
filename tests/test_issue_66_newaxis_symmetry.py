@@ -185,6 +185,44 @@ def test_no_input_symmetry_still_gains_inserted_group():
 
 
 # ---------------------------------------------------------------------------
+# Bool indexing bailout: boolean masks are not integer scalars.
+# `isinstance(True, int)` is True in Python, so without an explicit bool check
+# the propagator would treat `True` as an integer index (removes axis 0) when
+# numpy actually treats it as a boolean mask (adds a size-1 batch axis).
+# Symmetry conservatively drops to None.
+# ---------------------------------------------------------------------------
+
+
+def test_bool_scalar_index_drops_symmetry_safely():
+    """tensor[True] is a boolean mask in numpy; bail out to no symmetry."""
+    a = fnp.eye(3)
+    assert a.shape == (3, 3)
+    result = a[True]
+    assert result.shape == (1, 3, 3)
+    assert getattr(result, "symmetry", None) is None
+
+
+def test_bool_index_combined_with_none_drops_symmetry_safely():
+    """Combining True with None must not produce a misclassified inserted-axis
+    group: positions 0 and 2 are size-1 in output, but so is position 1 (the
+    bool-mask axis), and the propagator has no way to distinguish them. Drop
+    to None rather than report a wrong group.
+    """
+    a = fnp.eye(3)
+    result = a[None, True, None]
+    assert result.shape == (1, 1, 1, 3, 3)
+    assert getattr(result, "symmetry", None) is None
+
+
+def test_numpy_bool_scalar_index_drops_symmetry_safely():
+    """numpy.bool_ behaves like Python bool for indexing; same bailout."""
+    a = fnp.eye(3)
+    result = a[numpy.bool_(True)]
+    assert result.shape == (1, 3, 3)
+    assert getattr(result, "symmetry", None) is None
+
+
+# ---------------------------------------------------------------------------
 # Equivalence property: tensor[K] == expand_dims(tensor[slice_part], newaxes)
 # ---------------------------------------------------------------------------
 

@@ -296,7 +296,11 @@ def propagate_symmetry_slice(
         key = (key,)
 
     for k in key:
-        if isinstance(k, (np.ndarray, list)):
+        # Bool indices are boolean masks in numpy (add a size-1 batch axis for
+        # True / size-0 for False), not integer scalars. `isinstance(True, int)`
+        # is also True in Python, so we must check bool BEFORE the int branch
+        # below would silently misclassify it as an integer scalar index.
+        if isinstance(k, (np.ndarray, list, bool, np.bool_)):
             return None
 
     # Expand Ellipsis.
