@@ -311,7 +311,7 @@
   "module": "numpy",
   "name": "errstate",
   "related_guides": [],
-  "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10195cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+  "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x103584ec0>, all=None, divide=None, over=None, under=None, invalid=None)",
   "slug": "errstate",
   "source_url": "",
   "status_note": "",
