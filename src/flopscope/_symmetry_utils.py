@@ -286,6 +286,35 @@ def direct_product_groups(*groups: SymmetryGroup | None) -> SymmetryGroup | None
     return product if product.order() > 1 else None
 
 
+def setwise_stabilizer(
+    group: SymmetryGroup | None,
+    fixed_set: Iterable[int],
+) -> SymmetryGroup | None:
+    """Return the subgroup G' = {π ∈ G : π(fixed_set) = fixed_set}.
+
+    `fixed_set` is interpreted as tensor-axis indices; elements not in
+    ``group.axes`` are silently filtered out. Returns ``None`` if the
+    stabilizer is trivial (order ≤ 1).
+    """
+    if group is None:
+        return None
+    axes = group.axes
+    if axes is None:
+        axes = tuple(range(group.degree))
+    # Translate tensor-axis indices to internal degree indices.
+    internal = {axes.index(a) for a in fixed_set if a in axes}
+    result = group.setwise_stabilizer(internal)
+    return result if result.order() > 1 else None
+
+
+def group_orbits_on_axes(*args, **kwargs):  # populated in Task 3
+    raise NotImplementedError("group_orbits_on_axes implemented in Task 3")
+
+
+def _normalize_reps_for_output(*args, **kwargs):  # populated in Task 4
+    raise NotImplementedError("_normalize_reps_for_output implemented in Task 4")
+
+
 def broadcast_group(
     group: SymmetryGroup | None,
     *,
