@@ -768,18 +768,79 @@ def test_to_base_ndarray_tree_recurses_into_nested():
 
 # ----- _PASSTHROUGH lock-in -----
 
+# Realistic-args registry: every name in _PASSTHROUGH_NAMES must have an
+# entry here. Adding a name to _PASSTHROUGH_NAMES without a matching
+# _BUILD_ARGS entry causes the parameterized test below to fail loudly
+# with KeyError, forcing the author to register realistic args.
+_BUILD_ARGS = {
+    # Zero-FLOP type/shape queries:
+    "ndim": lambda: (fnp.empty(4),),
+    "shape": lambda: (fnp.empty(4),),
+    "size": lambda: (fnp.empty(4),),
+    # Zero-FLOP type-system queries:
+    "result_type": lambda: (fnp.empty(4),),
+    "can_cast": lambda: (fnp.empty(4), np.float64),
+    "min_scalar_type": lambda: (fnp.empty(4),),
+    "promote_types": lambda: (np.int32, np.float64),
+    "find_common_type": lambda: ([np.float64], []),
+    "mintypecode": lambda: (["f", "d"],),
+    # Test-harness assertion:
+    "array_equal": lambda: (fnp.empty(4), fnp.empty(4)),
+    # Zero-FLOP memory-layout queries (#72):
+    "may_share_memory": lambda: (fnp.empty(4), fnp.empty(4)),
+    "shares_memory": lambda: (fnp.empty(4), fnp.empty(4)),
+    "byte_bounds": lambda: (fnp.empty(4),),
+    # Zero-FLOP boolean predicates (#72 audit):
+    "iscomplexobj": lambda: (fnp.empty(4),),
+    "isrealobj": lambda: (fnp.empty(4),),
+    "isfortran": lambda: (fnp.empty(4),),
+    "isscalar": lambda: (fnp.empty(4),),
+    # Zero-FLOP shape arithmetic (#72 audit):
+    "broadcast_shapes": lambda: ((4,), (4,)),
+}
 
-def test_np_type_query_passthrough_does_not_charge_flops():
-    """``np.result_type``, ``np.can_cast``, ``np.min_scalar_type``, etc.
-    are zero-FLOP type-query functions that must bypass flopscope's
-    FLOP-tracking dispatch. They are added to ``_PASSTHROUGH_NAMES`` for
-    this reason."""
-    a = fnp.empty(8)
+
+def _passthrough_names_present_in_numpy():
+    """Parametrize source: every _PASSTHROUGH_NAMES entry whose underlying
+    np.<name> exists in the active NumPy version (skips byte_bounds /
+    find_common_type which were removed in NumPy 2.0)."""
+    from flopscope._ndarray import _PASSTHROUGH_NAMES
+
+    return [n for n in _PASSTHROUGH_NAMES if getattr(np, n, None) is not None]
+
+
+@pytest.mark.parametrize("name", _passthrough_names_present_in_numpy())
+def test_passthrough_name_does_not_dispatch_or_charge(monkeypatch, name):
+    """Every name in _PASSTHROUGH_NAMES must:
+    (a) charge 0 FLOPs under a BudgetContext, and
+    (b) NOT enter FlopscopeArray._get_array_function_dispatch.
+
+    Adding a new name to _PASSTHROUGH_NAMES without a matching _BUILD_ARGS
+    entry causes a KeyError here, forcing the author to register args."""
+    func = getattr(np, name)
+    args = _BUILD_ARGS[name]()
+
+    dispatch_called = []
+    real = FlopscopeArray._get_array_function_dispatch.__func__
+
+    def spy(cls):
+        dispatch_called.append(name)
+        return real(cls)
+
+    monkeypatch.setattr(
+        FlopscopeArray,
+        "_get_array_function_dispatch",
+        classmethod(spy),
+    )
+
     with flops.BudgetContext(flop_budget=int(1e9)) as bc:
-        assert np.result_type(a) == np.float64
-        assert np.can_cast(a, np.float64)
-        assert np.min_scalar_type(a) is not None
-    assert bc.flops_used == 0
+        func(*args)
+
+    assert bc.flops_used == 0, f"{name} charged {bc.flops_used} FLOPs"
+    assert not dispatch_called, (
+        f"{name} entered __array_function__ dispatch; "
+        f"should be in _PASSTHROUGH_NAMES fast path"
+    )
 
 
 # ----- Cache-verification test (Stage 2 helper added in Step 2.2) -----
@@ -916,34 +977,4 @@ def test_perf_warm_inplace_add_scalar_on_symmetric_is_fast():
     assert A_sym._symmetry is original_symmetry_ref, (  # pyright: ignore[reportAttributeAccessIssue]
         "warm in-place add lost symmetry object identity; "
         "_inplace_from_result is constructing a fresh group somewhere"
-    )
-
-
-# ----- #72 spot-check (RED in Task 1, deleted in Task 3) -----
-
-
-def test_may_share_memory_bypasses_array_function_dispatch(monkeypatch):
-    """np.may_share_memory must NOT enter __array_function__ dispatch.
-    It is a zero-FLOP memory-layout query; #72 audit adds it to
-    _PASSTHROUGH_NAMES."""
-    dispatch_called = []
-    real = FlopscopeArray._get_array_function_dispatch.__func__
-
-    def spy(cls):
-        dispatch_called.append("may_share_memory")
-        return real(cls)
-
-    monkeypatch.setattr(
-        FlopscopeArray,
-        "_get_array_function_dispatch",
-        classmethod(spy),
-    )
-    a = fnp.empty(4)
-    b = fnp.empty(4)
-    with flops.BudgetContext(flop_budget=int(1e9)) as bc:
-        np.may_share_memory(a, b)
-    assert bc.flops_used == 0
-    assert not dispatch_called, (
-        "np.may_share_memory entered __array_function__ dispatch; "
-        "should be in _PASSTHROUGH_NAMES"
     )
