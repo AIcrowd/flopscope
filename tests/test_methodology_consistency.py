@@ -75,16 +75,22 @@ class TestSortingConsistency:
 
 
 class TestContractionConsistency:
-    """matmul: cost = M*N*K for 2D matrix multiply (FMA=1 op)."""
+    """matmul: cost uses the whole-expression direct-event accumulation model.
+    For 2D matrix multiply with no symmetry:
+        total = (k-1)*M + alpha - num_output_orbits
+              = M*N*K + M*N*K - M*N = 2*M*N*K - M*N.
+    The final -M*N applies the off-by-one correction: first cell of each
+    output orbit is a free copy."""
 
     def test_matmul(self):
         m, n, k = 32, 32, 32
         a = np.random.rand(m, k)
         b = np.random.rand(k, n)
         runtime_cost = _run_and_get_cost(fnp.matmul, a, b)
-        # flopscope uses einsum_cost("ij,jk->ik", [(32,32),(32,32)])
-        # FMA=1 op, so cost = 32*32*32 = 32768
-        expected = m * n * k
+        # direct-event model with off-by-one correction:
+        # (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = M*N*K + M*N*K - M*N = 2*M*N*K - M*N (textbook 2n^3 - n^2 form).
+        expected = 2 * m * n * k - m * n
         assert runtime_cost == expected, (
             f"matmul({m},{k})x({k},{n}): runtime={runtime_cost}, expected={expected}"
         )
@@ -124,20 +130,23 @@ class TestPointwiseConsistency:
 
 
 class TestReductionConsistency:
-    """Reductions: cost = numel(input)."""
+    """Reductions: cost = numel(input) - 1 (orbit-mapping model)."""
 
     def test_sum(self):
+        # Updated to orbit-mapping count (was n(n+1)/2 unique-element count).
+        # Full reduction of (n,): n - 1 additions.
         n = 1000
         a = np.random.rand(n)
         runtime_cost = _run_and_get_cost(fnp.sum, a)
-        assert runtime_cost == n
+        assert runtime_cost == n - 1
 
     def test_mean(self):
+        # Updated to orbit-mapping count (was n(n+1)/2 unique-element count).
+        # Full reduction of (n,): n - 1 additions (mean includes that reduction).
         n = 1000
         a = np.random.rand(n)
         runtime_cost = _run_and_get_cost(fnp.mean, a)
-        # mean charges n+1 (sum + divide) or just n depending on impl
-        assert runtime_cost >= n
+        assert runtime_cost >= n - 1
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +155,7 @@ class TestReductionConsistency:
 
 
 class TestPolynomialConsistency:
-    """polyval: cost = m * deg (Horner's method, FMA=1)."""
+    """polyval: cost = 2 * m * deg (Horner's method, FMA=2)."""
 
     def test_polyval(self):
         degree = 10

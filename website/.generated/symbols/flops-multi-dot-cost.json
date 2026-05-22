@@ -132,6 +132,23 @@
             }
           ],
           "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Each binary matmul step (m x k) @ (k x n) costs "
+            },
+            {
+              "kind": "code",
+              "text": "2 * m * k * n"
+            },
+            {
+              "kind": "text",
+              "text": " FLOPs\nunder the FMA=2 textbook convention (m*k*n multiplies + m*k*n adds,\nignoring the \u2212m*n off-by-one for accumulation at this level of\napproximation).  FMA=2 unification 2026-05-20."
+            }
+          ],
+          "type": "paragraph"
         }
       ],
       "title": "Notes"

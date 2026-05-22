@@ -848,7 +848,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.sort",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L48",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L49",
   "href": "/docs/api/numpy/sort/",
   "import_path": "flopscope.numpy.sort",
   "is_operation_cost_leaf": true,

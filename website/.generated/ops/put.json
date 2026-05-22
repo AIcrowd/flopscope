@@ -373,7 +373,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.put",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1650",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1737",
   "href": "/docs/api/numpy/put/",
   "legacy_href": "/docs/api/ops/put/",
   "module": "numpy",

@@ -837,7 +837,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.multivariate_normal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
   "href": "/docs/api/numpy/random/multivariate-normal/",
   "import_path": "flopscope.numpy.random.multivariate_normal",
   "is_operation_cost_leaf": true,

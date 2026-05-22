@@ -754,7 +754,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.pow",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L414",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
   "href": "/docs/api/numpy/pow/",
   "import_path": "flopscope.numpy.pow",
   "is_operation_cost_leaf": true,

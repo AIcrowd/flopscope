@@ -506,7 +506,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polyint",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L150",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L159",
   "href": "/docs/api/numpy/polyint/",
   "legacy_href": "/docs/api/ops/polyint/",
   "module": "flopscope._polynomial",

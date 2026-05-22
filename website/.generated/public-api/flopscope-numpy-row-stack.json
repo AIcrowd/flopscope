@@ -486,7 +486,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.row_stack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1803",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1898",
   "href": "/docs/api/numpy/row-stack/",
   "import_path": "flopscope.numpy.row_stack",
   "is_operation_cost_leaf": true,

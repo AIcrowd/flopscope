@@ -137,7 +137,7 @@
   ],
   "signature": "flops.flops.roots_cost(n: 'int') -> 'int'",
   "slug": "flops-roots-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L65",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L70",
   "status_note": "",
   "summary": "Cost for roots: $n^3$ FLOPs (companion matrix eigendecomposition, simplified).",
   "upstream_source_url": ""

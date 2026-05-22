@@ -399,7 +399,7 @@
   "schema_version": 1,
   "slug": "intersect1d",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L445",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L473",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_arraysetops_impl.py#L617"
   }
 }

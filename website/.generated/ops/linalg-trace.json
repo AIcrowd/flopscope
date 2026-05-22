@@ -376,7 +376,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.trace",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L39",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L40",
   "href": "/docs/api/numpy/linalg/trace/",
   "legacy_href": "/docs/api/ops/linalg-trace/",
   "module": "numpy.linalg",

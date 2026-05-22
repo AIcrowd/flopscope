@@ -291,7 +291,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.moveaxis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L388",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L397",
   "href": "/docs/api/numpy/moveaxis/",
   "import_path": "flopscope.numpy.moveaxis",
   "is_operation_cost_leaf": true,

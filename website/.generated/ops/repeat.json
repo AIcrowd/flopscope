@@ -288,7 +288,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.repeat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L611",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L635",
   "href": "/docs/api/numpy/repeat/",
   "legacy_href": "/docs/api/ops/repeat/",
   "module": "numpy",

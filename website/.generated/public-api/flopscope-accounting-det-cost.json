@@ -200,7 +200,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.det_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L64",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L68",
   "href": "/docs/api/accounting/det-cost/",
   "import_path": "flopscope.accounting.det_cost",
   "is_operation_cost_leaf": false,

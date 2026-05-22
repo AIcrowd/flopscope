@@ -524,7 +524,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.fromfile",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1342",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1411",
   "href": "/docs/api/numpy/fromfile/",
   "import_path": "flopscope.numpy.fromfile",
   "is_operation_cost_leaf": true,

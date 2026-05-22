@@ -613,7 +613,7 @@
   "schema_version": 1,
   "slug": "random-choice",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L364",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L437",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.choice.html"
   }
 }

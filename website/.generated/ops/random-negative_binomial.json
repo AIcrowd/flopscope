@@ -551,7 +551,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.negative_binomial",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
   "href": "/docs/api/numpy/random/negative-binomial/",
   "legacy_href": "/docs/api/ops/random-negative_binomial/",
   "module": "numpy.random",

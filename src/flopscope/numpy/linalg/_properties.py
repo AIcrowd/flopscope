@@ -187,7 +187,7 @@ def norm_cost(shape: tuple, ord=None) -> int:
     -----
     Cost depends on the ``ord`` parameter and input dimensionality.
 
-    - Elementwise norms (Frobenius, L1, Linf, etc.): ``numel`` (weight=1 baked in).
+    - Elementwise norms (Frobenius, L1, Linf, etc.): ``2 * numel`` (FMA=2, weight=1 baked in).
     - SVD-based norms (2-norm, nuclear norm): ``4 * m * n * min(m, n)``
       (weight=4 baked in, consistent with linalg.svd weight=4).
     """
@@ -196,19 +196,19 @@ def norm_cost(shape: tuple, ord=None) -> int:
         numel *= d
     numel = max(numel, 1)
     if len(shape) == 1:
-        # FMA=1: all vector norms cost numel (one pass over elements)
-        return numel
+        # FMA=2: all vector norms cost 2*numel (one multiply + accumulate per element)
+        return 2 * numel
     else:
         m, n = shape[-2], shape[-1]
         if ord is None or ord == "fro":
-            return numel
+            return 2 * numel  # FMA=2
         elif ord in (1, -1, _np.inf, -_np.inf):
-            return numel
+            return 2 * numel  # FMA=2
         elif ord == 2 or ord == -2:
             return 4 * m * n * min(m, n)  # SVD-based, weight=4 baked in
         elif ord == "nuc":
             return 4 * m * n * min(m, n)  # SVD-based, weight=4 baked in
-        return numel
+        return 2 * numel  # FMA=2
 
 
 @_counted_wrapper
@@ -278,15 +278,14 @@ def vector_norm_cost(shape: tuple, ord=None) -> int:
 
     Notes
     -----
-    Most norms cost n FLOPs (one pass over elements). General p-norms
-    cost 2n due to exponentiation.
+    All norms cost 2*numel FLOPs (FMA=2: one multiply + accumulate per element).
     """
     numel = 1
     for d in shape:
         numel *= d
     numel = max(numel, 1)
-    # FMA=1: all norms cost numel (one pass over elements).
-    return numel
+    # FMA=2: all norms cost 2*numel (one multiply + accumulate per element).
+    return 2 * numel
 
 
 @_counted_wrapper
@@ -346,21 +345,21 @@ def matrix_norm_cost(shape: tuple, ord=None) -> int:
 
     Notes
     -----
-    - Elementwise norms (Frobenius, L1, Linf): ``numel`` (weight=1 baked in).
+    - Elementwise norms (Frobenius, L1, Linf): ``2 * numel`` (FMA=2, weight=1 baked in).
     - SVD-based norms (2-norm, nuclear): ``4 * m * n * min(m, n)``
       (weight=4 baked in, consistent with linalg.svd weight=4).
     """
     m, n = shape[-2], shape[-1]
     numel = m * n
     if ord is None or ord == "fro":
-        return numel
+        return 2 * numel  # FMA=2
     elif ord in (1, -1, _np.inf, -_np.inf):
-        return numel
+        return 2 * numel  # FMA=2
     elif ord == 2 or ord == -2:
         return 4 * m * n * min(m, n)  # SVD-based, weight=4 baked in
     elif ord == "nuc":
         return 4 * m * n * min(m, n)  # SVD-based, weight=4 baked in
-    return numel
+    return 2 * numel  # FMA=2
 
 
 @_counted_wrapper

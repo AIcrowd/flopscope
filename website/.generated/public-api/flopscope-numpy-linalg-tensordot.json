@@ -950,7 +950,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.tensordot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L72",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L76",
   "href": "/docs/api/numpy/linalg/tensordot/",
   "import_path": "flopscope.numpy.linalg.tensordot",
   "is_operation_cost_leaf": true,

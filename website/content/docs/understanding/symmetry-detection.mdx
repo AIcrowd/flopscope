@@ -1,410 +1,116 @@
 ---
-title: "Symmetry Detection Deep Dive"
+title: "Symmetry-aware FLOP counting"
 ---
 
-*Contributor-level walkthrough of flopscope's symmetry detection algorithm.*
+*How flopscope reduces the FLOPs charged for `einsum`, `sum`, `mean`, `median`, and friends when your tensors have symmetric structure.*
 
 **You will learn:**
-- How the bipartite graph is constructed from einsum subscripts
-- How the subset-keyed oracle detects and caches symmetry lazily
-- How the sigma-loop derives label permutations from row permutations
-- How Burnside's lemma counts unique elements for exact FLOP reduction
+- The one mental model flopscope uses for all symmetry-aware FLOP savings
+- How that model applies to `einsum`
+- How it applies to reductions (`sum`, `mean`, `median`, …)
+- How to inspect what gets charged with `flops.einsum_accumulation_cost` and `flops.reduction_accumulation_cost`
+- When the savings don't materialize, and why
 
-**TL;DR:** flopscope detects when an einsum expression has symmetry that allows computing fewer FLOPs. It does this by building a bipartite graph from the einsum subscripts, finding column permutations that preserve the graph structure, and using group theory to count how many unique terms exist. The savings can be dramatic -- a symmetric matrix multiplication can cost half as many FLOPs.
+## The mental model
 
-## The problem
+When you declare symmetry on a tensor (with `flops.as_symmetric`) — or when flopscope detects it from a repeated operand object — some entries in the dense layout are mathematically interchangeable. An **orbit** groups together all entries that are interchangeable. flopscope charges one event per orbit, not per dense element.
 
-A multi-operand einsum like `'ij,ai,bj->ab'` is decomposed by opt_einsum into
-a sequence of pairwise contractions. At each step the optimizer must evaluate
-candidate pairs -- and it needs to know, for each candidate intermediate, whether
-the result is symmetric, so it can score it with a reduced cost.
+For an `(n, n)` matrix declared symmetric in axes `(0, 1)`, there are `n*(n+1)/2` orbits among the `n*n` entries (the off-diagonal pairs share an orbit; diagonal entries are singleton orbits). Any cost that scales with "number of distinct entries" drops accordingly.
 
-When operands are `SymmetricTensor`s, their per-operand symmetry is known
-upfront. But there is a second source of symmetry: when the same Python object
-appears at multiple operand positions, the output can be symmetric in index
-labels contributed by those repeated operands -- even if the operands are dense.
+## Einsum: one event per orbit of (multiplications, accumulations)
 
-The naive approach is to rerun a detection procedure at every step for every
-candidate subset. This is too expensive for large contractions. We want:
-
-1. **Correctness** -- detect all exploitable symmetry without false positives.
-2. **Memoization** -- compute each intermediate's symmetry at most once.
-3. **Laziness** -- only evaluate subsets that the path optimizer actually visits.
-
-Subgraph symmetry detection achieves all three.
-
-## The bipartite graph
-
-The core data structure is a bipartite graph over the einsum expression.
-
-**Left vertices (U):** One U-vertex per axis of each operand. For a dense
-operand with subscript `"ai"`, each axis produces its own U-vertex (two total).
-For a `SymmetricTensor` with subscript `"ij"` and declared symmetry `S_2{i,j}`,
-both axes still produce separate U-vertices -- per-operand symmetry does not
-affect the graph topology. Instead, per-operand symmetry is handled entirely
-by the expanded sigma-loop (see below), which uses the declared symmetry
-generators as an additional source of row permutations.
-
-**Right vertices (labels):** One right vertex per unique index label. Labels are
-partitioned into:
-- **V (free labels):** appear in the final output subscript or in operands
-  outside the current subset (they "cross the cut").
-- **W (summed labels):** contracted entirely within the current subset.
-
-**Incidence:** An edge from U-vertex `u` to label `c` has weight equal to the
-multiplicity of `c` in the axes belonging to U-vertex `u`.
-
-**Identical-operand groups:** Operands that are the same Python object are
-grouped. These groups are the source of induced symmetry.
-
-### Worked example
-
-Consider `'ij,ai,bj->ab'` with operands `T, A, B` where `T` is a dense tensor:
+For an einsum, flopscope's charge in plain terms is:
 
 ```
-Subscripts:  ij,  ai,  bj  ->  ab
-Operands:    T    A    B
+total = (k − 1) × (unique multiplications across all operand axes) + (unique accumulations per output cell)
 ```
 
-U-vertices (one per axis):
+where `k` is the operand count. The savings come from *output orbits* — distinct output cells that flopscope can prove are interchangeable. The output gets symmetric structure either from declared symmetry on operands or from a repeated operand object appearing in multiple positions.
 
-- `(T, 0)` -- label set \{i\}
-- `(T, 1)` -- label set \{j\}
-- `(A, 0)` -- label set \{a\}
-- `(A, 1)` -- label set \{i\}
-- `(B, 0)` -- label set \{b\}
-- `(B, 1)` -- label set \{j\}
-
-Free labels at the top level: \{a, b\} (appear in output `->ab`).
-Summed labels at the top level: \{i, j\} (contracted out).
-
-No identical operands in this example -- `T`, `A`, and `B` are distinct Python
-objects.
-
-#### Full bipartite graph
-
-```
-   U (axes)                         Labels
-   -----------------               ------
-                                   V (free):
-   (A, 0) ------------------------- a
-   (B, 0) ------------------------- b
-
-                                   W (summed):
-   (T, 0) ----------+
-                    +--------------- i
-   (A, 1) ----------+
-
-   (T, 1) ----------+
-                    +--------------- j
-   (B, 1) ----------+
-```
-
-Now consider the subset `{A, B}` (positions 1 and 2):
-
-- U-vertices in subset: `(A, 0)`, `(A, 1)`, `(B, 0)`, `(B, 1)`
-- Labels in subset: \{a, i, b, j\}
-- Labels outside subset (in T): \{i, j\}
-- Crossing labels (in subset AND in outside): \{i, j\}
-- V at this step = \{a, b\} + \{i, j\} = \{a, b, i, j\} (all four -- \{i,j\} cross the cut)
-- W at this step = \{\} (nothing is summed entirely within \{A, B\})
-
-#### Induced subgraph for subset `{A, B}`
-
-When we restrict to subset `{A, B}`, labels `i` and `j` cross the cut (they also
-appear in T, outside the subset), so they move from W to V:
-
-```
-   U (subset {A, B} only)           Labels
-   ----------------------           ------
-                                    V (all free):
-   (A, 0) ------------------------- a
-   (A, 1) ------------------------- i
-   (B, 0) ------------------------- b
-   (B, 1) ------------------------- j
-
-                                    W: (empty)
-```
-
-The incidence matrix M at this subset (rows = U-vertices, columns = V+W):
-
-```
-         a  i  b  j
-(A, 0):  1  0  0  0
-(A, 1):  0  1  0  0
-(B, 0):  0  0  1  0
-(B, 1):  0  0  0  1
-```
-
-## The subset-keyed oracle
-
-The key invariant is the **pure-in-subset property**: the symmetry of an
-intermediate tensor depends only on the set of original operands it was formed
-from, not on the order in which they were contracted. This is because:
-
-- The bipartite graph structure is fixed for the full einsum.
-- The induced subgraph on a subset `S` is fully determined by which operands
-  are in `S`.
-- Symmetry is a property of the final intermediate, not its contraction history.
-
-This property makes the subset key canonical. The oracle stores results in a
-`dict[frozenset[int], SubsetSymmetry]` and returns cached results on
-subsequent calls with the same subset.
+Worked example — triple outer product `'i,j,k->ijk'` of three rank-1 vectors of length 4:
 
 ```python
-from flopscope._opt_einsum._subgraph_symmetry import SubgraphSymmetryOracle
+import numpy as np
+import flopscope as flops
 
-# One oracle per contract_path call
-oracle = SubgraphSymmetryOracle(
-    operands=list(operands),
-    subscript_parts=input_parts,
-    per_op_groups=perm_groups,
-    output_chars=output_str,
-)
+v1, v2, v3 = np.zeros(4), np.zeros(4), np.zeros(4)
+print(flops.einsum_accumulation_cost('i,j,k->ijk', v1, v2, v3).total)  # → 192
 
-# Lazy evaluation -- only computed on first access per subset
-result = oracle.sym(frozenset({0, 1}))  # SubsetSymmetry for intermediate from ops 0 and 1
-result.output  # V-side (output tensor) symmetry
-result.inner   # W-side (inner summation) symmetry
+v = np.zeros(4)
+print(flops.einsum_accumulation_cost('i,j,k->ijk', v, v, v).total)  # → 60
 ```
 
-## The detection algorithm
+When you pass three distinct vectors, every (i, j, k) output cell is its own orbit — 192 events. When you pass the *same* vector in all three operand positions, the operand swap induces an `S₃` action on the output labels, collapsing the 64 dense output cells into 20 orbits — 60 events. The output is structurally symmetric and the cost reflects that.
 
-### Goal
+The path that opt_einsum picks is irrelevant — the charge is **path-independent**. For multi-component expressions, each connected component is handled independently. Participants don't need to know which internal classifier fires for any given expression; only that the result is exact.
 
-For a fixed subset `S` with incidence matrix `M`, we want the full group
-of **automorphisms of the labelled bipartite graph** -- pairs `(sigma, pi)`
-where sigma permutes identical-operand rows and pi permutes label columns,
-such that applying `pi` to the columns of `sigma(M)` recovers `M`:
+## Reductions: `(unique inputs − unique outputs) + extra ops`
 
-```
-pi(sigma(M)) = M
-```
-
-Every such `pi` is a symmetry of the intermediate tensor built from `S`.
-Restricted to V labels it contributes to the output (V-side) symmetry;
-restricted to W labels it contributes to the inner (W-side) symmetry.
-The V/W partition is part of the labelled structure, so legitimate
-automorphisms must preserve it -- `pi(V) is a subset of V` and `pi(W) is a subset of W` -- and any
-`pi` with a cycle crossing V to W is rejected.
-
-### Column fingerprints
-
-For each label `c`, compute its column fingerprint `col(c)` -- the tuple of
-incidence values down the rows of M. Labels with identical fingerprints are
-*candidates* for symmetry equivalence. The fingerprint-to-label mapping is
-used by the sigma-loop to derive pi in O(1) per label via hash lookup.
-
-<Callout type="info" title="Removed fast path">
-Earlier versions had a standalone fast path that detected S_k whenever
-labels shared a fingerprint, without running the sigma-loop. This was
-incorrect for non-S_k groups (see the C3 bug note below) and has been
-removed. Fingerprints are now used only for pi derivation inside the
-sigma-loop -- they are not a standalone detection mechanism.
-</Callout>
-
-### Sigma loop: derive pi from generators
-
-The sigma-loop iterates over **generators** of the row-permutation group on M,
-drawn from three sources:
-
-- **Source A -- per-operand internal symmetry generators.** For each operand
-  that carries a declared `SymmetryGroup`, each generator of that group is
-  lifted to a row permutation on M (permuting only the rows belonging to that
-  operand). This captures symmetry that was previously handled by orbit-based
-  axis merging.
-
-- **Source B -- identical-operand swap generators.** For each group of k
-  identical operands (same Python object), the k-1 adjacent transpositions
-  `(op_i, op_{i+1})` are used as generators. Each such swap is lifted to a row
-  permutation that exchanges the rows of the two operands.
-
-- **Source C -- coordinated axis relabeling.** When identical operands share
-  the same subscript pattern (e.g. both have subscript `ij`), permuting axes
-  uniformly across all copies is equivalent to relabeling dummy indices.
-  Adjacent transpositions on W-only (summed) axes are generated, applied to
-  every copy simultaneously. This is restricted to W-side labels because
-  relabeling free (output) labels would change the output tensor.
-
-All generators are collected and passed to Dimino's algorithm to build the
-full row-permutation group. The sigma-loop then iterates over **all elements**
-of this group (not just the generators), deriving pi for each.
-
-For each group element `sigma`:
-
-1. Lift `sigma` to a row permutation on M.
-2. Compute `sigma(M)`'s column fingerprints: `sigma * col(c)` for each label `c`.
-3. **Derive the induced label permutation pi directly.** For each label `l`,
-   `pi(l)` is the label whose M-column matches `sigma(M)`'s column for `l` -- a
-   hash-table lookup in O(1). When multiple labels share a fingerprint
-   (collision), pick the lex-first unused candidate. If any label has no
-   match, reject this sigma.
-4. **Validate pi:** `pi(V) is a subset of V` and `pi(W) is a subset of W`. Any cycle crossing V to W
-   invalidates the sigma.
-5. **Collect pi as a generator literal** restricted to V labels (and
-   separately to W labels). Non-identity generators become part of the
-   detected `SymmetryGroup`.
-
-The sigma-loop collects all non-identity pi restrictions as generator literals.
-These generators are passed to Dimino's algorithm to close the group and build
-the exact symmetry group on V (and separately on W).
-
-## Interactive explorer
-
-Walk through each detection step interactively with the <StaticFileLink href="/symmetry-aware-einsum-contractions/">Symmetry Explorer</StaticFileLink> — choose a preset example or define your own einsum expression.
-
-## Worked examples
-
-Click to expand each example.
-
-<Accordions>
-<Accordion title="Block symmetry: einsum('ab,cd->abcd', X, X)">
-
-Consider two identical dense matrices `X`. The bipartite graph has one
-U-vertex per axis (four total), one label per column, and no W-labels
-(nothing is contracted):
+For reductions (`sum`, `prod`, `max`, `min`, `mean`, `median`, …), the formula is:
 
 ```
-   U (axes)                         Labels
-   -----------------               ------
-   operand X0:                     V (all free):
-     X0 * a ------------------------- a
-     X0 * b ------------------------- b
-
-   operand X1 (= X0):
-     X1 * c ------------------------- c
-     X1 * d ------------------------- d
-
-                                    W: (empty)
+total = (unique input entries − unique output cells) + extra ops
 ```
 
-The incidence matrix M is the 4x4 identity. The only nontrivial sigma swaps
-operands 0 and 1, permuting rows (0 with 2, 1 with 3). Matching sigma(M) columns
-back to M columns gives:
+The `− unique output cells` term is the off-by-one fix from [#56](https://github.com/AIcrowd/flopscope/issues/56): the first input element of each output cell is a free copy; only the remaining accumulations cost. So `sum` on `(10,)` charges 9 flops, not 10:
 
-```
-pi(a) = c,  pi(b) = d,  pi(c) = a,  pi(d) = b
+```python
+print(flops.reduction_accumulation_cost(np.zeros(10)).total)  # → 9
 ```
 
-So pi = (a c)(b d). Two disjoint 2-cycles from one sigma. The result is
-**block S_2: `{(a,b), (c,d)}`**.
+With declared symmetry, both terms drop. Summing a fully-symmetric rank-3 tensor:
 
-</Accordion>
-<Accordion title="Per-index symmetry: einsum('ia,ib->ab', X, X)">
+```python
+T_dense = np.zeros((4, 4, 4))
+T_sym   = flops.as_symmetric(np.zeros((4, 4, 4)), symmetry=(0, 1, 2))
 
-This computes X^T X, which is symmetric. U-vertices:
-
-- `(X0, 0)` -- label `i`, `(X0, 1)` -- label `a`
-- `(X1, 0)` -- label `i`, `(X1, 1)` -- label `b`
-
-Labels: V = `{a, b}` (output), W = `{i}` (contracted). Swapping operands
-gives:
-
-```
-pi(a) = b,  pi(b) = a,  pi(i) = i
+print(flops.reduction_accumulation_cost(T_dense).total)  # → 63
+print(flops.reduction_accumulation_cost(T_sym).total)    # → 19
 ```
 
-Label action on V: a single transposition (a b) -- **per-index `S_2{a, b}`**.
-X^T X is symmetric in its two output indices, as expected.
+`mean` adds one divide per unique output cell on top of the sum cost. `median` / `percentile` / `quantile` use a separate selection-style charge — see `flops.tier2_reduction_cost(...)`.
 
-</Accordion>
-<Accordion title="Cautionary note: the C3 axis-merging bug">
+## Inspecting what gets charged
 
-`einsum('ijk,jki->ik', T, T)` with C3 symmetry declared on T was falsely
-detected as having `S_2{i,k}` output symmetry. The root cause was orbit-based
-axis merging in the bipartite graph construction.
+Two public inspection functions return the same `AccumulationCost` shape:
 
-C3 acting on \{i,j,k\} has a single orbit \{i,j,k\}, so all three axes were
-merged into one U-vertex per operand. With merged vertices, labels `i` and
-`k` received identical column fingerprints, and the fingerprint fast path
-promoted them to `S_2{i,k}`. However, C3 contains only 3-cycles -- no
-transpositions -- so the 2-cycle (i k) is not a valid automorphism.
-
-The fix has two parts:
-
-1. **Removed orbit-based merging.** Each axis now gets its own U-vertex
-   regardless of declared symmetry. This ensures that the graph topology
-   faithfully reflects the actual incidence structure.
-2. **Expanded the sigma-loop.** Per-operand symmetry generators are fed
-   directly into the sigma-loop (Source A) alongside identical-operand
-   swap generators (Source B). Dimino's algorithm closes the group from the
-   discovered pi generators, producing C3 (not S2) for this case.
-
-</Accordion>
-</Accordions>
-
-## V-side and W-side
-
-V-side groups are symmetries of the output tensor -- they reduce the number of
-unique output elements that need to be computed. W-side groups are symmetries
-among the contracted (summed) labels -- they reduce the number of unique
-summation terms. Both contribute multiplicatively to the cost reduction:
-
-```
-cost = dense_cost * (unique_output / total_output) * (unique_inner / total_inner)
+```python
+flops.einsum_accumulation_cost('ij,jk->ik', A, B).total
+flops.reduction_accumulation_cost(T, axis=0).total
 ```
 
-The **output (V-side) reduction** is always applied when the step's
-intermediate has a non-trivial permutation group on its free indices.
+Both are LRU-cached; warm-call latency is in microseconds. See `flops.einsum_cache_info()` and `flops.reduction_cache_info()` for cache state.
 
-The **inner (W-side) reduction** is applied only when *all* labels in
-the detected inner group are present as contracted indices in that
-specific pairwise step. If any of those labels were contracted at an
-earlier step and no longer appear, the inner reduction is skipped.
-In the contraction path table, `[W checkmark: ...]` indicates the inner reduction was
-applied, while `[W: ...]` indicates it was detected but not applied.
-Inner symmetry can be toggled with `flops.configure(use_inner_symmetry=False)`.
+## When numbers might surprise you
 
-## Exact group detection and Burnside counting
+The orbit savings come from the **output** having symmetric structure. Declared symmetry on an input doesn't automatically translate to savings — the question is always whether the *output* cells share orbits.
 
-The sigma-loop collects all valid pi permutations as generator literals and builds a `SymmetryGroup` directly.
+**Gotcha 1 — input symmetry that doesn't reach the output.** Declaring `A` symmetric in `'ij,j->i'` doesn't save anything: the output index `i` doesn't share an orbit with anything under the (i, j) swap, so every output cell stays distinct.
 
-When the generated group equals S_k (the full symmetric group, checked via
-`order == k!`), the existing stars-and-bars formula `C(n+k-1, k)` applies.
-When the group is a proper subgroup (e.g., C_3 from `einsum('ij,jk,ki->', A, A, A)`),
-Burnside's lemma gives the exact unique element count.
+```python
+A_dense = np.zeros((4, 4))
+A_sym   = flops.as_symmetric(np.zeros((4, 4)), symmetry=(0, 1))
+v       = np.zeros(4)
 
-<Accordions>
-<Accordion title="Worked example: tr(A³)">
+print(flops.einsum_accumulation_cost('ij,j->i', A_dense, v).total)  # → 32
+print(flops.einsum_accumulation_cost('ij,j->i', A_sym,   v).total)  # → 32 (same!)
+```
 
-For `einsum('ij,jk,ki->', A, A, A)` with the same n x n matrix A:
+**Gotcha 2 — reduction along an axis that breaks the symmetry.** Summing along axis 0 of a `(6, 6)` `S₂` matrix leaves a `(6,)` output. The `(0, 1)` swap doesn't fix axis 0, so the output has no residual symmetry and no savings appear:
 
-1. The sigma-loop tries all 6 permutations of `{operand 0, 1, 2}`
-2. Only 3 produce valid pi's: identity, (i to j to k), (i to k to j)
-3. These are the generators of C_3 (cyclic group of order 3)
-4. Burnside counting on W-labels `{i,j,k}` with dimension n:
-   - Identity: n^3 fixed tuples (every tuple is fixed)
-   - 3-cycle (ijk): n fixed tuples (only i=j=k tuples)
-   - 3-cycle (ikj): n fixed tuples
-   - Total: (n^3 + 2n) / 3
+```python
+S2 = flops.as_symmetric(np.zeros((6, 6)), symmetry=(0, 1))
 
-For n=10: 340 unique elements instead of 220 (S_3), giving a more accurate
-(higher) FLOP estimate.
+print(flops.reduction_accumulation_cost(S2,              axis=0).total)  # → 30
+print(flops.reduction_accumulation_cost(np.zeros((6,6)), axis=0).total)  # → 30
+print(flops.reduction_accumulation_cost(S2).total)                        # → 20  (full reduction → saves)
+print(flops.reduction_accumulation_cost(np.zeros((6,6))).total)           # → 35
+```
 
-</Accordion>
-</Accordions>
+If your symmetry savings aren't materializing, check whether the operation's *output* would still carry symmetric structure given how the indices flow.
 
-## Complexity bound
+## What's actually happening
 
-The oracle evaluates each subset at most once. For a contract with `N` operands
-and groups of sizes `k_1, k_2, ...`:
+For curious contributor-level readers: the model is the α/M direct-event count, where α counts orbits of input entries projected onto the output and M counts orbits of inputs. The orbit calculation uses the *pointwise symmetry group* — the combination of declared symmetry on operands and the symmetries induced by repeated operand objects. The full classifier ladder (which picks between closed-form formulas like Young tableaux, singleton-cycle counts, and typed partition enumeration) lives in `flopscope/_accumulation/_ladder.py` and `flopscope/_accumulation/_regimes.py`.
 
-- **Generator collection:** Source A contributes O(rank) generators per operand
-  with declared symmetry. Source B contributes k-1 generators per identical group.
-  Source C contributes at most rank-1 generators per identical group with matching
-  subscripts. Total generators: `g = O(N * rank)`.
-- **Group enumeration:** Dimino's algorithm builds the full row-permutation
-  group from the generators in `O(|G| * g)` compositions.
-- **Pi derivation:** For each of the `|G|` group elements, deriving pi costs
-  `O(n_labels)` via fingerprint hash lookup.
-- **Per-subset total:** `O(|G| * (g + n_labels))`.
-- **Number of subsets visited:** at most `2^N` (usually much less -- path
-  algorithms visit only O(N^2) subsets in practice).
-
-For the common case of a single pair of identical operands (`|G| = 2`, `g = 1`):
-per-subset cost is `O(n_labels)`.
-
-## Related pages
-
-- [Symmetry Savings](/docs/guides/symmetry) -- practical guide to using symmetry
-- [FLOP Counting Model](/docs/understanding/flop-counting-model) -- how costs are calculated
+An interactive companion that visualizes the same model on a curated set of einsum expressions is available at the standalone route [/symmetry-aware-einsum-contractions/](/symmetry-aware-einsum-contractions/) — useful for building intuition before predicting your own costs.

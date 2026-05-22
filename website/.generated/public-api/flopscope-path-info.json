@@ -10,7 +10,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Information about a contraction path with per-step symmetry diagnostics."
+              "text": "Information about a contraction path."
             }
           ],
           "type": "paragraph"
@@ -32,7 +32,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.PathInfo",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L103",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L90",
   "href": "/docs/api/flopscope/path-info/",
   "import_path": "flopscope.PathInfo",
   "is_operation_cost_leaf": false,
@@ -50,9 +50,9 @@
   "returns": [],
   "schema_version": 1,
   "see_also": [],
-  "signature": "flopscope.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list[tuple[typing.Any, frozenset[str], str, tuple[str, ...] | None, str | bool]] = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
+  "signature": "flopscope.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
   "slug": "flopscope-path-info",
-  "summary": "Information about a contraction path with per-step symmetry diagnostics.",
+  "summary": "Information about a contraction path.",
   "upstream_source_url": "",
   "weight": 1.0
 }

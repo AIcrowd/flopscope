@@ -220,7 +220,7 @@
   "schema_version": 1,
   "slug": "linalg-matrix_transpose",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L115",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L119",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/linalg/_linalg.py#L3405"
   }
 }

@@ -43,7 +43,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.numpy.random.ranf",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L301",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L371",
   "href": "/docs/api/numpy/random/ranf/",
   "import_path": "flopscope.numpy.random.ranf",
   "is_operation_cost_leaf": true,

@@ -41,12 +41,12 @@ class TestHamming:
             assert numpy.allclose(hamming(10), numpy.hamming(10))
 
     def test_cost(self):
-        # Sheet formula: n (FMA=1)
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy import hamming
 
             hamming(10)
-            assert budget.flops_used == 10
+            assert budget.flops_used == 20
 
 
 class TestHanning:
@@ -57,12 +57,12 @@ class TestHanning:
             assert numpy.allclose(hanning(10), numpy.hanning(10))
 
     def test_cost(self):
-        # Sheet formula: n (FMA=1)
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy import hanning
 
             hanning(10)
-            assert budget.flops_used == 10
+            assert budget.flops_used == 20
 
 
 class TestKaiser:

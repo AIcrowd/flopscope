@@ -137,7 +137,7 @@
   ],
   "signature": "flops.flops.poly_cost(n: 'int') -> 'int'",
   "slug": "flops-poly-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L60",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L65",
   "status_note": "",
   "summary": "Cost for poly: $n^2$ FLOPs.",
   "upstream_source_url": ""

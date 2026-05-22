@@ -206,7 +206,7 @@
   ],
   "signature": "flops.flops.slogdet_cost(n: 'int', symmetric: 'bool' = False) -> 'int'",
   "slug": "flops-slogdet-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L110",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L115",
   "status_note": "",
   "summary": "Weighted FLOP cost of sign and log-determinant.",
   "upstream_source_url": ""

@@ -374,7 +374,7 @@
   "schema_version": 1,
   "slug": "random-random_sample",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L301",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L371",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.random_sample.html"
   }
 }

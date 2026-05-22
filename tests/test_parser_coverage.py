@@ -1,9 +1,8 @@
-"""Comprehensive tests for flopscope._opt_einsum._parser to bring coverage ~95%."""
+"""Comprehensive tests for the einsum parser (upstream opt_einsum.parser)."""
 
 import numpy
 import pytest
-
-from flopscope._opt_einsum._parser import (
+from opt_einsum.parser import (
     alpha_canonicalize,
     convert_interleaved_input,
     convert_subscripts,
@@ -110,7 +109,7 @@ class TestGenUnusedSymbols:
 
     def test_all_base_used(self):
         """When all 52 base symbols are used, should yield unicode symbols."""
-        from flopscope._opt_einsum._parser import _einsum_symbols_base
+        from opt_einsum.parser import _einsum_symbols_base
 
         result = list(gen_unused_symbols(_einsum_symbols_base, 2))
         # These should be the first two unicode symbols after the base set

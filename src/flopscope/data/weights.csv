@@ -146,6 +146,10 @@ fft.rfftn,benchmarked,FFT,5*(n/2)*ceil(log2(n)),1.0000,0.7013,,"10,000 FLOPs (10
 fft.irfftn,benchmarked,FFT,5*(n/2)*ceil(log2(n)),1.0000,0.8267,,"10,000 FLOPs (1000 elements, C=10000)",high,"Inverse N-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2; Van Loan 1992 §1.4).",,0.83,0.0708,14.1243,0.0019,np.fft.irfftn(x),"x: (1024,1024)","[432364696, 434030449, 433410854]",72720975,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/fft/_transforms.py#L423,baseline,10
 fft.hfft,benchmarked,FFT,5*n*ceil(log2(n)),1.0000,2.2743,,"10,000 FLOPs (1000 elements, C=10000)",high,FFT of Hermitian-symmetric signal. Cost: 5*n_out*ceil(log2(n_out)) (Cooley-Tukey radix-2; Van Loan 1992 §1.4).,,2.27,0.3634,2.7518,0.0170,np.fft.hfft(x),"x: (1048576,)","[2381467114, 2453878519, 2384794406]",746112380,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/fft/_transforms.py#L443,baseline,10
 fft.ihfft,benchmarked,FFT,5*(n/2)*ceil(log2(n)),1.0000,0.4244,,"10,000 FLOPs (1000 elements, C=10000)",medium,Inverse FFT of Hermitian signal. Cost: 5*n*ceil(log2(n)) (Cooley-Tukey radix-2; Van Loan 1992 §1.4).,,0.42,0.0722,13.8504,0.1080,np.fft.ihfft(x),"x: (1048576,)","[443361242, 532786632, 445026995]",148207455,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/fft/_transforms.py#L462,baseline,10
+fft.fftfreq,benchmarked,FFT,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+fft.fftshift,benchmarked,FFT,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+fft.ifftshift,benchmarked,FFT,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+fft.rfftfreq,benchmarked,FFT,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
 linalg.cholesky,benchmarked,Linalg,n^3,4.0000,0.5350,,"131,072 FLOPs (n=32, C=32768)",high,Cholesky decomposition. Cost: $n^3$.,,0.54,0.0346,115.6069,0.0002,np.linalg.cholesky(A),"A: (1024,1024)","[5745012772, 5746678587, 5745012772]",728009826,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_decompositions.py#L45,moderate,10
 linalg.qr,benchmarked,Linalg,"m*n*min(m,n)",4.0000,2.7316,,"4,000 FLOPs (C=1000)",high,"QR decomposition. Cost: $m \cdot n \cdot \min(m,n)$.",,2.73,0.4927,8.1185,0.0413,np.linalg.qr(A),"A: (1024,1024)","[29327982061, 29330079463, 31476590935]",10358642929,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_decompositions.py#L83,moderate,10
 linalg.eig,benchmarked,Linalg,n^3,4.0000,14.5964,,"131,072 FLOPs (n=32, C=32768)",medium,Eigendecomposition. Cost: $n^3$.,,14.60,1.7472,2.2894,0.1273,np.linalg.eig(A),"A: (1024,1024)","[163560804541, 156727584723, 127741075235]",36732097538,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_decompositions.py#L119,moderate,10
@@ -166,15 +170,17 @@ linalg.tensorinv,benchmarked,Linalg Delegates,n^3 (delegates to inv),4.0000,2.23
 linalg.tensorsolve,benchmarked,Linalg Delegates,n^3 (delegates to solve),4.0000,0.9282,,"131,072 FLOPs (n=32, C=32768)",high,Weight=4 (same as linalg.solve). Reshapes to 2D then calls solve. Cost n^3 in formula.,,0.93,0.0839,47.6758,0.0016,"np.linalg.tensorsolve(A, b)","A: (8,8,8,8), b: (8,8)","[2433162, 2439821, 2433162]",430397,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_solvers.py#L224,moderate,10
 linalg.cross,benchmarked,Linalg Delegates,6*n,1.0000,1.7413,,"1,000 FLOPs (C=1000)",high,Delegates to `me.cross` which charges `numel(output)` FLOPs.,,1.74,3.3076,0.3023,0.0465,"np.linalg.cross(a, b)","a: (1000000,3), b: (1000000,3)","[98478050, 108009598, 104478091]",388571181,,baseline,10
 linalg.matmul,benchmarked,Linalg Delegates,MNK,1.0000,2.0009,,"1,000 FLOPs (C=1000)",high,Delegates to `me.matmul` which charges `m*k*n` FLOPs (FMA=1).,,2.00,1.3932,0.7178,0.0002,"np.linalg.matmul(A, B)","A: (512,512), B: (512,512)","[2685103983, 2685937106, 2685628312]",3661346910,,baseline,10
-linalg.matrix_norm,benchmarked,Linalg Delegates,"numel (fro/L1/Linf) or 4*m*n*min(m,n) (ord=2/nuc)",1.0000,1.1225,,"1,000 FLOPs (1000 elements)",high,"Weight=1 (baked into cost function). Elementwise norms cost numel. SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) — the 4x is baked in for SVD consistency.",,1.12,0.2024,4.9407,0.0360,np.linalg.matrix_norm(A),"A: (512,512)","[5622748, 6038991, 5884892]",2077385,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L289,baseline,10
+linalg.matrix_norm,benchmarked,Linalg Delegates,"2*numel (fro/L1/Linf, FMA=2) or 4*m*n*min(m,n) (ord=2/nuc)",1.0000,1.1225,,"1,000 FLOPs (1000 elements)",high,"Weight=1 (baked into cost function). Elementwise norms cost 2*numel (FMA=2). SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) — the 4x is baked in for SVD consistency.",,1.12,0.2024,4.9407,0.0360,np.linalg.matrix_norm(A),"A: (512,512)","[5622748, 6038991, 5884892]",2077385,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L289,baseline,10
 linalg.matrix_power,benchmarked,Linalg Delegates,(ceil(log2(k))+popcount(k)-1)*n^3,1.0000,2.0030,,"10,000 FLOPs (1000 elements, C=10000)",high,Matrix power. Cost: $(\lfloor\log_2 k\rfloor + \text{popcount}(k) - 1) \cdot n^3$ (exponentiation by squaring).,,2.00,0.4316,2.3170,0.0002,"np.linalg.matrix_power(A, 5)","A: (64,64), n=5","[15752245, 15758779, 15752245]",6646475,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_compound.py#L116,baseline,10
-linalg.multi_dot,benchmarked,Linalg Delegates,sum of chain MNK costs,1.0000,1.0029,,"1,000 FLOPs (C=1000)",high,Chain matmul. Cost: sum of optimal chain matmul costs (CLRS §15.2).,,1.00,0.2153,4.6447,0.0009,"np.linalg.multi_dot([A, B, C])","A: (128,64), B: (64,128), C: (128,64)","[21016315, 21054953, 21032740]",8839020,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_compound.py#L68,baseline,10
-linalg.norm,benchmarked,Linalg Delegates,"numel (fro/L1/Linf) or 4*m*n*min(m,n) (ord=2/nuc)",1.0000,2.2412,,"1,000 FLOPs (1000 elements)",high,"Weight=1 (baked into cost function). Elementwise norms cost numel. SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) — the 4x is baked in for SVD consistency.",,2.24,0.6245,1.6013,0.0361,np.linalg.norm(x),"x: (10000000,)","[214116731, 230009679, 224116731]",122275816,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L187,baseline,10
+linalg.multi_dot,benchmarked,Linalg Delegates,2 * sum of chain MNK costs (FMA=2),1.0000,1.0029,,"1,000 FLOPs (C=1000)",high,Chain matmul. Cost: 2 * sum of optimal chain matmul costs (CLRS §15.2) (FMA=2).,,1.00,0.2153,4.6447,0.0009,"np.linalg.multi_dot([A, B, C])","A: (128,64), B: (64,128), C: (128,64)","[21016315, 21054953, 21032740]",8839020,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_compound.py#L68,baseline,10
+linalg.norm,benchmarked,Linalg Delegates,"2*numel (vector/fro/L1/Linf, FMA=2) or 4*m*n*min(m,n) (ord=2/nuc)",1.0000,2.2412,,"1,000 FLOPs (1000 elements)",high,"Weight=1 (baked into cost function). Elementwise norms cost 2*numel (FMA=2). SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) — the 4x is baked in for SVD consistency.",,2.24,0.6245,1.6013,0.0361,np.linalg.norm(x),"x: (10000000,)","[214116731, 230009679, 224116731]",122275816,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L187,baseline,10
 linalg.outer,benchmarked,Linalg Delegates,M*N,1.0000,1.0001,,"1,000 FLOPs (C=1000)",high,Delegates to `me.outer` which charges `m*n` FLOPs.,,1.00,1.1337,0.8821,0.0000,"np.linalg.outer(a, b)","a: (5000,), b: (5000,)","[250024028, 250039682, 250034069]",554932888,,baseline,10
 linalg.tensordot,benchmarked,Linalg Delegates,product of free * contracted dims,1.0000,2.0001,,"1,000 FLOPs (C=1000)",high,Delegates to `me.tensordot` which charges FLOPs based on contraction.,,2.00,0.5089,1.9650,0.0000,"np.linalg.tensordot(A, B, axes=1)","A: (64,64,64), B: (64,64,64)","[21475585963, 21476419086, 21476110292]",10699767686,,baseline,10
 linalg.trace,benchmarked,Linalg Delegates,"min(m,n)",1.0000,0.7872,,"1,000 FLOPs (n=1000, C=1000)",high,Blacklisted per reviewer — datetime ops not in scope.,,1.09,0.3628,2.7563,0.0000,np.linalg.trace(A),"A: (10000,10000) [np.ones]","[108731, 108731, 108731]",71042,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L45,baseline,10
 linalg.vecdot,benchmarked,Linalg Delegates,batch*K,1.0000,2.4841,,"1,000 FLOPs (1000-element vector, C=1000)",medium,Delegates to `me.vecdot` which charges `2*n` FLOPs.,,2.48,0.5579,1.7924,0.0654,"np.linalg.vecdot(A, B)","A: (1000,512), B: (1000,512)","[11694688, 13321682, 12718729]",5593153,,baseline,10
-linalg.vector_norm,benchmarked,Linalg Delegates,numel,1.0000,2.2412,,"1,000 FLOPs (1000 elements)",high,Vector norm. Cost: numel (or 2*numel for general p-norm).,,2.24,1.1385,0.8783,0.0361,np.linalg.vector_norm(x),"x: (10000000,)","[214116731, 230009679, 224116731]",222907683,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L238,baseline,10
+linalg.vector_norm,benchmarked,Linalg Delegates,2*numel (FMA=2),1.0000,2.2412,,"1,000 FLOPs (1000 elements)",high,Vector norm. Cost: 2*numel (FMA=2 — one multiply + accumulate per element).,,2.24,1.1385,0.8783,0.0361,np.linalg.vector_norm(x),"x: (10000000,)","[214116731, 230009679, 224116731]",222907683,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L238,baseline,10
+linalg.diagonal,benchmarked,Linalg Delegates,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+linalg.matrix_transpose,benchmarked,Linalg Delegates,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
 dot,benchmarked,Contractions,MNK,1.0000,2.0012,,"1,000 FLOPs (C=1000)",high,Dot product; cost = M*K*N (FMA=1).,,2.00,1.4051,0.7117,0.0002,"np.dot(A, B)","A: (512,512), B: (512,512)","[2685103983, 2685937078, 2685937022]",3692552746,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L619,baseline,10
 matmul,benchmarked,Contractions,MNK,1.0000,2.0012,,"1,000 FLOPs (C=1000)",high,Matrix multiplication; cost = M*K*N (FMA=1).,,2.00,1.3807,0.7243,0.0002,"np.matmul(A, B)","A: (512,512), B: (512,512)","[2685103983, 2685937078, 2685937022]",3628406734,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L655,baseline,10
 inner,benchmarked,Contractions,N (a.size),1.0000,2.6010,,"1,000 FLOPs (1000-element vector, C=1000)",medium,Inner product; cost = N (FMA=1).,,2.60,0.5863,1.7056,0.0736,"np.inner(a, b)","a: (1000000,), b: (1000000,)","[22829921, 26009654, 26009598]",11480154,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L681,baseline,10
@@ -185,7 +191,7 @@ tensordot,benchmarked,Contractions,product of free * contracted dims,1.0000,2.00
 kron,benchmarked,Contractions,numel(output),1.0000,1.0002,,"1,000 FLOPs (1000 elements)",high,Kronecker product; cost proportional to output size.,,1.00,1.1531,0.8672,0.0000,"np.kron(A, B)","A: (64,64), B: (64,64)","[167793697, 167806390, 167806334]",378782165,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L755,baseline,10
 einsum,benchmarked,Contractions,product of index dims (FMA=1),1.0000,2.0012,,"1,000 FLOPs (C=1000)",high,Generalized Einstein summation.,,2.00,0.1338,7.4738,0.0002,"np.einsum('ij,jk->ik', A, B)","A: (512,512), B: (512,512), subscripts='ij,jk->ik'","[2685103983, 2685937078, 2685937022]",351740209,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L139,baseline,10
 roots,benchmarked,Polynomial,degree^3,16.0000,10.2924,,"32,000 FLOPs (n=100 deg=10, C=2000)",high,"Return roots of polynomial with given coefficients. Cost: $n^3$ (companion matrix eig, simplified).",,10.29,1.9369,8.2606,0.0420,np.roots(c),"c: (101,)","[102095583, 110123593, 102924427]",37924915,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L217,moderate,10
-polyval,benchmarked,Polynomial,n * degree (FMA=1),1.0000,2.0214,,"2,000 FLOPs (n=100 deg=10, C=2000)",high,"Evaluate polynomial at given points. Cost: $m \cdot \text{deg}$ (Horner's method, FMA=1).",,2.02,0.7014,1.4257,0.0000,"np.polyval(c, x)","c: (101,), x: (1000000,)","[2021420470, 2021425593, 2021417915]",1373284400,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L78,baseline,10
+polyval,benchmarked,Polynomial,2 * n * degree (FMA=2),1.0000,2.0214,,"2,000 FLOPs (n=100 deg=10, C=2000)",high,"Evaluate polynomial at given points. Cost: $2m \cdot \text{deg}$ (Horner's method, FMA=2).",,2.02,0.7014,1.4257,0.0000,"np.polyval(c, x)","c: (101,), x: (1000000,)","[2021420470, 2021425593, 2021417915]",1373284400,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L78,baseline,10
 polyfit,benchmarked,Polynomial,2 * n * (degree+1)^2,1.0000,1.1977,,"2,000 FLOPs (n=100 deg=10, C=2000)",high,Least squares polynomial fit. Cost: 2 * m * (deg+1)^2 FLOPs.,,1.20,0.3746,2.6695,0.0000,"np.polyfit(x, y, 100)","x: (1000000,), y: (1000000,), degree=100","[244347826566, 244347831689, 244347823985]",149626487897,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L187,baseline,10
 polyadd,benchmarked,Polynomial,degree + 1,1.0000,10.8861,,"2,000 FLOPs (n=100 deg=10, C=2000)",high,"Add two polynomials. Cost: max(n1, n2) FLOPs.",,10.89,7.3313,0.1364,0.0055,"np.polyadd(c, d)","c: (101,), d: (101,)","[10917, 10995, 11035]",14498,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L96,baseline,10
 polysub,benchmarked,Polynomial,degree + 1,1.0000,10.8861,,"2,000 FLOPs (n=100 deg=10, C=2000)",high,"Difference (subtraction) of two polynomials. Cost: max(n1, n2) FLOPs.",,10.89,7.3651,0.1358,0.0055,"np.polysub(c, d)","c: (101,), d: (101,)","[10917, 10995, 11035]",14565,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L113,baseline,10
@@ -237,8 +243,12 @@ random.rand,benchmarked,Random,numel(output),1.0000,3.0001,,"1,000 FLOPs (1000 e
 random.randint,benchmarked,Random,numel(output),1.0000,0.0001,,"1,000 FLOPs (1000 elements)",high,Sampling; cost = numel(output).,,0.00,1.9079,0.5241,0.0000,"np.random.randint(0, 1000, 10000000)","output: (10000000,)","[9596, 9596, 9596]",373561982,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/random/__init__.py#L158,baseline,10
 random.random,benchmarked,Random,numel(output),1.0000,3.0001,,"1,000 FLOPs (1000 elements)",high,Sampling; cost = numel(output).,,3.00,3.0165,0.3315,0.0000,np.random.random(10000000),"output: (10000000,)","[300009596, 300009596, 300009596]",590627361,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/random/__init__.py#L179,baseline,10
 random.random_sample,benchmarked,Random,numel(output),1.0000,3.0001,,"1,000 FLOPs (1000 elements)",high,Sampling; cost = numel(output).,,3.00,3.0089,0.3323,0.0000,np.random.random_sample(10000000),"output: (10000000,)","[300009596, 300009596, 300009596]",589134243,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/random/__init__.py#L180,baseline,10
-random.bytes,benchmarked,Random,numel(output),1.0000,0.8610,,"1,000 FLOPs (1000 elements)",,EC2 timing = 0.86. Fast PRNG byte generation — cheaper than add.,,1.00,0.0000,N/A,N/A,np.random.bytes(N),N/A,[],0,,baseline,0
+random.bytes,benchmarked,Random,numel(output),1.0000,0.8610,,"1,000 FLOPs (1000 elements)",,EC2 timing = 0.86. Fast PRNG byte generation — cheaper than add.,,1.00,0.0000,N/A,N/A,np.random.bytes(N),N: 10000000,[],0,,baseline,0
 random.random_integers,benchmarked,Random,numel(output),1.0000,3.5105,,"1,000 FLOPs (1000 elements)",,EC2 timing = 3.51. Deprecated randint wrapper.,,0.00,0.0000,N/A,N/A,N/A,N/A,[],,,baseline,0
+random.default_rng,benchmarked,Random,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+random.get_state,benchmarked,Random,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+random.seed,benchmarked,Random,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+random.set_state,benchmarked,Random,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
 stats.norm.pdf,benchmarked,Stats,numel(input),16.0000,27.0000,,"16,000 FLOPs (1000 elements)",high,"Raw alpha=27.3002, setup overhead=0.3002 subtracted. FP instruction count per element.",,27.30,0.0000,N/A,0.0034,_dist._compute_pdf(x),"x: (10000000,)","[2714153591, 2730018817, 2730018858]",,,moderate,10
 stats.norm.cdf,benchmarked,Stats,numel(input),16.0000,47.5991,,"16,000 FLOPs (1000 elements)",low,"Raw alpha=47.8993, setup overhead=0.3002 subtracted. FP instruction count per element.",,47.90,0.0000,N/A,0.2654,_dist._compute_cdf(x),"x: (10000000,)","[3007601731, 5143335657, 4789933658]",,,moderate,10
 stats.norm.ppf,benchmarked,Stats,numel(input),16.0000,83.0527,,"16,000 FLOPs (1000 elements)",high,"Raw alpha=83.3529, setup overhead=0.3002 subtracted. FP instruction count per element.",,83.35,0.0000,N/A,0.0000,_dist._compute_ppf(x),"x: (10000000,)","[8335593509, 8335291409, 8335097729]",,,moderate,10
@@ -345,10 +355,80 @@ tile,benchmarked,Misc,numel(output),1.0000,0.6244,,"1,000 FLOPs (1000 elements)"
 unpackbits,benchmarked,Misc,numel(input),1.0000,0.0385,,"1,000 FLOPs (1000 elements)",,EC2 timing ratio vs add = 0.0385.,,0.00,0.0000,N/A,N/A,N/A,N/A,[],,,baseline,0
 unstack,benchmarked,Misc,numel(input),1.0000,0.0007,,"1,000 FLOPs (1000 elements)",,EC2 timing = 0.0007. Returns views — should be free.,,0.00,0.0000,N/A,N/A,N/A,N/A,[],,,baseline,0
 vstack,benchmarked,Misc,numel(output),1.0000,0.9082,,"1,000 FLOPs (1000 elements)",,EC2 timing ratio vs add = 0.9082.,,0.00,0.0000,N/A,N/A,N/A,N/A,[],,,baseline,0
+array_split,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+asarray,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+astype,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+atleast_1d,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+atleast_2d,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+atleast_3d,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+broadcast_arrays,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+broadcast_shapes,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+broadcast_to,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+can_cast,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+column_stack,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+common_type,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+copy,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+diag_indices,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+diag_indices_from,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+dsplit,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+empty,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+empty_like,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+expand_dims,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+eye,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+flip,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+fliplr,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+flipud,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+from_dlpack,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+frombuffer,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+hsplit,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+hstack,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+identity,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+isdtype,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+isfortran,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+isscalar,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+issubdtype,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+iterable,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+matrix_transpose,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+may_share_memory,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+min_scalar_type,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+mintypecode,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+moveaxis,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+ndim,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+ones,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+ones_like,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+permute_dims,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+promote_types,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+ravel,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+ravel_multi_index,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+require,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+reshape,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+result_type,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+rollaxis,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+rot90,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+row_stack,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+shape,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+shares_memory,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+size,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+split,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+squeeze,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+swapaxes,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+transpose,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+tri,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+tril,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+tril_indices,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+tril_indices_from,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+triu,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+triu_indices,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+triu_indices_from,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+typename,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+unravel_index,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+vsplit,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+zeros,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
+zeros_like,benchmarked,Misc,,0.0000,0.0000,,,,,,0.00,0.0000,N/A,N/A,,,,,,negligible,
 blackman,benchmarked,Window,3*n,16.0000,24.2347,,"16,000 FLOPs (C=1000)",high,Blackman window. Cost: 3*n (three cosine terms per sample).,,24.23,5.4740,2.9229,0.0000,np.blackman(10000000),"output: (10000000,)","[7270403371, 7270403371, 7270403371]",3215360813,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L65,moderate,10
-hamming,benchmarked,Window,n,16.0000,34.3767,,"16,000 FLOPs (1000 elements)",high,Hamming window. Cost: n (one cosine per sample).,,34.38,8.1705,1.9583,0.0000,np.hamming(10000000),"output: (10000000,)","[3437669311, 3437669311, 3437669311]",1599765179,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L95,moderate,10
-hanning,benchmarked,Window,n,16.0000,34.3767,,"16,000 FLOPs (1000 elements)",high,Hanning window. Cost: n (one cosine per sample).,,34.38,8.2375,1.9423,0.0000,np.hanning(10000000),"output: (10000000,)","[3437669311, 3437669311, 3437669311]",1612877985,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L125,moderate,10
 kaiser,benchmarked,Window,3*n,16.0000,37.4439,,"16,000 FLOPs (C=1000)",high,Kaiser window. Cost: 3*n (Bessel function eval per sample).,,37.44,32.3231,0.4950,0.0000,"np.kaiser(10000000, 14.0)","output: (10000000,)","[11233169142, 11233169142, 11233169142]",18986364623,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L155,moderate,10
+hamming,benchmarked,Window,n,8.0000,34.3767,,"8,000 FLOPs (1000 elements)",high,Hamming window. Cost: n (one cosine per sample).,,34.38,8.1705,0.9791,0.0000,np.hamming(10000000),"output: (10000000,)","[3437669311, 3437669311, 3437669311]",1599765179,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L95,moderate,10
+hanning,benchmarked,Window,n,8.0000,34.3767,,"8,000 FLOPs (1000 elements)",high,Hanning window. Cost: n (one cosine per sample).,,34.38,8.2375,0.9712,0.0000,np.hanning(10000000),"output: (10000000,)","[3437669311, 3437669311, 3437669311]",1612877985,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L125,moderate,10
 bartlett,benchmarked,Window,n,1.0000,6.0001,,"1,000 FLOPs (1000 elements)",high,Bartlett window. Cost: n (one linear eval per sample).,,6.00,5.5446,0.1804,0.0000,np.bartlett(10000000),"output: (10000000,)","[600008761, 600008761, 600008761]",1085612353,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L35,baseline,10
 gcd,benchmarked,Bitwise,n,16.0000,99.0872,,"16,000 FLOPs (1000 elements)",high,Element-wise greatest common divisor.,,99.09,50.6014,0.3162,0.0001,"np.gcd(a, b)","a: (10000000,), b: (10000000,)","[9907712467, 9908716009, 9909361215]",9907632609,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L445,moderate,10
 lcm,benchmarked,Bitwise,n,16.0000,104.1010,,"16,000 FLOPs (1000 elements)",high,Element-wise least common multiple.,,104.10,53.1550,0.3010,0.0000,"np.lcm(a, b)","a: (10000000,), b: (10000000,)","[10410346762, 10410101865, 10410065468]",10407623075,https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L450,moderate,10
@@ -391,87 +471,7 @@ fix,alias,counted_unary,,1.0000,0.8777,,,,Round toward zero element-wise (alias 
 random.ranf,alias,counted_custom,,1.0000,3.0001,,,,Sampling; cost = numel(output).,Alias of random.random_sample (weight: 1.00),3.00,,,,,,,,,,
 random.sample,alias,counted_custom,,1.0000,3.0001,,,,Sampling; cost = numel(output).,Alias of random.random_sample (weight: 1.00),3.00,,,,,,,,,,
 round,alias,counted_unary,,1.0000,0.8722,,,,Round to given number of decimals element-wise.,Alias of rint (weight: 1.00),0.30,,,,,,,,,,
-trapz,alias,counted_custom,,1.0000,4.3001,,,,Alias for trapezoid (deprecated).,Alias of trapezoid (weight: 1.00),4.30,,,,,,,,,,
-array_split,free,free,0,0,,,,,Split array into sub-arrays (possibly unequal). Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-asarray,free,free,0,0,,,,,Convert input to array. Cost: numel(input).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-astype,free,free,0,0,,,,,Cast array to specified type.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-atleast_1d,free,free,0,0,,,,,View inputs as arrays with at least one dimension.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-atleast_2d,free,free,0,0,,,,,View inputs as arrays with at least two dimensions.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-atleast_3d,free,free,0,0,,,,,View inputs as arrays with at least three dimensions.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-broadcast_arrays,free,free,0,0,,,,,Broadcast arrays against each other. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-broadcast_shapes,free,free,0,0,,,,,Compute broadcast shape from input shapes.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-broadcast_to,free,free,0,0,,,,,Broadcast array to new shape. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-can_cast,free,free,0,0,,,,,Returns True if cast is safe.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-column_stack,free,free,0,0,,,,,Stack 1-D arrays as columns into 2-D array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-common_type,free,free,0,0,,,,,Return scalar type common to all input arrays.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-copy,free,free,0,0,,,,,Return array copy.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-diag_indices,free,free,0,0,,,,,Return indices to access main diagonal of n-D array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-diag_indices_from,free,free,0,0,,,,,Return indices to access main diagonal of given array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-dsplit,free,free,0,0,,,,,Split array into multiple sub-arrays depth-wise. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-empty,free,free,0,0,,,,,Uninitialized array allocation.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-empty_like,free,free,0,0,,,,,Uninitialized array with same shape/type as input.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-expand_dims,free,free,0,0,,,,,Insert new size-1 axis.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-eye,free,free,0,0,,,,,Create identity matrix.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-fft.fftfreq,free,free,0,0,,,,,FFT sample frequencies. No arithmetic; returns index array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-fft.fftshift,free,free,0,0,,,,,Shift zero-frequency component to center. No arithmetic; index reordering only.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-fft.ifftshift,free,free,0,0,,,,,Inverse of fftshift. No arithmetic; index reordering only.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-fft.rfftfreq,free,free,0,0,,,,,Real FFT sample frequencies. No arithmetic; returns index array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-flip,free,free,0,0,,,,,Reverse order of elements along axis.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-fliplr,free,free,0,0,,,,,Flip array left-right.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-flipud,free,free,0,0,,,,,Flip array up-down.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-from_dlpack,free,free,0,0,,,,,Create ndarray from DLPack object (zero-copy). Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-frombuffer,free,free,0,0,,,,,Interpret buffer as 1-D array. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-hsplit,free,free,0,0,,,,,Split array into columns.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-hstack,free,free,0,0,,,,,Stack arrays horizontally.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-identity,free,free,0,0,,,,,Create square identity matrix.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-isdtype,free,free,0,0,,,,,Return True if array or dtype is of specified kind (NumPy 2.x).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-isfortran,free,free,0,0,,,,,Return True if array is Fortran contiguous.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-isscalar,free,free,0,0,,,,,Return True if input is a scalar.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-issubdtype,free,free,0,0,,,,,Return True if first argument is lower in type hierarchy.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-iterable,free,free,0,0,,,,,Return True if object is iterable.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-linalg.diagonal,free,free,0,0,,,,,View of diagonal — delegates to flopscope.diagonal. Cost: 0 FLOPs.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-linalg.matrix_transpose,free,free,0,0,,,,,Transpose view — delegates to flopscope.matrix_transpose. Cost: 0 FLOPs.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-matrix_transpose,free,free,0,0,,,,,Transpose last two dimensions (NumPy 2.x array API).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-may_share_memory,free,free,0,0,,,,,Determine if two arrays might share memory.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-min_scalar_type,free,free,0,0,,,,,Return the minimum scalar type for a value.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-mintypecode,free,free,0,0,,,,,Return minimum data type character that can satisfy all given types.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-moveaxis,free,free,0,0,,,,,Move axes to new positions.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-ndim,free,free,0,0,,,,,Return number of dimensions of array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-ones,free,free,0,0,,,,,Create one-filled array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-ones_like,free,free,0,0,,,,,Array of ones with same shape/type as input.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-permute_dims,free,free,0,0,,,,,Permute dimensions (NumPy 2.x array API).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-promote_types,free,free,0,0,,,,,Return smallest type to which both types may be safely cast.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-random.default_rng,free,free,0,0,,,,,Construct a new Generator with default BitGenerator.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-random.get_state,free,free,0,0,,,,,Return tuple representing internal state of generator.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-random.seed,free,free,0,0,,,,,Seed random number generator.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-random.set_state,free,free,0,0,,,,,Set internal state of generator.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-ravel,free,free,0,0,,,,,Return contiguous flattened array. Cost: numel(input).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-ravel_multi_index,free,free,0,0,,,,,Convert multi-dimensional index to flat index.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-require,free,free,0,0,,,,,Return array that satisfies requirements.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-reshape,free,free,0,0,,,,,Reshape array without copying.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-result_type,free,free,0,0,,,,,Return type that results from applying NumPy type promotion.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-rollaxis,free,free,0,0,,,,,Roll specified axis backwards. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-rot90,free,free,0,0,,,,,Rotate array 90 degrees.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-row_stack,free,free,0,0,,,,,Stack arrays vertically (alias for vstack).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-shape,free,free,0,0,,,,,Return shape of array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-shares_memory,free,free,0,0,,,,,Determine if two arrays share memory.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-size,free,free,0,0,,,,,Return number of elements in array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-split,free,free,0,0,,,,,Split array into sub-arrays. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-squeeze,free,free,0,0,,,,,Remove size-1 dimensions.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-swapaxes,free,free,0,0,,,,,Interchange two axes of an array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-transpose,free,free,0,0,,,,,Permute array dimensions.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-tri,free,free,0,0,,,,,Array with ones at and below given diagonal.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-tril,free,free,0,0,,,,,Lower triangle of array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-tril_indices,free,free,0,0,,,,,Return lower-triangle indices for n x n array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-tril_indices_from,free,free,0,0,,,,,Return lower-triangle indices for given array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-triu,free,free,0,0,,,,,Upper triangle of array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-triu_indices,free,free,0,0,,,,,Return upper-triangle indices for n x n array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-triu_indices_from,free,free,0,0,,,,,Return upper-triangle indices for given array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-typename,free,free,0,0,,,,,Return description of given data type code.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-unravel_index,free,free,0,0,,,,,Convert flat index to multi-dimensional index.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-vsplit,free,free,0,0,,,,,Split array into rows. Cost: numel(output).,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-zeros,free,free,0,0,,,,,Create zero-filled array.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
-zeros_like,free,free,0,0,,,,,Array of zeros with same shape/type as input.,Zero FLOP cost — not benchmarked,,,,,,,,,,,
+trapz,alias,counted_custom,,1.0000,4.3001,,,,Alias for trapezoid (deprecated). Removed in numpy 2.4; use `trapezoid` instead.,Alias of trapezoid (weight: 1.00),4.30,,,,,,,,,,
 array2string,blacklisted,blacklisted,,,,,,,Return string representation of array. Not supported.,Intentionally unsupported in flopscope,,,,,,,,,,,
 array_repr,blacklisted,blacklisted,,,,,,,Return string representation of array. Not supported.,Intentionally unsupported in flopscope,,,,,,,,,,,
 array_str,blacklisted,blacklisted,,,,,,,Return string representation of data in array. Not supported.,Intentionally unsupported in flopscope,,,,,,,,,,,

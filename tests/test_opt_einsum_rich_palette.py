@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from opt_einsum.parser import get_symbol
+
 import flopscope._opt_einsum._hsluv as hsluv
 from flopscope._opt_einsum._contract import PathInfo
-from flopscope._opt_einsum._parser import get_symbol
 
 
 def _alpha_symbols(count: int) -> list[str]:

@@ -417,7 +417,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.cross",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L30",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L31",
   "href": "/docs/api/numpy/linalg/cross/",
   "legacy_href": "/docs/api/ops/linalg-cross/",
   "module": "numpy.linalg",

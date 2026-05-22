@@ -322,7 +322,7 @@
       "module": "flopscope._opt_einsum._contract",
       "namespace": "flopscope",
       "slug": "flopscope-path-info",
-      "summary": "Information about a contraction path with per-step symmetry diagnostics."
+      "summary": "Information about a contraction path."
     },
     {
       "callable": true,
@@ -754,7 +754,7 @@
       "module": "flopscope._polynomial",
       "namespace": "accounting",
       "slug": "flopscope-accounting-polyval-cost",
-      "summary": "Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op)."
+      "summary": "Cost for polyval: Horner's method under FMA=2 textbook convention."
     },
     {
       "callable": true,
@@ -5206,7 +5206,7 @@
       "module": "flopscope.numpy.random._counted_classes",
       "namespace": "numpy",
       "slug": "flopscope-numpy-random-generator",
-      "summary": "numpy Generator subclass with FLOP-counted sampler methods."
+      "summary": "numpy ``Generator`` subclass with FLOP-counted sampler methods."
     },
     {
       "callable": true,
@@ -5758,7 +5758,7 @@
       "module": "flopscope.numpy.random._counted_classes",
       "namespace": "numpy",
       "slug": "flopscope-numpy-random-random-state",
-      "summary": "numpy RandomState subclass with FLOP-counted sampler methods."
+      "summary": "numpy legacy ``RandomState`` subclass with FLOP-counted sampler methods."
     },
     {
       "callable": true,

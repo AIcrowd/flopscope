@@ -911,7 +911,7 @@
   "schema_version": 1,
   "slug": "fft-ifftn",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L473",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L492",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/fft/_pocketfft.py#L881"
   }
 }

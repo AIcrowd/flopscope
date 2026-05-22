@@ -642,7 +642,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.inv",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L114",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L116",
   "href": "/docs/api/numpy/linalg/inv/",
   "legacy_href": "/docs/api/ops/linalg-inv/",
   "module": "numpy.linalg",

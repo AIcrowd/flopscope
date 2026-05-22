@@ -93,16 +93,16 @@ The block below shows `print(budget.summary(by_namespace=True))` for the `solver
 flopscope FLOP Budget Summary [solver]
 ==================================
   Total budget:              50,000,000
-  Used:                          66,048  (0.1%)
-  Remaining:                 49,933,952  (99.9%)
+  Used:                         135,423  (0.3%)
+  Remaining:                 49,864,577  (99.7%)
 
   By namespace:
-    solver                         66,048  (100.0%)  [3 calls]  Backend 0.000s  Overhead 0.000s
+    solver                        135,423  (100.0%)  [3 calls]  Backend 0.000s  Overhead 0.000s
 
   By operation:
-    einsum                     65,536  ( 99.2%)  [1 call]
-    exp                           256  (  0.4%)  [1 call]
-    sum                           256  (  0.4%)  [1 call]
+    einsum                    131,072  ( 96.8%)  [1 call]
+    exp                         4,096  (  3.0%)  [1 call]
+    sum                           255  (  0.2%)  [1 call]
 
   Total Wall Time:       ...s
   Flopscope Backend:     ...s  ( ...%)
@@ -139,8 +139,8 @@ print(data["by_namespace"]["solver"]["flops_used"])
 **Check costs before committing budget.** Use cost query functions to estimate before executing:
 
 ```python
-cost = flops.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
-print(f"This matmul will cost {cost:,} FLOPs")  # 16,777,216
+cost = flops.accounting.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
+print(f"This matmul will cost {cost:,} FLOPs")  # 33,554,432
 ```
 
 **Use namespaces for phases.** Split your solution into named phases (e.g., `"init"`, `"solve"`, `"refine"`) so the budget summary shows exactly where FLOPs are spent.

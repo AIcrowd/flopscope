@@ -332,7 +332,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.flipud",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1302",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1369",
   "href": "/docs/api/numpy/flipud/",
   "import_path": "flopscope.numpy.flipud",
   "is_operation_cost_leaf": true,

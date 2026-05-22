@@ -603,7 +603,7 @@
     "name": "random.default_rng",
     "notes": "Construct a new Generator with default BitGenerator.",
     "numpy_ref": "np.random.default_rng",
-    "signature": "fnp.random.default_rng(seed: 'Any' = None) -> \"'_CountedGenerator'\"",
+    "signature": "fnp.random.default_rng(seed: 'Any' = None) -> '_CountedGenerator'",
     "status": "supported",
     "summary": "Construct a new Generator with the default BitGenerator (PCG64).",
     "weight": 0.0
@@ -611,7 +611,7 @@
   "schema_version": 1,
   "slug": "random-default_rng",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L145",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L151",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.default_rng.html"
   }
 }

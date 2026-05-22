@@ -280,12 +280,12 @@
     "signature": "fnp.hamming(M: 'int') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the Hamming window.",
-    "weight": 16.0
+    "weight": 8.0
   },
   "schema_version": 1,
   "slug": "hamming",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L96",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L98",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_function_base_impl.py#L3367"
   }
 }

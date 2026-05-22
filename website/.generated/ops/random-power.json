@@ -593,7 +593,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.power",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
   "href": "/docs/api/numpy/random/power/",
   "legacy_href": "/docs/api/ops/random-power/",
   "module": "numpy.random",

@@ -130,6 +130,23 @@
             }
           ],
           "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Each binary matmul step (m x k) @ (k x n) costs "
+            },
+            {
+              "kind": "code",
+              "text": "2 * m * k * n"
+            },
+            {
+              "kind": "text",
+              "text": " FLOPs\nunder the FMA=2 textbook convention (m*k*n multiplies + m*k*n adds,\nignoring the \u2212m*n off-by-one for accumulation at this level of\napproximation).  FMA=2 unification 2026-05-20."
+            }
+          ],
+          "type": "paragraph"
         }
       ],
       "title": "Notes"
@@ -160,7 +177,8 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "Uses dynamic programming for optimal parenthesization. Source: Cormen et al., *Introduction to Algorithms* (CLRS), \u00a715.2."
+    "Uses dynamic programming for optimal parenthesization. Source: Cormen et al., *Introduction to Algorithms* (CLRS), \u00a715.2.",
+    "Each binary matmul step (m x k) @ (k x n) costs ``2 * m * k * n`` FLOPs under the FMA=2 textbook convention (m*k*n multiplies + m*k*n adds, ignoring the \u2212m*n off-by-one for accumulation at this level of approximation).  FMA=2 unification 2026-05-20."
   ],
   "numpy_ref": "",
   "operation": null,

@@ -393,7 +393,7 @@
   "schema_version": 1,
   "slug": "random-randn",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L117",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L122",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.randn.html"
   }
 }

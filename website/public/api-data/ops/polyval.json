@@ -509,12 +509,12 @@
   },
   "op": {
     "category": "counted_custom",
-    "cost_formula": "m * deg (FMA=1)",
-    "cost_formula_latex": "$m \\cdot \\text{deg}$",
+    "cost_formula": "2 * m * deg (FMA=2)",
+    "cost_formula_latex": "$2 \\cdot m \\cdot \\text{deg}$",
     "flopscope_ref": "fnp.polyval",
     "module": "flopscope._polynomial",
     "name": "polyval",
-    "notes": "Evaluate polynomial at given points. Cost: $m \\cdot \\text{deg}$ (Horner's method, FMA=1).",
+    "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
     "numpy_ref": "np.polyval",
     "signature": "fnp.polyval(p: 'ArrayLike', x: 'ArrayLike') -> 'FlopscopeArray'",
     "status": "supported",
@@ -524,7 +524,7 @@
   "schema_version": 1,
   "slug": "polyval",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L75",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L80",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_polynomial_impl.py#L702"
   }
 }

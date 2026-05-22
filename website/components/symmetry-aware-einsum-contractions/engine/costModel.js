@@ -113,6 +113,8 @@ export function computeExactCostModel({ labels, vLabels, groupElements, dimensio
   }
 
   const orbitCount = orbitRows.length;
+  // α/M model is FMA=2-textbook by construction (multiplies AND adds
+  // counted separately). No fma multiplier needed.
   const evaluationCostExact = Math.max(numTerms - 1, 0) * orbitCount;
 
   return {
@@ -124,14 +126,23 @@ export function computeExactCostModel({ labels, vLabels, groupElements, dimensio
 }
 
 /**
- * Aggregate per-component costs into the global μ and α the hero displays.
+ * Aggregate per-component costs into the global μ, α, and total the hero
+ * displays.
  *
  * The hero formula is
- *   Total = (k - 1) · ∏_a M_a  +  ∏_a α_a
+ *   Total = (k - 1) · ∏_a M_a  +  ∏_a α_a  −  ∏_a O_a
  *
  * which holds whenever the components are independent (G = ∏_a G_a, X = ∏_a X_a).
  * `decomposeClassifyAndCount` produces such components and attaches
- * `comp.multiplication.count = M_a` and `comp.accumulation.count = α_a`.
+ * `comp.multiplication.count = M_a`, `comp.accumulation.count = α_a`, and
+ * `comp.numOutputOrbits = O_a` (the orbit count of the visible-label tuples
+ * under the output stabilizer of that component).
+ *
+ * The `− ∏O_a` term applies the same off-by-one correction the reduction
+ * surface uses: the first cell of each output orbit is a free copy, only the
+ * remaining accumulations cost. When there is no actual reduction
+ * (`∏α == ∏O`), the α contribution collapses to zero, leaving only the
+ * `(k - 1)·∏M` multiplication chain.
  *
  * Returns `null` if any component has a missing accumulation count (e.g. the
  * regime ladder fell through, which currently can only happen when bruteForce
@@ -139,27 +150,34 @@ export function computeExactCostModel({ labels, vLabels, groupElements, dimensio
  */
 export function aggregateComponentCosts(components, numTerms) {
   if (!Array.isArray(components) || components.length === 0) {
-    return { mu: 0, alpha: 0, mTotal: 0, perComponent: [] };
+    return { mu: 0, alpha: 0, mTotal: 0, outputOrbitProduct: 0, total: 0, perComponent: [] };
   }
 
   let mTotal = 1;
   let alpha = 1;
+  let outputOrbitProduct = 1;
   const perComponent = [];
 
   for (const comp of components) {
     const M_a = comp.multiplication?.count;
     const alpha_a = comp.accumulation?.count;
-    if (M_a == null || alpha_a == null) return null;
+    const O_a = comp.numOutputOrbits;
+    if (M_a == null || alpha_a == null || O_a == null) return null;
     mTotal *= M_a;
     alpha *= alpha_a;
+    outputOrbitProduct *= O_a;
     perComponent.push({
       labels: comp.labels,
       M_a,
       alpha_a,
+      O_a,
       regimeId: comp.accumulation?.regimeId ?? null,
     });
   }
 
+  // α/M model is FMA=2-textbook by construction (multiplies AND adds
+  // counted separately). No fma multiplier needed.
   const mu = Math.max(numTerms - 1, 0) * mTotal;
-  return { mu, alpha, mTotal, perComponent };
+  const total = mu + alpha - outputOrbitProduct;
+  return { mu, alpha, mTotal, outputOrbitProduct, total, perComponent };
 }

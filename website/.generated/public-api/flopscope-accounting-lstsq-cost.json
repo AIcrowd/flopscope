@@ -170,7 +170,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.lstsq_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L149",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L152",
   "href": "/docs/api/accounting/lstsq-cost/",
   "import_path": "flopscope.accounting.lstsq_cost",
   "is_operation_cost_leaf": false,

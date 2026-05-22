@@ -587,7 +587,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.partition",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L127",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L131",
   "href": "/docs/api/numpy/partition/",
   "import_path": "flopscope.numpy.partition",
   "is_operation_cost_leaf": true,

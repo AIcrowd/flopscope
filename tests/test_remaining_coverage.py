@@ -3,7 +3,6 @@
 Covers uncovered branches in:
   - _counting_ops (array_equiv, histogram2d, histogramdd, apply_*, piecewise)
   - _validation (validate_ndarray, check_nan_inf, coerce_arrays)
-  - _opt_einsum/_testing (build_shapes, build_views, rand_equation, build_arrays_from_tuples)
   - _ndarray (reverse ops, in-place ops, __array_wrap__)
   - _config (unknown setting)
   - _docstrings (attach_docstring with empty docstring)
@@ -15,7 +14,9 @@ Covers uncovered branches in:
   - fft/_transforms (hfft, ihfft, irfft2, irfftn, fft2 with s, batch helpers)
   - _sorting_ops (lexsort, partition, argpartition, digitize, set ops)
   - _opt_einsum/_contract (memory_limit branches, PathInfo formatting)
-  - _opt_einsum/_blas (BLAS classification edge cases)
+
+Note: _opt_einsum/_testing and _opt_einsum/_blas sections were removed when those
+vendored modules were deleted in Task 7+8.
 """
 
 from __future__ import annotations
@@ -385,103 +386,6 @@ class TestCoerceArrays:
         arr = numpy.array([1, 2, 3])
         result = coerce_array(arr)
         assert result is arr  # same object, not a copy
-
-
-# ============================================================================
-# _opt_einsum/_testing
-# ============================================================================
-
-
-class TestBuildShapesEllipsis:
-    """Cover lines 75-80: ellipsis validation."""
-
-    def test_ellipsis_raises_without_flag(self):
-        from flopscope._opt_einsum._testing import build_shapes
-
-        with pytest.raises(ValueError, match="Ellipsis found"):
-            build_shapes("...ab,...bc->...ac")
-
-    def test_ellipsis_with_replace(self):
-        from flopscope._opt_einsum._testing import build_shapes
-
-        shapes = build_shapes("...ab,...bc->...ac", replace_ellipsis=True)
-        assert len(shapes) == 2
-        # Each shape should have 3 (ellipsis replacement) + 2 original dims = 5 dims
-        assert len(shapes[0]) == 5
-        assert len(shapes[1]) == 5
-
-
-class TestBuildViewsScalar:
-    """Cover lines 115-127: scalar array handling and default array_function."""
-
-    def test_scalar_term(self):
-        from flopscope._opt_einsum._testing import build_views
-
-        # ",->" means one empty-shape term (scalar) and one empty output
-        views = build_views(",a->a", {"a": 3})
-        assert len(views) == 2
-        # First view should be a scalar (float)
-        assert isinstance(views[0], float)
-        # Second view should be shape (3,)
-        assert hasattr(views[1], "shape")
-        assert views[1].shape == (3,)
-
-    def test_default_array_function(self):
-        from flopscope._opt_einsum._testing import build_views
-
-        views = build_views("ab,bc->ac", {"a": 2, "b": 3, "c": 4})
-        assert len(views) == 2
-        assert views[0].shape == (2, 3)
-        assert views[1].shape == (3, 4)
-
-
-class TestRandEquation:
-    """Cover lines 223-224, 245-249, 261: return_size_dict=True and global_dim=True."""
-
-    def test_return_size_dict(self):
-        from flopscope._opt_einsum._testing import rand_equation
-
-        eq, shapes, size_dict = rand_equation(
-            n=3, regularity=2, seed=42, return_size_dict=True
-        )
-        assert isinstance(size_dict, dict)
-        assert len(size_dict) > 0
-        assert isinstance(eq, str)
-        assert "->" in eq
-
-    def test_global_dim(self):
-        from flopscope._opt_einsum._testing import rand_equation
-
-        eq, shapes = rand_equation(n=3, regularity=2, seed=42, global_dim=True)
-        # With global_dim, all operands should share a common index
-        inputs = eq.split("->")[0].split(",")
-        # Check all inputs have at least one common character
-        common = set(inputs[0])
-        for inp in inputs[1:]:
-            common &= set(inp)
-        assert len(common) >= 1
-
-    def test_return_size_dict_and_global_dim(self):
-        from flopscope._opt_einsum._testing import rand_equation
-
-        eq, shapes, size_dict = rand_equation(
-            n=4, regularity=3, n_out=2, seed=123, global_dim=True, return_size_dict=True
-        )
-        assert isinstance(size_dict, dict)
-        assert len(shapes) == 4
-
-
-class TestBuildArraysFromTuples:
-    """Cover lines 275-277."""
-
-    def test_basic(self):
-        from flopscope._opt_einsum._testing import build_arrays_from_tuples
-
-        path = [(2, 3), (4, 5)]
-        arrays = build_arrays_from_tuples(path)
-        assert len(arrays) == 2
-        assert arrays[0].shape == (2, 3)
-        assert arrays[1].shape == (4, 5)
 
 
 # ============================================================================
@@ -1041,8 +945,8 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([1.0, 2.0, 3.0])
         with BudgetContext(flop_budget=10**9) as budget:
             norm(x, ord=3)
-        # FMA=1: all vector norms cost numel
-        assert budget.flops_used == 3
+        # FMA=2: all vector norms cost 2*numel
+        assert budget.flops_used == 6  # FMA=2: 2*numel
 
     def test_norm_matrix_2(self):
         from flopscope.numpy.linalg._properties import norm
@@ -1067,7 +971,7 @@ class TestLinalgPropertiesExtended:
         a = numpy.random.rand(3, 4)
         with BudgetContext(flop_budget=10**9) as budget:
             norm(a, ord=1)
-        assert budget.flops_used == 12  # numel
+        assert budget.flops_used == 24  # FMA=2: 2*numel
 
     def test_norm_with_axis_tuple(self):
         from flopscope.numpy.linalg._properties import norm
@@ -1108,8 +1012,8 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([1.0, 2.0, 3.0])
         with BudgetContext(flop_budget=10**9) as budget:
             vector_norm(x, ord=3)
-        # FMA=1: all norms cost numel
-        assert budget.flops_used == 3
+        # FMA=2: all norms cost 2*numel
+        assert budget.flops_used == 6  # FMA=2: 2*numel
 
     def test_vector_norm_default(self):
         from flopscope.numpy.linalg._properties import vector_norm
@@ -1117,7 +1021,7 @@ class TestLinalgPropertiesExtended:
         x = numpy.array([3.0, 4.0])
         with BudgetContext(flop_budget=10**9) as budget:
             vector_norm(x)
-        assert budget.flops_used == 2
+        assert budget.flops_used == 4  # FMA=2: 2*numel
 
     def test_vector_norm_with_axis(self):
         from flopscope.numpy.linalg._properties import vector_norm
@@ -1133,8 +1037,8 @@ class TestLinalgPropertiesExtended:
         a = numpy.random.rand(3, 4)
         with BudgetContext(flop_budget=10**9) as budget:
             matrix_norm(a)
-        # FMA=1: Frobenius norm costs numel
-        assert budget.flops_used == 3 * 4
+        # FMA=2: Frobenius norm costs 2*numel
+        assert budget.flops_used == 2 * 3 * 4  # FMA=2: 2*numel
 
     def test_matrix_norm_2(self):
         from flopscope.numpy.linalg._properties import matrix_norm
@@ -1452,10 +1356,10 @@ class TestSortingOpsExtended:
 
 
 class TestContractPathMemoryLimit:
-    """Cover _choose_memory_arg branches."""
+    """Cover memory_limit handling (now delegated to upstream opt_einsum)."""
 
     def test_memory_limit_max_input(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path(
             "ij,jk,kl->il",
@@ -1468,7 +1372,7 @@ class TestContractPathMemoryLimit:
         assert len(path) > 0
 
     def test_memory_limit_explicit(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path(
             "ij,jk,kl->il",
@@ -1481,29 +1385,42 @@ class TestContractPathMemoryLimit:
         assert len(path) > 0
 
     def test_memory_limit_invalid_string(self):
-        from flopscope._opt_einsum._contract import _choose_memory_arg
+        # _choose_memory_arg was removed along with local contract_path.
+        # Upstream opt_einsum raises ValueError for invalid memory_limit strings.
+        from flopscope._opt_einsum import contract_path
 
-        with pytest.raises(ValueError, match="memory_limit must be"):
-            _choose_memory_arg("invalid", [10, 20])  # pyright: ignore[reportArgumentType]
+        with pytest.raises((ValueError, TypeError)):
+            contract_path(
+                "ij,jk,kl->il",
+                (2, 3),
+                (3, 4),
+                (4, 5),
+                shapes=True,
+                memory_limit="invalid",  # type: ignore[arg-type]
+            )
 
     def test_memory_limit_negative(self):
-        from flopscope._opt_einsum._contract import _choose_memory_arg
+        # -1 is accepted by upstream as "no limit".
+        from flopscope._opt_einsum import contract_path
 
-        result = _choose_memory_arg(-1, [10, 20])
-        assert result is None
+        path, info = contract_path(
+            "ij,jk->ik", (3, 4), (4, 5), shapes=True, memory_limit=-1
+        )
+        assert len(path) > 0
 
     def test_memory_limit_negative_invalid(self):
-        from flopscope._opt_einsum._contract import _choose_memory_arg
+        # Values other than -1 and None: upstream raises ValueError.
+        from flopscope._opt_einsum import contract_path
 
-        with pytest.raises(ValueError, match="Memory limit must be larger"):
-            _choose_memory_arg(-2, [10, 20])
+        with pytest.raises((ValueError, TypeError)):
+            contract_path("ij,jk->ik", (3, 4), (4, 5), shapes=True, memory_limit=-2)
 
 
 class TestPathInfoFormatTable:
     """Cover PathInfo.format_table and __repr__."""
 
     def test_format_table(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path("ij,jk,kl->il", (2, 3), (3, 4), (4, 5), shapes=True)
         table = info.format_table()
@@ -1511,7 +1428,7 @@ class TestPathInfoFormatTable:
         assert "Optimized cost" in table
 
     def test_format_table_verbose(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path("ij,jk,kl->il", (2, 3), (3, 4), (4, 5), shapes=True)
         table = info.format_table(verbose=True)
@@ -1519,14 +1436,14 @@ class TestPathInfoFormatTable:
         assert "cumulative=" in table
 
     def test_repr(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path("ij,jk->ik", (3, 4), (4, 5), shapes=True)
         repr_str = repr(info)
         assert "contraction" in repr_str.lower() or "cost" in repr_str.lower()
 
     def test_optimize_false(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         path, info = contract_path(
             "ij,jk->ik", (3, 4), (4, 5), shapes=True, optimize=False
@@ -1534,123 +1451,13 @@ class TestPathInfoFormatTable:
         assert len(path) == 1
 
     def test_opt_cost_property(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         _, info = contract_path("ij,jk->ik", (3, 4), (4, 5), shapes=True)
         assert info.opt_cost >= 0
 
     def test_eq_property(self):
-        from flopscope._opt_einsum._contract import contract_path
+        from flopscope._opt_einsum import contract_path
 
         _, info = contract_path("ij,jk->ik", (3, 4), (4, 5), shapes=True)
         assert info.eq == "ij,jk->ik"
-
-
-# ============================================================================
-# _opt_einsum/_blas
-# ============================================================================
-
-
-def _make_sym_group(labels):
-    """Create a symmetric exact group with the given labels."""
-    from flopscope._perm_group import SymmetryGroup
-
-    pg = SymmetryGroup.symmetric(axes=tuple(range(len(labels))))
-    pg._labels = labels
-    return pg
-
-
-class TestBLASClassification:
-    """Cover remaining BLAS classification branches."""
-
-    def test_outer_einsum(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ab", "cd"], "abcd", set())  # pyright: ignore[reportArgumentType]
-        assert result == "OUTER/EINSUM"
-
-    def test_dot(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ij", "ij"], "", set("ij"))  # pyright: ignore[reportArgumentType]
-        assert result == "DOT"
-
-    def test_dot_einsum(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ij", "ji"], "", set("ij"))  # pyright: ignore[reportArgumentType]
-        assert result == "DOT/EINSUM"
-
-    def test_gemm_transpose_both(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ji", "ik"], "jk", set("i"))  # pyright: ignore[reportArgumentType]
-        assert result == "GEMM"
-
-    def test_gemm_transpose_right(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ij", "kj"], "ik", set("j"))  # pyright: ignore[reportArgumentType]
-        assert result == "GEMM"
-
-    def test_gemm_transpose_left(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ji", "jk"], "ik", set("j"))  # pyright: ignore[reportArgumentType]
-        assert result == "GEMM"
-
-    def test_gemv_einsum(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        # "j,ijk->ik": keep_left is empty, keep_right={i,k}
-        # No GEMM pattern matches because removed index is not at edges
-        result = can_blas(["j", "ijk"], "ik", set("j"))  # pyright: ignore[reportArgumentType]
-        assert result == "GEMV/EINSUM"
-
-    def test_tdot(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        # Removed indices not at edges of either input -> TDOT
-        result = can_blas(["ikj", "jlk"], "il", set("jk"))  # pyright: ignore[reportArgumentType]
-        assert result == "TDOT"
-
-    def test_repeated_index_false(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ijj", "jk"], "ik", set("j"))  # pyright: ignore[reportArgumentType]
-        assert result is False
-
-    def test_three_inputs_false(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ij", "jk", "kl"], "il", set("jk"))  # pyright: ignore[reportArgumentType]
-        assert result is False
-
-    def test_broadcast_dims_false(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        result = can_blas(["ij", "jk"], "ik", set("j"), shapes=[(4, 1), (5, 6)])  # pyright: ignore[reportArgumentType]
-        assert result is False
-
-    def test_symm_classification(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        # Create a symmetric group on indices i,j for left input
-        sym = _make_sym_group(("i", "j"))
-        result = can_blas(["ij", "jk"], "ik", set("j"), input_groups=[sym, None])  # pyright: ignore[reportArgumentType]
-        assert result == "SYMM"
-
-    def test_symv_classification(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        sym = _make_sym_group(("j", "i", "k"))
-        # "j,ijk->ik" is GEMV/EINSUM, with symmetric right input -> SYMV
-        result = can_blas(["j", "ijk"], "ik", set("j"), input_groups=[None, sym])  # pyright: ignore[reportArgumentType]
-        assert result == "SYMV"
-
-    def test_sydt_classification(self):
-        from flopscope._opt_einsum._blas import can_blas
-
-        sym = _make_sym_group(("i", "j"))
-        result = can_blas(["ij", "ij"], "", set("ij"), input_groups=[sym, None])  # pyright: ignore[reportArgumentType]
-        assert result == "SYDT"

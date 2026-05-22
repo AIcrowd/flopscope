@@ -482,7 +482,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.compress",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1080",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1130",
   "href": "/docs/api/numpy/compress/",
   "legacy_href": "/docs/api/ops/compress/",
   "module": "numpy",

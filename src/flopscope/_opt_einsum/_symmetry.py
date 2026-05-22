@@ -27,10 +27,16 @@ class SubsetSymmetry:
         Exact permutation group for the output (V) labels.
     inner : SymmetryGroup or None
         Exact permutation group for the inner (W) labels.
+    joint : SymmetryGroup or None
+        Value-preserving joint group acting on all V ∪ W labels together
+        (in sorted order).  Exposes cross-step identity-swap symmetries
+        that per-projection fingerprints miss.  ``_labels`` is set to the
+        sorted tuple of all subset labels.
     """
 
     output: SymmetryGroup | None
     inner: SymmetryGroup | None
+    joint: SymmetryGroup | None = None
 
 
 def unique_elements(

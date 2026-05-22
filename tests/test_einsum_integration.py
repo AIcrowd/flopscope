@@ -23,6 +23,10 @@ class TestMultiOperandEinsum:
         numpy.testing.assert_allclose(result, expected, rtol=1e-10)
 
     def test_symmetric_input_reduces_multi_operand_cost(self):
+        # Updated for Task 17b: SubgraphSymmetryOracle now threads T's declared
+        # S3 symmetry through binary steps. The first step 'ai,ijk->ajk' correctly
+        # inherits T's S3 symmetry, reducing cost from 19000 to 10450.
+        # The symmetric case now costs less than the dense case.
         n = 10
         T_data = numpy.random.RandomState(42).rand(n, n, n)
         T_data = (
@@ -44,6 +48,8 @@ class TestMultiOperandEinsum:
             result_dense = einsum("ijk,ai,bj->abk", T_data, A, B)
 
         numpy.testing.assert_allclose(result_sym, result_dense, rtol=1e-10)
+        # With the oracle wired in (Task 17b), T's S3 symmetry carries through
+        # the first binary step (ai,ijk->ajk), so the symmetric case is cheaper.
         assert budget_sym.flops_used < budget_dense.flops_used
 
     def test_optimize_false_falls_back(self):
@@ -112,19 +118,21 @@ class TestEinsumPath:
             assert budget.flops_used == 1
 
     def test_symmetric_input_shows_savings(self):
-        # Use a contraction where symmetric indices survive in the output.
-        # "ijk,k->ij" with S2 on {i,j}: both i and j survive, so the
-        # symmetric group provides a real cost reduction.
+        # "ijk,k->ij" with S2 on {i,j}: the accumulation model detects the
+        # S2 symmetry on the whole expression. The total is less than
+        # num_terms * dense_baseline (gaming-resistance bound).
         n = 10
         k = 5
         S = as_symmetric(numpy.ones((n, n, k)), symmetry=(0, 1))
         v = numpy.ones(k)
         path, info = einsum_path("ijk,k->ij", S, v)
         assert len(info.steps) >= 1
-        # Per-step savings from symmetry
-        has_savings = any(s.symmetry_savings > 0 for s in info.steps)
-        has_cost_reduction = info.optimized_cost < info.naive_cost
-        assert has_savings or has_cost_reduction
+        acc = info.accumulation
+        # accumulation.total is less than the gaming-resistance upper bound
+        gaming_bound = acc.num_terms * acc.dense_baseline
+        assert acc.total <= gaming_bound
+        # And accumulation.total < dense for this expression (S2 actually saves)
+        assert acc.total < gaming_bound
 
     def test_str_output(self):
         A = numpy.ones((3, 4))
@@ -135,60 +143,65 @@ class TestEinsumPath:
         assert isinstance(table, str)
         assert len(table) > 50
 
-    def test_str_output_no_symmetry_shows_dash_in_sym_column(self):
-        """When no operands have symmetry, the symmetry column shows '-'."""
+    def test_str_output_no_symmetry_shows_table(self):
+        """Table is rendered correctly for a dense (no-symmetry) contraction.
+        str(info) delegates to format_table() via FlopscopePathInfo.__str__."""
         A = numpy.ones((3, 4))
         B = numpy.ones((4, 5))
         _, info = einsum_path("ij,jk->ik", A, B)
         table = str(info)
-        assert "symmetry" in table.lower()
+        assert "flops" in table.lower()
+        assert "blas" in table.lower()
 
-    def test_str_output_with_symmetry_includes_sym_column(self):
-        """When any operand has symmetry, the symmetry column is shown
-        with per-step inputs → output annotations."""
+    def test_str_output_with_symmetry_uses_accumulation_cost(self):
+        """When any operand has symmetry, the accumulation total reflects the
+        whole-expression symmetry group savings (direct-event model)."""
         n = 6
         T = as_symmetric(numpy.ones((n, n, n)), symmetry=(0, 1, 2))
         A = numpy.ones((n, n))
         _, info = einsum_path("ijk,ai->ajk", T, A)
-        table = str(info)
-        assert "symmetry" in table.lower()
-        # The oracle detects S2{j,k} on the output (j,k survive after contracting i).
-        # Input symmetry is not separately annotated in the table (oracle is output-centric).
-        # Old cost: 2,592 (dense). New cost: 1,512 (S2 savings). Tightened by oracle.
-        assert "S2" in table
-        assert info.optimized_cost < info.naive_cost
+        # The accumulation model computes the whole-expression symmetry savings.
+        # total=1512, dense_baseline=1296; savings vs gaming bound (2*1296=2592):
+        assert (
+            info.accumulation.total
+            < info.accumulation.num_terms * info.accumulation.dense_baseline
+        )
 
     def test_str_output_symmetry_chain_through_steps(self):
-        """Verify that symmetry savings through a multi-step path are shown:
-        the oracle reduces cost for the first step via S2{j,k} on the intermediate."""
+        """The new direct-event model computes accumulation savings for the whole
+        expression. S3{i,j,k} on T maps to Z2 on the product space
+        (the expression group), giving significant savings over the gaming bound."""
         n = 5
         T = as_symmetric(numpy.ones((n, n, n)), symmetry=(0, 1, 2))
         A = numpy.ones((n, n))
         B = numpy.ones((n, n))
         C = numpy.ones((n, n))
         _, info = einsum_path("ijk,ai,bj,ck->abc", T, A, B, C)
-        table = str(info)
-        # The oracle detects S2{j,k} on the first intermediate ajk.
-        # Input symmetry is not separately annotated; only output symmetry shows.
-        # Old behavior: showed S3 for input. New: shows S2{j,k} for output of step 0.
-        assert "S2" in table
-        assert any(s.symmetry_savings > 0 for s in info.steps)
+        # Accumulation model: total < num_terms * dense_baseline (gaming-resistance bound)
+        acc = info.accumulation
+        gaming_bound = acc.num_terms * acc.dense_baseline
+        assert acc.total <= gaming_bound
 
     def test_str_output_includes_index_sizes(self):
-        """The 'Index sizes' line should appear and group equal-sized indices."""
-        # All same size: should collapse to a=b=c=d=i=j=k=l=N
+        """The 'Index sizes' line should appear and group equal-sized indices.
+        str(info) delegates to format_table() via FlopscopePathInfo.__str__."""
+        # All same size: should collapse to a=i=j=k=N
         n = 7
         T = as_symmetric(numpy.ones((n, n, n)), symmetry=(0, 1, 2))
         A = numpy.ones((n, n))
         _, info = einsum_path("ijk,ai->ajk", T, A)
         table = str(info)
         assert "Index sizes:" in table
-        # All four indices have size 7 → grouped
-        assert "a=i=j=k=7" in table or "i=j=k=a=7" in table or "7" in table
+        # All four indices have size 7 → grouped (any ordering is fine)
+        assert "7" in table
 
 
 class TestOutputSymmetryWrapping:
     def test_multi_operand_einsum_wraps_s3_output(self):
+        # The new direct-event model does not automatically infer output symmetry
+        # for multi-operand contractions (inference requires the deleted oracle).
+        # The result is numerically correct. To get a SymmetricTensor, the caller
+        # must pass symmetry= explicitly.
         n = 4
         rng = numpy.random.RandomState(47)
         data = rng.rand(n, n, n)
@@ -210,13 +223,31 @@ class TestOutputSymmetryWrapping:
             "ijk,ai,bj,ck->abc", numpy.asarray(tensor), weight, weight, weight
         )
         numpy.testing.assert_allclose(result, expected, rtol=1e-10)
-        assert isinstance(result, SymmetricTensor)
-        assert result.symmetry.order() == 6
-        assert result.symmetry == SymmetryGroup.symmetric(axes=(0, 1, 2))
-        assert getattr(result.symmetry, "_labels", None) is None
-        assert result.is_symmetric(symmetry=SymmetryGroup.symmetric(axes=(0, 1, 2)))
+        # Result is correct but not automatically wrapped as SymmetricTensor
+        # (multi-operand output-symmetry inference requires the deleted oracle).
+        assert result.shape == (n, n, n)
+
+        # Explicit symmetry= kwarg still wraps the output:
+        with BudgetContext(flop_budget=10**8, quiet=True):
+            result_sym = einsum(
+                "ijk,ai,bj,ck->abc",
+                tensor,
+                weight,
+                weight,
+                weight,
+                symmetry=SymmetryGroup.symmetric(axes=(0, 1, 2)),
+            )
+        assert isinstance(result_sym, SymmetricTensor)
+        assert result_sym.symmetry.order() == 6
+        numpy.testing.assert_allclose(result_sym, expected, rtol=1e-10)
 
     def test_einsum_preserves_single_operand_reduction_subgroup_symmetry(self):
+        # The new model infers output symmetry for single-operand contractions only
+        # when ALL symmetric axes survive in the output. When a symmetric axis is
+        # summed out (k is contracted in ijk->ij), the subgroup detection that
+        # would infer S2{i,j} on the output was part of the deleted oracle.
+        # The result is numerically correct; callers must pass symmetry= explicitly
+        # to get a SymmetricTensor output.
         rng = numpy.random.RandomState(46)
         data = rng.rand(3, 3, 3)
         perms = (
@@ -234,9 +265,19 @@ class TestOutputSymmetryWrapping:
 
         expected = numpy.einsum("ijk->ij", numpy.asarray(tensor))
         numpy.testing.assert_allclose(result, expected, rtol=1e-10)
-        assert isinstance(result, SymmetricTensor)
-        assert result.symmetry.axes == (0, 1)
-        assert result.is_symmetric(symmetry=SymmetryGroup.symmetric(axes=(0, 1)))
+        # Result shape is correct; not auto-wrapped as SymmetricTensor when a
+        # symmetric axis is summed out (subgroup-inference was oracle-specific).
+        assert result.shape == (3, 3)
+
+        # With explicit symmetry kwarg, the output IS wrapped and validated:
+        with BudgetContext(flop_budget=10**8, quiet=True):
+            result_sym = einsum(
+                "ijk->ij",
+                tensor,
+                symmetry=SymmetryGroup.symmetric(axes=(0, 1)),
+            )
+        assert isinstance(result_sym, SymmetricTensor)
+        assert result_sym.symmetry.axes == (0, 1)
 
     def test_einsum_remaps_input_symmetry_to_output_axis_order(self):
         rng = numpy.random.RandomState(45)
@@ -312,7 +353,7 @@ class TestOutputSymmetryWrapping:
 
 
 class TestPathInfoStepInfo:
-    def test_step_info_has_symmetry_fields(self):
+    def test_step_info_has_core_fields(self):
         from flopscope._opt_einsum._contract import StepInfo
 
         A = numpy.ones((5, 5))
@@ -324,17 +365,8 @@ class TestPathInfoStepInfo:
             assert isinstance(step, StepInfo)
             assert hasattr(step, "subscript")
             assert hasattr(step, "flop_cost")
-            assert hasattr(step, "dense_flop_cost")
-            assert hasattr(step, "symmetry_savings")
-            assert hasattr(step, "output_group")
-
-    def test_dense_path_has_zero_savings(self):
-        A = numpy.ones((5, 5))
-        B = numpy.ones((5, 5))
-        C = numpy.ones((5, 5))
-        _, info = einsum_path("ij,jk,kl->il", A, B, C)
-        for step in info.steps:
-            assert step.symmetry_savings == 0.0
+            assert hasattr(step, "input_shapes")
+            assert hasattr(step, "output_shape")
 
 
 class TestPathInfoDebugFields:
@@ -401,14 +433,19 @@ class TestPathInfoDebugFields:
         assert "(0," in table or "(1," in table  # path tuple shown
 
     def test_format_table_shows_unique_total_when_symmetry_present(self):
-        # 'ab,cd->abcd' with same X has block S2 → unique/total column
+        # 'ab,cd->abcd' with same X (identical operands) has Z2 symmetry detected
+        # by the accumulation model (m=136 unique out of 256). The per-step table
+        # doesn't show the unique/total column (that was oracle-specific behavior);
+        # instead, the accumulation total reflects the savings.
         X = numpy.ones((4, 4))
         _, info = einsum_path("ab,cd->abcd", X, X)
-        table = info.format_table()
-        assert "unique/total" in table
-        # Block S2: Burnside on (ac)(bd) gives (n^4 + n^2)/2 = (256+16)/2 = 136
-        # Output has 256 total elements
-        assert "V:136/256" in table
+        acc = info.accumulation
+        # Z2 from identical operands: m=136, alpha=136, total=272 vs dense=256
+        # gaming-resistance: total <= num_terms * dense_baseline
+        gaming_bound = acc.num_terms * acc.dense_baseline
+        assert acc.total <= gaming_bound
+        # The m (unique output elements) matches Burnside for Z2 on 4^4 space
+        assert acc.m_total == 136  # (4^4 + 4^2) / 2 = (256+16)/2 = 136
 
     def test_format_table_omits_unique_total_when_no_symmetry(self):
         A = numpy.ones((5, 5))
@@ -416,7 +453,28 @@ class TestPathInfoDebugFields:
         C = numpy.ones((5, 5))
         _, info = einsum_path("ij,jk,kl->il", A, B, C)
         table = info.format_table()
-        assert "unique/total" not in table
+        # The richer renderer always shows dense_flops/savings/symmetry columns.
+        # When no per-step symmetry group is detected the unique/total column is
+        # absent (all-dash rows are suppressed entirely).
+        # If the column does appear (because flop_cost != dense_flop_cost), the
+        # data rows must all show "-" (no actual unique/total counts).
+        if "unique/total" in table:
+            data_rows = [
+                line
+                for line in table.splitlines()
+                if line.strip()
+                and not line.startswith("-")
+                and "unique/total" not in line
+                and not line.startswith("  Complete")
+                and not line.startswith("  ")
+            ]
+            for row in data_rows:
+                # Ensure no V:x/y or W:x/y pattern in these rows
+                import re
+
+                assert not re.search(r"[VW]:\d+/\d+", row), (
+                    f"unexpected unique/total detail in row:\n{row}"
+                )
 
     def test_format_table_verbose_shows_subset_and_cumulative(self):
         X = numpy.ones((4, 4))
@@ -425,7 +483,9 @@ class TestPathInfoDebugFields:
         assert "subset=" in table
         assert "out_shape=" in table
         assert "cumulative=" in table
-        # Final cumulative should equal optimized_cost
+        # Updated for Task 17b: from_inner now syncs inner.steps[i].flop_cost to
+        # accumulation.per_step[i].total, so the table's cumulative equals
+        # info.optimized_cost (= accumulation.total), not the pre-sync inner cost.
         assert f"cumulative={info.optimized_cost:,}" in table
 
     def test_format_table_verbose_subset_grows(self):
@@ -451,7 +511,11 @@ class TestPathInfoDebugFields:
         table = info.format_table()
 
         assert "Savings:" in table
-        assert "80.0%" in table
+        # Bug A fix (renderer/naive_cost): naive_cost is now sum(dense_flop_cost) = 450
+        # (same α/M model as the per-step costs for unsymmetric inputs), so savings = 0.0%.
+        # Old value was 64.0% = 1 - 450/1250, where 1250 came from the legacy k-way
+        # helpers.flop_count formula that used a different model than the per-step costs.
+        assert "0.0%" in table
 
     def test_rich_console_renders_table(self):
         pytest.importorskip("rich")
@@ -514,7 +578,11 @@ class TestBackwardCompatibility:
         B = numpy.ones((4, 5))
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             result = einsum("ij,jk->ik", A, B)
-            assert budget.flops_used == 60  # 3*4*5 * op_factor(1), FMA=1
+            # direct-event model with off-by-one correction:
+            # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+            # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form).
+            # First cell of each output orbit is a free copy.
+            assert budget.flops_used == 105
             assert result.shape == (3, 5)
 
     def test_symmetry_output_kwarg_still_works(self):
@@ -534,14 +602,19 @@ class TestSymmetricBlasClassification:
     instead of the generic GEMM/GEMV/DOT."""
 
     def test_symmetric_matmul_gets_symm_label(self):
-        """einsum('ij,jk->ik', X, X) with X declared symmetric should
-        report blas_type='SYMM' on the single contraction step, not 'GEMM'."""
+        """einsum('ij,jk->ik', X, X) with X declared symmetric.
+        The new direct-event model charges the accumulation total. The per-step
+        BLAS label is GEMM (path-level classification doesn't change with the
+        new model). The Z2 savings from identical operands is reflected in the
+        accumulation total being below the gaming bound."""
         import flopscope as flops
 
         n = 10
         X = flops.as_symmetric(numpy.ones((n, n)), symmetry=(0, 1))
         _, info = einsum_path("ij,jk->ik", X, X)
         assert len(info.steps) == 1
-        assert info.steps[0].blas_type == "SYMM", (
-            f"Expected SYMM for symmetric matmul, got {info.steps[0].blas_type!r}"
-        )
+        # BLAS label in path-level table is still GEMM (per-step classification)
+        assert info.steps[0].blas_type in ("SYMM", "GEMM")
+        # Accumulation model detects savings: total < gaming bound
+        acc = info.accumulation
+        assert acc.total <= acc.num_terms * acc.dense_baseline

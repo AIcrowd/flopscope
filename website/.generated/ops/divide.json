@@ -549,7 +549,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.divide",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L414",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
   "href": "/docs/api/numpy/divide/",
   "legacy_href": "/docs/api/ops/divide/",
   "module": "numpy",

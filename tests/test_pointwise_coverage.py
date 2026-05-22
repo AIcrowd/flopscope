@@ -1020,10 +1020,12 @@ class TestAroundRoundOut:
 
 class TestReductionNonArray:
     def test_sum_on_list(self):
+        # Updated for orbit-mapping cost model (PR #91 Task 7).
+        # sum of 3 elements: 3 - 1 = 2 additions.
         with BudgetContext(flop_budget=10**6) as budget:
             result = sum([1.0, 2.0, 3.0])
         assert numpy.isclose(result, 6.0)
-        assert budget.flops_used == 3
+        assert budget.flops_used == 2
 
     def test_argmax_on_list(self):
         with BudgetContext(flop_budget=10**6):

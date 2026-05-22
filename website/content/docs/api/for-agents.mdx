@@ -73,7 +73,7 @@ payload for one operation:
   "flopscope_ref": "fnp.einsum",
   "numpy_ref": "np.einsum",
   "category": "counted_custom",
-  "cost_formula": "product of all index dims (FMA=1)",
+  "cost_formula": "FMA=2 textbook: 2 * product of contracted dims − output cell count",
   "cost_formula_latex": "$\\prod_i d_i$",
   "free": false,
   "blocked": false,
@@ -169,10 +169,9 @@ These are pure functions — no `BudgetContext` needed.
 
 **4. Use `fnp.einsum` as the primary computation primitive.**
 
-Most linear algebra can be expressed as einsum. The cost is simply the
-product of all index dimensions — each FMA (fused multiply-add) counts
-as 1 operation.
-`'ij,jk->ik'` with shapes `(m, k)` and `(k, n)` costs `m * k * n` FLOPs.
+Most linear algebra can be expressed as einsum. The cost follows the FMA=2
+textbook convention — each FMA (fused multiply-add) counts as two operations.
+`'ij,jk->ik'` with shapes `(m, k)` and `(k, n)` costs `2*m*k*n − m*n` FLOPs.
 
 **5. Use `wall_time_limit_s` for time-limited execution.**
 
@@ -191,9 +190,9 @@ configured limit for diagnostics.
 
 **6. Exploit symmetry for cost savings.**
 
-- Use `symmetric_axes` for symmetric outputs:
-  `fnp.einsum('ki,kj->ij', X, X, symmetric_axes=[(0, 1)])`
-- Wrap known-symmetric matrices with `flops.as_symmetric(data, symmetric_axes=(0, 1))`
+- Use `symmetry=` to declare a symmetric output:
+  `fnp.einsum('ki,kj->ij', X, X, symmetry=(0, 1))`
+- Wrap known-symmetric matrices with `flops.as_symmetric(data, symmetry=(0, 1))`
   for automatic savings in downstream ops
 
 ## Common mistakes agents make

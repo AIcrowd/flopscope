@@ -409,7 +409,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.put_along_axis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1678",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1767",
   "href": "/docs/api/numpy/put-along-axis/",
   "legacy_href": "/docs/api/ops/put_along_axis/",
   "module": "numpy",

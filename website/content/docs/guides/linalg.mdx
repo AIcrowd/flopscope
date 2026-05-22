@@ -23,7 +23,7 @@ title: "Linear Algebra"
 | `fnp.linalg.eig(A)` | $10n^3$ | 4.0 | General eigendecomposition |
 | `fnp.linalg.eigh(A)` | $4n^3/3$ | 4.0 | Symmetric eigendecomposition |
 | `fnp.linalg.cholesky(A)` | $n^3/3$ | 4.0 | Cholesky (symmetric positive definite) |
-| `fnp.linalg.qr(A)` | $mn^2 - n^3/3$ | 4.0 | Householder QR (FMA=1) |
+| `fnp.linalg.qr(A)` | $mn^2 - n^3/3$ | 4.0 | Householder QR (FMA=2) |
 | `fnp.linalg.eigvals(A)` | $10n^3$ | 4.0 | Eigenvalues only |
 | `fnp.linalg.eigvalsh(A)` | $4n^3/3$ | 4.0 | Symmetric eigenvalues only |
 | `fnp.linalg.svdvals(A)` | $m \cdot n \cdot \min(m,n)$ | 4.0 | Singular values only |
@@ -70,7 +70,7 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 with flops.BudgetContext(flop_budget=10**8) as budget:
-    A = flops.as_symmetric(fnp.multiply(fnp.eye(10), 2.0), symmetric_axes=(0, 1))
+    A = flops.as_symmetric(fnp.multiply(fnp.eye(10), 2.0), symmetry=(0, 1))
 
     # solve_cost(n=10) = n^3 = 1000 FLOPs (symmetric/nrhs params are currently ignored)
     x = fnp.linalg.solve(A, fnp.ones(10))
@@ -85,10 +85,10 @@ See [Exploit Symmetry Savings](/docs/guides/symmetry/) for full details.
 ## Query cost before running
 
 ```python
-cost = flops.svd_cost(m=256, n=256, k=10)
+cost = flops.accounting.svd_cost(m=256, n=256, k=10)
 print(f"SVD cost: {cost:,}")  # 655,360
 
-cost = flops.solve_cost(n=256)
+cost = flops.accounting.solve_cost(n=256)
 print(f"Solve cost: {cost:,}")  # 16,777,216 (= 256^3; symmetric/nrhs params currently ignored)
 ```
 

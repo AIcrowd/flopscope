@@ -210,7 +210,7 @@
   ],
   "signature": "flops.flops.inv_cost(n: 'int', symmetric: 'bool' = False) -> 'int'",
   "slug": "flops-inv-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L89",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L91",
   "status_note": "",
   "summary": "Weighted FLOP cost of matrix inverse.",
   "upstream_source_url": ""

@@ -342,6 +342,8 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
+    { name = "opt-einsum" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -374,10 +376,12 @@ requires-dist = [
     { name = "gitlint", marker = "extra == 'dev'", specifier = ">=0.19" },
     { name = "numpy", specifier = ">=2.0.0,<2.5.0" },
     { name = "numpydoc", marker = "extra == 'docs'", specifier = ">=1.8" },
+    { name = "opt-einsum", specifier = ">=3.3.0,<4.0.0" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.408,<1.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "rich", specifier = ">=14.3.3" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.10" },
@@ -675,6 +679,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/3c/dfccc9e7dee357fb2aa13c3890d952a370dd0ed071e0f7ed62ed0df567c1/numpydoc-1.10.0.tar.gz", hash = "sha256:3f7970f6eee30912260a6b31ac72bba2432830cd6722569ec17ee8d3ef5ffa01", size = 94027, upload-time = "2025-12-02T16:39:12.937Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/5e/3a6a3e90f35cea3853c45e5d5fb9b7192ce4384616f932cf7591298ab6e1/numpydoc-1.10.0-py3-none-any.whl", hash = "sha256:3149da9874af890bcc2a82ef7aae5484e5aa81cb2778f08e3c307ba6d963721b", size = 69255, upload-time = "2025-12-02T16:39:11.561Z" },
+]
+
+[[package]]
+name = "opt-einsum"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/b9/2ac072041e899a52f20cf9510850ff58295003aa75525e58343591b0cbfb/opt_einsum-3.4.0.tar.gz", hash = "sha256:96ca72f1b886d148241348783498194c577fa30a8faac108586b14f1ba4473ac", size = 63004, upload-time = "2024-09-26T14:33:24.483Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/cd/066e86230ae37ed0be70aae89aabf03ca8d9f39c8aea0dec8029455b5540/opt_einsum-3.4.0-py3-none-any.whl", hash = "sha256:69bb92469f86a1565195ece4ac0323943e83477171b91d24c35afe028a90d7cd", size = 71932, upload-time = "2024-09-26T14:33:23.039Z" },
 ]
 
 [[package]]

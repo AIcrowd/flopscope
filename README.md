@@ -73,7 +73,7 @@ for i, W in enumerate(weights):
     h = fnp.einsum('ij,j->i', W, h)
     if i < depth - 1:
         h = fnp.maximum(h, 0)
-flops.budget_summary()  # 984,321 FLOPs
+flops.budget_summary()  # 6,231,041 FLOPs
 ```
 
 </td>
@@ -87,6 +87,7 @@ flops.budget_summary()  # 984,321 FLOPs
 - **Budget enforcement** -- operations are checked before execution; exceeding the budget raises a clear error
 - **Symmetry-aware einsum** -- automatic FLOP savings for repeated operands and declared symmetry groups
 - **Transparent diagnostics** -- inspect per-operation costs, cumulative budget usage, and detailed summaries at any time
+- **Inspect costs analytically** -- `flops.einsum_accumulation_cost(...)` and `flops.reduction_accumulation_cost(...)` return the exact FLOP count for an einsum or reduction without running the op
 - **Truncated SVD** -- top-k singular value decomposition with `O(m * n * k)` cost
 
 ## What's Supported
@@ -143,16 +144,16 @@ flops.budget_summary()           # accumulated session/global summary
 ```
 flopscope FLOP Budget Summary
 =============================
-  Total budget:     100,000,000
-  Used:                 984,321  (1.0%)
-  Remaining:         99,015,679  (99.0%)
+  Total budget:             100,000,000
+  Used:                       6,231,041  (6.2%)
+  Remaining:                 93,768,959  (93.8%)
 
   By operation:
-    random.randn          327,936  ( 33.3%)  [6 calls]
-    multiply              327,680  ( 33.3%)  [5 calls]
-    einsum                327,680  ( 33.3%)  [5 calls]
-    maximum                 1,024  (  0.1%)  [4 calls]
-    sqrt                        1  (  0.0%)  [1 call]
+    random.randn            5,246,976  ( 84.2%)  [6 calls]
+    einsum                    655,360  ( 10.5%)  [5 calls]
+    multiply                  327,680  (  5.3%)  [5 calls]
+    maximum                     1,024  (  0.0%)  [4 calls]
+    sqrt                            1  (  0.0%)  [1 call]
 
   Total Wall Time:     ...s
   Flopscope Backend:   ...s  (...%)
@@ -164,11 +165,26 @@ flopscope FLOP Budget Summary
 
 ```python
 # Query FLOP costs without running anything (no BudgetContext needed)
-cost = flops.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
-print(f"Matmul cost: {cost:,}")  # 16,777,216
+cost = flops.accounting.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
+print(f"Matmul cost: {cost:,}")  # 33,554,432
 
-cost = flops.svd_cost(m=256, n=256, k=10)
-print(f"SVD cost: {cost:,}")     # 655,360
+cost = flops.accounting.svd_cost(m=256, n=256, k=10)
+print(f"SVD cost: {cost:,}")     # 2,621,440
+```
+
+For symmetry-aware inspection that takes actual array inputs (and reflects
+declared symmetry), use the accumulation cost APIs:
+
+```python
+import numpy as np
+A = np.zeros((256, 256))
+B = np.zeros((256, 256))
+# Returns an AccumulationCost decomposition without running the op
+cost = flops.einsum_accumulation_cost('ij,jk->ik', A, B)
+print(cost.total)                # 33,554,432
+
+cost = flops.reduction_accumulation_cost(A, op_factor=1)
+print(cost.total)                # 65,535
 ```
 
 ### Symmetry Savings

@@ -203,7 +203,7 @@
   ],
   "signature": "flops.flops.polyadd_cost(n1: 'int', n2: 'int') -> 'int'",
   "slug": "flops-polyadd-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L25",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L30",
   "status_note": "",
   "summary": "Cost for polyadd: max(n1, n2) FLOPs.",
   "upstream_source_url": ""

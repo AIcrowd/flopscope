@@ -168,7 +168,7 @@
   ],
   "signature": "flops.flops.matrix_power_cost(n: 'int', k: 'int') -> 'int'",
   "slug": "flops-matrix-power-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L95",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L102",
   "status_note": "",
   "summary": "Weighted FLOP cost of matrix power A**k.",
   "upstream_source_url": ""

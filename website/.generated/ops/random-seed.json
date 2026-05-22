@@ -75,7 +75,7 @@
   "example": null,
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.seed",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L157",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L225",
   "href": "/docs/api/numpy/random/seed/",
   "legacy_href": "/docs/api/ops/random-seed/",
   "module": "numpy.random",

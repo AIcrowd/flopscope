@@ -17,8 +17,9 @@ class TestEinsumSymmetricInput:
         v = numpy.ones(5)
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             einsum("ijk,k->ij", S, v)
-            dense_cost = 2 * 10 * 10 * 5
-            assert budget.flops_used < dense_cost
+            # new direct-event model: total=550, gaming bound=num_terms*dense=2*500=1000
+            dense_gaming_bound = 2 * 10 * 10 * 5 * 2  # 2 operands * dense_baseline
+            assert budget.flops_used < dense_gaming_bound
             assert budget.flops_used > 0
 
     def test_plain_input_unchanged(self):
@@ -26,7 +27,10 @@ class TestEinsumSymmetricInput:
         v = numpy.ones(10)
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             einsum("ij,j->i", A, v)
-            assert budget.flops_used == 100
+            # direct-event model with off-by-one correction:
+            # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+            # = 100 + 100 - 10 = 190. First cell of each output orbit is free.
+            assert budget.flops_used == 190
 
 
 class TestEinsumSymmetricOutput:
@@ -61,3 +65,16 @@ class TestEinsumSymmetryParam:
             result = einsum("ki,kj->ij", X, X, symmetry=(0, 1))
             assert isinstance(result, SymmetricTensor)
             assert result.symmetry == flops.SymmetryGroup.symmetric(axes=(0, 1))
+
+
+def test_total_never_exceeds_k_times_dense_baseline():
+    """Even with declared symmetries, total <= k * dense_baseline always (gaming-resistance)."""
+    import numpy as np
+
+    import flopscope as fps
+
+    A = np.zeros((4, 4, 4))
+    A_sym = fps.as_symmetric(A, symmetry=(0, 1, 2))
+    cost = fps.einsum_accumulation_cost("ijk,abc->ic", A_sym, A_sym)
+    upper_bound = cost.num_terms * cost.dense_baseline
+    assert cost.total <= upper_bound

@@ -409,7 +409,7 @@
   "schema_version": 1,
   "slug": "put_along_axis",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1678",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1767",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_shape_base_impl.py#L182"
   }
 }

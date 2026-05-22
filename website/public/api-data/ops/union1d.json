@@ -168,7 +168,7 @@
   "schema_version": 1,
   "slug": "union1d",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L468",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L499",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_arraysetops_impl.py#L1140"
   }
 }

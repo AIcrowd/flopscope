@@ -1235,7 +1235,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.svd",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_svd.py#L29",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_svd.py#L30",
   "href": "/docs/api/numpy/linalg/svd/",
   "legacy_href": "/docs/api/ops/linalg-svd/",
   "module": "numpy.linalg",

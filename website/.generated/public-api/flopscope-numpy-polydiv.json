@@ -441,7 +441,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polydiv",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L185",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196",
   "href": "/docs/api/numpy/polydiv/",
   "import_path": "flopscope.numpy.polydiv",
   "is_operation_cost_leaf": true,

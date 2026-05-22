@@ -56,16 +56,16 @@ uv run python first_budget.py
 flopscope FLOP Budget Summary
 =========================
   Total budget:    1,000,000,000,000,000
-  Used:                       2,624,513  (0.0%)
-  Remaining:        999,999,997,375,487  (100.0%)
+  Used:                      13,114,112  (0.0%)
+  Remaining:        999,999,986,885,888  (100.0%)
 
   By operation:
-    random.randn              655,616  ( 25.0%)  [11 calls]
-    multiply                  655,360  ( 25.0%)  [10 calls]
-    array                     655,360  ( 25.0%)  [10 calls]
-    einsum                    655,360  ( 25.0%)  [10 calls]
-    maximum                     2,560  (  0.1%)  [10 calls]
-    sum                           256  (  0.0%)  [1 call]
+    random.randn           10,489,856  ( 80.0%)  [11 calls]
+    einsum                  1,310,720  ( 10.0%)  [10 calls]
+    multiply                  655,360  (  5.0%)  [10 calls]
+    array                     655,360  (  5.0%)  [10 calls]
+    maximum                     2,560  (  0.0%)  [10 calls]
+    sum                           255  (  0.0%)  [1 call]
     sqrt                            1  (  0.0%)  [1 call]
 
   By operation (time):
@@ -82,7 +82,7 @@ flopscope FLOP Budget Summary
 
 - **Top rows:** `Used` is the total FLOP count spent so far across the current session, and `Remaining` shows the implicit global headroom
 - **Flat default:** the summary stays flat unless you explicitly ask for `flops.budget_summary(by_namespace=True)`
-- **Operations table:** the 10-layer MLP spreads FLOPs roughly equally across `random.randn`, `multiply`, `array`, and `einsum` (~25% each); activations (`maximum`) are comparatively cheap, and the Kaiming scale `sqrt` adds just 1 FLOP
+- **Operations table:** the 10-layer MLP is dominated by `random.randn` for weight init (~80%) and the per-layer matrix-vector `einsum` (~10%); `multiply` and `array` from the Kaiming-scaled init each contribute ~5%, activations (`maximum`) are comparatively cheap, and the Kaiming scale `sqrt` adds just 1 FLOP
 
 If you want namespace attribution, opt in separately:
 

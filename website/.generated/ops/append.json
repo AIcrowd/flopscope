@@ -598,7 +598,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.append",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L840",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L876",
   "href": "/docs/api/numpy/append/",
   "legacy_href": "/docs/api/ops/append/",
   "module": "numpy",

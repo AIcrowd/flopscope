@@ -131,7 +131,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.polyint_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L40",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
   "href": "/docs/api/accounting/polyint-cost/",
   "import_path": "flopscope.accounting.polyint_cost",
   "is_operation_cost_leaf": false,

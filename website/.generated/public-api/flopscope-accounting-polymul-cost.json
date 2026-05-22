@@ -197,7 +197,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.polymul_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L45",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L50",
   "href": "/docs/api/accounting/polymul-cost/",
   "import_path": "flopscope.accounting.polymul_cost",
   "is_operation_cost_leaf": false,

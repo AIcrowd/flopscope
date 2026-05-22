@@ -348,7 +348,7 @@
   "schema_version": 1,
   "slug": "frombuffer",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1324",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1392",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.frombuffer.html"
   }
 }

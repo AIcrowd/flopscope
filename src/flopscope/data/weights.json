@@ -2614,7 +2614,7 @@
       "linalg.matrix_norm": {
         "category": "counted_custom",
         "measurement_mode": "blas",
-        "analytical_formula": "numel (fro/L1/Linf) or 4*m*n*min(m,n) (ord=2/nuc)",
+        "analytical_formula": "2*numel (fro/L1/Linf, FMA=2) or 4*m*n*min(m,n) (ord=2/nuc)",
         "analytical_flops": 524288,
         "benchmark_size": "A: (512,512)",
         "bench_code": "np.linalg.matrix_norm(A)",
@@ -2638,7 +2638,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Weight=1 (baked into cost function). Elementwise norms cost numel. SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) \u2014 the 4x is baked in for SVD consistency.",
+        "notes": "Weight=1 (baked into cost function). Elementwise norms cost 2*numel (FMA=2). SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) \u2014 the 4x is baked in for SVD consistency.",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L289"
       },
       "linalg.matrix_power": {
@@ -2704,7 +2704,7 @@
       "linalg.multi_dot": {
         "category": "counted_custom",
         "measurement_mode": "blas",
-        "analytical_formula": "sum of chain MNK costs",
+        "analytical_formula": "2 * sum of chain MNK costs (FMA=2)",
         "analytical_flops": 2097152,
         "benchmark_size": "A: (128,64), B: (64,128), C: (128,64)",
         "bench_code": "np.linalg.multi_dot([A, B, C])",
@@ -2728,13 +2728,13 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Chain matmul. Cost: sum of optimal chain matmul costs (CLRS \u00a715.2).",
+        "notes": "Chain matmul. Cost: 2 * sum of optimal chain matmul costs (CLRS \u00a715.2) (FMA=2).",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_compound.py#L68"
       },
       "linalg.norm": {
         "category": "counted_custom",
         "measurement_mode": "blas",
-        "analytical_formula": "numel (fro/L1/Linf) or 4*m*n*min(m,n) (ord=2/nuc)",
+        "analytical_formula": "2*numel (vector/fro/L1/Linf, FMA=2) or 4*m*n*min(m,n) (ord=2/nuc)",
         "analytical_flops": 10000000,
         "benchmark_size": "x: (10000000,)",
         "bench_code": "np.linalg.norm(x)",
@@ -2758,7 +2758,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Weight=1 (baked into cost function). Elementwise norms cost numel. SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) \u2014 the 4x is baked in for SVD consistency.",
+        "notes": "Weight=1 (baked into cost function). Elementwise norms cost 2*numel (FMA=2). SVD-based norms (ord=2, nuc) cost 4*m*n*min(m,n) \u2014 the 4x is baked in for SVD consistency.",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L187"
       },
       "linalg.outer": {
@@ -2941,7 +2941,7 @@
       "linalg.vector_norm": {
         "category": "counted_custom",
         "measurement_mode": "blas",
-        "analytical_formula": "numel",
+        "analytical_formula": "2*numel (FMA=2)",
         "analytical_flops": 10000000,
         "benchmark_size": "x: (10000000,)",
         "bench_code": "np.linalg.vector_norm(x)",
@@ -2965,7 +2965,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Vector norm. Cost: numel (or 2*numel for general p-norm).",
+        "notes": "Vector norm. Cost: 2*numel (FMA=2 — one multiply + accumulate per element).",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/linalg/_properties.py#L238"
       },
       "allclose": {
@@ -6083,7 +6083,7 @@
       "polyval": {
         "category": "counted_custom",
         "measurement_mode": "custom",
-        "analytical_formula": "n * degree (FMA=1)",
+        "analytical_formula": "2 * n * degree (FMA=2)",
         "analytical_flops": 100000000,
         "benchmark_size": "c: (101,), x: (1000000,)",
         "bench_code": "np.polyval(c, x)",
@@ -6107,7 +6107,7 @@
         "baseline_bench_code": "np.add(x, y, out=_out)",
         "baseline_perf_instructions_total": 160009598.0,
         "baseline_timing_ns_total": 195797715.0,
-        "notes": "Evaluate polynomial at given points. Cost: $m \\cdot \\text{deg}$ (Horner's method, FMA=1).",
+        "notes": "Evaluate polynomial at given points. Cost: $2m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
         "cost_impl_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L78"
       },
       "polyfit": {
@@ -11093,8 +11093,8 @@
     "unique_values": 1.0,
     "bartlett": 1.0,
     "blackman": 16.0,
-    "hamming": 16.0,
-    "hanning": 16.0,
+    "hamming": 8.0,
+    "hanning": 8.0,
     "kaiser": 16.0,
     "random.bytes": 1.0,
     "isnan": 1.0,

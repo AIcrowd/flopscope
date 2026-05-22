@@ -968,7 +968,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.cov",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1990",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2296",
   "href": "/docs/api/numpy/cov/",
   "legacy_href": "/docs/api/ops/cov/",
   "module": "numpy",

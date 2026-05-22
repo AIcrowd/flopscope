@@ -390,7 +390,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.astype",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L761",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L793",
   "href": "/docs/api/numpy/astype/",
   "legacy_href": "/docs/api/ops/astype/",
   "module": "numpy",

@@ -530,7 +530,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.noncentral_chisquare",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L86",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L89",
   "href": "/docs/api/numpy/random/noncentral-chisquare/",
   "import_path": "flopscope.numpy.random.noncentral_chisquare",
   "is_operation_cost_leaf": true,

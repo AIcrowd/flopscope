@@ -695,7 +695,7 @@ def generate_markdown(rows: list[dict], data: dict) -> str:
     w(
         "- $\\alpha_{\\text{raw}}(\\text{op})$ is the **raw correction factor** -- "
         "the ratio of hardware-observed FP instructions to the analytical FLOP "
-        "count (FMA = 1 op)."
+        "count (FMA = 2 ops, textbook)."
     )
     w(
         "- $F(\\text{op})$ is the total SIMD-width-weighted count of retired "
@@ -738,10 +738,11 @@ def generate_markdown(rows: list[dict], data: dict) -> str:
     w("are expected for ops with less FP work than the overhead measurement")
     w("(e.g., bitwise ops that generate 0 FP instructions).")
     w()
-    w("**Note on BLAS/linalg FMA ops:** `fp_arith_inst_retired` counts each FMA")
-    w("as 2 retired operations (one multiply + one add). Pure-FMA ops like")
-    w("matmul will therefore show empirical weight ≈ 2.0. The reviewer can")
-    w("decide whether to keep this or override to 1.0.")
+    w("**Note on BLAS/linalg FMA ops:** Both flopscope's analytical FLOP count and")
+    w("`fp_arith_inst_retired` count each FMA as 2 ops (one multiply + one add).")
+    w(
+        "Pure-FMA ops like matmul therefore show weights near 1.0 (no convention mismatch)."
+    )
     w()
 
     # ------------------------------------------------------------------
@@ -985,9 +986,8 @@ def generate_markdown(rows: list[dict], data: dict) -> str:
     w("### BLAS vectorization effects")
     w()
     w("Operations backed by optimized BLAS routines (`matmul`, `dot`, contraction ops)")
-    w("show weights below 1.0 because FMA instructions fuse two analytical FLOPs into")
-    w("one hardware instruction. The sub-unity weights are correct -- they reflect")
-    w("real hardware instruction counts.")
+    w("show weights near 1.0 because flopscope's analytical FLOP count and the perf")
+    w("instruction counter both treat each FMA as 2 retired ops.")
     w()
     w("### Random number generators")
     w()

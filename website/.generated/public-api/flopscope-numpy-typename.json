@@ -252,7 +252,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.typename",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1958",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2058",
   "href": "/docs/api/numpy/typename/",
   "import_path": "flopscope.numpy.typename",
   "is_operation_cost_leaf": true,

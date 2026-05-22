@@ -180,7 +180,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Most norms cost n FLOPs (one pass over elements). General p-norms\ncost 2n due to exponentiation."
+              "text": "All norms cost 2*numel FLOPs (FMA=2: one multiply + accumulate per element)."
             }
           ],
           "type": "paragraph"
@@ -206,7 +206,7 @@
   ],
   "signature": "flops.flops.vector_norm_cost(shape: 'tuple', ord=None) -> 'int'",
   "slug": "flops-vector-norm-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L257",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L264",
   "status_note": "",
   "summary": "Weighted FLOP cost of vector norm.",
   "upstream_source_url": ""

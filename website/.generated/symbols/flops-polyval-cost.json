@@ -12,13 +12,27 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op)."
+              "text": "Cost for polyval: Horner's method under FMA=2 textbook convention."
             }
           ],
           "type": "paragraph"
         }
       ],
       "title": "Summary"
+    },
+    {
+      "blocks": [
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Per coefficient: 1 multiply + 1 add (FMA=2). m output cells, deg coefficients.\nReturns 2 * m * deg FLOPs."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "title": "Extended Summary"
     },
     {
       "blocks": [
@@ -181,8 +195,8 @@
   ],
   "signature": "flops.flops.polyval_cost(deg: 'int', m: 'int') -> 'int'",
   "slug": "flops-polyval-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L20",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L21",
   "status_note": "",
-  "summary": "Cost for polyval: Horner's method = m * deg FLOPs (FMA=1 op).",
+  "summary": "Cost for polyval: Horner's method under FMA=2 textbook convention.",
   "upstream_source_url": ""
 }

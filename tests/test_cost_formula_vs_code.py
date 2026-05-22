@@ -265,10 +265,9 @@ _REDUCTION_NUMEL = [
     "nanmin",
     "nanprod",
     "nansum",
-    "median",
     "nanmedian",
-    # mean/std/var also cost numel(input) per sheet
-    "mean",
+    # std/var also cost numel(input) per sheet
+    # (mean is excluded: it charges +1 divide for the scalar output orbit)
     "average",
     "nanmean",
     "std",
@@ -280,31 +279,75 @@ _REDUCTION_NUMEL = [
 
 @pytest.mark.parametrize("name", _REDUCTION_NUMEL)
 def test_reduction_numel(name, we):
+    # Updated for orbit-mapping cost model (PR #91 Task 7).
+    # Full reduction of (10,10): prod(shape) - 1 = 100 - 1 = 99 additions.
     a = numpy.random.rand(10, 10)
     fn = getattr(we, name)
     cost = _cost_of(fn, a)
-    assert cost == 100, f"{name}: expected numel(input)=100, got {cost}"
+    assert cost == 99, f"{name}: expected orbit-mapping cost=99, got {cost}"
 
 
-@pytest.mark.parametrize("name", ["percentile", "nanpercentile"])
-def test_percentile_numel(name, we):
+def test_mean_charges_sum_plus_one_divide(we):
+    # Task 9: mean charges sum-cost + num_output_orbits divides.
+    # Full reduction of (10,10) dense: sum cost = 99, scalar output → 1 divide.
+    # Total = 100.
+    a = numpy.random.rand(10, 10)
+    cost = _cost_of(we.mean, a)
+    assert cost == 100, f"mean: expected sum_cost(99) + 1 divide = 100, got {cost}"
+
+
+def test_median_tier2_cost(we):
+    # Task 10: median uses Tier-2 model: num_output_orbits × axis_dim.
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
+    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    a = numpy.random.rand(10, 10)
+    cost = _cost_of(we.median, a)
+    assert cost == 100, f"median: expected Tier-2 cost=100, got {cost}"
+
+
+def test_percentile_tier2_cost(we):
+    # Task 11: percentile uses Tier-2 model: num_output_orbits × axis_dim.
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
+    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    a = numpy.random.rand(10, 10)
+    cost = _cost_of(we.percentile, a, q=50)
+    assert cost == 100, f"percentile: expected Tier-2 cost=100, got {cost}"
+
+
+@pytest.mark.parametrize("name", ["nanpercentile"])
+def test_nanpercentile_numel(name, we):
+    # nanpercentile still uses the old orbit-mapping model.
+    # Full reduction of (10,10): prod(shape) - 1 = 100 - 1 = 99 additions.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=50)
-    assert cost == 100, f"{name}: expected numel(input)=100, got {cost}"
+    assert cost == 99, f"{name}: expected orbit-mapping cost=99, got {cost}"
 
 
-@pytest.mark.parametrize("name", ["quantile", "nanquantile"])
-def test_quantile_numel(name, we):
+def test_quantile_tier2_cost(we):
+    # Task 11: quantile uses Tier-2 model: num_output_orbits × axis_dim.
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
+    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    a = numpy.random.rand(10, 10)
+    cost = _cost_of(we.quantile, a, q=0.5)
+    assert cost == 100, f"quantile: expected Tier-2 cost=100, got {cost}"
+
+
+@pytest.mark.parametrize("name", ["nanquantile"])
+def test_nanquantile_numel(name, we):
+    # nanquantile still uses the old orbit-mapping model.
+    # Full reduction of (10,10): prod(shape) - 1 = 100 - 1 = 99 additions.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=0.5)
-    assert cost == 100, f"{name}: expected numel(input)=100, got {cost}"
+    assert cost == 99, f"{name}: expected orbit-mapping cost=99, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["cumulative_sum", "cumulative_prod"])
 def test_cumulative_numel(name, we):
+    # Updated for orbit-mapping cost model (PR #91 Task 7).
+    # axis=0 reduction of (10,10): 10 cols * (10-1) additions = 90.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, axis=0)
-    assert cost == 100, f"{name}: expected numel(input)=100, got {cost}"
+    assert cost == 90, f"{name}: expected orbit-mapping cost=90, got {cost}"
 
 
 # ---------------------------------------------------------------------------
@@ -313,15 +356,23 @@ def test_cumulative_numel(name, we):
 
 
 def test_matmul_mnk(we):
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
         _cost_of(we.matmul, numpy.random.rand(10, 10), numpy.random.rand(10, 10))
-        == 1000
+        == 1900
     )
 
 
 def test_dot_mnk(we):
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
-        _cost_of(we.dot, numpy.random.rand(10, 10), numpy.random.rand(10, 10)) == 1000
+        _cost_of(we.dot, numpy.random.rand(10, 10), numpy.random.rand(10, 10)) == 1900
     )
 
 
@@ -338,6 +389,8 @@ def test_outer_mn(we):
 
 
 def test_tensordot_contracted(we):
+    # tensordot uses the old dense formula: a.size*b.size/contracted = 5*4*4*3/4 = 60
+    # (tensordot has its own cost model, separate from the accumulation-based einsum model)
     assert (
         _cost_of(
             we.tensordot,
@@ -359,11 +412,15 @@ def test_cross_6n(we):
 
 
 def test_einsum_mnk(we):
+    # direct-event model with off-by-one correction:
+    # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+    # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+    # First cell of each output orbit is a free copy.
     assert (
         _cost_of(
             we.einsum, "ij,jk->ik", numpy.random.rand(10, 10), numpy.random.rand(10, 10)
         )
-        == 1000
+        == 1900
     )
 
 
@@ -463,25 +520,35 @@ class TestLinalgProperties:
         assert _cost_of(we.linalg.trace, numpy.random.rand(8, 8)) == 8
 
     def test_vector_norm_numel(self, we):
-        assert _cost_of(we.linalg.vector_norm, numpy.random.rand(20)) == 20
+        assert (
+            _cost_of(we.linalg.vector_norm, numpy.random.rand(20)) == 40
+        )  # FMA=2: 2*numel
 
     def test_matrix_norm_numel(self, we):
-        assert _cost_of(we.linalg.matrix_norm, numpy.random.rand(8, 8)) == 64
+        assert (
+            _cost_of(we.linalg.matrix_norm, numpy.random.rand(8, 8)) == 128
+        )  # FMA=2: 2*numel
 
     def test_norm_vector_numel(self, we):
-        assert _cost_of(we.linalg.norm, numpy.random.rand(20)) == 20
+        assert _cost_of(we.linalg.norm, numpy.random.rand(20)) == 40  # FMA=2: 2*numel
 
     def test_norm_matrix_numel(self, we):
-        assert _cost_of(we.linalg.norm, numpy.random.rand(8, 8)) == 64
+        assert (
+            _cost_of(we.linalg.norm, numpy.random.rand(8, 8)) == 128
+        )  # FMA=2: 2*numel
 
 
 class TestLinalgDelegates:
     def test_matmul_mnk(self, we):
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 1000 + 1000 - 100 = 1900 (textbook 2n^3 - n^2 form).
+        # First cell of each output orbit is a free copy.
         assert (
             _cost_of(
                 we.linalg.matmul, numpy.random.rand(10, 10), numpy.random.rand(10, 10)
             )
-            == 1000
+            == 1900
         )
 
     def test_outer_mn(self, we):
@@ -516,13 +583,15 @@ class TestLinalgDelegates:
 
 class TestPolynomial:
     def test_polyval_m_times_deg(self, we):
+        # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
+        # 5 coeffs → deg=4, m=20 → 2*20*4 = 160
         assert (
             _cost_of(
                 we.polyval,
                 numpy.array([1.0, 2.0, 3.0, 4.0, 5.0]),
                 numpy.random.rand(20),
             )
-            == 80
+            == 160
         )
 
     def test_polyadd(self, we):
@@ -633,10 +702,12 @@ class TestWindows:
         assert _cost_of(we.bartlett, 20) == 20
 
     def test_hamming_n(self, we):
-        assert _cost_of(we.hamming, 20) == 20
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        assert _cost_of(we.hamming, 20) == 40
 
     def test_hanning_n(self, we):
-        assert _cost_of(we.hanning, 20) == 20
+        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        assert _cost_of(we.hanning, 20) == 40
 
     def test_blackman_3n(self, we):
         assert _cost_of(we.blackman, 20) == 60

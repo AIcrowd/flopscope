@@ -258,7 +258,7 @@
   "schema_version": 1,
   "slug": "setdiff1d",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L484",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L516",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_arraysetops_impl.py#L1177"
   }
 }

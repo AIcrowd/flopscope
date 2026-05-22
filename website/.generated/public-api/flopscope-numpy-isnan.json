@@ -425,7 +425,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isnan",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L793",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L826",
   "href": "/docs/api/numpy/isnan/",
   "import_path": "flopscope.numpy.isnan",
   "is_operation_cost_leaf": true,

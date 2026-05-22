@@ -120,7 +120,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "One FMA (cosine + scale) per sample, counted as 1 op under FMA=1."
+              "text": "Two ops per sample under FMA=2 convention (1 multiply + 1 add)."
             }
           ],
           "type": "paragraph"
@@ -146,7 +146,7 @@
   ],
   "signature": "flops.flops.hamming_cost(n: 'int') -> 'int'",
   "slug": "flops-hamming-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L76",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L78",
   "status_note": "",
   "summary": "Weighted FLOP cost of Hamming window generation.",
   "upstream_source_url": ""

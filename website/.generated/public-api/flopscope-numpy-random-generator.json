@@ -10,13 +10,294 @@
           "inline": [
             {
               "kind": "text",
-              "text": "numpy Generator subclass with FLOP-counted sampler methods."
+              "text": "numpy "
+            },
+            {
+              "kind": "code",
+              "text": "Generator"
+            },
+            {
+              "kind": "text",
+              "text": " subclass with FLOP-counted sampler methods."
             }
           ],
           "type": "paragraph"
         }
       ],
       "title": "Summary"
+    },
+    {
+      "blocks": [
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Each sampler method ("
+            },
+            {
+              "kind": "code",
+              "text": "standard_normal"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "normal"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "uniform"
+            },
+            {
+              "kind": "text",
+              "text": ",\n"
+            },
+            {
+              "kind": "code",
+              "text": "integers"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "choice"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "shuffle"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "permutation"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "bytes"
+            },
+            {
+              "kind": "text",
+              "text": ", ...)\ndeducts FLOPs from the active "
+            },
+            {
+              "kind": "code",
+              "text": "BudgetContext"
+            },
+            {
+              "kind": "text",
+              "text": " and returns\n"
+            },
+            {
+              "kind": "code",
+              "text": "FlopscopeArray"
+            },
+            {
+              "kind": "text",
+              "text": ". Free attribute access ("
+            },
+            {
+              "kind": "code",
+              "text": "bit_generator"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "kind": "code",
+              "text": "spawn"
+            },
+            {
+              "kind": "text",
+              "text": ")\nis allowed; anything else raises "
+            },
+            {
+              "kind": "code",
+              "text": "UnsupportedFunctionError"
+            },
+            {
+              "kind": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Construct via "
+            },
+            {
+              "display_text": "flopscope.flops.random.default_rng",
+              "explicit_title": false,
+              "external_url": "",
+              "href": "",
+              "kind": "role_reference",
+              "original_target": "flopscope.flops.random.default_rng",
+              "role": "func",
+              "suppress_link": false,
+              "target": "flops.random.default_rng",
+              "unresolved": true
+            },
+            {
+              "kind": "text",
+              "text": " (canonical) or by\npassing a "
+            },
+            {
+              "kind": "code",
+              "text": "BitGenerator"
+            },
+            {
+              "kind": "text",
+              "text": " directly: "
+            },
+            {
+              "kind": "code",
+              "text": "Generator(flops.random.PCG64(42))"
+            },
+            {
+              "kind": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "title": "Extended Summary"
+    },
+    {
+      "blocks": [
+        {
+          "links": [
+            {
+              "description": "canonical constructor.",
+              "description_inline": [
+                {
+                  "kind": "text",
+                  "text": "canonical constructor."
+                }
+              ],
+              "external_url": "",
+              "href": "/docs/api/numpy/random/default-rng/",
+              "label": "fnp.random.default_rng",
+              "original_target": "fnp.random.default_rng",
+              "role": "",
+              "target": "flopscope.numpy.random.default_rng",
+              "unresolved": false
+            }
+          ],
+          "type": "link_list"
+        }
+      ],
+      "title": "See also"
+    },
+    {
+      "blocks": [
+        {
+          "lines": [
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "import flopscope.numpy as fnp"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "from flopscope import BudgetContext"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "rng = fnp.random.default_rng(42)"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "with BudgetContext(flop_budget=10**6):"
+            },
+            {
+              "kind": "input",
+              "prompt": "...",
+              "text": "x = rng.standard_normal((10,))"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "type(x).__name__"
+            },
+            {
+              "kind": "output",
+              "text": "'FlopscopeArray'"
+            }
+          ],
+          "type": "doctest_block"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Pickle / "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/copy/",
+              "kind": "link",
+              "target": "copy",
+              "text": "copy"
+            },
+            {
+              "kind": "text",
+              "text": " round-trips preserve counting:"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "lines": [
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "import pickle"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "revived = pickle.loads(pickle.dumps(rng))"
+            },
+            {
+              "kind": "input",
+              "prompt": ">>>",
+              "text": "isinstance(revived, type(rng))"
+            },
+            {
+              "kind": "output",
+              "text": "True"
+            }
+          ],
+          "type": "doctest_block"
+        }
+      ],
+      "title": "Examples"
     }
   ],
   "canonical_name": "flopscope.numpy.random.Generator",
@@ -27,12 +308,23 @@
   "display_type": "",
   "doc_coverage": {
     "raw_blocks": [],
-    "unresolved_references": [],
+    "unresolved_references": [
+      {
+        "display_text": "flopscope.flops.random.default_rng",
+        "original_target": "flopscope.flops.random.default_rng",
+        "role": "func",
+        "target": "flops.flops.random.default_rng"
+      }
+    ],
     "unsupported_directives": []
   },
-  "example": null,
+  "example": {
+    "code": ">>> import flopscope.numpy as fnp\n>>> from flopscope import BudgetContext\n>>> rng = fnp.random.default_rng(42)\n>>> with BudgetContext(flop_budget=10**6):\n...     x = rng.standard_normal((10,))\n>>> type(x).__name__\n'FlopscopeArray'\n\nPickle / ``copy`` round-trips preserve counting:\n\n>>> import pickle\n>>> revived = pickle.loads(pickle.dumps(rng))\n>>> isinstance(revived, type(rng))\nTrue",
+    "output": "",
+    "source": "derived"
+  },
   "flopscope_ref": "flopscope.numpy.random.Generator",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L109",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L112",
   "href": "/docs/api/numpy/random/generator/",
   "import_path": "flopscope.numpy.random.Generator",
   "is_operation_cost_leaf": false,
@@ -49,10 +341,27 @@
   "previous": null,
   "returns": [],
   "schema_version": 1,
-  "see_also": [],
+  "see_also": [
+    {
+      "description": "canonical constructor.",
+      "description_inline": [
+        {
+          "kind": "text",
+          "text": "canonical constructor."
+        }
+      ],
+      "external_url": "",
+      "href": "/docs/api/numpy/random/default-rng/",
+      "label": "fnp.random.default_rng",
+      "original_target": "fnp.random.default_rng",
+      "role": "",
+      "target": "flopscope.numpy.random.default_rng",
+      "unresolved": false
+    }
+  ],
   "signature": "flopscope.numpy.random.Generator",
   "slug": "flopscope-numpy-random-generator",
-  "summary": "numpy Generator subclass with FLOP-counted sampler methods.",
+  "summary": "numpy ``Generator`` subclass with FLOP-counted sampler methods.",
   "upstream_source_url": "",
   "weight": 1.0
 }

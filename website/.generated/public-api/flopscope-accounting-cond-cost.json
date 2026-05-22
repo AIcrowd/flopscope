@@ -278,7 +278,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.cond_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L377",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L391",
   "href": "/docs/api/accounting/cond-cost/",
   "import_path": "flopscope.accounting.cond_cost",
   "is_operation_cost_leaf": false,

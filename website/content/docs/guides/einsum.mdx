@@ -25,21 +25,21 @@ with flops.BudgetContext(flop_budget=10**8) as budget:
     B = fnp.ones((256, 256))
     x = fnp.ones((256,))
 
-    # Matrix-vector multiply: cost = m × k
-    y = fnp.einsum('ij,j->i', A, x)           # 256 × 256 = 65,536 FLOPs
+    # Matrix-vector multiply
+    y = fnp.einsum('ij,j->i', A, x)           # 131,072 FLOPs
 
-    # Matrix multiply: cost = m × k × n
-    C = fnp.einsum('ij,jk->ik', A, B)         # 256 × 256 × 256 = 16,777,216 FLOPs
+    # Matrix multiply
+    C = fnp.einsum('ij,jk->ik', A, B)         # 33,554,432 FLOPs
 
-    # Outer product: cost = i × j
-    outer = fnp.einsum('i,j->ij', x, x)       # 256 × 256 = 65,536 FLOPs
+    # Outer product
+    outer = fnp.einsum('i,j->ij', x, x)       # 65,792 FLOPs
 
-    # Trace: cost = i
+    # Trace
     tr = fnp.einsum('ii->', A)                 # 256 FLOPs
 
-    # Batched matmul: cost = b × m × k × n
+    # Batched matmul
     batch = fnp.ones((4, 256, 256))
-    out = fnp.einsum('bij,bjk->bik', batch, batch)  # 4 × 256 × 256 × 256 FLOPs
+    out = fnp.einsum('bij,bjk->bik', batch, batch)  # 134,217,728 FLOPs
 
     print(budget.summary())
 ```
@@ -48,18 +48,19 @@ with flops.BudgetContext(flop_budget=10**8) as budget:
 
 The cost of an einsum is the sum of per-step costs along the optimal contraction path. Every einsum — even a simple two-operand one — goes through the [opt_einsum path optimizer](/docs/api/) (a symmetry-aware fork of [opt_einsum](https://github.com/dgasmith/opt_einsum)).
 
-For each pairwise step:
+For each pairwise contraction step the cost decomposes into a multiplicative term `μ` and an accumulation term `α`:
 
 ```
-cost = product of all index dimensions
+cost = μ + α
 ```
 
-Each FMA (fused multiply-add) counts as 1 operation, so the cost is
-simply the product of all index dimensions with no factor-of-2.
+where `μ` is the product of all index dimensions (the FMAs you'd issue) and `α` charges the accumulation across the contracted axes. The α/M model counts multiplies and adds separately (FMA=2 textbook); the factor-of-2 you see for dense matmul comes from `μ` counting multiplies and `α` counting accumulation adds.
 
 For `'ij,jk->ik'` with shapes `(256, 256)` and `(256, 256)`:
 - Indices: i=256, j=256, k=256
-- Cost: 256 x 256 x 256 = 16,777,216
+- μ = 256 × 256 × 256 = 16,777,216
+- α = 16,777,216
+- Cost: 33,554,432
 
 For multi-operand einsums (3+ tensors), Flopscope automatically decomposes the contraction into optimal pairwise steps. The total cost is the sum of per-step costs.
 
@@ -107,12 +108,6 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 n = 10
-T = flops.as_symmetric(fnp.ones((n, n, n)), symmetric_axes=(0, 1, 2))
-A = fnp.random.randn(n, n)
-B = fnp.random.randn(n, n)
-C = fnp.random.randn(n, n)
-
-n = 10
 T = flops.as_symmetric(fnp.ones((n, n, n)), symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1, 2)))
 A = fnp.random.randn(n, n)
 B = fnp.random.randn(n, n)
@@ -122,43 +117,54 @@ path, info = fnp.einsum_path('ijk,ai,bj,ck->abc', T, A, B, C)
 
 print(f"Path: {path}")
 print(info)
-print(f"Naive cost:     {info.naive_cost:,}")
 print(f"Optimized cost: {info.optimized_cost:,}")
-print(f"Speedup:        {info.speedup:.1f}x")
 print(f"Optimizer used: {info.optimizer_used}")
 ```
 
 ```text
 Path: [(0, 1), (0, 2), (0, 1)]
   Complete contraction:  ijk,ai,bj,ck->abc
-      Naive cost (flopscope):  3,000,000
-  Optimized cost (flopscope):  25,500
-                     Speedup:  117.647x
+      Naive cost (flopscope):  4,000,000
+  Optimized cost (flopscope):  4,000,000
+                     Speedup:  1.000x
+                     Savings:  0.0%
        Largest intermediate:  1,000 elements
                 Index sizes:  a=b=c=i=j=k=10
                   Optimizer:  optimal
---------------------------------------------------------------------------------------------------------------------------------------------
-step  contract  subscript                                flops     dense_flops   savings  blas      unique/total  symmetry (inputs → output)
---------------------------------------------------------------------------------------------------------------------------------------------
-   0  (0, 1)    ai,ijk->ajk                              5,500          10,000    45.0%  SYMM      V:550/1,000   - × S3{i,j,k} → S2{j,k}
-   1  (0, 2)    ajk,bj->akb                             10,000          10,000     0.0%  TDOT      -             S2{j,k} × - → -
-   2  (0, 1)    akb,ck->abc                             10,000          10,000     0.0%  TDOT      -             -
-Naive cost:     3,000,000
-Optimized cost: 25,500
-Speedup:        117.6x
+------------------------------------------------------------------------------------
+step  contract  subscript                                flops  blas
+------------------------------------------------------------------------------------
+   0  (0, 1)    ai,ijk->ajk                             10,000  GEMM
+   1  (0, 2)    ajk,bj->akb                             10,000  TDOT
+   2  (0, 1)    akb,ck->abc                             10,000  TDOT
+Optimized cost: 4,000,000
 Optimizer used: optimal
 ```
 
-The printed table gives you the contraction order, naive-vs-optimized FLOP counts, largest intermediate, grouped index sizes, and one row per pairwise contraction step. Each step shows the chosen contract tuple, dense baseline, savings, BLAS tag, and any symmetry that survived into the intermediate.
+The printed table shows the contraction order, the α/M cost (path-independent — naive and optimized are equal by construction), largest intermediate, grouped index sizes, and one row per pairwise contraction step. Each step shows the chosen contract tuple, subscript, per-step FLOPs, and BLAS tag.
 
 For per-step debugging, call `print(info.format_table(verbose=True))`. The verbose view adds indented rows with the merged operand subset, the intermediate output shape, and the running cumulative cost.
 
-`flops.einsum_cost()` returns the same cost that `einsum()` would deduct — one source of truth:
+For the symmetric-vs-dense FLOP breakdown that the path-independent total doesn't expose, use `flops.einsum_accumulation_cost(...).describe()` — see the inspection section below.
+
+### Inspecting what gets charged
+
+If you want to see the exact FLOP cost flopscope will charge for an einsum (without actually running it), call `flops.einsum_accumulation_cost`:
 
 ```python
-cost = flops.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
-print(f"Matmul cost: {cost:,}")  # 16,777,216
+import flopscope as flops
+import flopscope.numpy as fnp
+
+A = fnp.zeros((4, 4))
+B = fnp.zeros((4, 4))
+
+cost = flops.einsum_accumulation_cost('ij,jk->ik', A, B)
+print(cost.total)  # 128
 ```
+
+The cost is path-independent: `flops.einsum_accumulation_cost(...).total` matches `info.optimized_cost` from `fnp.einsum_path(...)`, and both equal the FLOPs that `BudgetContext` will charge when you actually call `fnp.einsum(...)`. Repeated calls hit an LRU cache and return in microseconds — see `flops.einsum_cache_info()` and `flops.einsum_clear_caches()` if you need to reset between cold-call benchmarks.
+
+For inputs with declared symmetry, the returned total reflects the orbit-aware savings — see [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for the mental model.
 
 ## Custom contraction paths
 
@@ -228,7 +234,7 @@ flops.configure(einsum_path_cache_size=8192)
 
 **Symptom:** Unexpectedly high FLOP cost
 
-**Fix:** Check all index dimensions. A subscript like `'ijkl,jklm->im'` multiplies all five dimension sizes together. Use `flops.einsum_cost()` or `fnp.einsum_path()` to preview costs before executing.
+**Fix:** Check all index dimensions. A subscript like `'ijkl,jklm->im'` multiplies all five dimension sizes together. Use `flops.accounting.einsum_cost()` or `fnp.einsum_path()` to preview costs before executing.
 
 ## Related pages
 

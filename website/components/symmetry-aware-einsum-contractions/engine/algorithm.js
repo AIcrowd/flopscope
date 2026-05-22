@@ -651,8 +651,11 @@ export function computeCostReduction(burnside, group, numTerms = 2) {
 
   // Total contraction size = V * W (output elements × summed elements)
   const allCount = totalCount * burnside.wTotalCount;
-  // Dense cost: FMA counts as 1 op (not 2), so op_factor = max(1, num_terms - 1)
-  const opFactor = Math.max(1, numTerms - 1);
+  // FMA=2 textbook convention: each multiply-add fused into 2 ops
+  // (1 multiply + 1 add counted separately). For a binary contraction
+  // the dense baseline is 2 * M*N*K (off-by-one not applied at this
+  // per-step approximation; matches Python helpers.flop_count under FMA=2).
+  const opFactor = Math.max(1, numTerms - 1) + 1;
   const denseCost = Math.max(1, opFactor * allCount);
 
   // V-only reduction: reduce output side by V symmetry

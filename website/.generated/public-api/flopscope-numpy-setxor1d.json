@@ -173,7 +173,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.setxor1d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L507",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L542",
   "href": "/docs/api/numpy/setxor1d/",
   "import_path": "flopscope.numpy.setxor1d",
   "is_operation_cost_leaf": true,

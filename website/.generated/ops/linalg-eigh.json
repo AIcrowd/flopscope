@@ -726,7 +726,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.eigh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L190",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L194",
   "href": "/docs/api/numpy/linalg/eigh/",
   "legacy_href": "/docs/api/ops/linalg-eigh/",
   "module": "numpy.linalg",

@@ -414,7 +414,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.roll",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L644",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L671",
   "href": "/docs/api/numpy/roll/",
   "import_path": "flopscope.numpy.roll",
   "is_operation_cost_leaf": true,

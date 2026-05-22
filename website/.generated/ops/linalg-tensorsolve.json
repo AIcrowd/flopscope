@@ -423,7 +423,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.tensorsolve",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L292",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L299",
   "href": "/docs/api/numpy/linalg/tensorsolve/",
   "legacy_href": "/docs/api/ops/linalg-tensorsolve/",
   "module": "numpy.linalg",

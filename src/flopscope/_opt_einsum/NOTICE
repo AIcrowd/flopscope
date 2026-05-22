@@ -1,322 +1,59 @@
-This package is a modified fork of opt_einsum by Daniel G. A. Smith et al.
+This package is a slim adapter layer over opt_einsum by Daniel G. A. Smith et al.
 
   Original repository : https://github.com/dgasmith/opt_einsum
   Original license    : MIT (see LICENSE in this directory)
   Original authors    : Daniel G. A. Smith and Johnnie Gray
-  Fork date           : 2026-04-03
+  Adapter date        : 2026-05-07
 
-This fork is self-contained — it depends only on Python stdlib and numpy,
-with zero imports from the host project (flopscope). It could be contributed
-back upstream to opt_einsum as a standalone symmetry extension.
+This adapter is no longer a fork. opt_einsum is a runtime dependency
+(declared in pyproject.toml). The local files here adapt upstream's PathInfo
+to flopscope's expected dataclass shape, recompute per-step FLOP counts using
+flopscope's FMA convention (default 1, configurable), and preserve the colored
+rich-render display.
 
 
 ================================================================================
-FILE-BY-FILE CHANGE LOG
+LOCAL FILES
 ================================================================================
-
-_typing.py  (vendored from opt_einsum/typing.py)
-──────────────────────────────────────────────────
-  - Removed BackendType (no backend dispatch in this fork).
-  - All other types unchanged: TensorShapeType, PathType, ArrayType,
-    ArrayIndexType, ArrayShaped, ContractionListType, PathSearchFunctionType,
-    OptimizeKind.
-
-_parser.py  (vendored from opt_einsum/parser.py)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - No logic changes. All functions preserved: parse_einsum_input,
-    get_symbol, get_shape, find_output_str, find_output_shape,
-    has_valid_einsum_chars_only, convert_to_valid_einsum_chars,
-    convert_interleaved_input, gen_unused_symbols.
-
-_helpers.py  (vendored from opt_einsum/helpers.py)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - No logic changes. All functions preserved: compute_size_by_dict,
-    find_contraction, flop_count.
-
-_blas.py  (vendored from opt_einsum/blas.py — EXTENDED)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - Added optional `input_symmetries` parameter to `can_blas()`.
-  - When symmetric inputs are detected, refines the base classification:
-      GEMM       + symmetric input → SYMM
-      GEMV/EINSUM + symmetric input → SYMV
-      DOT        + symmetric input → SYDT
-  - Classification only — actual dispatch to scipy.linalg.blas.dsymm/dsymv
-    is future work. These labels serve as metadata for PathInfo/StepInfo.
-  - When input_symmetries is None, behavior is identical to upstream.
-
-_testing.py  (vendored from opt_einsum/testing.py)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - No logic changes. Provides build_shapes, build_views, rand_equation
-    for the vendored test suite.
-
-_paths.py  (vendored from opt_einsum/paths.py — EXTENDED)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - Added `input_symmetries` parameter to ALL path algorithms. Symmetry
-    now drives the contraction ORDER — the algorithms prefer contractions
-    that exploit symmetry, not just contractions that look cheapest under
-    dense cost estimates. This means the returned path may differ from the
-    upstream path when symmetry is present.
-      * calc_k12_flops: accepts symmetry_map, returns (k12, cost, sym12).
-        Uses symmetric_flop_count (with the output_indices fix) +
-        propagate_symmetry when present.
-      * optimal: threads symmetry_map through DFS recursion.
-        Disables result cache when symmetry is present (same index
-        pair may have different symmetries in different branches).
-        Symmetric costs in calc_k12_flops guide the DFS to choose
-        the cheapest symmetric contraction order.
-      * BranchBound: threads symmetry_map through branch search.
-        Candidate assessment uses symmetric costs and unique sizes,
-        so the branch-and-bound pruning respects symmetry savings.
-      * ssa_greedy_optimize / greedy: tracks symmetry_map per tensor.
-        Uses compute_unique_size for memory footprints. Propagates
-        symmetry after each contraction so that future greedy choices
-        see the updated symmetry of intermediates.
-      * DynamicProgramming: accepts input_symmetries but does NOT use
-        them for path ordering. The DP algorithm uses integer-mapped
-        indices internally and its comparator functions (_dp_compare_*)
-        operate on bitmap sets, making full symmetry integration complex.
-        This is acceptable because: (1) DP is only used for 6-16 operands
-        via auto_hq, and (2) the symmetry-aware COST REPORTING in
-        contract_path() still applies, so the reported costs are correct
-        even though the path itself is optimized under dense assumptions.
-      * RandomGreedy: passes input_symmetries through to
-        ssa_greedy_optimize so random restarts also explore
-        symmetry-aware orderings (see also _path_random.py).
-      * auto / auto_hq: pass input_symmetries through to dispatched algorithm.
-  - PathOptimizer base class updated to accept **kwargs.
-  - When input_symmetries is None, ALL behavior is identical to upstream.
-
-_path_random.py  (vendored from opt_einsum/path_random.py — EXTENDED)
-──────────────────────────────────────────────────
-  - Import paths changed from `opt_einsum.X` to relative `._X`.
-  - Added `input_symmetries` parameter to RandomOptimizer.__call__() and
-    RandomGreedy.__call__(). The input_symmetries value is passed through
-    to the underlying greedy optimizer (ssa_greedy_optimize) so that
-    random restarts also benefit from symmetry-aware cost estimates and
-    symmetry-aware contraction ordering.
-  - All classes/functions preserved: RandomOptimizer, RandomGreedy,
-    thermal_chooser, random_greedy, random_greedy_128.
-  - When input_symmetries is None, ALL behavior is identical to upstream.
-
-_contract.py  (vendored from opt_einsum/contract.py — HEAVILY MODIFIED)
-──────────────────────────────────────────────────
-  This file has the most changes. It was stripped to path-finding only
-  and extended with symmetry-aware cost reporting.
-
-  REMOVED from upstream:
-    - contract()             — execution function (we don't execute)
-    - _core_contract()       — pairwise execution loop
-    - ContractExpression     — cached compiled expression
-    - _einsum()              — backend-aware einsum dispatch
-    - _tensordot()           — backend-aware tensordot dispatch
-    - _transpose()           — backend-aware transpose dispatch
-    - _filter_einsum_defaults() — kwarg filtering for backends
-    - format_const_einsum_str() — constant operand formatting
-    - shape_only()           — shape-only context manager
-    - All imports of: backends, sharing
-
-  KEPT from upstream (with modifications noted):
-    - _choose_memory_arg()   — unchanged
-    - contract_path()        — kept and extended (see below)
-
-  REPLACED:
-    - PathInfo class         — replaced with a @dataclass (see below)
-
-  NEW:
-    - StepInfo @dataclass    — per-step contraction diagnostics
-    - PathInfo @dataclass    — replaces upstream's class-based PathInfo
-
-  contract_path() changes:
-    - Added `input_symmetries: list[IndexSymmetry | None] | None = None`
-      parameter. When provided, enables symmetry-aware cost reporting AND
-      passes input_symmetries through to whichever optimizer is dispatched
-      (optimal, greedy, branch-and-bound, DP, random-greedy, etc.) so that
-      symmetry influences the contraction order, not just the cost report.
-    - Removed `einsum_call` hidden kwarg (was for contract() integration).
-    - In the contraction list loop:
-      * Tracks a parallel `sym_list` alongside `input_list` / `input_shapes`.
-      * For each pairwise step, gathers the symmetries of the contracted
-        tensors and calls propagate_symmetry() to compute the result's
-        symmetry. Symmetries are propagated left-to-right for multi-tensor
-        contractions within a single step.
-      * Uses symmetric_flop_count() (from _symmetry.py) when symmetries
-        are present; falls back to helpers.flop_count() otherwise.
-      * Computes both symmetry-aware and dense costs for each step.
-      * Builds StepInfo objects with per-step diagnostics.
-    - When `input_symmetries is None`, ALL behavior is identical to
-      upstream opt_einsum — no regressions.
-    - Returns the new PathInfo @dataclass (with backward-compat legacy
-      fields: contraction_list, scale_list, size_list, opt_cost property).
-
-  StepInfo fields:
-    subscript          — einsum string for this step, e.g. "ijk,ai->ajk"
-    flop_cost          — symmetry-aware cost (flopscope formula)
-    dense_flop_cost    — cost without symmetry
-    symmetry_savings   — 1 - (flop_cost / dense_flop_cost)
-    input_shapes       — shapes of inputs to this step
-    output_shape       — shape of the step's result
-    input_symmetries   — IndexSymmetry for each input
-    output_symmetry    — propagated IndexSymmetry of the result
-
-  PathInfo fields:
-    path               — the contraction order [(i,j), ...]
-    steps              — list of StepInfo
-    naive_cost         — cost of a single N-way contraction
-    optimized_cost     — sum of per-step costs
-    speedup            — naive_cost / optimized_cost
-    largest_intermediate — max elements in any intermediate
-    input_subscripts   — e.g. "ijk,ai,bj,ck"
-    output_subscript   — e.g. "abc"
-    size_dict          — index label → dimension size
-    (legacy fields for backward compat with upstream tests)
-
-_hsluv.py  (vendored/adapted from hsluv-python — MIT)
-──────────────────────────────────────────────────
-  New local helper for deterministic terminal label palettes.
-  - Adapted from the MIT-licensed hsluv-python reference implementation:
-      https://github.com/hsluv/hsluv-python
-  - Vendors only the conversion path needed for HSLuv → RGB/hex.
-  - Adds `qualitative_hsluv_palette()` for high-separation categorical colors.
-  - Palette construction is inspired by seaborn's `husl_palette`, but this
-    fork does not vendor seaborn code or add a seaborn dependency.
-
-_symmetry.py  (NEW — not in upstream opt_einsum)
-──────────────────────────────────────────────────
-  Entirely new module. Provides symmetry types and operations for the
-  path optimizer. Self-contained — no flopscope imports.
-
-  IndexSymmetry = list[frozenset[str]]
-    Type alias. Each frozenset names indices that are symmetric under
-    permutation. Uses character labels (stable across contractions)
-    rather than positional integers.
-    Example: [frozenset("ijk")] means S₃ symmetry on indices i, j, k.
-
-  propagate_symmetry(sym1, k1, sym2, k2, k12) → IndexSymmetry | None
-    Conservative propagation rule for pairwise contractions:
-    1. For each symmetric group in sym1 and sym2, intersect with k12
-       (the surviving indices).
-    2. Drop groups with fewer than 2 surviving members.
-    3. Merge surviving groups from both inputs.
-    No cross-tensor symmetry is inferred.
-    Example: ijk (S₃) contracted with ai → ajk (S₂ on j,k).
-
-  unique_elements(indices, size_dict, symmetry) → int
-    Number of unique elements under symmetry. For each symmetric group
-    of k indices each of size n: C(n+k-1, k) (stars and bars).
-    Free indices contribute their full size. Product across all groups.
-    Example: S₂ on (i,j) with n=10 → C(11,2) = 55 unique elements.
-
-  compute_unique_size(indices, size_dict, symmetry) → int
-    Alias for unique_elements.
-
-  symmetry_factor(symmetry) → int
-    Product of factorial(len(group)) for each group.
-    This is the order of the permutation group.
-    Example: S₃ → 3! = 6, S₂×S₂ → 2!×2! = 4.
-
-  symmetric_flop_count(idx_contraction, inner, num_terms, size_dict,
-                       input_symmetries=None, output_symmetry=None,
-                       output_indices=None) → int
-    Symmetry-aware FLOP estimate:
-    1. Start with dense cost: flop_count(idx_contraction, inner, num_terms, size_dict)
-    2. For each input symmetry group overlapping the contraction indices,
-       scale by C(n+k-1,k) / n^k (fraction of unique multi-indices).
-    3. Divide by symmetry_factor(output_symmetry).
-    4. Return max(cost, 1).
-    When no symmetry is provided, returns the same value as flop_count().
-
-    FIX (output_indices parameter): The original implementation over-reduced
-    for summed indices. The new `output_indices` parameter tells the function
-    which indices survive into the output. The symmetry ratio is now applied
-    only to surviving (non-summed) subgroups of each symmetric group. For
-    example, given S_3 on {i,j,k} where i is summed out, only the S_2
-    subgroup on {j,k} contributes a symmetry reduction.
 
 __init__.py
 ──────────────────────────────────────────────────
-  Public API surface for the subpackage. Exports:
-    - contract_path  (from _contract)
-    - PathInfo       (from _contract)
-    - StepInfo       (from _contract)
-    - BranchBound    (from _paths)
-    - DynamicProgramming (from _paths)
-  Registers random path functions on import:
-    - "random-greedy"     → _path_random.random_greedy
-    - "random-greedy-128" → _path_random.random_greedy_128
+  Re-exports `contract_path` (wrapped to return flopscope's PathInfo),
+  `parse_einsum_input` (from upstream), `PathInfo`, `StepInfo`, `flop_count`,
+  `build_path_info`.
+
+_contract.py
+──────────────────────────────────────────────────
+  Contains:
+    - StepInfo, PathInfo dataclasses (flopscope's expected shape)
+    - build_path_info() — adapter from upstream's PathInfo to flopscope's
+    - Rich-render display methods for terminal output
+
+_helpers.py
+──────────────────────────────────────────────────
+  flop_count() — computes per-step FLOP cost using flopscope's FMA convention.
+  Default FMA = 1; configurable via flopscope.configure(fma_cost=2).
+
+_hsluv.py
+──────────────────────────────────────────────────
+  HSLuv color palette helpers used by the rich-render display.
+  Adapted from the MIT-licensed hsluv-python reference implementation:
+    https://github.com/hsluv/hsluv-python
 
 
 ================================================================================
-WHAT WAS REMOVED FROM UPSTREAM
+HISTORY
 ================================================================================
 
-The following upstream modules were NOT vendored:
+Originally vendored as a full fork (2026-04-03) to support symmetry-aware
+path search via SubgraphSymmetryOracle. After the symmetry-aware einsum cost
+rewrite (2026-05-07) made path search symmetry-agnostic, the fork's
+customizations collapsed to:
+  - FMA=1 cost convention
+  - Custom PathInfo/StepInfo shape with rich-render display
 
-  opt_einsum/backends/     — Backend dispatch (numpy, jax, torch, tf, cupy, theano)
-  opt_einsum/sharing.py    — Thread-local intermediate caching
-  opt_einsum/_version.py   — Version string
+This adapter package was created (2026-05-07) by deleting the bulk of the
+fork (~3000 lines: _paths.py, _path_random.py, _blas.py, _parser.py,
+_testing.py, _typing.py) and adding opt_einsum as a runtime dependency.
 
-The following were removed from contract.py (see above):
-
-  contract()               — Execution function
-  _core_contract()         — Pairwise execution loop
-  ContractExpression       — Cached compiled expression
-  Backend dispatch helpers — _einsum, _tensordot, _transpose
-
-Rationale: This fork is path-finding only. Execution happens in the host
-project (flopscope._einsum), which delegates to numpy.einsum for each
-pairwise step along the optimized path.
-
-
-================================================================================
-HOW SYMMETRY FLOWS THROUGH THE SYSTEM
-================================================================================
-
-The host project (flopscope) converts its symmetry metadata (positional
-integer dims like [(0,1,2)]) to IndexSymmetry (character labels like
-[frozenset("ijk")]) at the boundary, then passes them to contract_path().
-
-Symmetry drives both the contraction ORDER (via the path algorithms) and the
-cost reporting (via contract_path). This is the key distinction: symmetry does
-not merely give cheaper cost numbers for a fixed path — it changes which path
-the optimizer selects. A contraction that looks sub-optimal under dense cost
-estimates may become the best choice once symmetry savings are accounted for.
-
-Each path algorithm (optimal, branch-and-bound, greedy, random-greedy)
-maintains a symmetry_map (tensor index -> IndexSymmetry) that is updated
-after every contraction so downstream steps see the propagated symmetry.
-DynamicProgramming accepts input_symmetries but does not use them for
-path ordering (see _paths.py notes above); cost reporting is still
-symmetry-aware via contract_path().
-
-Inside each path algorithm, for each candidate contraction:
-
-  1. Look up IndexSymmetry for both operands from symmetry_map.
-  2. Call calc_k12_flops() which uses symmetric_flop_count() (with the
-     output_indices fix for correct summed-vs-surviving index handling)
-     + propagate_symmetry().
-  3. The resulting symmetric cost drives greedy/branch/DP selection —
-     cheaper symmetric contractions are preferred over denser ones.
-     This means the contraction ORDER changes with symmetry.
-  4. The propagated result symmetry is stored back into symmetry_map,
-     influencing all future ordering decisions in the same search.
-
-Inside contract_path(), for final cost reporting per step:
-
-  1. Gather the IndexSymmetry of the tensors being contracted.
-  2. Call propagate_symmetry() to compute the result's symmetry.
-     Conservative rule: restrict each group to surviving indices.
-  3. Call symmetric_flop_count() (with output_indices) for the
-     symmetry-aware cost. Summed indices do not receive symmetry
-     reduction; only surviving subgroups contribute.
-  4. Store the result symmetry for downstream steps.
-
-Example chain for `ijk,ai,bj,ck->abc` with T[ijk] having S₃:
-
-  Step 1: ijk(S₃) + ai(none) → ajk(S₂ on j,k)    ~83% savings
-  Step 2: ajk(S₂) + bj(none) → abk(none)          ~50% savings
-  Step 3: abk(none) + ck(none) → abc(none)          0% savings
+LICENSE (MIT) is preserved here per opt_einsum's licensing terms.

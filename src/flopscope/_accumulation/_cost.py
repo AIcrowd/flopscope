@@ -1,0 +1,1414 @@
+"""AccumulationCost orchestrator + per-component cost wrapping.
+
+Aggregates the ladder primitive (compute_accumulation) into
+einsum-shaped cost reports. Future reduction code reuses run_ladder_per_component
+and adds its own aggregator (aggregate_reduction) that uses different cost arithmetic.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from dataclasses import replace as _dc_replace
+
+from ._burnside import size_aware_burnside
+from ._components import Component
+from ._ladder import (
+    AccumulationResult,
+    RegimeId,
+    RegimeStep,
+    Shape,
+    compute_accumulation,
+)
+from ._output_orbit import restrict_stabilizer_to_positions
+
+
+def _build_symmetric_proxy(shape, sym):
+    """Build a proxy operand for reduction_accumulation_cost.
+
+    reduction_accumulation_cost only inspects shape + symmetry on its input;
+    a numpy.empty(shape) wrapped in a SymmetricTensor (if sym is non-None) is
+    sufficient and avoids materializing actual values.  We bypass validation
+    (as_symmetric would raise for uninitialized data) since we only need the
+    symmetry metadata, not correct tensor values.  Used by per-step
+    pre-reduction detection to compute Tier-1 reduction cost without owning
+    the operand data itself.
+    """
+    import numpy as np
+
+    arr = np.empty(shape)
+    if sym is None:
+        return arr
+    from flopscope._symmetric import SymmetricTensor
+
+    return SymmetricTensor(arr, symmetry=sym)
+
+
+def compute_step_cost_from_joint_group(
+    joint_group: object,
+    v_labels: tuple[str, ...],
+    w_labels: tuple[str, ...],
+    sizes: dict[str, int],
+    num_terms: int,
+    dimino_budget: int,
+) -> int | None:
+    """Per-step cost via Burnside on the merged-subset's joint group.
+
+    Sprint 2 / Cat C: complements the per-input fingerprint cost by handling
+    cross-step identity-swap cases (e.g. §5(a) step 2 = 160 → 55) that
+    per-input cannot see because intermediates lose their "from the same
+    original operand" identity.
+
+    Cost formula (Regime 1 / functionalProjection):
+        M = |orbits of joint_group on (V ∪ W)-tuples|
+        O = |orbits of joint_group's V-projection on V-tuples|
+        total = (num_terms − 1) · M + M − O   (for k = 2: 2M − O)
+
+    Returns:
+        The computed total cost, or None when:
+          - joint_group is None / has no generators (trivial),
+          - V is not preserved setwise by joint_group (Regime 2 — caller
+            must fall back to per-input path),
+          - dimino enumeration exceeds dimino_budget,
+          - joint_group's _labels does not cover (v_labels + w_labels).
+    """
+    from flopscope._config import get_setting, set_setting
+    from flopscope._perm_group import _dimino
+    from flopscope._perm_group import _PermutationCompat as _Perm
+
+    if joint_group is None:
+        return None
+    if not getattr(joint_group, "generators", None):
+        return None
+
+    joint_labels = getattr(joint_group, "_labels", None)
+    if joint_labels is None:
+        return None
+
+    canonical_labels = tuple(v_labels) + tuple(w_labels)
+    if set(joint_labels) != set(canonical_labels):
+        return None
+
+    n_v = len(v_labels)
+    n_total = len(canonical_labels)
+    canonical_idx = {lbl: i for i, lbl in enumerate(canonical_labels)}
+    joint_idx = {lbl: i for i, lbl in enumerate(joint_labels)}
+
+    canonical_gens: list[_Perm] = []
+    for gen in joint_group.generators:  # type: ignore[union-attr]
+        arr = gen.array_form
+        canonical_perm = [0] * n_total
+        for lbl in canonical_labels:
+            src_jpos = joint_idx[lbl]
+            dst_jlbl = joint_labels[arr[src_jpos]]
+            canonical_perm[canonical_idx[lbl]] = canonical_idx[dst_jlbl]
+        for vpos in range(n_v):
+            if canonical_perm[vpos] >= n_v:
+                return None
+        canonical_gens.append(_Perm(canonical_perm))
+
+    if not canonical_gens:
+        return None
+
+    # Temporarily override dimino_budget to honour the caller's request.
+    prev_budget = int(get_setting("dimino_budget"))  # type: ignore[arg-type]
+    try:
+        set_setting("dimino_budget", dimino_budget)
+        all_elems = _dimino(tuple(canonical_gens))
+    except Exception:
+        return None
+    finally:
+        set_setting("dimino_budget", prev_budget)
+
+    combined_sizes = tuple(sizes[lbl] for lbl in canonical_labels)
+    M = size_aware_burnside(all_elems, combined_sizes)
+
+    v_elems = [_Perm(list(elem.array_form[:n_v])) for elem in all_elems]
+    v_sizes = combined_sizes[:n_v]
+    num_v_orbits = size_aware_burnside(v_elems, v_sizes)
+
+    return (num_terms - 1) * M + M - num_v_orbits
+
+
+@dataclass(frozen=True)
+class ComponentCost:
+    """Per-component cost. alpha is None when this component's regime returned
+    unavailable (partition budget exceeded with brute-force disabled by policy)."""
+
+    labels: tuple[str, ...]
+    va: tuple[str, ...]
+    wa: tuple[str, ...]
+    sizes: tuple[int, ...]
+
+    m: int
+    alpha: int | None
+    dense_count: int
+    num_output_orbits: int
+
+    regime_id: RegimeId
+    shape: Shape
+
+    group_name: str
+    group_order: int
+
+    regime_trace: tuple[RegimeStep, ...]
+    unavailable_reason: str | None = None
+
+    def describe(self) -> dict[str, str]:
+        """LaTeX strings built on demand (Task 23 fills in the body)."""
+        from ._cost_descriptions import describe_component
+
+        return describe_component(self)
+
+
+def run_ladder_per_component(
+    components: Sequence[Component],
+    *,
+    partition_budget: int,
+) -> tuple[ComponentCost, ...]:
+    """For each Component, run the ladder + Burnside, return ComponentCosts.
+
+    Pure transformation, no aggregation policy. Reused by both einsum and (future)
+    reduction code paths.
+    """
+    out: list[ComponentCost] = []
+    for c in components:
+        result: AccumulationResult = compute_accumulation(
+            labels=c.labels,
+            va=c.va,
+            wa=c.wa,
+            elements=c.elements,
+            generators=c.generators,
+            sizes=c.sizes,
+            visible_positions=c.visible_positions,
+            partition_budget=partition_budget,
+        )
+        # M is always computable via Burnside, even when α is unavailable.
+        if c.elements and len(c.elements) > 0:
+            m = size_aware_burnside(c.elements, c.sizes)
+        else:
+            m = math.prod(c.sizes) if c.sizes else 1
+        dense_count = math.prod(c.sizes) if c.sizes else 1
+
+        # num_output_orbits: orbits of the visible-label tuples under the
+        # output stabilizer (the subgroup of G that preserves V setwise,
+        # restricted to V). Used by aggregate_einsum to apply the same
+        # "first cell of each orbit is a free copy" off-by-one correction
+        # that reduction_accumulation_cost already applies.
+        v_sizes = tuple(c.sizes[p] for p in c.visible_positions)
+        if not v_sizes:
+            num_output_orbits = 1
+        elif c.elements and len(c.elements) > 0:
+            h_elements = restrict_stabilizer_to_positions(
+                c.elements, c.visible_positions
+            )
+            num_output_orbits = size_aware_burnside(h_elements, v_sizes)
+        else:
+            num_output_orbits = math.prod(v_sizes)
+
+        unavailable_reason: str | None = None
+        if result.regime_id == "unavailable":
+            # The "unavailable" trace step's reason is the ladder's last word.
+            unavailable_step = next(
+                (s for s in result.trace if s.regime_id == "unavailable"),
+                None,
+            )
+            if unavailable_step is not None:
+                unavailable_reason = unavailable_step.reason
+
+        out.append(
+            ComponentCost(
+                labels=c.labels,
+                va=c.va,
+                wa=c.wa,
+                sizes=c.sizes,
+                m=m,
+                alpha=result.count,
+                dense_count=dense_count,
+                num_output_orbits=num_output_orbits,
+                regime_id=result.regime_id,
+                shape=result.shape,
+                group_name=c.group_name,
+                group_order=c.order,
+                regime_trace=result.trace,
+                unavailable_reason=unavailable_reason,
+            )
+        )
+    return tuple(out)
+
+
+# ── AccumulationCost + aggregate_einsum ──────────────────────────────
+
+
+import warnings
+
+from flopscope._opt_einsum._contract import PreReduction
+from flopscope.errors import CostFallbackWarning
+
+
+@dataclass(frozen=True)
+class AccumulationCost:
+    """Whole-einsum cost. When any component is unavailable, total falls back to
+    the dense baseline (k · dense_baseline) and a CostFallbackWarning fires."""
+
+    total: int
+    mu: int | None
+    alpha: int | None
+    m_total: int
+    dense_baseline: int
+    num_terms: int
+
+    per_component: tuple[ComponentCost, ...]
+
+    fallback_used: bool
+    unavailable_components: tuple[int, ...] = ()
+    unavailable_reason: str | None = None
+
+    # NEW: path-aware decomposition. Empty for k<=2 (no path walked).
+    per_step: tuple[AccumulationCost, ...] = ()
+    path: tuple[tuple[int, ...], ...] | None = None
+
+    # Sprint 3 (#55): per-step pre-reductions, one tuple per step (empty when no isolation).
+    pre_reductions_per_step: tuple[tuple[PreReduction, ...], ...] = ()
+
+    # Sprint 4: which cost category produced this step's total ("per-input",
+    # "joint-burnside", or "output-burnside"). None for aggregate (multi-step)
+    # AccumulationCost objects and pre-Sprint-4 stale instances.
+    cost_source: str | None = None
+
+    def describe(self) -> dict:
+        """Human-readable + LaTeX summary, built on demand."""
+        from ._cost_descriptions import describe_total
+
+        return describe_total(self)
+
+    @property
+    def savings_ratio(self) -> float:
+        """total / (k · dense_baseline). 1.0 means no savings; lower is better."""
+        denom = self.num_terms * self.dense_baseline
+        return self.total / denom if denom > 0 else 1.0
+
+
+def aggregate_einsum(
+    component_costs: Sequence[ComponentCost],
+    *,
+    num_terms: int,
+    dense_baseline: int,
+) -> AccumulationCost:
+    """Aggregate per-component costs into the einsum cost:
+    ``total = (k-1)·∏M + ∏α − ∏num_output_orbits``.
+
+    The final ``−∏num_output_orbits`` term applies the same off-by-one
+    correction that ``reduction_accumulation_cost`` uses: the first cell of
+    each output orbit is a free copy, and only the remaining accumulations
+    cost. When there is no actual reduction (``∏α == ∏num_output_orbits``),
+    the α contribution collapses to zero, leaving only the ``(k-1)·∏M``
+    multiplication chain.
+
+    Fallback policy: if any component has alpha=None, total = k · dense_baseline
+    (the no-symmetry direct-event count) and a CostFallbackWarning fires.
+    """
+    failing = [i for i, c in enumerate(component_costs) if c.alpha is None]
+
+    m_total = 1
+    for c in component_costs:
+        m_total *= c.m
+
+    if not failing:
+        alpha_product = 1
+        output_orbit_product = 1
+        for c in component_costs:
+            assert c.alpha is not None  # for type narrowing
+            alpha_product *= c.alpha
+            output_orbit_product *= c.num_output_orbits
+        mu = (num_terms - 1) * m_total
+        total = mu + alpha_product - output_orbit_product
+        return AccumulationCost(
+            total=total,
+            mu=mu,
+            alpha=alpha_product,
+            m_total=m_total,
+            dense_baseline=dense_baseline,
+            num_terms=num_terms,
+            per_component=tuple(component_costs),
+            fallback_used=False,
+        )
+
+    # Fallback: charge dense.
+    fallback_total = num_terms * dense_baseline
+    first_failing = component_costs[failing[0]]
+    reason = first_failing.unavailable_reason or "partition_budget exceeded"
+    failing_labels = ", ".join(first_failing.labels)
+    warnings.warn(
+        CostFallbackWarning(
+            f"einsum: component {list(failing)} ({failing_labels}) returned "
+            f"unavailable — charging dense cost {fallback_total} = "
+            f"{num_terms} × {dense_baseline}. Failing reason: {reason}. "
+            f"Raise via flopscope.configure(partition_budget=...) to attempt "
+            f"exact counting."
+        ),
+        stacklevel=4,
+    )
+    return AccumulationCost(
+        total=fallback_total,
+        mu=None,
+        alpha=None,
+        m_total=m_total,
+        dense_baseline=dense_baseline,
+        num_terms=num_terms,
+        per_component=tuple(component_costs),
+        fallback_used=True,
+        unavailable_components=tuple(failing),
+        unavailable_reason=reason,
+    )
+
+
+# ── End-to-end orchestrator ──────────────────────────────────────────
+
+
+from collections.abc import Sequence as _Seq
+from typing import Any as _Any
+from typing import cast as _cast
+
+from ._bipartite import build_bipartite, build_incidence_matrix
+from ._components import decompose_into_components
+from ._detection import build_full_group, run_sigma_loop
+from ._wreath import enumerate_wreath
+
+
+def _build_size_map(
+    input_parts: _Seq[str],
+    shapes: _Seq[_Seq[int]],
+) -> dict[str, int]:
+    """Build label → size from operand shapes. Validates that each label
+    appears with consistent sizes across operands."""
+    size_map: dict[str, int] = {}
+    for part, shape in zip(input_parts, shapes, strict=True):
+        for label, dim in zip(part, shape, strict=True):
+            existing = size_map.get(label)
+            if existing is not None and existing != dim:
+                raise ValueError(
+                    f"label '{label}' has inconsistent sizes {existing} and {dim} "
+                    f"across operands"
+                )
+            size_map[label] = dim
+    return size_map
+
+
+def _operand_names_from_identity_pattern(
+    num_ops: int,
+    identity_pattern: tuple[tuple[int, ...], ...] | None,
+) -> tuple[str, ...]:
+    """Generate operand names that respect the identity pattern.
+    Operands sharing the same id (per identity_pattern) get the same name."""
+    if identity_pattern is None:
+        return tuple(f"op_{i}" for i in range(num_ops))
+    name_of: dict[int, str] = {}
+    for group in identity_pattern:
+        shared_name = f"op_grp_{group[0]}"
+        for pos in group:
+            name_of[pos] = shared_name
+    return tuple(name_of.get(i, f"op_{i}") for i in range(num_ops))
+
+
+def _per_op_symmetry_for_wreath(sym: _Any) -> _Any:
+    """Pass declared symmetry through to enumerate_h. SymmetryGroup objects
+    pass through unchanged; strings (like 'symmetric') also pass through."""
+    return sym
+
+
+def _walk_path_and_aggregate(
+    *,
+    canonical_subscripts: str,
+    input_parts: _Seq[str],
+    output_subscript: str,
+    shapes: _Seq[_Seq[int]],
+    per_op_symmetries: _Seq[_Any],
+    identity_pattern: tuple[tuple[int, ...], ...] | None,
+    partition_budget: int,
+    dense_baseline: int,
+    full_expression_component_costs: tuple[ComponentCost, ...] | None = None,
+) -> AccumulationCost:
+    """Walk opt_einsum's binary contraction path and sum per-step costs.
+
+    Decomposes a k>=3 einsum into binary contractions via opt_einsum.contract_path.
+    Each binary step calls compute_accumulation_cost recursively (k=2 path),
+    treating intermediate tensors as dense (no symmetry carried forward).
+
+    ``full_expression_component_costs``: the ComponentCost tuple from the caller's
+    wreath/sigma computation of the FULL k-ary expression. Stored verbatim in
+    per_component so that JS-parity tests (which inspect per_component directly)
+    remain unaffected by the path decomposition.
+
+    Returns an AccumulationCost with per_step and path populated.
+    """
+    import opt_einsum as _oe
+
+    from flopscope._opt_einsum._contract import build_path_info
+
+    num_ops = len(input_parts)
+
+    # Build shape-only operands for opt_einsum (it only needs shape info).
+    # We use shapes=True to avoid materializing tensors.
+    import numpy as _np
+
+    dummy_operands = [_np.empty(shape) for shape in shapes]
+    upstream_path, upstream_info = _oe.contract_path(
+        canonical_subscripts,
+        *dummy_operands,
+        optimize="auto",
+    )
+
+    path_info = build_path_info(
+        upstream_path,
+        upstream_info,
+        size_dict=upstream_info.size_dict,
+    )
+
+    # Build SubgraphSymmetryOracle for the full expression so per-step
+    # binary contractions inherit their symmetry from the declared groups
+    # rather than treating every intermediate as dense.
+    from flopscope._opt_einsum._subgraph_symmetry import SubgraphSymmetryOracle
+
+    def _group_to_oracle_list(sym: _Any, subscript: str) -> list | None:
+        """Convert a per_op_symmetry entry to the oracle's per_op_groups format.
+
+        The oracle's Source A generator loop requires ``group._labels`` to be
+        set (the subscript chars the group acts on, in axis order).  When the
+        declared SymmetryGroup has ``axes`` but ``_labels is None``, we derive
+        _labels from the operand subscript and the group's axes mapping.
+        """
+        from flopscope._perm_group import SymmetryGroup as _SG
+
+        if sym is None:
+            return None
+        if not isinstance(sym, _SG):
+            # String symmetries (e.g. 'symmetric') are not SymmetryGroup objects;
+            # skip them here — the oracle only consumes SymmetryGroup generators.
+            return None
+        # Ensure _labels is set so the oracle's Source A generator loop can
+        # map group-axis positions to subscript characters.
+        if sym._labels is None and sym.axes is not None:
+            # axes[g_pos] = tensor axis index; subscript[axis_idx] = char.
+            try:
+                derived_labels = tuple(subscript[ax] for ax in sym.axes)
+            except IndexError:
+                derived_labels = None
+            if derived_labels is not None:
+                # Build a new group with _labels set (avoid mutating the original).
+                import copy as _copy
+
+                labeled_group = _copy.copy(sym)
+                labeled_group._labels = derived_labels
+                return [labeled_group]
+        return [sym]
+
+    # Build oracle operands that mirror the original identity pattern:
+    # identical operands (same Python id in the original call) must share
+    # the same Python object here so the oracle's Source B generator (identical-
+    # operand swaps) fires correctly for subset queries.
+    oracle_operands = list(dummy_operands)  # start with distinct fresh objects
+    if identity_pattern:
+        for group in identity_pattern:
+            # All positions in `group` referred to the same object originally.
+            # Reuse the dummy for the first position for all positions in the group.
+            canonical_obj = oracle_operands[group[0]]
+            for pos in group[1:]:
+                oracle_operands[pos] = canonical_obj
+
+    oracle = SubgraphSymmetryOracle(
+        operands=oracle_operands,
+        subscript_parts=list(input_parts),
+        per_op_groups=[
+            _group_to_oracle_list(s, sub)
+            for s, sub in zip(per_op_symmetries, input_parts, strict=False)
+        ],
+        output_chars=output_subscript,
+    )
+
+    def _subset_sym_fingerprint(subset: frozenset[int], step_subscript: str) -> tuple:
+        """Return an accumulation-cache fingerprint for a step-input subset.
+
+        Queries the oracle for the V-side (output) group of the subset of
+        original operands, then serialises it in the (axes, gens) format
+        expected by get_accumulation_cost_cached's sym_fingerprint.
+        Returns None (dense) when the oracle finds no symmetry.
+
+        Oracle groups encode generators in label-sorted space (_labels gives the
+        sorted char tuple and each generator acts on positions of that tuple).
+        The cache reconstructs a group with _labels derived from the step
+        subscript in axis order, so the generator would be misinterpreted unless
+        we convert it to tensor-axis space first.
+        """
+        from flopscope._perm_group import SymmetryGroup as _SG
+        from flopscope._perm_group import _PermutationCompat as _Perm
+
+        ss = oracle.sym(subset)
+        grp = ss.output  # V-side (free-label) group for this subset
+        if grp is None or not isinstance(grp, _SG):
+            return None  # type: ignore[return-value]
+        if not grp.generators:
+            return None  # type: ignore[return-value]
+
+        # Convert oracle's label-sorted generators to tensor-axis-space so that
+        # when the cache reconstructs the group (with _labels derived from the
+        # step subscript in axis order), the generator is correctly interpreted.
+        if grp._labels is not None:
+            labels = grp._labels  # sorted char tuple
+            char_to_axis = {c: i for i, c in enumerate(step_subscript)}
+            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+            new_gens = []
+            for gen in grp.generators:
+                arr = list(gen.array_form)
+                axis_gen = list(range(len(step_subscript)))
+                for ax, char in enumerate(step_subscript):
+                    if char in label_to_lpos:
+                        lpos = label_to_lpos[char]
+                        target_char = labels[arr[lpos]]
+                        if target_char in char_to_axis:
+                            axis_gen[ax] = char_to_axis[target_char]
+                new_gens.append(_Perm(axis_gen))
+            axes = tuple(range(len(step_subscript)))
+            gens = tuple(tuple(g.array_form) for g in new_gens)
+        else:
+            axes = grp.axes if grp.axes is not None else tuple(range(grp.degree))
+            gens = tuple(tuple(g.array_form) for g in grp.generators)
+
+        if not gens:
+            return None  # type: ignore[return-value]
+        return (axes, gens)
+
+    # SSA-to-subset: tracks which original operand positions each current
+    # operand covers. Starts as singletons; merged as the path progresses.
+    # We walk path_info.path in parallel with path_info.steps.
+    current_subsets: list[frozenset[int]] = [frozenset({i}) for i in range(num_ops)]
+
+    from ._cache import get_accumulation_cost_cached
+
+    per_step_costs: list[AccumulationCost] = []
+    pre_reductions_per_step: list[tuple[PreReduction, ...]] = []
+    for step_idx, step in enumerate(path_info.steps):
+        step_subscript = step.subscript
+        if "->" in step_subscript:
+            step_lhs, step_output = step_subscript.split("->", 1)
+        else:
+            step_lhs, step_output = step_subscript, ""
+        step_input_parts = step_lhs.split(",")
+        step_shapes = step.input_shapes
+
+        # Derive which original operands each step input covers.
+        # path_info.path[step_idx] gives the current-list positions to contract.
+        raw_path_entry = path_info.path[step_idx]
+        # Sort descending so that popping by index doesn't shift earlier indices.
+        contract_positions = tuple(sorted(raw_path_entry, reverse=True))
+
+        # Gather the input subsets matching the opt_einsum operand order in the
+        # step subscript. opt_einsum pops positions from highest to lowest (to
+        # avoid index shifting), so the subscript's left-to-right operand order
+        # corresponds to descending position order in the path entry.
+        # E.g. path entry (0,1) with subscript "jk,ij->..." means position 1
+        # (higher) contributes "jk" first and position 0 contributes "ij" second.
+        step_input_subsets = [
+            current_subsets[pos]
+            for pos in sorted(
+                raw_path_entry, reverse=True
+            )  # descending = subscript order
+        ]
+
+        # ── Sprint 3 (#55): per-binary-step pre-reduction of isolated summed labels ──
+        # When a label is summed in this step AND appears in only one input, pre-reduce
+        # that operand along the isolated axis BEFORE the main contraction.  Mirrors
+        # PyTorch's sumproduct_pair.
+        from flopscope._accumulation._public import (
+            _per_op_sym_fingerprint,
+            reduction_accumulation_cost,
+        )
+        from flopscope._symmetry_utils import reduce_group
+
+        # Per-input symmetries for this step (pre-reduction).
+        # For single-original-operand inputs (no upstream contraction), the input's
+        # symmetry is per_op_symmetries[only_original].  Multi-original inputs
+        # (intermediates) have no declared per-input symmetry.
+        def _input_sym(subset):
+            if len(subset) == 1:
+                only = next(iter(subset))
+                return per_op_symmetries[only]
+            return None
+
+        left_sym_pre = _input_sym(step_input_subsets[0])
+        right_sym_pre = (
+            _input_sym(step_input_subsets[1]) if len(step_input_subsets) > 1 else None
+        )
+
+        # Detect isolated summed labels.
+        summed_set = set("".join(step_input_parts)) - set(step_output)
+        left_labels_set = (
+            set(step_input_parts[0]) if len(step_input_parts) > 0 else set()
+        )
+        right_labels_set = (
+            set(step_input_parts[1]) if len(step_input_parts) > 1 else set()
+        )
+        left_only_summed = (left_labels_set & summed_set) - right_labels_set
+        right_only_summed = (right_labels_set & summed_set) - left_labels_set
+
+        pre_reductions_for_step: list[PreReduction] = []
+        pre_reduce_cost_total = 0
+
+        # Defaults: no rewrite.
+        effective_left_part = step_input_parts[0]
+        effective_right_part = step_input_parts[1] if len(step_input_parts) > 1 else ""
+        effective_left_shape = step_shapes[0]
+        effective_right_shape = step_shapes[1] if len(step_shapes) > 1 else ()
+        effective_left_sym = left_sym_pre
+        effective_right_sym = right_sym_pre
+
+        # Pre-reduce left operand
+        if left_only_summed and len(step_input_parts) > 0:
+            reduce_axes = tuple(
+                i for i, c in enumerate(step_input_parts[0]) if c in left_only_summed
+            )
+            left_proxy = _build_symmetric_proxy(step_shapes[0], left_sym_pre)
+            reduce_cost = reduction_accumulation_cost(
+                left_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in step_input_parts[0] if c not in left_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(step_shapes[0]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                left_sym_pre,
+                ndim=len(step_input_parts[0]),
+                axis=reduce_axes,
+            )
+
+            effective_left_part = surviving_subscript
+            effective_left_shape = surviving_shape
+            effective_left_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=0,
+                    removed_labels=tuple(sorted(left_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Pre-reduce right operand
+        if right_only_summed and len(step_input_parts) > 1:
+            reduce_axes = tuple(
+                i for i, c in enumerate(step_input_parts[1]) if c in right_only_summed
+            )
+            right_proxy = _build_symmetric_proxy(step_shapes[1], right_sym_pre)
+            reduce_cost = reduction_accumulation_cost(
+                right_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in step_input_parts[1] if c not in right_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(step_shapes[1]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                right_sym_pre,
+                ndim=len(step_input_parts[1]),
+                axis=reduce_axes,
+            )
+
+            effective_right_part = surviving_subscript
+            effective_right_shape = surviving_shape
+            effective_right_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=1,
+                    removed_labels=tuple(sorted(right_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Override step_input_parts / step_shapes to the EFFECTIVE versions so the
+        # downstream existing code (per-input fingerprint + cache lookup + Cat C
+        # joint-Burnside + V-only fallback) sees the rewritten step.
+        if pre_reductions_for_step:
+            if len(step_input_parts) >= 2:
+                step_input_parts = [effective_left_part, effective_right_part]
+                step_shapes = [effective_left_shape, effective_right_shape]
+            else:
+                step_input_parts = [effective_left_part]
+                step_shapes = [effective_left_shape]
+
+        # Build per-step sym_fingerprint by querying the oracle per input subset.
+        # Pass the step subscript so generators can be converted from oracle
+        # label-sorted space to tensor-axis space matching the step subscript.
+        # Override per-input fingerprints when pre-reduction occurred, since the
+        # effective symmetry differs from what _subset_sym_fingerprint would compute
+        # by querying the oracle on the (unreduced) subset.
+        step_sym_fp_list = []
+        for idx, (subset, sub_part) in enumerate(
+            zip(step_input_subsets, step_input_parts, strict=False)
+        ):
+            if idx == 0 and left_only_summed:
+                step_sym_fp_list.append(
+                    _per_op_sym_fingerprint(effective_left_sym)
+                    if effective_left_sym is not None
+                    else None
+                )
+            elif idx == 1 and right_only_summed:
+                step_sym_fp_list.append(
+                    _per_op_sym_fingerprint(effective_right_sym)
+                    if effective_right_sym is not None
+                    else None
+                )
+            else:
+                step_sym_fp_list.append(_subset_sym_fingerprint(subset, sub_part))
+        step_sym_fp: tuple = tuple(step_sym_fp_list)
+
+        # Derive the step's identity_pattern from the original expression's
+        # identity_pattern. A step identity exists only when BOTH inputs are:
+        # (a) singleton subsets (original operands, not intermediates), AND
+        # (b) in the same identity group in the original expression.
+        # The wreath/sigma framework correctly handles identical operands even
+        # when they appear with different subscripts in the step — the
+        # swap generator combined with per-operand declared symmetry produces
+        # the correct joint group.
+        step_identity_pattern: tuple[tuple[int, ...], ...] | None = None
+        if identity_pattern:
+            # Map each singleton original position to its local step index.
+            orig_to_local: dict[int, int] = {}
+            for local_idx_inner, subset in enumerate(step_input_subsets):
+                if len(subset) == 1:
+                    orig_to_local[next(iter(subset))] = local_idx_inner
+            # For each original identity group, restrict to this step's singletons.
+            local_groups = []
+            for orig_group in identity_pattern:
+                step_members = tuple(
+                    orig_to_local[op] for op in orig_group if op in orig_to_local
+                )
+                if len(step_members) >= 2:
+                    local_groups.append(step_members)
+            if local_groups:
+                step_identity_pattern = tuple(local_groups)
+
+        step_canonical = ",".join(step_input_parts) + "->" + step_output
+
+        # Route per-step binary calls through the shared LRU cache so that
+        # identical sub-steps across different top-level expressions hit once.
+        step_cost = get_accumulation_cost_cached(
+            canonical_subscripts=step_canonical,
+            input_parts=tuple(step_input_parts),
+            output_subscript=step_output,
+            shapes=tuple(tuple(s) for s in step_shapes),
+            sym_fingerprint=step_sym_fp,
+            identity_pattern=step_identity_pattern,
+            partition_budget=partition_budget,
+        )
+
+        # Sprint 4: candidate-list cost selection.
+        # Compute all valid Burnside-based candidates and pick the min.
+        #
+        # - Cat A (per-input wreath/sigma): always valid, baseline (step_cost).
+        # - Cat B (output-orbit Burnside): valid when merged_output_group is
+        #   non-trivial; formula ``O_out · (2·W − 1)``. Previously gated to
+        #   fire only when Cat A found no savings; now competes unconditionally.
+        # - Cat C (joint-Burnside on V ∪ W): valid in Regime 1 with V preserved
+        #   setwise; via compute_step_cost_from_joint_group().
+        #
+        # The winning category is threaded into AccumulationCost.cost_source.
+        candidates: list[tuple[AccumulationCost, str]] = [(step_cost, "per-input")]
+
+        if oracle is not None:
+            merged_subset_local = frozenset().union(*step_input_subsets)
+            ss_merged = oracle.sym(merged_subset_local)
+
+            # Step-local size dict (used by both Cat B and Cat C).
+            step_size_dict: dict[str, int] = {}
+            for sub, shape in zip(step_input_parts, step_shapes, strict=False):
+                for char, sz in zip(sub, shape, strict=False):
+                    step_size_dict[char] = sz
+
+            # --- Cat C candidate: joint group ---
+            joint_group = ss_merged.joint
+            # Sprint 3 (#55): project joint group to surviving labels when
+            # pre-reduction removed labels from this step's subscripts.
+            removed_labels_in_step = set(left_only_summed) | set(right_only_summed)
+            if joint_group is not None and removed_labels_in_step:
+                joint_labels = joint_group._labels
+                if joint_labels is not None:
+                    removed_positions = {
+                        i
+                        for i, lbl in enumerate(joint_labels)
+                        if lbl in removed_labels_in_step
+                    }
+                    if removed_positions:
+                        stabilized = joint_group.setwise_stabilizer(removed_positions)
+                        surviving_positions = tuple(
+                            i
+                            for i in range(len(joint_labels))
+                            if i not in removed_positions
+                        )
+                        joint_group = stabilized.restrict(surviving_positions)
+                        if joint_group is not None:
+                            # restrict() may drop _labels; restore them so the
+                            # downstream helper can match them to the step's
+                            # effective V/W labels.
+                            new_labels = tuple(
+                                joint_labels[i] for i in surviving_positions
+                            )
+                            if joint_group._labels is None:
+                                joint_group._labels = new_labels
+                            if joint_group.order() <= 1:
+                                joint_group = None
+            if joint_group is not None and joint_group.generators:
+                # V/W label tuples in canonical order (V first, then W).
+                v_labels_tup = tuple(step_output)
+                seen_w: set[str] = set()
+                w_labels_tup = tuple(
+                    c
+                    for sub in step_input_parts
+                    for c in sub
+                    if c not in v_labels_tup and not (c in seen_w or seen_w.add(c))
+                )
+                from flopscope._config import get_setting
+
+                joint_total = compute_step_cost_from_joint_group(
+                    joint_group=joint_group,
+                    v_labels=v_labels_tup,
+                    w_labels=w_labels_tup,
+                    sizes=step_size_dict,
+                    num_terms=len(step_input_parts),
+                    dimino_budget=int(get_setting("dimino_budget")),  # type: ignore[arg-type]
+                )
+                if joint_total is not None:
+                    joint_cost = AccumulationCost(
+                        total=joint_total,
+                        mu=step_cost.mu,
+                        alpha=step_cost.alpha,
+                        m_total=step_cost.m_total,
+                        dense_baseline=step_cost.dense_baseline,
+                        num_terms=step_cost.num_terms,
+                        per_component=step_cost.per_component,
+                        fallback_used=step_cost.fallback_used,
+                        unavailable_components=step_cost.unavailable_components,
+                        unavailable_reason=step_cost.unavailable_reason,
+                        per_step=step_cost.per_step,
+                        path=step_cost.path,
+                    )
+                    candidates.append((joint_cost, "joint-burnside"))
+
+            # --- Cat B candidate: output-orbit Burnside (UNCONDITIONAL) ---
+            # Previously fallback-only (fires only when Cat A == dense FMA);
+            # now competes with Cat A and Cat C in the candidate list.
+            step_all_chars = set("".join(step_input_parts))
+            step_dense_baseline_val = math.prod(
+                step_size_dict.get(c, 1) for c in step_all_chars
+            )
+            step_output_dense = math.prod(step_size_dict.get(c, 1) for c in step_output)
+            merged_output_grp = ss_merged.output if ss_merged else None
+            if merged_output_grp is not None and merged_output_grp.generators:
+                from flopscope._perm_group import _dimino
+                from flopscope._perm_group import _PermutationCompat as _Perm
+
+                labels = merged_output_grp._labels
+                if labels is not None:
+                    char_to_axis = {c: i for i, c in enumerate(step_output)}
+                    label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+                    axis_gens: list[_Perm] = []
+                    for gen in merged_output_grp.generators:
+                        arr = list(gen.array_form)
+                        axis_gen = list(range(len(step_output)))
+                        for ax, char in enumerate(step_output):
+                            if char in label_to_lpos:
+                                lpos = label_to_lpos[char]
+                                tgt = labels[arr[lpos]]
+                                if tgt in char_to_axis:
+                                    axis_gen[ax] = char_to_axis[tgt]
+                        axis_gens.append(_Perm(axis_gen))
+                else:
+                    axis_gens = list(merged_output_grp.generators)
+
+                try:
+                    all_elems = _dimino(tuple(axis_gens))
+                    output_sizes = tuple(step_size_dict.get(c, 1) for c in step_output)
+                    corrected_orbits = size_aware_burnside(all_elems, output_sizes)
+                    if 0 < corrected_orbits < step_output_dense:
+                        step_w_chars = step_all_chars - set(step_output)
+                        step_w_size = (
+                            math.prod(step_size_dict.get(c, 1) for c in step_w_chars)
+                            if step_w_chars
+                            else 1
+                        )
+                        corrected_total = corrected_orbits * (2 * step_w_size - 1)
+                        if corrected_total > 0:
+                            cat_b_cost = AccumulationCost(
+                                total=corrected_total,
+                                mu=step_w_size * corrected_orbits - corrected_orbits,
+                                alpha=step_w_size * corrected_orbits,
+                                m_total=step_w_size * corrected_orbits,
+                                dense_baseline=step_dense_baseline_val,
+                                num_terms=step_cost.num_terms,
+                                per_component=step_cost.per_component,
+                                fallback_used=step_cost.fallback_used,
+                                unavailable_components=step_cost.unavailable_components,
+                                unavailable_reason=step_cost.unavailable_reason,
+                                per_step=step_cost.per_step,
+                                path=step_cost.path,
+                            )
+                            candidates.append((cat_b_cost, "output-burnside"))
+                except Exception:
+                    pass  # dimino budget exceeded or other; skip Cat B
+
+        # Pick the tightest candidate.
+        step_cost, cost_source_chosen = min(candidates, key=lambda x: x[0].total)
+
+        # Stamp cost_source onto the winning AccumulationCost (frozen
+        # dataclass → use dataclasses.replace).
+        step_cost = _dc_replace(step_cost, cost_source=cost_source_chosen)
+
+        # Sprint 3: step total = pre_reductions + residual contraction.
+        # Runs AFTER candidate selection so the chosen cost_source is preserved.
+        if pre_reduce_cost_total > 0:
+            step_cost = _dc_replace(
+                step_cost, total=step_cost.total + pre_reduce_cost_total
+            )
+
+        per_step_costs.append(step_cost)
+        pre_reductions_per_step.append(tuple(pre_reductions_for_step))
+
+        # Update current_subsets: remove contracted inputs (highest index first
+        # to preserve lower indices), then append the merged output subset.
+        merged_subset: frozenset[int] = frozenset().union(*step_input_subsets)
+        for pos in contract_positions:
+            current_subsets.pop(pos)
+        current_subsets.append(merged_subset)
+
+    total = sum(s.total for s in per_step_costs)
+    mu_total = sum((s.mu or 0) for s in per_step_costs)
+    alpha_total = sum((s.alpha or 0) for s in per_step_costs)
+    # m_total for the path-level result must reflect the number of unique output
+    # elements in the FULL k-ary expression, not the product of per-step intermediate
+    # m_total values (which would multiply intermediate tensor sizes together and
+    # always exceed dense_baseline, making _has_savings() return False).
+    # full_expression_component_costs holds the full-expression per_component data
+    # computed by the wreath/sigma pass before the path decomposition.
+    if full_expression_component_costs:
+        m_total = math.prod(c.m for c in full_expression_component_costs)
+    else:
+        # Fallback: sum of per-step m_total values is still wrong, but if we have
+        # no component data just use dense_baseline as a conservative estimate.
+        m_total = dense_baseline
+    fallback_used = any(s.fallback_used for s in per_step_costs)
+    unavailable_components: tuple[int, ...] = tuple(
+        i for i, s in enumerate(per_step_costs) if s.fallback_used
+    )
+    unavailable_reason = next(
+        (s.unavailable_reason for s in per_step_costs if s.unavailable_reason),
+        None,
+    )
+
+    return AccumulationCost(
+        total=total,
+        mu=mu_total if mu_total > 0 else None,
+        alpha=alpha_total if alpha_total > 0 else None,
+        m_total=m_total,
+        dense_baseline=dense_baseline,
+        num_terms=num_ops,
+        per_component=full_expression_component_costs or (),
+        fallback_used=fallback_used,
+        unavailable_components=unavailable_components,
+        unavailable_reason=unavailable_reason,
+        per_step=tuple(per_step_costs),
+        path=tuple(tuple(p) for p in path_info.path),
+        pre_reductions_per_step=tuple(pre_reductions_per_step),
+    )
+
+
+def compute_accumulation_cost(
+    *,
+    canonical_subscripts: str,
+    input_parts: _Seq[str],
+    output_subscript: str,
+    shapes: _Seq[_Seq[int]],
+    per_op_symmetries: _Seq[_Any] | None,
+    identity_pattern: tuple[tuple[int, ...], ...] | None,
+    partition_budget: int | None = None,
+) -> AccumulationCost:
+    """End-to-end whole-expression cost.
+
+    Inputs:
+      canonical_subscripts: the einsum string after canonicalization
+        (e.g. 'ij,jk->ik').
+      input_parts: per-operand subscript strings.
+      output_subscript: output labels (may be empty).
+      shapes: per-operand shape tuples.
+      per_op_symmetries: parallel to operands; SymmetryGroup objects, strings
+        ('symmetric', 'cyclic', 'dihedral'), or None.
+      identity_pattern: tuple of operand-position tuples that share id.
+      partition_budget: per-component partition cap; defaults to global setting.
+
+    Dimino-budget fallback: any internal call to ``_dimino`` that exceeds the
+    configured ``dimino_budget`` (default 500_000) raises
+    :class:`_DiminoBudgetExceeded`. This function catches the exception,
+    emits a :class:`CostFallbackWarning`, and returns an
+    :class:`AccumulationCost` with ``fallback_used=True`` and
+    ``total = k * dense_baseline`` (the no-symmetry direct-event count) —
+    the same shape the partition-budget fallback uses.
+    """
+    from flopscope._config import get_setting
+    from flopscope._perm_group import _DiminoBudgetExceeded
+
+    num_ops = len(input_parts)
+    if per_op_symmetries is None:
+        per_op_symmetries = (None,) * num_ops
+    if partition_budget is None:
+        partition_budget = _cast(int, get_setting("partition_budget"))
+
+    operand_names = _operand_names_from_identity_pattern(num_ops, identity_pattern)
+
+    graph = build_bipartite(
+        subscripts=tuple(input_parts),
+        output=output_subscript,
+        operand_names=operand_names,
+    )
+    matrix_data = build_incidence_matrix(graph)
+
+    # Build per-operand wreath inputs.
+    axis_ranks = tuple(len(part) for part in input_parts)
+    u_offsets = tuple(sum(axis_ranks[:i]) for i in range(num_ops))
+    grouped_ops: set[int] = set()
+    for grp in graph.identical_groups:
+        grouped_ops.update(grp)
+    singleton_groups = [(i,) for i in range(num_ops) if i not in grouped_ops]
+    identical_groups_all = (*graph.identical_groups, *singleton_groups)
+
+    # Pre-compute sizes / dense_baseline up-front so the bail-handler can use
+    # them without redoing graph work.
+    size_map = _build_size_map(input_parts, shapes)
+    sizes = tuple(size_map[lbl] for lbl in graph.all_labels)
+    dense_baseline = math.prod(sizes) if sizes else 1
+
+    try:
+        wreath_elements = list(
+            enumerate_wreath(
+                identical_groups=identical_groups_all,
+                per_op_symmetry=tuple(
+                    _per_op_symmetry_for_wreath(s) for s in per_op_symmetries
+                ),
+                axis_ranks=axis_ranks,
+                u_offsets=u_offsets,
+            )
+        )
+
+        sigma_results = run_sigma_loop(graph, matrix_data, tuple(wreath_elements))
+        detected = build_full_group(sigma_results, all_labels=graph.all_labels)
+
+        # Decompose into components.
+        components = decompose_into_components(
+            detected_group=detected,
+            v_labels=graph.free_labels,
+            w_labels=graph.summed_labels,
+            sizes=sizes,
+        )
+
+        component_costs = run_ladder_per_component(
+            components,
+            partition_budget=partition_budget,
+        )
+    except _DiminoBudgetExceeded as exc:
+        fallback_total = num_ops * dense_baseline
+        reason = (
+            f"dimino_budget exceeded ({exc.seen_count} > {exc.budget}); "
+            f"auto-inferred symmetry group is too large to enumerate exactly"
+        )
+        warnings.warn(
+            CostFallbackWarning(
+                f"accumulation: {reason} — charging dense cost {fallback_total} "
+                f"= {num_ops} × {dense_baseline}. Raise via "
+                f"flopscope.configure(dimino_budget=...) to attempt exact counting."
+            ),
+            stacklevel=4,
+        )
+        return AccumulationCost(
+            total=fallback_total,
+            mu=None,
+            alpha=None,
+            m_total=1,
+            dense_baseline=dense_baseline,
+            num_terms=num_ops,
+            per_component=(),
+            fallback_used=True,
+            unavailable_components=(),
+            unavailable_reason=reason,
+        )
+
+    if num_ops >= 3:
+        return _walk_path_and_aggregate(
+            canonical_subscripts=canonical_subscripts,
+            input_parts=input_parts,
+            output_subscript=output_subscript,
+            shapes=shapes,
+            per_op_symmetries=per_op_symmetries,
+            identity_pattern=identity_pattern,
+            partition_budget=partition_budget,
+            dense_baseline=dense_baseline,
+            full_expression_component_costs=component_costs,
+        )
+
+    # ── Sprint 3 (#55): 2-op case — pre-reduce isolated summed labels ────────
+    # For binary (2-operand) einsums, detect isolated summed labels, compute
+    # pre-reduction costs, then re-evaluate the RESIDUAL contraction on the
+    # reduced subscripts.  Total = pre_reduction_costs + residual_cost.
+    if num_ops == 2:
+        from flopscope._accumulation._public import (
+            _per_op_sym_fingerprint,
+            reduction_accumulation_cost,
+        )
+        from flopscope._symmetry_utils import reduce_group
+
+        input_parts_list = list(input_parts)
+        shapes_list = [tuple(s) for s in shapes]
+
+        summed_set = set("".join(input_parts_list)) - set(output_subscript)
+        left_labels_set = set(input_parts_list[0])
+        right_labels_set = set(input_parts_list[1])
+        left_only_summed = (left_labels_set & summed_set) - right_labels_set
+        right_only_summed = (right_labels_set & summed_set) - left_labels_set
+
+        pre_reductions_for_step: list[PreReduction] = []
+        pre_reduce_cost_total = 0
+
+        left_sym = per_op_symmetries[0] if per_op_symmetries else None
+        right_sym = per_op_symmetries[1] if per_op_symmetries else None
+
+        # Default effective values (no-op if no pre-reduction).
+        eff_left_part = input_parts_list[0]
+        eff_right_part = input_parts_list[1]
+        eff_left_shape = shapes_list[0]
+        eff_right_shape = shapes_list[1]
+        eff_left_sym = left_sym
+        eff_right_sym = right_sym
+
+        # Pre-reduce left operand
+        if left_only_summed:
+            reduce_axes = tuple(
+                i for i, c in enumerate(input_parts_list[0]) if c in left_only_summed
+            )
+            left_proxy = _build_symmetric_proxy(shapes_list[0], left_sym)
+            reduce_cost = reduction_accumulation_cost(
+                left_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in input_parts_list[0] if c not in left_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(shapes_list[0]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                left_sym,
+                ndim=len(input_parts_list[0]),
+                axis=reduce_axes,
+            )
+            eff_left_part = surviving_subscript
+            eff_left_shape = surviving_shape
+            eff_left_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=0,
+                    removed_labels=tuple(sorted(left_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Pre-reduce right operand
+        if right_only_summed:
+            reduce_axes = tuple(
+                i for i, c in enumerate(input_parts_list[1]) if c in right_only_summed
+            )
+            right_proxy = _build_symmetric_proxy(shapes_list[1], right_sym)
+            reduce_cost = reduction_accumulation_cost(
+                right_proxy, axis=reduce_axes
+            ).total
+            pre_reduce_cost_total += reduce_cost
+
+            surviving_subscript = "".join(
+                c for c in input_parts_list[1] if c not in right_only_summed
+            )
+            surviving_shape = tuple(
+                s for i, s in enumerate(shapes_list[1]) if i not in set(reduce_axes)
+            )
+            surviving_sym = reduce_group(
+                right_sym,
+                ndim=len(input_parts_list[1]),
+                axis=reduce_axes,
+            )
+            eff_right_part = surviving_subscript
+            eff_right_shape = surviving_shape
+            eff_right_sym = surviving_sym
+            pre_reductions_for_step.append(
+                PreReduction(
+                    operand_index=1,
+                    removed_labels=tuple(sorted(right_only_summed)),
+                    cost=reduce_cost,
+                    surviving_subscript=surviving_subscript,
+                    reduced_symmetry_fingerprint=(
+                        _per_op_sym_fingerprint(surviving_sym)
+                        if surviving_sym is not None
+                        else None
+                    ),
+                )
+            )
+
+        if pre_reductions_for_step:
+            # Compute residual cost on the REDUCED subscripts/shapes/symmetries.
+            from ._cache import get_accumulation_cost_cached
+
+            eff_canonical = f"{eff_left_part},{eff_right_part}->{output_subscript}"
+            eff_sym_fp = (
+                _per_op_sym_fingerprint(eff_left_sym)
+                if eff_left_sym is not None
+                else None,
+                _per_op_sym_fingerprint(eff_right_sym)
+                if eff_right_sym is not None
+                else None,
+            )
+            residual_cost = get_accumulation_cost_cached(
+                canonical_subscripts=eff_canonical,
+                input_parts=(eff_left_part, eff_right_part),
+                output_subscript=output_subscript,
+                shapes=(eff_left_shape, eff_right_shape),
+                sym_fingerprint=eff_sym_fp,
+                identity_pattern=identity_pattern,
+                partition_budget=partition_budget,
+            )
+            return AccumulationCost(
+                total=residual_cost.total + pre_reduce_cost_total,
+                mu=residual_cost.mu,
+                alpha=residual_cost.alpha,
+                m_total=residual_cost.m_total,
+                dense_baseline=dense_baseline,
+                num_terms=residual_cost.num_terms,
+                per_component=component_costs,
+                fallback_used=residual_cost.fallback_used,
+                unavailable_components=residual_cost.unavailable_components,
+                unavailable_reason=residual_cost.unavailable_reason,
+                per_step=residual_cost.per_step,
+                path=residual_cost.path,
+                pre_reductions_per_step=(tuple(pre_reductions_for_step),),
+            )
+
+    return aggregate_einsum(
+        component_costs=component_costs,
+        num_terms=num_ops,
+        dense_baseline=dense_baseline,
+    )
+
+
+# ── Reduction-cost API hook (designed for, not implemented) ──────────
+
+
+def aggregate_reduction(
+    component_costs: Sequence[ComponentCost],
+    *,
+    op_factor: int = 1,
+    dense_baseline: int,
+    output_dense: int,
+    extra_ops: int = 0,
+) -> AccumulationCost:
+    """Aggregate per-component costs into a ufunc.reduce cost.
+
+    Formula:
+        total = op_factor × (∏α_c - output_dense) + extra_ops
+
+    ``output_dense`` is the **orbit-aware** output count: the orchestrator
+    passes ``_num_output_orbits(input_shape, axes_summed, symmetry)`` through
+    this slot. For dense inputs this equals ``prod(output_shape)`` so the
+    name is consistent with the locked-stub docstring.
+
+    Fallback (any component unavailable):
+        total = output_dense × (input_axis_size - 1) × op_factor + extra_ops
+    where input_axis_size = dense_baseline / output_dense.
+
+    See .aicrowd/superpowers/specs/2026-05-13-symmetry-aware-reduction-cost-design.md.
+    """
+    failing = [i for i, c in enumerate(component_costs) if c.alpha is None]
+
+    m_total = 1
+    for c in component_costs:
+        m_total *= c.m
+
+    if failing:
+        # Floor-division is safe: the orchestrator passes
+        # dense_baseline = prod(input_shape) and output_dense = num_output_orbits,
+        # which evenly divides for symmetry=None and represents the orbit-discounted
+        # input-axis size for symmetric inputs.
+        input_axis_size = dense_baseline // output_dense if output_dense else 0
+        fallback_total = (
+            output_dense * max(0, input_axis_size - 1) * op_factor + extra_ops
+        )
+        first = component_costs[failing[0]]
+        reason = first.unavailable_reason or "partition_budget exceeded"
+        labels = ", ".join(first.labels)
+        warnings.warn(
+            CostFallbackWarning(
+                f"reduction: component {list(failing)} ({labels}) returned "
+                f"unavailable — charging dense cost {fallback_total}. "
+                f"Failing reason: {reason}."
+            ),
+            stacklevel=4,
+        )
+        return AccumulationCost(
+            total=fallback_total,
+            mu=None,
+            alpha=None,
+            m_total=m_total,
+            dense_baseline=dense_baseline,
+            num_terms=1,
+            per_component=tuple(component_costs),
+            fallback_used=True,
+            unavailable_components=tuple(failing),
+            unavailable_reason=reason,
+        )
+
+    alpha_product = 1
+    for c in component_costs:
+        assert c.alpha is not None  # for type narrowing
+        alpha_product *= c.alpha
+
+    # Invariant: output_dense (num_output_orbits) <= alpha_product. The
+    # orchestrator computes both consistently. If you ever see a negative
+    # total here, the orchestrator passed an inconsistent output_dense.
+    total = op_factor * (alpha_product - output_dense) + extra_ops
+    return AccumulationCost(
+        total=total,
+        mu=0,  # k=1 single-operand reduction
+        alpha=alpha_product,
+        m_total=m_total,
+        dense_baseline=dense_baseline,
+        num_terms=1,
+        per_component=tuple(component_costs),
+        fallback_used=False,
+    )

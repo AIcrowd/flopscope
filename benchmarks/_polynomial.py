@@ -20,7 +20,7 @@ POLYNOMIAL_OPS: list[str] = [
 ]
 
 _FORMULA_STRINGS: dict[str, str] = {
-    "polyval": "n * degree (FMA=1)",
+    "polyval": "2 * n * degree (FMA=2)",
     "polyfit": "2 * n * (degree+1)^2",
     "roots": "degree^3",
     "polymul": "(degree+1)^2",
@@ -40,7 +40,9 @@ def _analytical_cost(op: str, n: int, degree: int) -> int:
     benchmark denominator and the budget deduction use the same formula.
     """
     if op == "polyval":
-        return n * degree
+        return (
+            2 * n * degree
+        )  # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
     elif op == "polyfit":
         return 2 * n * (degree + 1) ** 2
     elif op == "roots":

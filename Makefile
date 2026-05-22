@@ -104,6 +104,13 @@ install:  ## Install all deps (dev + docs) and set up git hooks
 	git config core.hooksPath .githooks
 
 # ---------------------------------------------------------------------------
+# Benchmarks
+# ---------------------------------------------------------------------------
+.PHONY: bench-accumulation
+bench-accumulation:  ## Cold + warm latency benchmark for einsum_accumulation_cost
+	$(UV) python benchmarks/accumulation/bench_cost_compute.py
+
+# ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
 .PHONY: help

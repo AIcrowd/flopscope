@@ -302,7 +302,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.hamming",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L96",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_window.py#L98",
   "href": "/docs/api/numpy/hamming/",
   "legacy_href": "/docs/api/ops/hamming/",
   "module": "flopscope._window",
@@ -397,5 +397,5 @@
   "upstream_ref_label": "NumPy Ref",
   "upstream_source_label": "numpy source",
   "upstream_source_url": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_function_base_impl.py#L3367",
-  "weight": 16.0
+  "weight": 8.0
 }

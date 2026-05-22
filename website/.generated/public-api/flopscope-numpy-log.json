@@ -607,7 +607,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.log",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L341",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
   "href": "/docs/api/numpy/log/",
   "import_path": "flopscope.numpy.log",
   "is_operation_cost_leaf": true,

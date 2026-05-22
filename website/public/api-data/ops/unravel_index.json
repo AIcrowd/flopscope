@@ -280,7 +280,7 @@
   "schema_version": 1,
   "slug": "unravel_index",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1987",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2088",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.unravel_index.html"
   }
 }

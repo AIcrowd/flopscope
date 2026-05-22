@@ -386,7 +386,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polymul",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L167",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L177",
   "href": "/docs/api/numpy/polymul/",
   "legacy_href": "/docs/api/ops/polymul/",
   "module": "flopscope._polynomial",

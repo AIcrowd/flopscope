@@ -1,0 +1,7 @@
+{
+  "name": "flopscope-js-oracle",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Node bridge to the JS symmetry-aware einsum engine for Python parity tests"
+}

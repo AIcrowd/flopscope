@@ -582,7 +582,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.mask_indices",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1513",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1595",
   "href": "/docs/api/numpy/mask-indices/",
   "import_path": "flopscope.numpy.mask_indices",
   "is_operation_cost_leaf": true,

@@ -252,7 +252,7 @@
   "schema_version": 1,
   "slug": "broadcast_shapes",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1025",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1074",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_stride_tricks_impl.py#L433"
   }
 }

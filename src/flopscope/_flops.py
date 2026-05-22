@@ -6,7 +6,7 @@ import math
 from collections import Counter
 
 from flopscope._perm_group import SymmetryGroup
-from flopscope._symmetry_utils import unique_elements_for_shape, validate_symmetry_group
+from flopscope._symmetry_utils import unique_elements_for_shape
 
 
 def parse_einsum_subscripts(subscripts: str) -> tuple[list[list[str]], list[str]]:
@@ -46,8 +46,11 @@ def einsum_cost(
 ) -> int:
     """FLOP cost of an einsum operation.
 
-    Delegates to ``contract_path`` from opt_einsum, which uses ``flop_count``
-    with ``op_factor`` (FMA = 1 FLOP; see ``_cost_model.FMA_COST``).
+    Uses the whole-expression direct-event accumulation model:
+    total = (k-1) * prod(M) + prod(alpha), where M is the number of
+    unique output elements and alpha is the number of unique output+
+    reduction-axis combinations. FMA = 2 (textbook): the α/M formula counts
+    multiplies and adds separately by construction.
 
     Parameters
     ----------
@@ -63,47 +66,34 @@ def einsum_cost(
     int
         Estimated FLOP count.
     """
-    from flopscope._opt_einsum import contract_path
+    # Build dummy arrays of the right shape for the parser
+    import numpy as _np
 
-    oracle = None
-    if operand_symmetries and any(s is not None for s in operand_symmetries):
-        input_parts = subscripts.replace(" ", "").split("->")[0].split(",")
-        output_str = subscripts.split("->")[1] if "->" in subscripts else ""
-        perm_groups = []
-        for symmetry, chars, shape in zip(
-            operand_symmetries, input_parts, shapes, strict=False
-        ):
-            if symmetry is None:
-                perm_groups.append(None)
-                continue
-            validate_symmetry_group(symmetry, ndim=len(shape), shape=shape)
-            axes = (
-                symmetry.axes
-                if symmetry.axes is not None
-                else tuple(range(symmetry.degree))
-            )
-            if len(axes) < 2 or symmetry.order() <= 1:
-                perm_groups.append(None)
-                continue
-            labeled_group = SymmetryGroup(*symmetry.generators, axes=axes)
-            labeled_group._labels = tuple(chars[axis] for axis in axes)
-            perm_groups.append([labeled_group])
+    from flopscope._accumulation._cost import compute_accumulation_cost
+    from flopscope._opt_einsum import parse_einsum_input
 
-        from flopscope._opt_einsum._subgraph_symmetry import SubgraphSymmetryOracle
-
-        # Use sentinel objects as operands (identity-based detection not needed here)
-        sentinel_operands = [object() for _ in range(len(input_parts))]
-        oracle = SubgraphSymmetryOracle(
-            operands=sentinel_operands,
-            subscript_parts=input_parts,
-            per_op_groups=perm_groups,
-            output_chars=output_str,
-        )
-
-    _, path_info = contract_path(
-        subscripts, *shapes, shapes=True, symmetry_oracle=oracle
+    dummy_operands = [_np.empty(s) for s in shapes]
+    input_subscripts, output_subscript, _ = parse_einsum_input(
+        (subscripts, *dummy_operands)
     )
-    return path_info.optimized_cost
+    canonical_subscripts = f"{input_subscripts}->{output_subscript}"
+    input_parts = tuple(input_subscripts.split(","))
+
+    per_op_syms: tuple[SymmetryGroup | None, ...] = (
+        tuple(operand_symmetries)
+        if operand_symmetries is not None
+        else (None,) * len(shapes)
+    )
+
+    cost = compute_accumulation_cost(
+        canonical_subscripts=canonical_subscripts,
+        input_parts=input_parts,
+        output_subscript=output_subscript,
+        shapes=shapes,
+        per_op_symmetries=per_op_syms,
+        identity_pattern=None,
+    )
+    return cost.total
 
 
 def analytical_pointwise_cost(
@@ -133,37 +123,45 @@ def analytical_pointwise_cost(
 
 def analytical_reduction_cost(
     input_shape: tuple[int, ...],
-    axis: int | None = None,
+    axis: int | tuple[int, ...] | None = None,
     symmetry: SymmetryGroup | None = None,
 ) -> int:
-    """FLOP cost of a reduction operation.
+    """FLOP cost of a reduction operation (orbit-mapping model).
+
+    Delegates to compute_reduction_accumulation_cost from the
+    _accumulation subpackage. The legacy `unique_elements_for_shape`-based
+    formula is removed in favor of the path-independent orbit-mapping count
+    (with #56's off-by-one corrected).
 
     Parameters
     ----------
     input_shape : tuple of int
         Shape of the input array.
-    axis : int or None, optional
-        Axis along which to reduce. If None, reduce over all elements.
-    symmetry : SymmetryGroup or None, optional
-        If provided, only unique elements are counted.
+    axis : int, tuple of int, or None, optional
+        Axis or axes to reduce. None means full reduction.
+    symmetry : SymmetryGroup, optional
+        Pointwise symmetry of the input.
 
     Returns
     -------
     int
-        Estimated FLOP count (one per element).
-
-    Notes
-    -----
-    The ``axis`` parameter is accepted for API consistency but does not
-    affect the result: a reduction always touches every element regardless
-    of which axis is reduced, so the cost is always ``prod(input_shape)``.
+        FLOP count via the Tier-1 orbit-mapping model.
     """
-    if symmetry is not None:
-        return max(unique_elements_for_shape(symmetry, input_shape), 1)
-    result = 1
-    for dim in input_shape:
-        result *= dim
-    return max(result, 1)
+    from flopscope._accumulation._reduction import (
+        _normalize_axis,
+        compute_reduction_accumulation_cost,
+    )
+
+    ndim = len(input_shape)
+    axes_summed = _normalize_axis(axis, ndim)
+    cost = compute_reduction_accumulation_cost(
+        input_shape=tuple(input_shape),
+        axes_summed=axes_summed,
+        symmetry=symmetry,
+        op_factor=1,
+        extra_ops=0,
+    )
+    return max(cost.total, 1)
 
 
 # Backward-compatible internal aliases. The public weighted API lives in

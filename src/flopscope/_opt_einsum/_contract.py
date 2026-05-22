@@ -1,34 +1,28 @@
-"""Contains contract_path and supporting types (stripped from opt_einsum contract.py).
+"""Contains PathInfo, StepInfo, and build_path_info (stripped from opt_einsum contract.py).
 
 Excluded: contract, _core_contract, ContractExpression, _einsum, _tensordot,
 _transpose, backends/sharing imports, _filter_einsum_defaults,
 format_const_einsum_str, shape_only.
+
+The local contract_path() body was removed in Task 7+8; upstream opt_einsum is
+used directly via __init__.py's wrapper.
 """
 
-from collections.abc import Collection
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import cached_property
 from hashlib import sha1
-from typing import Any, Literal, overload
+from typing import Any
 
-from . import _blas as blas
+from flopscope._perm_group import SymmetryGroup
+
 from . import _helpers as helpers
-from . import _parser as parser
-from . import _paths as paths
 from ._hsluv import rgb_distance_hex, rich_label_palette
-from ._subgraph_symmetry import SubgraphSymmetryOracle
-from ._symmetry import SymmetryGroup, symmetric_flop_count
-from ._typing import (
-    ArrayType,
-    ContractionListType,
-    OptimizeKind,
-    PathType,
-)
 
 __all__ = [
-    "contract_path",
+    "build_path_info",
     "PathInfo",
+    "PreReduction",
     "StepInfo",
 ]
 
@@ -39,9 +33,32 @@ _RICH_SYMMETRY_STYLES = {
     "W": "bold bright_green",
 }
 
-## Common types
 
-_MemoryLimit = None | int | Decimal | Literal["max_input"]
+@dataclass(frozen=True)
+class PreReduction:
+    """Metadata for a single pre-reduction performed on a binary step's input.
+
+    When a label is summed in this step AND appears in only ONE of the two
+    inputs, that input is pre-reduced along the isolated axis BEFORE the
+    main contraction.  This mirrors PyTorch's `sumproduct_pair` optimization
+    (`aten/src/ATen/native/Linear.cpp`).
+
+    Attributes:
+        operand_index: 0 or 1 — which input of the binary step (left or right).
+        removed_labels: labels dropped from this input's subscript (sorted tuple).
+        cost: flops charged by this pre-reduction (from reduction_accumulation_cost).
+        surviving_subscript: this input's subscript after dropping removed_labels.
+        reduced_symmetry_fingerprint: canonical sym fingerprint of the post-
+            reduction operand symmetry; fed to the residual contraction's
+            per-input fingerprint.  None when the operand had no declared
+            symmetry or the reduction killed all surviving symmetry.
+    """
+
+    operand_index: int
+    removed_labels: tuple[str, ...]
+    cost: int
+    surviving_subscript: str
+    reduced_symmetry_fingerprint: tuple | None = None
 
 
 @dataclass
@@ -52,7 +69,7 @@ class StepInfo:
     """Einsum subscript for this step, e.g. ``"ijk,ai->ajk"``."""
 
     flop_cost: int
-    """Symmetry-aware FLOP cost (FMA = 1 op)."""
+    """FLOP cost (FMA = 1 op)."""
 
     input_shapes: list[tuple[int, ...]]
     """Shapes of the input operands for this step."""
@@ -60,24 +77,25 @@ class StepInfo:
     output_shape: tuple[int, ...]
     """Shape of the output operand for this step."""
 
-    input_groups: list[SymmetryGroup | None]
+    input_groups: list = field(default_factory=list)
     """SymmetryGroup for each input in this step."""
 
-    output_group: SymmetryGroup | None
+    output_group: object | None = None
     """SymmetryGroup of the output, or None."""
 
-    dense_flop_cost: int
+    dense_flop_cost: int = 0
     """FLOP cost without symmetry (FMA = 1 op)."""
 
-    symmetry_savings: float
+    symmetry_savings: float = 0.0
     """Fraction saved: ``1 - (flop_cost / dense_flop_cost)``. Zero when no symmetry."""
 
-    blas_type: str | bool = False
+    inner_group: object | None = None
+    """SymmetryGroup among the contracted (summed) labels, or None."""
 
-    inner_group: SymmetryGroup | None = None
-    """SymmetryGroup among the contracted (summed) labels, or None.
-    Describes inner-summation redundancy from the W-side of the
-    subgraph symmetry oracle."""
+    inner_applied: bool = False
+    """Whether inner (W-side) symmetry was actually applied at this step."""
+
+    blas_type: str | bool = False
     """BLAS classification for this step (e.g. 'GEMM', 'SYMM', False)."""
 
     path_indices: tuple[int, ...] = ()
@@ -85,24 +103,39 @@ class StepInfo:
     ``PathInfo.path[i]``). Useful for cross-referencing the table with
     the raw path field."""
 
-    inner_applied: bool = False
-    """Whether inner (W-side) symmetry was actually applied to reduce
-    the FLOP cost at this step.  True only when ``use_inner_symmetry``
-    is enabled and all W-group labels are contracted at this step."""
-
     merged_subset: frozenset[int] | None = None
     """Subset of *original* operand positions that this step's output
     intermediate covers. For step 0 contracting two original operands i
     and j, this is ``frozenset({i, j})``. For later steps it's the union
-    of the subsets of all SSA inputs being contracted. This is the exact
-    key the symmetry oracle uses for ``oracle.sym(...)`` lookups, so it
-    makes the symmetry column directly attributable. ``None`` when no
-    oracle was provided."""
+    of the subsets of all SSA inputs being contracted."""
+
+    pre_reductions: tuple[PreReduction, ...] = field(default_factory=tuple)
+    """Pre-reductions applied to binary step inputs before the main contraction.
+
+    Each entry records a label that was summed out of exactly one input prior
+    to the contraction itself (mirroring PyTorch's ``sumproduct_pair``
+    optimization).  Empty for all existing steps — populated by Task 4."""
+
+    cost_source: str | None = None
+    """Which cost category produced ``flop_cost`` (Sprint 4).
+
+    One of ``"per-input"`` (Cat A wreath/sigma), ``"joint-burnside"`` (Cat C
+    on the merged-subset joint group), or ``"output-burnside"`` (Cat B on
+    the merged output group's orbit count).  ``None`` only on stale
+    pre-Sprint-4 instances.
+
+    Surfaced by the renderer for transparency ("why this number?") and used
+    by regression tests to pin which category was selected."""
+
+    @property
+    def flop_count(self) -> int:
+        """Alias for ``flop_cost`` (adapter compatibility)."""
+        return self.flop_cost
 
 
 @dataclass
 class PathInfo:
-    """Information about a contraction path with per-step symmetry diagnostics."""
+    """Information about a contraction path."""
 
     path: list[tuple[int, ...]]
     """The optimized contraction path (list of index-tuples)."""
@@ -140,7 +173,7 @@ class PathInfo:
     string for the trivial num_ops <= 2 case where no optimizer runs."""
 
     # Legacy fields for backward-compat with opt_einsum tests
-    contraction_list: ContractionListType = field(default_factory=list)
+    contraction_list: list = field(default_factory=list)
     scale_list: list[int] = field(default_factory=list)
     size_list: list[int] = field(default_factory=list)
     _oe_naive_cost: int = 0
@@ -230,24 +263,6 @@ class PathInfo:
                 result.append(ch)
         return result
 
-    def _rich_eq_text(self):
-        """Render the full einsum expression with global label styling."""
-        from rich.text import Text
-
-        result = Text()
-        prefix = "Complete contraction: "
-        result.append(prefix, style="bold")
-        result.append_text(self._style_text_charwise(self.eq))
-        return result
-
-    def _rich_subscript_text(self, subscript: str):
-        """Render a subscript or step expression with global label styling."""
-        return self._style_text_charwise(subscript)
-
-    def _rich_index_sizes_text(self):
-        """Render the index-size summary with label styling."""
-        return self._style_text_charwise(self._fmt_index_sizes())
-
     def _rich_symmetry_token_text(self, token: str):
         from rich.text import Text
 
@@ -303,8 +318,8 @@ class PathInfo:
         from rich.text import Text
 
         in_parts = [self._fmt_sym(s) for s in step.input_groups]
-        out_part = self._fmt_sym(step.output_group)
-        w_part = self._fmt_sym(step.inner_group)
+        out_part = self._fmt_sym(step.output_group)  # type: ignore[arg-type]
+        w_part = self._fmt_sym(step.inner_group)  # type: ignore[arg-type]
         if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
             return Text("-", style="dim")
 
@@ -324,6 +339,24 @@ class PathInfo:
             result.append_text(self._rich_symmetry_token_text(w_part))
             result.append("]", style="dim")
         return result
+
+    def _rich_eq_text(self):
+        """Render the full einsum expression with global label styling."""
+        from rich.text import Text
+
+        result = Text()
+        prefix = "Complete contraction: "
+        result.append(prefix, style="bold")
+        result.append_text(self._style_text_charwise(self.eq))
+        return result
+
+    def _rich_subscript_text(self, subscript: str):
+        """Render a subscript or step expression with global label styling."""
+        return self._style_text_charwise(subscript)
+
+    def _rich_index_sizes_text(self):
+        """Render the index-size summary with label styling."""
+        return self._style_text_charwise(self._fmt_index_sizes())
 
     def _fmt_overall_savings(self) -> str:
         """Format total optimized-vs-dense savings for the whole contraction."""
@@ -431,7 +464,48 @@ class PathInfo:
         result.append("\n")
         result.append("cumulative=", style="dim")
         result.append(f"{cumulative:,}", style="bold cyan")
+        # NEW: per-step M / α / −O from attached accumulation.
+        acc_step = getattr(step, "_acc_step", None)
+        if acc_step is not None:
+            m_value = acc_step.m_total
+            alpha_value = acc_step.alpha or 0
+            o_value = (
+                acc_step.per_component[0].num_output_orbits
+                if acc_step.per_component
+                else 0
+            )
+            result.append("\n")
+            result.append("M=", style="dim")
+            result.append(str(m_value), style="bold")
+            result.append("  α=", style="dim")
+            result.append(str(alpha_value), style="bold")
+            result.append("  −O=", style="dim")
+            result.append(str(o_value), style="bold")
         return result
+
+    def _fmt_index_sizes(self) -> str:
+        """Format index sizes compactly. Groups indices with the same size."""
+        if not self.size_dict:
+            return ""
+        from collections import defaultdict
+
+        by_size: dict[int, list[str]] = defaultdict(list)
+        for idx, sz in self.size_dict.items():
+            by_size[sz].append(idx)
+        parts = []
+        for sz, idxs in sorted(by_size.items(), key=lambda kv: (-len(kv[1]), -kv[0])):
+            idxs_sorted = sorted(idxs)
+            parts.append(f"{'='.join(idxs_sorted)}={sz}")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _fmt_contract(step: StepInfo) -> str:
+        """Format the path-supplied contraction tuple, e.g. '(0, 1)'."""
+        if not step.path_indices:
+            return "-"
+        if len(step.path_indices) == 2:
+            return f"({step.path_indices[0]}, {step.path_indices[1]})"
+        return "(" + ",".join(str(p) for p in step.path_indices) + ")"
 
     @staticmethod
     def _try_named_group(k: int, order: int) -> str | None:
@@ -491,11 +565,19 @@ class PathInfo:
         gen_str = self._fmt_generators(group, labels)
         return f"PermGroup⟨{gen_str}⟩"
 
+    def _fmt_step_regime(self, step) -> str:
+        """Return the regime name for a step, or '-' when unknown.
+
+        FlopscopePathInfo.__str__ patches `_regime` per step from
+        accumulation.per_step before calling format_table.
+        """
+        return getattr(step, "_regime", "-")
+
     def _fmt_step_sym(self, step: StepInfo) -> str:
         """Format inputs→output symmetry transformation for one step."""
         in_parts = [self._fmt_sym(s) for s in step.input_groups]
-        out_part = self._fmt_sym(step.output_group)
-        w_part = self._fmt_sym(step.inner_group)
+        out_part = self._fmt_sym(step.output_group)  # type: ignore[arg-type]
+        w_part = self._fmt_sym(step.inner_group)  # type: ignore[arg-type]
         if all(p == "-" for p in in_parts) and out_part == "-" and w_part == "-":
             return ""
         result = f"{' × '.join(in_parts)} → {out_part}"
@@ -504,35 +586,33 @@ class PathInfo:
             result += f"  [{w_prefix}: {w_part}]"
         return result
 
-    def _fmt_index_sizes(self) -> str:
-        """Format index sizes compactly. Groups indices with the same size."""
-        if not self.size_dict:
-            return ""
-        from collections import defaultdict
-
-        by_size: dict[int, list[str]] = defaultdict(list)
-        for idx, sz in self.size_dict.items():
-            by_size[sz].append(idx)
-        parts = []
-        for sz, idxs in sorted(by_size.items(), key=lambda kv: (-len(kv[1]), -kv[0])):
-            idxs_sorted = sorted(idxs)
-            parts.append(f"{'='.join(idxs_sorted)}={sz}")
-        return ", ".join(parts)
-
-    @staticmethod
-    def _fmt_contract(step: StepInfo) -> str:
-        """Format the path-supplied contraction tuple, e.g. '(0, 1)'."""
-        if not step.path_indices:
-            return "-"
-        if len(step.path_indices) == 2:
-            return f"({step.path_indices[0]}, {step.path_indices[1]})"
-        return "(" + ",".join(str(p) for p in step.path_indices) + ")"
-
     def _fmt_unique_dense(self, step: StepInfo) -> str:
         """Show output and inner unique/dense element counts."""
         from math import prod
 
-        from flopscope._opt_einsum._symmetry import unique_elements
+        def _unique_elements(
+            indices: frozenset[str],
+            size_dict: dict[str, int],
+            perm_group: SymmetryGroup | None,
+        ) -> int:
+            """Count unique elements for a set of subscript indices under symmetry."""
+            if not indices:
+                return 1
+            if perm_group is not None:
+                labels = perm_group._labels or tuple(
+                    sorted(indices)[: perm_group.degree]
+                )
+                pg_size_dict: dict[int, int] = {}
+                accounted: set[str] = set()
+                for i, lbl in enumerate(labels):
+                    pg_size_dict[i] = size_dict[lbl]
+                    accounted.add(lbl)
+                count = perm_group.burnside_unique_count(pg_size_dict)
+                for idx in indices:
+                    if idx not in accounted:
+                        count *= size_dict[idx]
+                return count
+            return prod(size_dict[i] for i in indices)
 
         if step.flop_cost == step.dense_flop_cost:
             return "-"
@@ -542,8 +622,10 @@ class PathInfo:
         if step.output_group is not None and step.output_shape:
             out_str = step.subscript.split("->")[1] if "->" in step.subscript else ""
             out_total = prod(step.output_shape)
-            out_unique = unique_elements(
-                frozenset(out_str), self.size_dict, perm_group=step.output_group
+            out_unique = _unique_elements(
+                frozenset(out_str),
+                self.size_dict,
+                perm_group=step.output_group,  # type: ignore[arg-type]
             )
             if out_unique != out_total:
                 parts.append(f"V:{out_unique:,}/{out_total:,}")
@@ -558,8 +640,10 @@ class PathInfo:
             contracted = frozenset(lhs.replace(",", "")) - frozenset(out_str)
             if contracted:
                 inner_total = prod(self.size_dict[c] for c in contracted)
-                inner_unique = unique_elements(
-                    contracted, self.size_dict, perm_group=step.inner_group
+                inner_unique = _unique_elements(
+                    contracted,
+                    self.size_dict,
+                    perm_group=step.inner_group,  # type: ignore[arg-type]
                 )
                 if inner_unique != inner_total:
                     parts.append(f"W:{inner_unique:,}/{inner_total:,}")
@@ -598,6 +682,7 @@ class PathInfo:
             s.dense_flop_cost > 0 and s.flop_cost != s.dense_flop_cost
             for s in self.steps
         )
+        any_regime = any(hasattr(s, "_regime") for s in self.steps)
 
         contract_width = max(
             len("contract"),
@@ -634,6 +719,15 @@ class PathInfo:
                 default=0,
             ),
         )
+        regime_width = None
+        if any_regime:
+            regime_width = max(
+                len("regime"),
+                max(
+                    (len(getattr(step, "_regime", "-")) for step in self.steps),
+                    default=len("regime"),
+                ),
+            )
         unique_width = None
         if any_unique:
             unique_width = max(
@@ -656,6 +750,8 @@ class PathInfo:
         table.add_column("step", justify="right", no_wrap=True, width=len("step"))
         table.add_column("contract", justify="left", no_wrap=True, width=contract_width)
         table.add_column("subscript", overflow="fold", width=subscript_width)
+        if any_regime:
+            table.add_column("regime", justify="left", no_wrap=True, width=regime_width)
         table.add_column("flops", justify="right", no_wrap=True, width=flops_width)
         table.add_column(
             "dense_flops", justify="right", no_wrap=True, width=dense_width
@@ -677,6 +773,10 @@ class PathInfo:
                 str(i),
                 self._fmt_contract(step),
                 self._rich_subscript_text(step.subscript),
+            ]
+            if any_regime:
+                row.append(getattr(step, "_regime", "-"))
+            row += [
                 f"{step.flop_cost:,}",
                 f"{step.dense_flop_cost:,}",
                 f"{step.symmetry_savings:>7.1%}",
@@ -686,6 +786,47 @@ class PathInfo:
                 row.append(self._fmt_unique_dense(step))
             row.append(self._rich_step_sym_text(step) or "-")
             table.add_row(*row)
+            # Sprint 3 (#55): pre-reduction sub-rows
+            pre_reductions = step.pre_reductions
+            if pre_reductions:
+                from rich.text import Text
+
+                lhs = step.subscript.split("->")[0]
+                operand_subs = lhs.split(",")
+                for pre in pre_reductions:
+                    op_name = f"op{pre.operand_index}"
+                    labels_str = ",".join(pre.removed_labels)
+                    original_sub = (
+                        operand_subs[pre.operand_index]
+                        if 0 <= pre.operand_index < len(operand_subs)
+                        else ""
+                    )
+                    sub_text = Text(
+                        f"  pre-reduce {op_name} {{{labels_str}}}: "
+                        f"{pre.cost:,} ops  "
+                        f"(subscript: {original_sub} → {pre.surviving_subscript})",
+                        style="dim",
+                    )
+                    detail_row = [""] * len(table.columns)
+                    detail_row[2] = sub_text  # type: ignore[call-overload, assignment]
+                    table.add_row(*detail_row)
+                # Residual contraction sub-row
+                residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
+                effective_subs = list(operand_subs)
+                for pre in pre_reductions:
+                    if 0 <= pre.operand_index < len(effective_subs):
+                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                step_output_part = (
+                    step.subscript.split("->")[1] if "->" in step.subscript else ""
+                )
+                residual_subscript = ",".join(effective_subs) + "->" + step_output_part
+                detail_row = [""] * len(table.columns)
+                detail_row[2] = Text(  # type: ignore[call-overload, assignment]
+                    f"  residual contraction: {residual_subscript}  → "
+                    f"{residual_cost:,} ops",
+                    style="dim",
+                )
+                table.add_row(*detail_row)
             if verbose:
                 cumulative += step.flop_cost
                 detail_row = [""] * len(table.columns)
@@ -727,7 +868,7 @@ class PathInfo:
         max_sym_width = max((len(s) for s in sym_strs), default=0)
         header_lines = self._header_lines()
 
-        # Common columns: step, contract, subscript, flops, dense_flops, savings, blas
+        # Common columns: step, contract, subscript, regime, flops, dense_flops, savings, blas
         # Plus: symmetry (when any step has symmetry) and unique/dense (when any
         # step has reduced cost).
         any_unique = any(
@@ -743,12 +884,17 @@ class PathInfo:
             len("unique/total"),
             max((len(self._fmt_unique_dense(s)) for s in self.steps), default=0),
         )
+        regime_strs = [self._fmt_step_regime(s) for s in self.steps]
+        regime_col_width = max(
+            len("regime"), max((len(r) for r in regime_strs), default=0)
+        )
 
         # Build the header line
         cols = [
             f"{'step':>4}",
             f"{'contract':<{contract_col_width}}",
             f"{'subscript':<30}",
+            f"{'regime':<{regime_col_width}}",
             f"{'flops':>14}",
             f"{'dense_flops':>14}",
             f"{'savings':>8}",
@@ -770,6 +916,7 @@ class PathInfo:
                 f"{i:>4}",
                 f"{contract_strs[i]:<{contract_col_width}}",
                 f"{step.subscript:<30}",
+                f"{regime_strs[i]:<{regime_col_width}}",
                 f"{step.flop_cost:>14,}",
                 f"{step.dense_flop_cost:>14,}",
                 f"{step.symmetry_savings:>7.1%}",
@@ -782,6 +929,42 @@ class PathInfo:
                 sym_str = sym_str[: sym_col_width - 1] + "…"
             row_parts.append(f"{sym_str:<{sym_col_width}}")
             lines.append("  ".join(row_parts))
+
+            # Sprint 3 (#55): pre-reduction sub-rows
+            pre_reductions = step.pre_reductions
+            if pre_reductions:
+                indent = " " * 8
+                lhs = step.subscript.split("->")[0]
+                operand_subs = lhs.split(",")
+                # Per-pre-reduction sub-row
+                for pre in pre_reductions:
+                    op_name = f"op{pre.operand_index}"
+                    labels_str = ",".join(pre.removed_labels)
+                    original_sub = (
+                        operand_subs[pre.operand_index]
+                        if 0 <= pre.operand_index < len(operand_subs)
+                        else ""
+                    )
+                    sub_line = (
+                        f"{indent}pre-reduce {op_name} {{{labels_str}}}: "
+                        f"{pre.cost:,} ops  "
+                        f"(subscript: {original_sub} → {pre.surviving_subscript})"
+                    )
+                    lines.append(sub_line)
+                # Residual contraction sub-row
+                residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
+                effective_subs = list(operand_subs)
+                for pre in pre_reductions:
+                    if 0 <= pre.operand_index < len(effective_subs):
+                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                step_output_part = (
+                    step.subscript.split("->")[1] if "->" in step.subscript else ""
+                )
+                residual_subscript = ",".join(effective_subs) + "->" + step_output_part
+                lines.append(
+                    f"{indent}residual contraction: {residual_subscript}  → "
+                    f"{residual_cost:,} ops"
+                )
 
             cumulative += step.flop_cost
             if verbose:
@@ -798,6 +981,17 @@ class PathInfo:
                     f"out_shape={shape_str}",
                     f"cumulative={cumulative:,}",
                 ]
+                # NEW: per-step M / α / −O from attached accumulation.
+                acc_step = getattr(step, "_acc_step", None)
+                if acc_step is not None:
+                    m_value = acc_step.m_total
+                    alpha_value = acc_step.alpha or 0
+                    o_value = (
+                        acc_step.per_component[0].num_output_orbits
+                        if acc_step.per_component
+                        else 0
+                    )
+                    detail_parts.append(f"M={m_value} α={alpha_value} −O={o_value}")
                 lines.append("        " + "  ".join(detail_parts))
 
         return "\n".join(lines)
@@ -836,433 +1030,449 @@ class PathInfo:
         return self.__str__()
 
 
-def _choose_memory_arg(memory_limit: _MemoryLimit, size_list: list[int]) -> int | None:
-    if memory_limit == "max_input":
-        return max(size_list)
+# ── per-step cost helper ───────────────────────────────────────────
 
-    if isinstance(memory_limit, str):
-        raise ValueError(
-            "memory_limit must be None, int, or the string Literal['max_input']."
+
+def symmetric_flop_count(
+    idx_contract,
+    inner,
+    num_terms,
+    size_dict,
+    *,
+    input_subscripts=None,
+    output_subscript=None,
+    input_shapes=None,
+    per_input_groups=None,
+):
+    """Per-step symmetry-aware cost. Delegates to compute_accumulation_cost
+    on the binary sub-expression so path-walker per-step costs match
+    accumulation per-step costs by construction.
+
+    When ``per_input_groups`` is provided (a sequence of SymmetryGroup-or-None,
+    one per input), the cache call uses those as the per-operand symmetry
+    fingerprint so propagated intermediate symmetries reduce the per-step
+    cost.  When None, falls back to all-None fingerprints (legacy/dense path).
+
+    Legacy fallback: when subscripts/shapes are not provided (older callers),
+    falls back to the dense direct-event count from helpers.flop_count.
+    """
+    if input_subscripts is None or input_shapes is None:
+        return helpers.flop_count(
+            idx_contraction=idx_contract,
+            inner=inner,
+            num_terms=num_terms,
+            size_dictionary=size_dict,
         )
 
-    if memory_limit is None:
-        return None
+    from flopscope._accumulation._cache import get_accumulation_cost_cached
+    from flopscope._config import get_setting
 
-    if memory_limit < 1:
-        if memory_limit == -1:
-            return None
-        else:
-            raise ValueError("Memory limit must be larger than 0, or -1")
+    canonical = ",".join(input_subscripts) + "->" + (output_subscript or "")
+    partition_budget = int(get_setting("partition_budget"))  # type: ignore[arg-type]
 
-    return int(memory_limit)
+    if per_input_groups is not None:
+        # Oracle-derived groups encode generators in label-sorted space:
+        # group._labels = alphabetically sorted tuple of subscript chars;
+        # generator[i] = j means label _labels[i] maps to _labels[j].
+        # Source A in _collect_pi_permutations instead expects generators in
+        # tensor-axis space: generator[i] = j means axis i maps to axis j.
+        # Convert by re-expressing each generator via the subscript char order.
+        from flopscope._accumulation._cost import compute_accumulation_cost
+        from flopscope._perm_group import SymmetryGroup as _SG
+        from flopscope._perm_group import _PermutationCompat as _Perm
+
+        def _oracle_group_to_tensor_axes(group: _SG, subscript: str) -> _SG | None:
+            """Re-express an oracle label-sorted group in tensor-axis space.
+
+            The oracle creates SymmetryGroup with _labels = sorted char tuple
+            and axes = identity range.  Source A in the subgraph oracle uses
+            axes[g_pos] as a tensor axis index, so passing the oracle group
+            directly maps position 0 to axis 0, which is wrong when the chars
+            are sorted (not in subscript order).
+
+            This function builds a new SymmetryGroup whose generators act on
+            axis indices of ``subscript`` directly, so Source A interprets them
+            correctly.
+            """
+            if group is None or group._labels is None:
+                return group  # type: ignore[return-value]
+            labels = group._labels  # e.g. ('b', 'c', 'i') sorted
+            char_to_axis = {c: i for i, c in enumerate(subscript)}
+            label_to_lpos = {lbl: k for k, lbl in enumerate(labels)}
+
+            new_gens = []
+            for gen in group.generators:
+                arr = list(gen.array_form)  # label-space permutation
+                axis_gen = list(range(len(subscript)))
+                for ax, char in enumerate(subscript):
+                    if char in label_to_lpos:
+                        lpos = label_to_lpos[char]
+                        target_char = labels[arr[lpos]]
+                        if target_char in char_to_axis:
+                            axis_gen[ax] = char_to_axis[target_char]
+                new_gens.append(_Perm(axis_gen))
+            if not new_gens:
+                return None
+            new_grp = _SG(*new_gens, axes=tuple(range(len(subscript))))
+            return new_grp
+
+        converted = tuple(
+            _oracle_group_to_tensor_axes(g, sub) if g is not None else None
+            for g, sub in zip(per_input_groups, input_subscripts, strict=False)
+        )
+        cost = compute_accumulation_cost(
+            canonical_subscripts=canonical,
+            input_parts=tuple(input_subscripts),
+            output_subscript=output_subscript or "",
+            shapes=tuple(tuple(s) for s in input_shapes),
+            per_op_symmetries=converted,
+            identity_pattern=None,
+            partition_budget=partition_budget,
+        )
+        return cost.total
+
+    sym_fingerprint = tuple(None for _ in input_subscripts)
+    cost = get_accumulation_cost_cached(
+        canonical_subscripts=canonical,
+        input_parts=tuple(input_subscripts),
+        output_subscript=output_subscript or "",
+        shapes=tuple(tuple(s) for s in input_shapes),
+        sym_fingerprint=sym_fingerprint,
+        identity_pattern=None,
+        partition_budget=partition_budget,
+    )
+    return cost.total
 
 
-# Overload for contract_path(einsum_string, *operands)
-@overload
-def contract_path(
-    subscripts: str,
-    *operands: ArrayType,
-    use_blas: bool = True,
-    optimize: OptimizeKind = True,
-    memory_limit: _MemoryLimit = None,
-    shapes: bool = False,
-    symmetry_oracle: SubgraphSymmetryOracle | None = None,
-) -> tuple[PathType, PathInfo]: ...
+# ── build_path_info adapter (Task 5) ───────────────────────────────
 
 
-# Overload for contract_path(operand, indices, operand, indices, ....)
-@overload
-def contract_path(
-    subscripts: ArrayType,
-    *operands: ArrayType | Collection[int],
-    use_blas: bool = True,
-    optimize: OptimizeKind = True,
-    memory_limit: _MemoryLimit = None,
-    shapes: bool = False,
-    symmetry_oracle: SubgraphSymmetryOracle | None = None,
-) -> tuple[PathType, PathInfo]: ...
+def build_path_info(
+    upstream_path,
+    upstream_info,
+    *,
+    size_dict,
+    optimizer_used: str = "",
+    per_op_symmetries=None,
+    identity_pattern=None,
+):
+    """Adapt upstream opt_einsum's PathInfo to flopscope's PathInfo.
 
+    Per-step ``flop_cost`` is recomputed using flopscope's
+    ``_helpers.flop_count`` (FMA = 1 by default; configurable via the
+    ``fma_cost`` setting). ``naive_cost`` and ``optimized_cost`` are also
+    recomputed from the per-step costs.
 
-def contract_path(
-    subscripts: Any,
-    *operands: Any,
-    use_blas: bool = True,
-    optimize: OptimizeKind = True,
-    memory_limit: _MemoryLimit = None,
-    shapes: bool = False,
-    symmetry_oracle: SubgraphSymmetryOracle | None = None,
-) -> tuple[PathType, PathInfo]:
-    """Find a contraction order `path`, without performing the contraction.
+    Parameters
+    ----------
+    upstream_path : list[tuple[int, ...]]
+        The contraction path returned by opt_einsum.contract_path.
+    upstream_info : opt_einsum.contract.PathInfo
+        Upstream's PathInfo with contraction_list, naive_cost, etc.
+    size_dict : dict[str, int]
+        Label -> dimension size mapping.
+    optimizer_used : str, optional
+        Name of the optimizer that produced ``upstream_path``. Propagated
+        into the returned PathInfo for display. Defaults to ``''``.
+    per_op_symmetries : sequence of SymmetryGroup or None, optional
+        Per-operand declared symmetries (parallel to operands). When provided,
+        a SubgraphSymmetryOracle is built and queried per step to populate
+        ``input_groups``, ``output_group``, and ``inner_group`` on each
+        StepInfo. Defaults to ``None`` (all dense, no symmetry).
 
-    Parameters:
-          subscripts: Specifies the subscripts for summation.
-          *operands: These are the arrays for the operation.
-          use_blas: Do you use BLAS for valid operations, may use extra memory for more intermediates.
-          optimize: Choose the type of path the contraction will be optimized with.
-                - if a list is given uses this as the path.
-                - `'optimal'` An algorithm that explores all possible ways of
-                contracting the listed tensors. Scales factorially with the number of
-                terms in the contraction.
-                - `'dp'` A faster (but essentially optimal) algorithm that uses
-                dynamic programming to exhaustively search all contraction paths
-                without outer-products.
-                - `'greedy'` An cheap algorithm that heuristically chooses the best
-                pairwise contraction at each step. Scales linearly in the number of
-                terms in the contraction.
-                - `'random-greedy'` Run a randomized version of the greedy algorithm
-                32 times and pick the best path.
-                - `'random-greedy-128'` Run a randomized version of the greedy
-                algorithm 128 times and pick the best path.
-                - `'branch-all'` An algorithm like optimal but that restricts itself
-                to searching 'likely' paths. Still scales factorially.
-                - `'branch-2'` An even more restricted version of 'branch-all' that
-                only searches the best two options at each step. Scales exponentially
-                with the number of terms in the contraction.
-                - `'auto'` Choose the best of the above algorithms whilst aiming to
-                keep the path finding time below 1ms.
-                - `'auto-hq'` Aim for a high quality contraction, choosing the best
-                of the above algorithms whilst aiming to keep the path finding time
-                below 1sec.
-
-          memory_limit: Give the upper bound of the largest intermediate tensor contract will build.
-                - None or -1 means there is no limit
-                - `max_input` means the limit is set as largest input tensor
-                - a positive integer is taken as an explicit limit on the number of elements
-
-                The default is None. Note that imposing a limit can make contractions
-                exponentially slower to perform.
-
-          shapes: Whether ``contract_path`` should assume arrays (the default) or array shapes have been supplied.
-
-    Returns:
-          path: The optimized einsum contraction path
-          PathInfo: A printable object containing various information about the path found.
-
-    Notes:
-          The resulting path indicates which terms of the input contraction should be
-          contracted first, the result of this contraction is then appended to the end of
-          the contraction list.
-
-    Examples:
-          We can begin with a chain dot example. In this case, it is optimal to
-          contract the b and c tensors represented by the first element of the path (1,
-          2). The resulting tensor is added to the end of the contraction and the
-          remaining contraction, `(0, 1)`, is then executed.
-
-      ```python
-      path_info = contract_path('ij,jk,kl->il', (2,3), (3,4), (4,5), shapes=True)
-      print(path_info[0])
-      #> [(1, 2), (0, 1)]
-      ```
+    Returns
+    -------
+    PathInfo
+        flopscope's PathInfo with FMA-aware per-step costs.
     """
-    if (optimize is True) or (optimize is None):
-        optimize = "auto"
+    from math import prod
 
-    # Track which optimizer is actually invoked, for display in PathInfo.
-    # Resolved below once we know num_ops (for auto/auto-hq's inner choice).
-    optimizer_used: str = ""
+    # Walk the contraction list. Each entry has the shape:
+    #   (idx_contract: tuple[int,...], idx_removed: frozenset[str],
+    #    einsum_str: str, remaining: tuple[str,...] | None, do_blas: bool|str)
+    steps_out: list[StepInfo] = []
+    largest_intermediate = 0
 
-    # Python side parsing
-    operands_ = [subscripts] + list(operands)
-    input_subscripts, output_subscript, operands_prepped = parser.parse_einsum_input(
-        operands_, shapes=shapes
+    # Reconstruct merged_subset tracking from the path itself.
+    # upstream_path[i] gives the original (pre-sort) indices for step i.
+    _first_remaining = (
+        upstream_info.contraction_list[0][3]
+        if upstream_info.contraction_list
+        and upstream_info.contraction_list[0][3] is not None
+        else None
+    )
+    num_ops = (
+        (len(_first_remaining) + 1)
+        if _first_remaining is not None
+        else (len(list(upstream_path)) + 1)
     )
 
-    # Build a few useful list and sets
-    input_list = input_subscripts.split(",")
-    input_sets = [frozenset(x) for x in input_list]
-    if shapes:
-        input_shapes = list(operands_prepped)
-    else:
-        input_shapes = [parser.get_shape(x) for x in operands_prepped]
-    output_set = frozenset(output_subscript)
-    indices = frozenset(input_subscripts.replace(",", ""))
-
-    # Get length of each unique dimension and ensure all dimensions are correct
-    size_dict: dict[str, int] = {}
-    for tnum, term in enumerate(input_list):
-        sh = input_shapes[tnum]
-
-        if len(sh) != len(term):
-            raise ValueError(
-                f"Einstein sum subscript '{input_list[tnum]}' does not contain the "
-                f"correct number of indices for operand {tnum}."
-            )
-        for cnum, char in enumerate(term):
-            dim = int(sh[cnum])
-
-            if char in size_dict:
-                # For broadcasting cases we always want the largest dim size
-                if size_dict[char] == 1:
-                    size_dict[char] = dim
-                elif dim not in (1, size_dict[char]):
-                    raise ValueError(
-                        f"Size of label '{char}' for operand {tnum} ({size_dict[char]}) does not match previous "
-                        f"terms ({dim})."
-                    )
-            else:
-                size_dict[char] = dim
-
-    # Compute size of each input array plus the output array
-    size_list = [
-        helpers.compute_size_by_dict(term, size_dict)
-        for term in input_list + [output_subscript]
-    ]
-    memory_arg = _choose_memory_arg(memory_limit, size_list)
-
-    num_ops = len(input_list)
-
-    # Compute naive cost
-    inner_product = (sum(len(x) for x in input_sets) - len(indices)) > 0
-    naive_cost = helpers.flop_count(indices, inner_product, num_ops, size_dict)
-
-    # Compute the path
-    if optimize is False:
-        path_tuple: PathType = [tuple(range(num_ops))]
-        optimizer_used = "none"
-    elif not isinstance(optimize, (str, paths.PathOptimizer)):
-        # Custom path supplied (a list of tuples)
-        path_tuple = optimize  # type: ignore
-        optimizer_used = "explicit_path"
-    elif num_ops <= 2:
-        # Nothing to be optimized
-        path_tuple = [tuple(range(num_ops))]
-        optimizer_used = "trivial"
-    elif isinstance(optimize, paths.PathOptimizer):
-        # Custom path optimizer instance supplied
-        if symmetry_oracle is not None:
-            try:
-                path_tuple = optimize(
-                    input_sets,
-                    output_set,
-                    size_dict,
-                    memory_arg,
-                    symmetry_oracle=symmetry_oracle,
-                )
-            except TypeError:
-                path_tuple = optimize(input_sets, output_set, size_dict, memory_arg)
-        else:
-            path_tuple = optimize(input_sets, output_set, size_dict, memory_arg)
-        optimizer_used = type(optimize).__name__
-    else:
-        path_optimizer = paths.get_path_fn(optimize)
-        if symmetry_oracle is not None:
-            path_tuple = path_optimizer(
-                input_sets,
-                output_set,
-                size_dict,
-                memory_arg,
-                symmetry_oracle=symmetry_oracle,  # type: ignore[call-arg]
-            )
-        else:
-            path_tuple = path_optimizer(input_sets, output_set, size_dict, memory_arg)
-        # Resolve auto/auto-hq to the inner choice the routing made.
-        if optimize == "auto":
-            inner_fn = paths._AUTO_CHOICES.get(num_ops, paths.greedy)
-            optimizer_used = getattr(inner_fn, "__name__", str(inner_fn))
-        elif optimize == "auto-hq":
-            from ._path_random import random_greedy_128
-
-            inner_fn = paths._AUTO_HQ_CHOICES.get(num_ops, random_greedy_128)
-            optimizer_used = getattr(inner_fn, "__name__", str(inner_fn))
-        else:
-            optimizer_used = optimize
-
-    cost_list = []
-    scale_list = []
-    size_list = []
-    contraction_list = []
-    step_infos: list[StepInfo] = []
-
-    # Track symmetries through contractions using the oracle
-    # ssa_ids[position] gives the SSA id for that operand position in input_list
-    ssa_ids: list[int] = list(range(num_ops))
-    next_ssa = num_ops
-
-    # ssa_to_subset: maps SSA id -> frozenset of original operand indices.
-    # Always populated (even without an oracle) so that StepInfo.merged_subset
-    # is available for display, since the subset reconstruction is cheap and
-    # purely a function of the path.
+    # ssa_to_subset tracks which original operands each SSA id covers.
     ssa_to_subset: dict[int, frozenset[int]] = {
         k: frozenset({k}) for k in range(num_ops)
     }
+    ssa_ids: list[int] = list(range(num_ops))
+    next_ssa = num_ops
 
-    # Build contraction tuple (positions, gemm, einsum_str, remaining)
-    for cnum, contract_inds in enumerate(path_tuple):
-        # Preserve the original (path-supplied) tuple for display before
-        # we sort it for the popping convention.
-        original_path_tuple = tuple(contract_inds)
-        # Make sure we remove inds from right to left
-        contract_inds = tuple(sorted(contract_inds, reverse=True))
+    # Bug B fix: build a SubgraphSymmetryOracle from the declared operand
+    # symmetries so per-step input_groups / output_group / inner_group are
+    # populated correctly instead of always being empty / None.
+    # The oracle is built once here and queried per step below.
+    oracle = None
+    if per_op_symmetries is not None:
+        orig_input_parts = getattr(upstream_info, "input_subscripts", None)
+        orig_output = getattr(upstream_info, "output_subscript", "")
+        if orig_input_parts is not None:
+            _orig_parts_list = orig_input_parts.split(",")
+            if len(_orig_parts_list) == num_ops:
+                try:
+                    import numpy as _np
 
-        # Snapshot per-operand index sets before find_contraction mutates
-        # input_sets (needed for Φ cost model's per-operand free counts).
-        _pre_input_sets = [input_sets[ci] for ci in contract_inds]
+                    from flopscope._opt_einsum._subgraph_symmetry import (
+                        SubgraphSymmetryOracle,
+                    )
 
-        contract_tuple = helpers.find_contraction(contract_inds, input_sets, output_set)
-        out_inds, input_sets, idx_removed, idx_contract = contract_tuple
+                    # Build dummy operands with the right shapes, then alias
+                    # positions in the same identity-group to share object
+                    # identity.  The oracle's Source-B (identical-operand
+                    # swap) and Source-C (coordinated relabel) π-generators
+                    # rely on object identity (``_dummy_ops[i] is _dummy_ops[j]``);
+                    # without aliasing, residual symmetries that come from
+                    # identical operands (e.g. A @ A → S₂ on output) would
+                    # silently be omitted from the per-step annotation.
+                    _dummy_ops: list = [
+                        _np.empty(tuple(size_dict[c] for c in part))
+                        for part in _orig_parts_list
+                    ]
+                    if identity_pattern is not None:
+                        for _group in identity_pattern:
+                            _canonical = _dummy_ops[_group[0]]
+                            for _pos in _group[1:]:
+                                _dummy_ops[_pos] = _canonical
 
-        # Compute cost using oracle if available
-        subset_sym = None  # assigned below when symmetry_oracle is not None
-        _step_inner_applied = False  # assigned below when symmetry_oracle is not None
-        if symmetry_oracle is not None:
-            # Look up each input's symmetry from the oracle before merging.
-            # This is used both for cost computation (via merged_subset →
-            # result_sym) and for BLAS classification (input_groups
-            # enables SYMM/SYMV/SYDT labelling in can_blas).
-            step_syms: list = [None] * len(contract_inds)
-            merged_subset: frozenset[int] = frozenset()
-            for pos_in_step, ci in enumerate(contract_inds):
-                ssa_id = ssa_ids[ci]
-                subset_i = ssa_to_subset[ssa_id]
-                step_syms[pos_in_step] = symmetry_oracle.sym(subset_i).output
-                merged_subset = merged_subset | subset_i
+                    def _sym_to_group_list(sym: Any, subscript: str) -> list | None:
+                        """Convert per_op_symmetry entry → oracle per_op_groups list.
 
-            subset_sym = symmetry_oracle.sym(merged_subset)
-            result_sym = subset_sym.output
+                        Source A generators in ``_collect_pi_permutations`` require
+                        ``group._labels`` to be populated (the function short-circuits
+                        on ``group._labels is None``).  User-supplied groups created
+                        via ``SymmetryGroup.symmetric(axes=...)`` have ``axes`` set
+                        but ``_labels`` empty, so we synthesize labels here from the
+                        operand's subscript at the symmetry's axis positions.
 
-            # Per-operand free index counts for Φ cost model.
-            _free_counts = tuple(len(s - idx_removed) for s in _pre_input_sets)
+                        We build a fresh ``SymmetryGroup`` so the user's object
+                        stays untouched (the oracle is per-call and these clones
+                        live only for its duration).
+                        """
+                        if sym is None:
+                            return None
+                        if not isinstance(sym, SymmetryGroup):
+                            return None
+                        if sym._labels is not None:
+                            return [sym]
+                        if sym.axes is None:
+                            return [sym]
+                        try:
+                            labels = tuple(subscript[ax] for ax in sym.axes)
+                        except (IndexError, TypeError):
+                            return None
+                        clone = SymmetryGroup(*sym.generators, axes=sym.axes)
+                        clone._labels = labels
+                        return [clone]
 
-            from flopscope._config import get_setting
+                    oracle = SubgraphSymmetryOracle(
+                        operands=_dummy_ops,
+                        subscript_parts=_orig_parts_list,
+                        per_op_groups=[
+                            _sym_to_group_list(s, part)
+                            for s, part in zip(
+                                per_op_symmetries, _orig_parts_list, strict=False
+                            )
+                        ],
+                        output_chars=orig_output,
+                    )
+                except Exception:
+                    oracle = None
 
-            _use_inner = bool(get_setting("use_inner_symmetry"))
+    # SSA current-subsets list for oracle queries — parallel to ssa_ids list.
+    # Each entry is the frozenset of original operand indices covered by the
+    # corresponding current operand.  Starts as singletons.
+    current_oracle_subsets: list[frozenset[int]] = [
+        frozenset({k}) for k in range(num_ops)
+    ]
 
-            cost = symmetric_flop_count(
-                idx_contract,
-                bool(idx_removed),
-                len(contract_inds),
-                size_dict,
-                output_group=subset_sym.output,
-                output_indices=out_inds,
-                inner_group=subset_sym.inner,
-                inner_indices=idx_removed if idx_removed else None,
-                use_inner_symmetry=_use_inner,
-                per_operand_free_counts=_free_counts,
-            )
+    for step_idx, entry in enumerate(upstream_info.contraction_list):
+        idx_removed = entry[1]  # frozenset of label chars removed (inner product)
+        einsum_str = entry[2]  # e.g. "jk,ij->ik"
+        do_blas = entry[4]  # BLAS classification string or False
 
-            # Determine whether inner symmetry was actually applied at
-            # this step (for display: W✓ vs W).
-            _step_inner_applied = False
-            if _use_inner and subset_sym.inner is not None and idx_removed:
-                _gl = (
-                    set(subset_sym.inner._labels) if subset_sym.inner._labels else set()
-                )
-                _step_inner_applied = bool(_gl and _gl <= set(idx_removed))
+        # The original path indices for this step (pre-sort, from upstream_path).
+        original_path_tuple: tuple[int, ...] = tuple(upstream_path[step_idx])
+
+        if "->" in einsum_str:
+            lhs, rhs = einsum_str.split("->", 1)
         else:
-            step_syms = [None] * len(contract_inds)
-            result_sym = None
-            cost = helpers.flop_count(
-                idx_contract, bool(idx_removed), len(contract_inds), size_dict
-            )
+            lhs, rhs = einsum_str, ""
 
-        # Dense cost is always the opt_einsum flop_count (no symmetry)
-        dense_cost = helpers.flop_count(
-            idx_contract, bool(idx_removed), len(contract_inds), size_dict
+        lhs_parts = lhs.split(",")
+        num_terms = len(lhs_parts)
+
+        # Reconstruct idx_contraction (set of all labels touched) from lhs
+        idx_contraction: frozenset[str] = frozenset(
+            c for part in lhs_parts for c in part
         )
 
-        cost_list.append(cost)
-        scale_list.append(len(idx_contract))
-        size_list.append(helpers.compute_size_by_dict(out_inds, size_dict))
+        inner = bool(idx_removed)
 
-        tmp_inputs = [input_list.pop(x) for x in contract_inds]
-        tmp_shapes = [input_shapes.pop(x) for x in contract_inds]
+        input_shapes_for_step: list[tuple[int, ...]] = [
+            tuple(size_dict[c] for c in part) for part in lhs_parts
+        ]
+        output_shape_for_step: tuple[int, ...] = tuple(size_dict[c] for c in rhs)
 
-        # Update SSA id tracking: compute merged subset and assign new SSA id.
-        # Always tracked (even without an oracle) so StepInfo.merged_subset
-        # is available for display.
+        # Bug B fix: query the oracle for per-step symmetry groups BEFORE computing
+        # cost so that propagated intermediate symmetries reduce the per-step cost.
+        # The oracle uses current_oracle_subsets (not yet updated for this step)
+        # so querying before the SSA merge gives us the current inputs' symmetries.
+        step_input_groups: list = []
+        step_output_group: object | None = None
+        step_inner_group: object | None = None
+
+        # Reconstruct merged_subset by tracking which original operands each
+        # SSA id covers. The path gives us the positions to contract.
+        contract_positions = tuple(sorted(original_path_tuple, reverse=True))
         new_merged_subset: frozenset[int] = frozenset()
-        for ci in contract_inds:
-            ssa_id = ssa_ids[ci]
-            new_merged_subset = new_merged_subset | ssa_to_subset[ssa_id]
-        for ci in contract_inds:
-            ssa_ids.pop(ci)
+        for ci in contract_positions:
+            if ci < len(ssa_ids):
+                new_merged_subset = new_merged_subset | ssa_to_subset[ssa_ids[ci]]
+
+        if oracle is not None:
+            try:
+                # Gather which oracle-tracked subsets map to each lhs input.
+                # opt_einsum pops positions highest-to-lowest (contract_positions
+                # is sorted descending), so the lhs subscript order matches
+                # the descending-position order of the path entry.
+                step_input_subsets = [
+                    current_oracle_subsets[pos]
+                    for pos in sorted(original_path_tuple, reverse=True)
+                    if pos < len(current_oracle_subsets)
+                ]
+                for inp_subset in step_input_subsets:
+                    ss = oracle.sym(inp_subset)
+                    step_input_groups.append(ss.output)  # V-side group for this input
+                # For output_group and inner_group, query the merged subset.
+                merged_ss = oracle.sym(new_merged_subset)
+                step_output_group = merged_ss.output
+                step_inner_group = merged_ss.inner
+            except Exception:
+                step_input_groups = []
+                step_output_group = None
+                step_inner_group = None
+
+        cost = symmetric_flop_count(
+            idx_contraction,
+            inner,
+            num_terms,
+            size_dict,
+            input_subscripts=lhs_parts,
+            output_subscript=rhs,
+            input_shapes=input_shapes_for_step,
+            per_input_groups=step_input_groups if step_input_groups else None,
+        )
+
+        # Dense cost: what this step would cost without any symmetry reduction.
+        step_dense_flop_cost = helpers.flop_count(
+            idx_contraction,
+            inner,
+            num_terms,
+            size_dict,
+            input_subscripts=lhs_parts,
+            output_subscript=rhs,
+            input_shapes=input_shapes_for_step,
+        )
+        # Fraction of dense cost saved by symmetry (0.0 when no symmetry or
+        # when the accumulation model costs more than the dense baseline due to
+        # FMA vs. flop_count differences on this branch).
+        step_symmetry_savings = (
+            max(0.0, 1.0 - cost / step_dense_flop_cost)
+            if step_dense_flop_cost > 0
+            else 0.0
+        )
+
+        if output_shape_for_step:
+            largest_intermediate = max(
+                largest_intermediate, prod(output_shape_for_step)
+            )
+
+        # Complete the SSA merge (popping positions into next_ssa).
+        for ci in contract_positions:
+            if ci < len(ssa_ids):
+                ssa_ids.pop(ci)
         ssa_to_subset[next_ssa] = new_merged_subset
         ssa_ids.append(next_ssa)
         next_ssa += 1
 
-        if use_blas:
-            do_blas = blas.can_blas(
-                tmp_inputs,
-                "".join(out_inds),
-                idx_removed,
-                tmp_shapes,  # type: ignore[arg-type]
-                input_groups=step_syms if symmetry_oracle is not None else None,
+        # Update current_oracle_subsets to mirror the SSA merge above.
+        # Guard against out-of-range indices the same way the ssa_ids loop does.
+        _oracle_contract_positions = tuple(
+            pos
+            for pos in sorted(original_path_tuple, reverse=True)
+            if pos < len(current_oracle_subsets)
+        )
+        if _oracle_contract_positions:
+            merged_oracle_subset: frozenset[int] = frozenset().union(
+                *(current_oracle_subsets[pos] for pos in _oracle_contract_positions)
             )
+            for pos in _oracle_contract_positions:
+                current_oracle_subsets.pop(pos)
+            current_oracle_subsets.append(merged_oracle_subset)
         else:
-            do_blas = False
+            current_oracle_subsets.append(frozenset())
 
-        # Last contraction
-        if (cnum - len(path_tuple)) == -1:
-            idx_result = output_subscript
-        else:
-            # use tensordot order to minimize transpositions
-            all_input_inds = "".join(tmp_inputs)
-            idx_result = "".join(sorted(out_inds, key=all_input_inds.find))
-
-        shp_result = parser.find_output_shape(tmp_inputs, tmp_shapes, idx_result)
-
-        input_list.append(idx_result)
-        input_shapes.append(shp_result)
-
-        einsum_str = ",".join(tmp_inputs) + "->" + idx_result
-
-        # Build StepInfo
-        step_flop = cost
-        step_dense = dense_cost
-        savings = 1.0 - (step_flop / step_dense) if step_dense > 0 else 0.0
-
-        step_infos.append(
+        steps_out.append(
             StepInfo(
                 subscript=einsum_str,
-                flop_cost=step_flop,
-                input_shapes=list(tmp_shapes),
-                output_shape=shp_result,
-                input_groups=list(step_syms),
-                output_group=result_sym,
-                inner_group=(subset_sym.inner if symmetry_oracle is not None else None),  # type: ignore[union-attr]
-                dense_flop_cost=step_dense,
-                symmetry_savings=savings,
+                flop_cost=cost,
+                input_shapes=input_shapes_for_step,
+                output_shape=output_shape_for_step,
                 blas_type=do_blas,
-                inner_applied=(
-                    _step_inner_applied if symmetry_oracle is not None else False
-                ),
                 path_indices=original_path_tuple,
                 merged_subset=new_merged_subset,
+                # Diagnostic fields: dense baseline and symmetry savings.
+                dense_flop_cost=step_dense_flop_cost,
+                symmetry_savings=step_symmetry_savings,
+                # Bug B fix: symmetry groups from oracle (empty list / None when
+                # per_op_symmetries was not provided or oracle build failed).
+                input_groups=step_input_groups,
+                output_group=step_output_group,
+                inner_group=step_inner_group,
             )
         )
 
-        # for large expressions saving the remaining terms at each step can
-        # incur a large memory footprint - and also be messy to print
-        if len(input_list) <= 20:
-            remaining: tuple[str, ...] | None = tuple(input_list)
-        else:
-            remaining = None
+    optimized_cost = sum(s.flop_cost for s in steps_out)
 
-        contraction = (contract_inds, idx_removed, einsum_str, remaining, do_blas)
-        contraction_list.append(contraction)
+    # Bug A fix: naive_cost uses the same α/M model as the per-step dense_flop_cost
+    # (helpers.flop_count, no symmetry), so header "Savings" and per-step "savings"
+    # columns are computed from the same model.  The old approach used
+    # helpers.flop_count over ALL labels as if they were contracted in one shot,
+    # which can be a very different number than the sum of per-step dense costs.
+    naive_cost = sum(s.dense_flop_cost for s in steps_out)
 
-    opt_cost = sum(cost_list)
+    speedup = (naive_cost / optimized_cost) if optimized_cost > 0 else 1.0
 
-    # naive_cost already computed with flop_count
-    optimized_cost = sum(s.flop_cost for s in step_infos)
-
-    path_print = PathInfo(
-        path=list(path_tuple),
-        steps=step_infos,
+    return PathInfo(
+        path=list(upstream_path),
+        steps=steps_out,
         naive_cost=naive_cost,
         optimized_cost=optimized_cost,
-        largest_intermediate=max(size_list, default=1),
-        speedup=naive_cost / max(optimized_cost, 1),
-        input_subscripts=input_subscripts,
-        output_subscript=output_subscript,
+        largest_intermediate=largest_intermediate,
+        speedup=speedup,
+        input_subscripts=getattr(upstream_info, "input_subscripts", ""),
+        output_subscript=getattr(upstream_info, "output_subscript", ""),
         size_dict=dict(size_dict),
         optimizer_used=optimizer_used,
-        contraction_list=contraction_list,
-        scale_list=scale_list,
-        size_list=size_list,
+        contraction_list=list(upstream_info.contraction_list),
+        scale_list=list(getattr(upstream_info, "scale_list", [])),
+        size_list=list(getattr(upstream_info, "size_list", [])),
         _oe_naive_cost=naive_cost,
-        _oe_opt_cost=opt_cost,
+        _oe_opt_cost=optimized_cost,
     )
-
-    return path_tuple, path_print

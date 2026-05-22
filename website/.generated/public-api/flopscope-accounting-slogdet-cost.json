@@ -200,7 +200,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.slogdet_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L110",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L115",
   "href": "/docs/api/accounting/slogdet-cost/",
   "import_path": "flopscope.accounting.slogdet_cost",
   "is_operation_cost_leaf": false,

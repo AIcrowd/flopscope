@@ -162,7 +162,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.pinv_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L209",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215",
   "href": "/docs/api/accounting/pinv-cost/",
   "import_path": "flopscope.accounting.pinv_cost",
   "is_operation_cost_leaf": false,

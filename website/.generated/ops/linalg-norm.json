@@ -896,7 +896,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.norm",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L208",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L214",
   "href": "/docs/api/numpy/linalg/norm/",
   "legacy_href": "/docs/api/ops/linalg-norm/",
   "module": "numpy.linalg",

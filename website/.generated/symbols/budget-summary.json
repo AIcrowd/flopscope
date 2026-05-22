@@ -183,7 +183,7 @@
   "related_guides": [],
   "signature": "flops.budget_summary(by_namespace: 'bool' = False)",
   "slug": "budget-summary",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L422",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_display.py#L443",
   "status_note": "",
   "summary": "Render the session-wide budget summary.",
   "upstream_source_url": ""

@@ -222,7 +222,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.rand",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L117",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L122",
   "href": "/docs/api/numpy/random/rand/",
   "import_path": "flopscope.numpy.random.rand",
   "is_operation_cost_leaf": true,

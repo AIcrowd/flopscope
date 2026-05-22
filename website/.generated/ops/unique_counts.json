@@ -239,7 +239,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unique_counts",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L335",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L353",
   "href": "/docs/api/numpy/unique-counts/",
   "legacy_href": "/docs/api/ops/unique_counts/",
   "module": "numpy",

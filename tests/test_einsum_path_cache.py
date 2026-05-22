@@ -1,9 +1,16 @@
-"""Tests for einsum path caching."""
+"""Tests for einsum path caching.
+
+Path and accumulation caches are now separate (see _einsum.py Decision Q1):
+- _path_cache: caches (subscripts, shapes, optimize) -> path_info
+- _accumulation_cache: caches (subscripts, shapes, sym_fingerprint) -> AccumulationResult
+
+The deleted _symmetry_fingerprint / SubgraphSymmetryOracle tests are removed entirely.
+"""
 
 import numpy
 
 from flopscope._config import configure, get_setting
-from flopscope._einsum import _identity_pattern, _symmetry_fingerprint
+from flopscope._einsum import _identity_pattern
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetric import SymmetricTensor
 
@@ -21,36 +28,11 @@ def test_einsum_path_cache_size_configurable():
         configure(einsum_path_cache_size=original)
 
 
-def test_symmetry_fingerprint_no_symmetry():
-    A = numpy.ones((3, 4))
-    B = numpy.ones((4, 5))
-    fp = _symmetry_fingerprint([A, B], ["ij", "jk"])
-    assert fp == (None, None)
-
-
-def test_symmetry_fingerprint_with_symmetry():
-    data = numpy.ones((3, 3))
-    S = SymmetricTensor(data, symmetry=SymmetryGroup.symmetric(axes=(0, 1)))
-    fp = _symmetry_fingerprint([S], ["ij"])
-    assert fp != (None,)
-    assert isinstance(fp, tuple)
-    # Fingerprint is hashable
-    hash(fp)
-
-
-def test_symmetry_fingerprint_deterministic():
-    data = numpy.ones((3, 3))
-    S = SymmetricTensor(data, symmetry=SymmetryGroup.symmetric(axes=(0, 1)))
-    fp1 = _symmetry_fingerprint([S], ["ij"])
-    fp2 = _symmetry_fingerprint([S], ["ij"])
-    assert fp1 == fp2
-
-
 def test_identity_pattern_distinct():
     A = numpy.ones((3, 4))
     B = numpy.ones((4, 5))
     pat = _identity_pattern([A, B])
-    # Distinct objects → no grouping, all singletons → normalized to None
+    # Distinct objects -> no grouping, all singletons -> normalized to None
     assert pat is None
 
 

@@ -43,7 +43,7 @@
   "related_guides": [],
   "signature": "flops.random.sample(*args, **kwargs)",
   "slug": "random-sample",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L301",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L371",
   "status_note": "",
   "summary": "Counted version of ``flops.random.random.sample``. Cost: numel(output) FLOPs.",
   "upstream_source_url": ""

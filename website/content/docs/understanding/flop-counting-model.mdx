@@ -10,13 +10,17 @@ title: "FLOP Counting Model"
 - How symmetry savings and per-operation weights modify costs
 - How the FLOP multiplier and namespaces interact with the cost model
 
-## Convention: FMA = 1 operation
+## FMA convention: textbook (multiply + add = 2 operations)
 
-This codebase counts a fused multiply-add (a * b + c) as a **single operation**.
-Hardware FMA units execute this in one instruction; the common textbook
-convention of counting it as 2 (one multiply + one add) is **not** used here.
-All cost formulae reflect this: a matrix multiply of dimensions
-(m, k) x (k, n) costs m*k*n operations, not 2*m*k*n.
+flopscope counts a fused multiply-add (`a * b + c`) as **2 operations** —
+one multiply + one add, counted separately. This matches the textbook /
+opt_einsum convention. Under this model, dense matmul of `(m, k)` × `(k, n)`
+costs `2·m·k·n − m·n` FLOPs (m·n output cells, each doing k multiplies and
+k−1 adds with the accumulator initialized from the first product).
+
+There is no longer a configurable knob — the previous `flops.fma_cost()` /
+`flops.configure(fma_cost=...)` API was removed in the 2026-05-20
+unification. flopscope is FMA=2-only.
 
 ## Why FLOPs instead of wall-clock time
 
@@ -46,14 +50,16 @@ model instead.
 
 | Category | Formula | Example |
 |----------|---------|---------|
-| **Einsum** | Per-step: product of all index dims | `'ij,jk->ik'` → 3 × 4 × 5 = 60 |
 | **Unary** (exp, log, sqrt, ...) | $\text\{numel\}(\text\{output\})$ | shape (256, 256) → 65,536 |
 | **Binary** (add, multiply, ...) | $\text\{numel\}(\text\{output\})$ | shape (256, 256) → 65,536 |
-| **Reduction** (sum, mean, max, ...) | $\text\{numel\}(\text\{input\})$ | shape (256, 256) → 65,536 |
 | **SVD** | $m \cdot n \cdot k$ | (256, 256, k=10) → 655,360 |
 | **Solve** | $n^3$ | (256, 256) solve → 16,777,216 |
 | **Dot / Matmul** | Same as einsum | (256, 256) @ (256, 256) → 256³ |
 | **Free ops** | 0 | zeros, reshape, etc. |
+
+**Einsum.** flopscope's charge for `fnp.einsum(...)` is path-independent and orbit-aware: one event per unique multiplication across operands, plus one event per unique accumulation per output cell. For unsymmetric inputs, this reduces to the familiar dense formulas (`m*k*n` for `'ij,jk->ik'`, etc.). For inputs with declared or detected symmetry, both event counts drop. See [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for the mental model and worked examples.
+
+**Reductions.** flopscope's charge for `fnp.sum`, `fnp.prod`, `fnp.max`, `fnp.min`, `fnp.mean`, and friends is `(unique input entries − unique output cells) + extra ops`. The `− unique output cells` term is the off-by-one fix from issue #56: `sum((10,))` charges 9, not 10. `fnp.median` / `fnp.percentile` / `fnp.quantile` use a separate selection-style cost surface. See [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for details.
 
 ### Sorting & search
 
@@ -87,122 +93,19 @@ When a tensor is a `SymmetricTensor`, costs are reduced based on the number of u
 | Category | Symmetric cost | Standard cost |
 |----------|---------------|---------------|
 | **Pointwise** (unary/binary) | unique_elements | $\text\{numel\}(\text\{output\})$ |
-| **Reduction** | unique_elements | $\text\{numel\}(\text\{input\})$ |
-| **Einsum** (symmetric contraction) | Symmetry-reduced (see below) | Full product |
 | **Solve** | $n^3$ | $n^3$ |
 | **Det / Slogdet** | $n^3$ | $n^3$ |
 | **Inv** | $n^3/3 + n^3$ | $n^3$ |
 
-See [Exploit Symmetry Savings](/docs/guides/symmetry/) for usage details.
-
-### Subgraph symmetry detection
-
-Symmetry that reduces einsum costs comes from two complementary sources,
-both unified under the **subgraph symmetry detection** algorithm:
-
-1. **Declared per-operand symmetry.** When an operand is wrapped with
-   `flops.as_symmetric()`, its symmetry groups are embedded in the bipartite
-   graph as U-vertex equivalence classes. These propagate into intermediate
-   tensors automatically.
-
-2. **Induced symmetry from repeated operands.** When the same Python object
-   is passed at multiple operand positions, the subgraph oracle detects this
-   via Python identity (`is`) and derives symmetry groups on the output that
-   cannot be seen from per-operand metadata alone.
-
-The oracle builds a bipartite graph once per `contract_path` call and
-evaluates symmetry lazily per subset of operands encountered during path
-search. Both sources are merged via the same group-merging machinery, so a
-tensor that is both `SymmetricTensor` and also repeated in the subscript
-benefits from both contributions simultaneously.
-
-See the
-[symmetry guide](/docs/guides/symmetry/)
-for usage examples, and the
-[subgraph symmetry explanation](/docs/understanding/symmetry-detection/)
-for the algorithm walkthrough.
+Einsum and reduction savings are no longer captured by a single "symmetric cost vs standard cost" cell — both are computed by the orbit-aware α/M direct-event model, where the savings depend on the *output orbit* structure rather than per-operand element counts. See [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for the mental model and worked examples, and [Exploit Symmetry Savings](/docs/guides/symmetry/) for usage details.
 
 ## Einsum cost model
 
-Every einsum — regardless of the number of operands — is decomposed into
-pairwise contraction steps along an optimal path (found via flopscope's
-[opt_einsum fork](/docs/api/)).
-The total cost is the sum of per-step costs:
+flopscope's charge for `fnp.einsum(...)` uses the orbit-aware α/M direct-event count: one event per unique multiplication across operands, plus one event per unique accumulation per output cell. The total is path-independent — the same number is charged regardless of which contraction path opt_einsum picks.
 
-```
-total_cost = sum(step.flop_cost for step in path.steps)
-```
+For inputs with no declared symmetry, this reduces to the familiar dense formulas. For inputs with declared or detected symmetry (including symmetry detected from repeated operand objects), both event counts drop in proportion to the output-orbit collapse.
 
-### Per-step cost
-
-For each pairwise step, the **dense** cost is:
-
-```
-dense_step_cost = product of all index dimensions
-```
-
-Each fused multiply-add (FMA) counts as 1 operation (see
-[Convention](#convention-fma--1-operation) above), so the cost of a
-contraction step is simply the product of all index dimensions — there is
-no factor-of-2 distinction between inner products and outer products.
-
-When symmetry is present, flopscope reduces each step's cost based on
-the structure of the contraction.
-
-### Symmetric contraction cost
-
-Each pairwise step's cost is reduced by two independent multiplicative
-factors — one for the output (V-side) indices and one for the inner
-(W-side) contracted indices:
-
-```
-step_cost = dense_step_cost
-          × (unique_output_elements / total_output_elements)
-          × (unique_inner_elements / total_inner_elements)
-```
-
-Each ratio is computed exactly using **Burnside's lemma** over the
-permutation group detected for that step by the
-[`SubgraphSymmetryOracle`](/docs/understanding/symmetry-detection/). For the
-full symmetric group S$_k$ on $k$ equal-sized axes, Burnside reduces to
-the stars-and-bars formula $\binom\{n+k-1\}\{k\}$; for proper subgroups like
-$C_k$ or block groups the oracle returns the exact generators and
-Burnside counts over the enumerated elements.
-
-The **output (V-side) reduction** is always applied when the step's
-intermediate has a non-trivial permutation group on its free indices —
-only the unique output elements need to be computed.
-
-The **inner (W-side) reduction** is applied only when *all* labels in
-the detected inner group are present as contracted indices in that
-specific pairwise step. If any of those labels were contracted at an
-earlier step and no longer appear in the current step, the inner
-reduction is skipped (the per-step table shows this as `[W: ...]` when
-detected-but-not-applied versus `[W✓: ...]` when applied). Inner
-symmetry can be toggled globally with
-`flops.configure(use_inner_symmetry=False)`.
-
-The two factors are independent; outer-product contractions (no summed
-indices) and non-uniform index dimensions are handled by the same
-formula, since Burnside's lemma makes no assumption about uniform sizes
-beyond requiring axes in the same orbit to share a dimension.
-
-### Multi-operand contractions
-
-For a simple two-operand einsum like `'ij,jk->ik'`, there is one step,
-so the total cost equals the step cost. For multi-operand einsums (3+
-tensors), the optimizer finds the pairwise ordering that minimizes the
-total cost.
-
-When symmetric tensors are present, the optimizer is symmetry-aware: it
-uses symmetric costs to decide which pair to contract at each step, so the
-returned path may differ from the dense-optimal path. Symmetry propagates
-through intermediates — if an early contraction produces a symmetric
-intermediate, subsequent steps benefit from the reduced element count, and
-the optimizer factors this into its ordering decisions.
-
-Use `fnp.einsum_path()` to inspect the per-step breakdown. See
-[Use Einsum](/docs/guides/einsum/) for examples.
+See [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for the mental model, worked examples, and the public inspection API (`flops.einsum_accumulation_cost(...)`).
 
 ## Per-operation weights
 
@@ -235,7 +138,7 @@ The formula is:
 $$w(\text\{op\}) = \max\bigl(\alpha_\{\text\{raw\}\}(\text\{op\}) - \text\{overhead\}_\{\text\{category\}\}, \ 0\bigr)$$
 
 where $\alpha_\{\text\{raw\}\}$ is the median ratio of hardware-observed FP
-instructions to analytical FLOPs (FMA = 1 op), measured via
+instructions to analytical FLOPs (FMA = 2 ops, textbook), measured via
 `fp_arith_inst_retired` performance counters. The ufunc dispatch overhead
 (measured from `np.abs`, which generates zero FP arithmetic) is subtracted
 per category to remove numpy implementation noise from the weight.

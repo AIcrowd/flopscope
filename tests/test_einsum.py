@@ -22,14 +22,21 @@ def test_matmul_flop_cost():
     B = numpy.ones((4, 5))
     with BudgetContext(flop_budget=10**6) as budget:
         einsum("ij,jk->ik", A, B)
-        assert budget.flops_used == 60  # 3*4*5 * op_factor(1), FMA=1
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form).
+        # First cell of each output orbit is a free copy.
+        assert budget.flops_used == 105
 
 
 def test_trace():
     A = numpy.eye(10)
     with BudgetContext(flop_budget=10**6) as budget:
         result = einsum("ii->", A)
-        assert budget.flops_used == 10  # 10 * op_factor(1), FMA=1
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 0 + 10 - 1 = 9 (scalar output: first cell is a free copy).
+        assert budget.flops_used == 9
     assert float(result) == 10.0
 
 
@@ -39,6 +46,10 @@ def test_outer_product():
     with BudgetContext(flop_budget=10**6) as budget:
         result = einsum("i,j->ij", a, b)
         assert result.shape == (3, 4)
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits) = 12.
+        # Outer product has no summed axes; alpha == num_output_orbits so the
+        # accumulation term collapses, leaving only the multiplications.
         assert budget.flops_used == 12
 
 
@@ -47,7 +58,10 @@ def test_batch_matmul():
     B = numpy.ones((2, 4, 5))
     with BudgetContext(flop_budget=10**6) as budget:
         einsum("bij,bjk->bik", A, B)
-        assert budget.flops_used == 120  # 2*3*4*5 * op_factor(1), FMA=1
+        # direct-event model with off-by-one correction:
+        # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
+        # = 120 + 120 - 30 = 210. First cell of each output orbit is a free copy.
+        assert budget.flops_used == 210
 
 
 def test_symmetry_valid():

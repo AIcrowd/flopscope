@@ -6,6 +6,8 @@ requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
     "numpy>=2.0.0,<2.5.0",
+    "opt_einsum>=3.3.0,<4.0.0",
+    "rich>=14.3.3",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +73,10 @@ extend-select = ["B", "C4", "UP"]
 # Deferred imports after version-check call trigger E402; compact guards use E701
 "src/flopscope/__init__.py" = ["E402"]
 "src/flopscope/fft/_transforms.py" = ["E701"]
+# Accumulation subpackage: mid-file imports at section boundaries are intentional
+# (each phase of the regime ladder co-locates its imports with its code, mirroring
+# the JS implementation's structure).
+"src/flopscope/_accumulation/*" = ["E402"]
 # Tests: unused variables are intentional (assert no exception raised)
 "tests/**" = ["F841", "E402", "E501"]
 # Benchmarks: long f-strings for subprocess setup code

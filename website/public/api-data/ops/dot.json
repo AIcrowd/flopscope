@@ -795,12 +795,12 @@
   },
   "op": {
     "category": "counted_custom",
-    "cost_formula": "m * k * n (FMA=1)",
-    "cost_formula_latex": "$m \\cdot k \\cdot n$",
+    "cost_formula": "2 * m * k * n - m * n (FMA=2)",
+    "cost_formula_latex": "$2 \\cdot m \\cdot k \\cdot n - m \\cdot n$",
     "flopscope_ref": "fnp.dot",
     "module": "numpy",
     "name": "dot",
-    "notes": "Dot product; cost = M*K*N (FMA=1).",
+    "notes": "Dot product; cost = M*K*N (weight-calibrated).",
     "numpy_ref": "np.dot",
     "signature": "fnp.dot(a: 'ArrayLike', b: 'ArrayLike') -> 'FlopscopeArray'",
     "status": "supported",
@@ -810,7 +810,7 @@
   "schema_version": 1,
   "slug": "dot",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1506",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1789",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.dot.html"
   }
 }

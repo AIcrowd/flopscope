@@ -168,7 +168,7 @@
   ],
   "signature": "flops.flops.matrix_rank_cost(m: 'int', n: 'int') -> 'int'",
   "slug": "flops-matrix-rank-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L456",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L471",
   "status_note": "",
   "summary": "Weighted FLOP cost of matrix rank.",
   "upstream_source_url": ""

@@ -88,11 +88,13 @@ class TestBinarySymmetry:
 
 class TestReductionSymmetry:
     def test_sum_symmetric_cost(self):
+        # Updated to orbit-mapping count (was n(n+1)/2 unique-element count).
+        # Symmetric (10,10) has 55 orbits; full reduction: 55-1=54 additions.
         data = numpy.eye(10)
         S = as_symmetric(data, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)))
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             fnp.sum(S)
-            assert budget.flops_used == 55
+            assert budget.flops_used == 54
 
     def test_sum_returns_plain(self):
         data = numpy.eye(4)

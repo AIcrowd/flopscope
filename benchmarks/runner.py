@@ -165,10 +165,9 @@ def normalize_weights_v2(
     zero-FLOP operations are injected separately with weight 0.0 because they
     are not benchmarked.
 
-    Note: BLAS/linalg ops that are pure FMA loops will show weight ≈ 2.0
-    because ``fp_arith_inst_retired`` counts each FMA as 2 retired FP
-    operations. This is left as-is for the reviewer to decide whether to
-    keep weight=2 or override to weight=1.
+    Note: BLAS/linalg ops that are pure FMA loops will show weight ≈ 1.0
+    because both flopscope's FMA=2 analytical count and
+    ``fp_arith_inst_retired`` count each FMA as 2 ops, so the ratio cancels.
     """
     weights = {}
     for op, alpha in raw_alpha.items():
@@ -535,7 +534,7 @@ def run_benchmarks(
         "baseline_alpha_abs_raw": round(baselines.alpha_abs, 6),
         **baselines.to_dict(),
         "note": (
-            "analytical_FLOPs from flopscope registry (FMA=1); "
+            "analytical_FLOPs from flopscope registry (FMA=2 textbook); "
             "perf_instructions are SIMD-width-weighted "
             "fp_arith_inst_retired counts; "
             "ufunc overhead subtracted per category; "

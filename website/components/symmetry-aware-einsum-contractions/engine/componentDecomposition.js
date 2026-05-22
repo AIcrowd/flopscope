@@ -10,6 +10,7 @@
 import { Permutation, dimino, burnsideCount } from './permutation.js';
 import { detectShape } from './shapeLayer.js';
 import { computeAccumulation } from './accumulationCount.js';
+import { restrictStabilizerToPositions } from './outputOrbit.js';
 
 class UnionFind {
   constructor(n) {
@@ -253,7 +254,30 @@ export function decomposeClassifyAndCount(
     const multiplication = {
       count: burnsideCount(comp.elements, compSizes).uniqueCount,
     };
-    return { ...comp, sizes: compSizes, shape: shape.kind, accumulation, multiplication };
+    // numOutputOrbits: orbits of the visible-label tuples under the output
+    // stabilizer (subgroup of G that preserves V setwise, restricted to V).
+    // Used by aggregateComponentCosts to apply the "first cell of each output
+    // orbit is a free copy" off-by-one correction. Mirrors the Python
+    // ComponentCost.num_output_orbits field. For scalar output (empty V),
+    // there is one orbit; for trivial groups, this is just ∏ visible sizes.
+    const vSizes = vPositionsLocal.map((p) => compSizes[p]);
+    let numOutputOrbits;
+    if (vSizes.length === 0) {
+      numOutputOrbits = 1;
+    } else if (comp.elements.length > 0) {
+      const hElements = restrictStabilizerToPositions(comp.elements, vPositionsLocal);
+      numOutputOrbits = burnsideCount(hElements, vSizes).uniqueCount;
+    } else {
+      numOutputOrbits = vSizes.reduce((a, b) => a * b, 1);
+    }
+    return {
+      ...comp,
+      sizes: compSizes,
+      shape: shape.kind,
+      accumulation,
+      multiplication,
+      numOutputOrbits,
+    };
   });
   return { ...base, components };
 }

@@ -949,7 +949,7 @@
   "schema_version": 1,
   "slug": "linalg-tensordot",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L72",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_aliases.py#L76",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/linalg/_linalg.py#L3392"
   }
 }

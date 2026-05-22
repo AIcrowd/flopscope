@@ -172,7 +172,7 @@
   ],
   "signature": "flops.flops.qr_cost(m: 'int', n: 'int') -> 'int'",
   "slug": "flops-qr-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L61",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_decompositions.py#L63",
   "status_note": "",
   "summary": "Weighted FLOP cost of QR decomposition.",
   "upstream_source_url": ""

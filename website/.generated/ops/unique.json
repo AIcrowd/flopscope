@@ -786,7 +786,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unique",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L286",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L302",
   "href": "/docs/api/numpy/unique/",
   "legacy_href": "/docs/api/ops/unique/",
   "module": "numpy",

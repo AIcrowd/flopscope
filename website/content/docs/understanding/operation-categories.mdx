@@ -27,7 +27,8 @@ Operations that perform arithmetic. Cost is computed analytically from tensor sh
 |-------------|-------------|----------|
 | Unary | numel(output) | `exp`, `log`, `sqrt`, `abs`, `sin`, `cos`, `tanh`, `ceil`, `floor` |
 | Binary | numel(output) | `add`, `multiply`, `maximum`, `divide`, `power`, `subtract` |
-| Reduction | numel(input) | `sum`, `mean`, `max`, `min`, `std`, `var`, `argmax`, `nansum` |
+| Reduction (Tier 1) | unique inputs − unique outputs (+ divide for `mean`) | `sum`, `prod`, `max`, `min`, `mean`, `all`, `any`, bitwise/logical reductions |
+| Reduction (Tier 2) | unique outputs × per-output cost | `median`, `percentile`, `quantile` |
 | Einsum | product of all index dims | `fnp.einsum(...)` |
 | Dot/Matmul | equivalent einsum | `fnp.dot(A, B)`, `A @ B` |
 | Linalg | per-operation formula | `fnp.linalg.solve`, `fnp.linalg.eigh`, `fnp.linalg.cholesky` |
@@ -38,6 +39,18 @@ Operations that perform arithmetic. Cost is computed analytically from tensor sh
 | Stats | flat per-element (varies) | `flops.stats.norm.pdf`, `flops.stats.expon.cdf`, `flops.stats.cauchy.ppf` |
 
 When inputs are `SymmetricTensor`, many operations automatically get reduced costs. See [Exploit Symmetry](/docs/guides/symmetry/).
+
+#### Reduction cost surfaces
+
+flopscope splits reductions into two cost surfaces:
+
+**Tier 1 — additive accumulation** (`sum`, `prod`, `max`, `min`, `all`, `any`, bitwise/logical `or`/`and`/`xor`, `mean`).
+Charges `(unique input entries − unique output cells) + extra ops`. `mean` adds one divide per unique output cell.
+
+**Tier 2 — selection-style reductions** (`median`, `percentile`, `quantile`).
+Charges `(unique output cells) × (per-output cost)`. Each output cell needs a full partition pass over the reduced axes; symmetry helps when output cells share an orbit.
+
+See [Symmetry-aware FLOP counting](/docs/understanding/symmetry-detection/) for the mental model and worked examples.
 
 ### Blacklisted operations
 

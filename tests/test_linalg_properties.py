@@ -76,16 +76,16 @@ class TestNorm:
             from flopscope.numpy.linalg import norm
 
             norm(x)
-            assert budget.flops_used == 10
+            assert budget.flops_used == 20  # FMA=2: 2*numel
 
     def test_matrix_fro_cost(self):
-        # FMA=1: Frobenius norm costs numel
+        # FMA=2: Frobenius norm costs 2*numel
         A = numpy.random.randn(4, 5)
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy.linalg import norm
 
             norm(A)
-            assert budget.flops_used == 20
+            assert budget.flops_used == 40  # FMA=2: 2*numel
 
     def test_matrix_ord2_cost(self):
         # SVD-based: 4x baked into cost function
@@ -102,16 +102,16 @@ class TestNorm:
             from flopscope.numpy.linalg import norm
 
             norm(A, ord=1)
-            assert budget.flops_used == 20
+            assert budget.flops_used == 40  # FMA=2: 2*numel
 
     def test_vector_p_norm_cost(self):
-        # FMA=1: p-norm costs numel
+        # FMA=2: p-norm costs 2*numel
         x = numpy.random.randn(10)
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy.linalg import norm
 
             norm(x, ord=3)
-            assert budget.flops_used == 10
+            assert budget.flops_used == 20  # FMA=2: 2*numel
 
 
 class TestVectorNorm:
@@ -128,7 +128,7 @@ class TestVectorNorm:
             from flopscope.numpy.linalg import vector_norm
 
             vector_norm(x)
-            assert budget.flops_used == 10
+            assert budget.flops_used == 20  # FMA=2: 2*numel
 
 
 class TestMatrixNorm:
@@ -140,13 +140,13 @@ class TestMatrixNorm:
             assert numpy.isclose(matrix_norm(A), numpy.linalg.matrix_norm(A))
 
     def test_fro_cost(self):
-        # FMA=1: Frobenius norm costs numel
+        # FMA=2: Frobenius norm costs 2*numel
         A = numpy.random.randn(3, 4)
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy.linalg import matrix_norm
 
             matrix_norm(A)
-            assert budget.flops_used == 12
+            assert budget.flops_used == 24  # FMA=2: 2*numel
 
 
 class TestCond:

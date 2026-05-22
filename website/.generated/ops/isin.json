@@ -828,7 +828,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isin",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L422",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L446",
   "href": "/docs/api/numpy/isin/",
   "legacy_href": "/docs/api/ops/isin/",
   "module": "numpy",

@@ -255,7 +255,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.shuffle",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L347",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L419",
   "href": "/docs/api/numpy/random/shuffle/",
   "import_path": "flopscope.numpy.random.shuffle",
   "is_operation_cost_leaf": true,

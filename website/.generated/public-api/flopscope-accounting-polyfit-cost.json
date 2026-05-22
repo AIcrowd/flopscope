@@ -175,7 +175,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.polyfit_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L55",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L60",
   "href": "/docs/api/accounting/polyfit-cost/",
   "import_path": "flopscope.accounting.polyfit_cost",
   "is_operation_cost_leaf": false,

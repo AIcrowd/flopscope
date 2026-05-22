@@ -311,7 +311,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.random.Generator.spawn",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L128",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/_counted_classes.py#L164",
   "href": "/docs/api/numpy/random/generator/spawn/",
   "legacy_href": "/docs/api/ops/random-Generator-spawn/",
   "module": "numpy.random",
@@ -394,7 +394,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.random.Generator.spawn(self, n_children: 'int') -> \"list['_CountedGenerator']\"",
+  "signature": "fnp.random.Generator.spawn(self, n_children: 'int') -> 'list[_np.random.Generator]'",
   "slug": "random-Generator-spawn",
   "summary": "Create new independent child generators.",
   "upstream_ref_label": "NumPy Ref",

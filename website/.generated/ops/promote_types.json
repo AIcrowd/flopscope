@@ -353,7 +353,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.promote_types",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1642",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1729",
   "href": "/docs/api/numpy/promote-types/",
   "legacy_href": "/docs/api/ops/promote_types/",
   "module": "numpy",

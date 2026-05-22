@@ -440,7 +440,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polydiv",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L185",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196",
   "href": "/docs/api/numpy/polydiv/",
   "legacy_href": "/docs/api/ops/polydiv/",
   "module": "flopscope._polynomial",

@@ -920,7 +920,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fft.fftn",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L436",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/fft/_transforms.py#L453",
   "href": "/docs/api/numpy/fft/fftn/",
   "legacy_href": "/docs/api/ops/fft-fftn/",
   "module": "numpy.fft",

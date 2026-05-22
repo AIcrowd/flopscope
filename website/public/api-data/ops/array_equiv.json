@@ -195,7 +195,7 @@
   "schema_version": 1,
   "slug": "array_equiv",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L93",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L98",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/numeric.py#L2565"
   }
 }

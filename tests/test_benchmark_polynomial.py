@@ -24,7 +24,8 @@ class TestOpsLists:
 
 class TestAnalyticalCost:
     def test_polyval(self):
-        assert _analytical_cost("polyval", 1000, 5) == 1000 * 5
+        # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
+        assert _analytical_cost("polyval", 1000, 5) == 2 * 1000 * 5
 
     def test_polyfit(self):
         assert _analytical_cost("polyfit", 1000, 5) == 2 * 1000 * 6**2
@@ -133,8 +134,9 @@ class TestBenchmarkPolynomial:
             )
 
         # polyval: total_flops = 500*4 = 2000
-        # analytical = 1000 * 5 = 5000 (FMA=1)
-        # normalized = 2000 / 5000 = 0.4
+        # analytical = 2 * 1000 * 5 = 10000 (FMA=2)
+        # normalized = 2000 / 10000 = 0.2
+        # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
         expected = 2000.0 / _analytical_cost("polyval", n, degree)
         assert result["polyval"] == pytest.approx(expected)
 

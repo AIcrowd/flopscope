@@ -283,7 +283,7 @@
   "schema_version": 1,
   "slug": "random-get_state",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L162",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L230",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.get_state.html"
   }
 }

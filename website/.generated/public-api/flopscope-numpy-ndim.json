@@ -232,7 +232,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ndim",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1560",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1643",
   "href": "/docs/api/numpy/ndim/",
   "import_path": "flopscope.numpy.ndim",
   "is_operation_cost_leaf": true,

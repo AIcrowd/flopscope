@@ -540,7 +540,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bincount",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L269",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_counting_ops.py#L279",
   "href": "/docs/api/numpy/bincount/",
   "legacy_href": "/docs/api/ops/bincount/",
   "module": "numpy",

@@ -197,7 +197,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.polysub_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L30",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L35",
   "href": "/docs/api/accounting/polysub-cost/",
   "import_path": "flopscope.accounting.polysub_cost",
   "is_operation_cost_leaf": false,

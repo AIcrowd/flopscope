@@ -711,7 +711,7 @@
   "schema_version": 1,
   "slug": "lexsort",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L102",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_sorting_ops.py#L105",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.lexsort.html"
   }
 }

@@ -348,7 +348,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.matrix_norm",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L354",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_properties.py#L365",
   "href": "/docs/api/numpy/linalg/matrix-norm/",
   "legacy_href": "/docs/api/ops/linalg-matrix_norm/",
   "module": "numpy.linalg",

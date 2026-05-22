@@ -433,7 +433,7 @@
   "schema_version": 1,
   "slug": "polydiv",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L185",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_polynomial_impl.py#L979"
   }
 }

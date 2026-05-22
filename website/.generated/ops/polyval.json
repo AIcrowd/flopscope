@@ -509,8 +509,8 @@
   "canonical_name": "polyval",
   "canonical_path": "numpy/polyval",
   "category": "counted_custom",
-  "cost_formula": "m * deg (FMA=1)",
-  "cost_formula_latex": "$m \\cdot \\text{deg}$",
+  "cost_formula": "2 * m * deg (FMA=2)",
+  "cost_formula_latex": "$2 \\cdot m \\cdot \\text{deg}$",
   "display_type": "custom",
   "doc_coverage": {
     "raw_blocks": [
@@ -541,7 +541,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polyval",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L75",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L80",
   "href": "/docs/api/numpy/polyval/",
   "legacy_href": "/docs/api/ops/polyval/",
   "module": "flopscope._polynomial",
@@ -550,7 +550,7 @@
     "href": "/docs/api/numpy/positive/",
     "label": "fnp.positive"
   },
-  "notes": "Evaluate polynomial at given points. Cost: $m \\cdot \\text{deg}$ (Horner's method, FMA=1).",
+  "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
   "notes_sections": [
     "Horner's scheme [1]_ is used to evaluate the polynomial. Even so, for polynomials of high degree the values may be inaccurate due to rounding errors. Use carefully.",
     "If `x` is a subtype of `ndarray` the return value will be of the same type."

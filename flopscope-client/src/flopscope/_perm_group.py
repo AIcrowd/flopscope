@@ -593,8 +593,33 @@ _PermutationCompat = _Permutation
 _SymmetryGroupCompat = SymmetryGroup
 
 
+class _DiminoBudgetExceeded(Exception):
+    """Raised when _dimino exceeds the configured dimino_budget.
+
+    Callers should catch this and fall back to a dense / non-symmetry-aware
+    cost, emitting CostFallbackWarning.
+    """
+
+    def __init__(self, seen_count: int, budget: int) -> None:
+        super().__init__(
+            f"Dimino enumeration exceeded budget: visited {seen_count} elements "
+            f"(budget={budget}). Group is likely too large to enumerate exactly."
+        )
+        self.seen_count = seen_count
+        self.budget = budget
+
+
 def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
-    """Enumerate all group elements via Dimino's algorithm."""
+    """Enumerate all group elements via Dimino's algorithm.
+
+    Consults the configured ``dimino_budget`` setting (default 500_000); if the
+    seen-set size exceeds the budget, raises :class:`_DiminoBudgetExceeded`
+    instead of running indefinitely. Callers should catch and fall back to a
+    dense (no-symmetry) cost via :class:`flopscope.errors.CostFallbackWarning`.
+    """
+    from flopscope._config import get_setting
+
+    budget = int(get_setting("dimino_budget"))  # type: ignore[arg-type]
     n = generators[0].size
     identity = _Permutation.identity(n)
     elements = [identity]
@@ -614,10 +639,14 @@ def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
                     if product not in seen:
                         seen.add(product)
                         next_new.append(product)
+                        if len(seen) > budget:
+                            raise _DiminoBudgetExceeded(len(seen), budget)
                     product_r = g * elem
                     if product_r not in seen:
                         seen.add(product_r)
                         next_new.append(product_r)
+                        if len(seen) > budget:
+                            raise _DiminoBudgetExceeded(len(seen), budget)
             new_elements = next_new
             coset.extend(next_new)
         elements.extend(coset)

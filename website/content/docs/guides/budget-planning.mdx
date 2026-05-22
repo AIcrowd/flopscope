@@ -19,19 +19,19 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 # Einsum cost
-cost = flops.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
-print(f"Matmul cost: {cost:,}")         # 16,777,216 (256^3, FMA=1)
+cost = flops.accounting.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
+print(f"Matmul cost: {cost:,}")         # 33,488,896 (2*256^3 − 256^2, FMA=2)
 
 # SVD cost
-cost = flops.svd_cost(m=256, n=256, k=10)
+cost = flops.accounting.svd_cost(m=256, n=256, k=10)
 print(f"SVD cost: {cost:,}")            # 655,360
 
 # Pointwise cost (unary/binary ops like exp, add, multiply)
-cost = flops.pointwise_cost("exp", shape=(256, 256))
+cost = flops.accounting.pointwise_cost("exp", shape=(256, 256))
 print(f"Pointwise cost: {cost:,}")      # 65,536
 
 # Reduction cost (sum, mean, max, etc.)
-cost = flops.reduction_cost("sum", input_shape=(256, 256))
+cost = flops.accounting.reduction_cost("sum", input_shape=(256, 256))
 print(f"Reduction cost: {cost:,}")      # 65,536
 ```
 
@@ -53,9 +53,9 @@ Plan a multi-step computation before executing:
 
 ```python
 steps = [
-    ("einsum ij,j->i", flops.einsum_cost('ij,j->i', shapes=[(256, 256), (256,)])),
-    ("ReLU (maximum)", flops.pointwise_cost("maximum", shape=(256,))),
-    ("sum reduction", flops.reduction_cost("sum", input_shape=(256,))),
+    ("einsum ij,j->i", flops.accounting.einsum_cost('ij,j->i', shapes=[(256, 256), (256,)])),
+    ("ReLU (maximum)", flops.accounting.pointwise_cost("maximum", shape=(256,))),
+    ("sum reduction", flops.accounting.reduction_cost("sum", input_shape=(256,))),
 ]
 
 total = sum(cost for _, cost in steps)

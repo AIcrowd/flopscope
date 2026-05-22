@@ -698,8 +698,17 @@ export default function TotalCostView({
   if (!componentCosts || !componentData) return null;
 
   const sectionFiveThemeCssVars = getExplorerThemeCssVariables(SECTION_FIVE_THEME_OVERRIDE);
-  const { mu = 0, alpha = 0, mTotal = 0, perComponent = [] } = componentCosts;
-  const totalCost = mu + alpha;
+  const {
+    mu = 0,
+    alpha = 0,
+    mTotal = 0,
+    outputOrbitProduct = 0,
+    total = 0,
+    perComponent = [],
+  } = componentCosts;
+  // `total` already includes the `− ∏num_output_orbits` off-by-one correction
+  // (see aggregateComponentCosts in engine/costModel.js).
+  const totalCost = total;
   const denseTuples = denseTupleCountFromComponents(componentData?.components ?? []);
   const multiplicationFactor = Math.max(numTerms - 1, 0);
   const denseTotalCost = denseDirectEventCostFromComponents(componentData?.components ?? [], numTerms);
@@ -707,7 +716,17 @@ export default function TotalCostView({
   const savingsPct = denseTotalCost > 0 ? (((denseTotalCost - totalCost) / denseTotalCost) * 100).toFixed(1) : '0';
   const savingsPositive = Number(savingsPct) > 0;
   const { components = [] } = componentData;
-  const denseExpansion = `(${numTerms} - 1) × ${denseTuples.toLocaleString()} + ${denseTuples.toLocaleString()} = ${denseTotalCost.toLocaleString()}`;
+  // Dense output cell count: ∏ visible-label sizes across components.
+  let denseOutputs = 1;
+  for (const comp of componentData?.components ?? []) {
+    const labels = Array.isArray(comp.labels) ? comp.labels : [];
+    const sizes = Array.isArray(comp.sizes) ? comp.sizes : [];
+    for (const visibleLabel of comp.va ?? []) {
+      const idx = labels.indexOf(visibleLabel);
+      if (idx >= 0 && sizes[idx] != null) denseOutputs *= sizes[idx];
+    }
+  }
+  const denseExpansion = `(${numTerms} - 1) × ${denseTuples.toLocaleString()} + ${denseTuples.toLocaleString()} − ${denseOutputs.toLocaleString()} = ${denseTotalCost.toLocaleString()}`;
   const multiplicationExpansion = `(${numTerms} - 1) × ${mTotal.toLocaleString()} = ${mu.toLocaleString()}`;
   const alphaFactors = perComponent.map((comp) => comp.alpha_a.toLocaleString());
   const accumulationExpansion = alphaFactors.length > 1
@@ -717,15 +736,15 @@ export default function TotalCostView({
     {
       label: 'Dense Direct Events',
       value: denseTotalCost.toLocaleString(),
-      formula: String.raw`(k-1)\prod_{\ell\in L} n_\ell + \prod_{\ell\in L} n_\ell`,
+      formula: String.raw`(k-1)\prod_{\ell\in L} n_\ell + \prod_{\ell\in L} n_\ell - \prod_{\ell\in V} n_\ell`,
       detail: denseExpansion,
     },
     {
       label: 'Symmetry-Aware Direct Events',
       value: totalCost.toLocaleString(),
       valueClassName: 'text-coral',
-      formula: String.raw`\mu + \alpha`,
-      detail: `${mu.toLocaleString()} + ${alpha.toLocaleString()} = ${totalCost.toLocaleString()}`,
+      formula: String.raw`\mu + \alpha - O`,
+      detail: `${mu.toLocaleString()} + ${alpha.toLocaleString()} − ${outputOrbitProduct.toLocaleString()} = ${totalCost.toLocaleString()}`,
     },
   ];
   const SUPPORTING_METRICS = [

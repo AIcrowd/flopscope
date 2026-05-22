@@ -886,8 +886,8 @@
   "canonical_name": "matmul",
   "canonical_path": "numpy/matmul",
   "category": "counted_custom",
-  "cost_formula": "m * k * n (FMA=1)",
-  "cost_formula_latex": "$m \\cdot k \\cdot n$",
+  "cost_formula": "2 * m * k * n - m * n (FMA=2)",
+  "cost_formula_latex": "$2 \\cdot m \\cdot k \\cdot n - m \\cdot n$",
   "display_type": "custom",
   "doc_coverage": {
     "raw_blocks": [],
@@ -908,7 +908,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.matmul",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1554",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1838",
   "href": "/docs/api/numpy/matmul/",
   "legacy_href": "/docs/api/ops/matmul/",
   "module": "numpy",
@@ -917,7 +917,7 @@
     "href": "/docs/api/numpy/matrix-transpose/",
     "label": "fnp.matrix_transpose"
   },
-  "notes": "Matrix multiplication; cost = M*K*N (FMA=1).",
+  "notes": "Matrix multiplication; cost = M*K*N (weight-calibrated).",
   "notes_sections": [
     "The behavior depends on the arguments in the following way.",
     "- If both arguments are 2-D they are multiplied like conventional matrices. - If either argument is N-D, N > 2, it is treated as a stack of matrices residing in the last two indexes and broadcast accordingly. - If the first argument is 1-D, it is promoted to a matrix by prepending a 1 to its dimensions. After matrix multiplication the prepended 1 is removed. (For stacks of vectors, use ``vecmat``.) - If the second argument is 1-D, it is promoted to a matrix by appending a 1 to its dimensions. After matrix multiplication the appended 1 is removed. (For stacks of vectors, use ``matvec``.)",

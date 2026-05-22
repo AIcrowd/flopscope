@@ -599,7 +599,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.divmod",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L497",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L507",
   "href": "/docs/api/numpy/divmod/",
   "import_path": "flopscope.numpy.divmod",
   "is_operation_cost_leaf": true,
