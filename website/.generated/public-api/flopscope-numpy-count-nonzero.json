@@ -333,7 +333,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.count_nonzero",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1519",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1522",
   "href": "/docs/api/numpy/count-nonzero/",
   "import_path": "flopscope.numpy.count_nonzero",
   "is_operation_cost_leaf": true,

@@ -140,7 +140,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.sort_complex",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1132",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1135",
   "href": "/docs/api/numpy/sort-complex/",
   "legacy_href": "/docs/api/ops/sort_complex/",
   "module": "numpy",

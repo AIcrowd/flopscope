@@ -32,7 +32,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.PathInfo",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L90",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L136",
   "href": "/docs/api/flopscope/path-info/",
   "import_path": "flopscope.PathInfo",
   "is_operation_cost_leaf": false,

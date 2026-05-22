@@ -317,7 +317,7 @@
     "related_guides": [],
     "signature": "flops.FlopscopeArray(shape, dtype=<class 'float'>, buffer=None, offset=0, strides=None, order=None)",
     "slug": "flopscope-array",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L99",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L110",
     "status_note": "",
     "summary": "A numpy ndarray subclass with FLOP-tracked operators.",
     "upstream_source_url": ""
@@ -409,7 +409,7 @@
     ],
     "signature": "flops.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
     "slug": "path-info",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L90",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L136",
     "status_note": "",
     "summary": "Information about a contraction path.",
     "upstream_source_url": ""
@@ -453,9 +453,9 @@
         "title": "Einsum Guide"
       }
     ],
-    "signature": "flops.StepInfo(subscript: str, flop_cost: int, input_shapes: list[tuple[int, ...]], output_shape: tuple[int, ...], input_groups: list = <factory>, output_group: object | None = None, dense_flop_cost: int = 0, symmetry_savings: float = 0.0, inner_group: object | None = None, inner_applied: bool = False, blas_type: str | bool = False, path_indices: tuple[int, ...] = (), merged_subset: frozenset[int] | None = None) -> None",
+    "signature": "flops.StepInfo(subscript: str, flop_cost: int, input_shapes: list[tuple[int, ...]], output_shape: tuple[int, ...], input_groups: list = <factory>, output_group: object | None = None, dense_flop_cost: int = 0, symmetry_savings: float = 0.0, inner_group: object | None = None, inner_applied: bool = False, blas_type: str | bool = False, path_indices: tuple[int, ...] = (), merged_subset: frozenset[int] | None = None, pre_reductions: tuple[flopscope._opt_einsum._contract.PreReduction, ...] = <factory>, cost_source: str | None = None) -> None",
     "slug": "step-info",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L36",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L64",
     "status_note": "",
     "summary": "Per-step diagnostics for a contraction path.",
     "upstream_source_url": ""
@@ -3224,7 +3224,7 @@
     "related_guides": [],
     "signature": "fnp.clear_einsum_cache()",
     "slug": "clear-einsum-cache",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L84",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L85",
     "status_note": "",
     "summary": "Clear the einsum path cache.",
     "upstream_source_url": ""
@@ -4147,7 +4147,7 @@
     "module": "numpy",
     "name": "errstate",
     "related_guides": [],
-    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10937cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10195cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "errstate",
     "source_url": "",
     "status_note": "",
@@ -6114,6 +6114,66 @@
                 ],
                 "name": "operand_symmetries",
                 "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Argument forwarded to the analytical "
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/einsum/",
+                        "kind": "link",
+                        "target": "einsum",
+                        "text": "einsum"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " cost formula. Defaults to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "None"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "tuple[tuple[int, ...], ...] | None, optional",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Argument forwarded to the analytical "
+                  },
+                  {
+                    "external_url": "",
+                    "href": "/docs/api/numpy/einsum/",
+                    "kind": "link",
+                    "target": "einsum",
+                    "text": "einsum"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " cost formula. Defaults to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "None"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "identity_pattern",
+                "type": "field_list"
               }
             ],
             "title": "Parameters",
@@ -6252,7 +6312,7 @@
         "title": "Einsum Guide"
       }
     ],
-    "signature": "flops.flops.einsum_cost(subscripts: 'str', shapes: 'list[tuple[int, ...]]', operand_symmetries: 'list[SymmetryGroup | None] | None' = None) -> 'int'",
+    "signature": "flops.flops.einsum_cost(subscripts: 'str', shapes: 'list[tuple[int, ...]]', operand_symmetries: 'list[SymmetryGroup | None] | None' = None, identity_pattern: 'tuple[tuple[int, ...], ...] | None' = None) -> 'int'",
     "slug": "flops-einsum-cost",
     "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L42",
     "status_note": "",
@@ -12423,7 +12483,7 @@
     ],
     "signature": "flops.flops.svd_cost(m: 'int', n: 'int', k: 'int | None' = None) -> 'int'",
     "slug": "flops-svd-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L173",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L178",
     "status_note": "",
     "summary": "Weighted FLOP cost of a (truncated) SVD.",
     "upstream_source_url": ""
@@ -16526,7 +16586,7 @@
     "related_guides": [],
     "signature": "fnp.isnat(*args, **kwargs)",
     "slug": "isnat",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
     "upstream_source_url": ""

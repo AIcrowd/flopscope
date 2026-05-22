@@ -961,7 +961,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.cross",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2098",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2171",
   "href": "/docs/api/numpy/cross/",
   "import_path": "flopscope.numpy.cross",
   "is_operation_cost_leaf": true,

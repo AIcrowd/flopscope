@@ -230,7 +230,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.gcd",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
   "href": "/docs/api/numpy/gcd/",
   "legacy_href": "/docs/api/ops/gcd/",
   "module": "numpy",

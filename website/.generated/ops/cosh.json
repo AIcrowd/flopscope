@@ -394,7 +394,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.cosh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
   "href": "/docs/api/numpy/cosh/",
   "legacy_href": "/docs/api/ops/cosh/",
   "module": "numpy",

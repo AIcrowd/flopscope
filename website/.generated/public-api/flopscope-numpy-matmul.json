@@ -909,7 +909,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.matmul",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1838",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1835",
   "href": "/docs/api/numpy/matmul/",
   "import_path": "flopscope.numpy.matmul",
   "is_operation_cost_leaf": true,

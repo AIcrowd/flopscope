@@ -1127,7 +1127,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nanpercentile",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L849",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
   "href": "/docs/api/numpy/nanpercentile/",
   "import_path": "flopscope.numpy.nanpercentile",
   "is_operation_cost_leaf": true,

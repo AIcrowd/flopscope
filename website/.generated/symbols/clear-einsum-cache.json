@@ -135,7 +135,7 @@
   "related_guides": [],
   "signature": "fnp.clear_einsum_cache()",
   "slug": "clear-einsum-cache",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L84",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_einsum.py#L85",
   "status_note": "",
   "summary": "Clear the einsum path cache.",
   "upstream_source_url": ""

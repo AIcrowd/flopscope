@@ -467,7 +467,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nancumsum",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L849",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
   "href": "/docs/api/numpy/nancumsum/",
   "import_path": "flopscope.numpy.nancumsum",
   "is_operation_cost_leaf": true,

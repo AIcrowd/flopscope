@@ -391,7 +391,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10937cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+  "signature": "flopscope.numpy.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10195cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
   "slug": "flopscope-numpy-errstate",
   "summary": "Context manager for floating-point error handling.",
   "upstream_source_url": "",

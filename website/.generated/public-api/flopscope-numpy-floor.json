@@ -485,7 +485,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.floor",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
   "href": "/docs/api/numpy/floor/",
   "import_path": "flopscope.numpy.floor",
   "is_operation_cost_leaf": true,

@@ -113,7 +113,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.numpy.amax",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L849",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
   "href": "/docs/api/numpy/amax/",
   "import_path": "flopscope.numpy.amax",
   "is_operation_cost_leaf": true,
