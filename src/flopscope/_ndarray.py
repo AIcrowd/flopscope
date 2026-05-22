@@ -84,8 +84,6 @@ _PASSTHROUGH_NAMES = (
     "may_share_memory",
     "shares_memory",
     "byte_bounds",
-    # Zero-FLOP structural comparison (#72 audit):
-    "array_equiv",
     # Zero-FLOP boolean predicates (#72 audit):
     "iscomplexobj",
     "isrealobj",
