@@ -23,6 +23,35 @@ def _dih(*axes):
     return SymmetryGroup.dihedral(axes=axes)
 
 
+def _make_S4_symmetric_tensor(N=3):
+    """Build a fully S_4-symmetric (N,N,N,N) tensor by averaging over perms."""
+    from itertools import permutations
+    rng = np.random.default_rng(0)
+    T = rng.standard_normal((N, N, N, N))
+    out = np.zeros_like(T)
+    for p in permutations(range(4)):
+        out += T.transpose(p)
+    return out / 24
+
+
+def _make_D3_symmetric_tensor(N=4):
+    """Build a fully S_3-symmetric (N,N,N) tensor (which is also D_3-symmetric)."""
+    from itertools import permutations
+    rng = np.random.default_rng(1)
+    T = rng.standard_normal((N, N, N))
+    out = np.zeros_like(T)
+    for p in permutations(range(3)):
+        out += T.transpose(p)
+    return out / 6
+
+
+def _make_C3_symmetric_tensor(N=3):
+    """Build a C_3-symmetric (N,N,N) tensor (cyclic 3-fold)."""
+    rng = np.random.default_rng(2)
+    T = rng.standard_normal((N, N, N))
+    return (T + T.transpose([1, 2, 0]) + T.transpose([2, 0, 1])) / 3
+
+
 def test_every_issue_68_op_has_transport():
     """Coverage assertion: every shape op in issue #68 has a transport function."""
     from flopscope import _symmetry_transport as st
@@ -687,3 +716,92 @@ class TestZeroSizeDefensive:
         G = _sym(1, 2)
         result = transport_split(G, input_shape=(0, 3, 3), axis=0)
         assert result is None
+
+
+class TestFlipSetwiseStabilizerDeep:
+    """Layer-2: pin the corrected setwise-stabilizer rule from math-olympiad review."""
+
+    def test_S4_partial_flip_yields_Klein_4(self):
+        T = as_symmetric(
+            _make_S4_symmetric_tensor(N=3),
+            symmetry=_sym(0, 1, 2, 3),
+        )
+        result = fnp.flip(T, axis=(0, 1))
+        # Klein-4 stabilizer of {0,1} in S_4 = {e, (01), (23), (01)(23)}.
+        assert isinstance(result, SymmetricTensor)
+        assert result.symmetry.order() == 4
+
+    def test_D3_partial_flip_yields_Z2(self):
+        T = as_symmetric(
+            _make_D3_symmetric_tensor(N=4),
+            symmetry=_dih(0, 1, 2),
+        )
+        result = fnp.flip(T, axis=1)
+        assert isinstance(result, SymmetricTensor)
+        assert result.symmetry.order() == 2
+
+    def test_C3_partial_flip_drops_with_warning(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(
+            _make_C3_symmetric_tensor(N=3),
+            symmetry=_cyc(0, 1, 2),
+        )
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.flip(T, axis=0)
+        assert not isinstance(result, SymmetricTensor)
+
+
+class TestReshapeSegmentMatchingDeep:
+    def test_identity_with_interior_length_1(self):
+        T = as_symmetric(
+            np.eye(3).reshape(3, 1, 3),
+            symmetry=_sym(0, 2),
+        )
+        result = fnp.reshape(T, (3, 1, 3))
+        assert isinstance(result, SymmetricTensor)
+        assert set(result.symmetry.axes) == {0, 2}
+
+    def test_suffix_split_preserves(self):
+        T = as_symmetric(
+            np.zeros((2, 3, 3, 4)),
+            symmetry=_sym(1, 2),
+        )
+        # Set some non-zero entries to make symmetry checking meaningful.
+        np.asarray(T)[1, 0, 1, 2] = np.asarray(T)[1, 1, 0, 2] = 5.0
+        result = fnp.reshape(T, (2, 3, 3, 2, 2))
+        assert isinstance(result, SymmetricTensor)
+        assert set(result.symmetry.axes) == {1, 2}
+
+    def test_merge_in_block_drops_with_warning(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(
+            np.zeros((2, 3, 3, 4)),
+            symmetry=_sym(1, 2),
+        )
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.reshape(T, (2, 9, 4))
+        assert not isinstance(result, SymmetricTensor)
+
+
+class TestTileOrbitConstantDeep:
+    def test_constant_reps_on_S2_orbit_preserves(self):
+        T = as_symmetric(
+            np.array([[1.0, 2.0], [2.0, 3.0]]),
+            symmetry=_sym(0, 1),
+        )
+        result = fnp.tile(T, (2, 2))  # output (4, 4)
+        assert isinstance(result, SymmetricTensor)
+        assert set(result.symmetry.axes) == {0, 1}
+        # Verify symmetry of output data.
+        out_arr = np.asarray(result)
+        assert np.allclose(out_arr, out_arr.T)
+
+    def test_non_constant_reps_drops(self):
+        from flopscope.errors import SymmetryLossWarning
+        T = as_symmetric(
+            np.array([[1.0, 2.0], [2.0, 3.0]]),
+            symmetry=_sym(0, 1),
+        )
+        with pytest.warns(SymmetryLossWarning):
+            result = fnp.tile(T, (2, 1))
+        assert not isinstance(result, SymmetricTensor)
