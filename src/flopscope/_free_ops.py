@@ -23,8 +23,6 @@ from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import (
     broadcast_group,
-    remap_group_axes,
-    remap_group_for_expand_dims,
     validate_symmetry_group,
     wrap_with_symmetry,
     wrap_with_trusted_symmetry,
@@ -67,9 +65,6 @@ def _compatible_symmetry_for_shape(symmetry, shape):
         return None
     return symmetry
 
-
-def _normalize_axis_order(axes, ndim):
-    return tuple(axis % ndim for axis in axes)
 
 
 def _infer_structural_constructor_symmetry(*, kind, N=None, M=None, k=0, v_ndim=None):
@@ -378,15 +373,14 @@ def transpose(
     axes: Sequence[int] | None = None,
 ) -> FlopscopeArray:
     """Permute array dimensions. Wraps ``numpy.transpose``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.transpose(_to_base_ndarray(a), axes=axes)  # type: ignore[return-value]
-    result = _np.transpose(_np.asarray(a), axes=axes)
-    if axes is None:
-        order = tuple(reversed(range(a.ndim)))
-    else:
-        order = _normalize_axis_order(tuple(axes), a.ndim)
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.transpose(a_arr, axes=axes)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_transpose(in_group, ndim=a_arr.ndim, axes=axes)
+    # transpose never genuinely drops (axis perm always preserves S_n etc.).
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(transpose, _np.transpose, "free", "0 FLOPs")
@@ -394,15 +388,15 @@ attach_docstring(transpose, _np.transpose, "free", "0 FLOPs")
 
 def swapaxes(a: ArrayLike, axis1: int, axis2: int) -> FlopscopeArray:
     """Swap two axes. Wraps ``numpy.swapaxes``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.swapaxes(_to_base_ndarray(a), axis1, axis2)  # type: ignore[return-value]
-    result = _np.swapaxes(_np.asarray(a), axis1, axis2)
-    order = list(range(a.ndim))
-    axis1 %= a.ndim
-    axis2 %= a.ndim
-    order[axis1], order[axis2] = order[axis2], order[axis1]
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.swapaxes(a_arr, axis1, axis2)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_swapaxes(
+        in_group, ndim=a_arr.ndim, axis1=axis1, axis2=axis2,
+    )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)
+    return _asplainflopscope(result)
 
 
 attach_docstring(swapaxes, _np.swapaxes, "free", "0 FLOPs")
@@ -410,28 +404,19 @@ attach_docstring(swapaxes, _np.swapaxes, "free", "0 FLOPs")
 
 def moveaxis(
     a: ArrayLike,
-    source: int | Sequence[int],
-    destination: int | Sequence[int],
+    source,
+    destination,
 ) -> FlopscopeArray:
     """Move axes to new positions. Wraps ``numpy.moveaxis``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.moveaxis(_to_base_ndarray(a), source, destination)  # type: ignore[return-value]
-    result = _np.moveaxis(_np.asarray(a), source, destination)
-    if _np.ndim(source) == 0:
-        source_axes = (int(source),)  # type: ignore[arg-type, call-overload]
-    else:
-        source_axes = tuple(source)  # type: ignore[arg-type, call-overload]
-    if _np.ndim(destination) == 0:
-        destination_axes = (int(destination),)  # type: ignore[arg-type, call-overload]
-    else:
-        destination_axes = tuple(destination)  # type: ignore[arg-type, call-overload]
-    source_axes = _normalize_axis_order(source_axes, a.ndim)
-    destination_axes = _normalize_axis_order(destination_axes, a.ndim)
-    order = [axis for axis in range(a.ndim) if axis not in source_axes]
-    for dest, src in sorted(zip(destination_axes, source_axes, strict=True)):
-        order.insert(dest, src)
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.moveaxis(a_arr, source, destination)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_moveaxis(
+        in_group, ndim=a_arr.ndim, source=source, destination=destination,
+    )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)
+    return _asplainflopscope(result)
 
 
 attach_docstring(moveaxis, _np.moveaxis, "free", "0 FLOPs")
@@ -648,19 +633,17 @@ def squeeze(
 attach_docstring(squeeze, _np.squeeze, "free", "0 FLOPs")
 
 
-def expand_dims(
-    a: ArrayLike,
-    axis: int | tuple[int, ...],
-) -> FlopscopeArray:
+def expand_dims(a: ArrayLike, axis) -> FlopscopeArray:
     """Insert a new axis. Wraps ``numpy.expand_dims``. Cost: 0 FLOPs."""
     a_arr = _np.asarray(a)
-    result = _np.expand_dims(_np.asarray(a), axis=axis)
-    symmetry = remap_group_for_expand_dims(
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        ndim=a_arr.ndim,
-        axis=axis,
+    result = _np.expand_dims(a_arr, axis=axis)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_expand_dims(
+        in_group, input_ndim=a_arr.ndim, axis=axis,
     )
-    return wrap_with_symmetry(result, symmetry) if symmetry is not None else result  # type: ignore[return-value]
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)
+    return _asplainflopscope(result)
 
 
 attach_docstring(expand_dims, _np.expand_dims, "free", "0 FLOPs")
@@ -895,24 +878,22 @@ def diagonal(
 attach_docstring(diagonal, _np.diagonal, "free", "0 FLOPs")
 
 
-@_counted_wrapper
-def broadcast_to(
-    array: ArrayLike,
-    shape: int | Sequence[int],
-) -> FlopscopeArray:
-    """Broadcast array to shape. Cost: numel(output)."""
-    output_shape = (shape,) if isinstance(shape, int) else tuple(shape)
-    input_array = _np.asarray(array)
-    budget = require_budget()
-    cost = max(int(_np.prod(output_shape)), 1)
-    with budget.deduct("broadcast_to", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(_np.broadcast_to, input_array, output_shape)
-    symmetry = broadcast_group(
-        array.symmetry if isinstance(array, SymmetricTensor) else None,
-        input_shape=input_array.shape,
-        output_shape=output_shape,
+def broadcast_to(array: ArrayLike, shape) -> FlopscopeArray:
+    """Broadcast array to a new shape. Wraps ``numpy.broadcast_to``. Cost: 0 FLOPs."""
+    arr = _np.asarray(array)
+    result = _np.broadcast_to(arr, shape)
+    in_group = array.symmetry if isinstance(array, SymmetricTensor) else None
+    out_group = _st.transport_broadcast_to(
+        in_group, input_shape=arr.shape, output_shape=tuple(shape),
     )
-    return wrap_with_symmetry(result, symmetry)  # type: ignore[return-value]
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            reason="broadcast_to expands length-1 block axes",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)
+    return _asplainflopscope(result)
 
 
 attach_docstring(broadcast_to, _np.broadcast_to, "free", "0 FLOPs")
