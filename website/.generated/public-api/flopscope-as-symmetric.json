@@ -273,7 +273,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.as_symmetric",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L725",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767",
   "href": "/docs/api/flopscope/as-symmetric/",
   "import_path": "flopscope.as_symmetric",
   "is_operation_cost_leaf": false,

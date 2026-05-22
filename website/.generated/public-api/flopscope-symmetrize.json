@@ -515,7 +515,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.symmetrize",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L60",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61",
   "href": "/docs/api/flopscope/symmetrize/",
   "import_path": "flopscope.symmetrize",
   "is_operation_cost_leaf": false,
