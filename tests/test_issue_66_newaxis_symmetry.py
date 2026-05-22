@@ -125,9 +125,7 @@ def test_preexisting_size_one_not_lumped_with_existing_symmetry():
         ]
     )
     data = sym_matrix[:, numpy.newaxis, :]
-    tensor = flops.as_symmetric(
-        data, symmetry=SymmetryGroup.symmetric(axes=(0, 2))
-    )
+    tensor = flops.as_symmetric(data, symmetry=SymmetryGroup.symmetric(axes=(0, 2)))
     assert tensor.shape == (3, 1, 3)
     assert tensor.symmetry == SymmetryGroup.symmetric(axes=(0, 2))
 
@@ -205,9 +203,7 @@ def _count_symmetry_warnings(callable_):
     with _warnings.catch_warnings(record=True) as caught:
         _warnings.simplefilter("always")
         callable_()
-        return sum(
-            1 for w in caught if issubclass(w.category, SymmetryLossWarning)
-        )
+        return sum(1 for w in caught if issubclass(w.category, SymmetryLossWarning))
 
 
 def test_no_warning_on_gained_symmetry_via_none_insertion():
