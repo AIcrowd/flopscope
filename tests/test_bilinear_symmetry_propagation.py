@@ -180,3 +180,22 @@ def test_dot_sym_self_matches_einsum():
     )
     assert isinstance(X, SymmetricTensor)
     assert isinstance(Y, SymmetricTensor)
+
+
+# --- outer (Task 6) ------------------------------------------------------
+
+def test_outer_sym_self_matches_einsum():
+    """outer(v, v) cost and output type match einsum('i,j->ij', v, v)."""
+    n = 12
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        v = fnp.array(rs.randn(n))
+        with flopscope.namespace("ou"):
+            X = fnp.outer(v, v)
+        with flopscope.namespace("ein"):
+            Y = fnp.einsum("i,j->ij", v, v)
+    assert _flops(bc, "ou") == _flops(bc, "ein"), (
+        f"outer cost {_flops(bc, 'ou')} != einsum cost {_flops(bc, 'ein')}"
+    )
+    assert isinstance(X, SymmetricTensor)
+    assert isinstance(Y, SymmetricTensor)

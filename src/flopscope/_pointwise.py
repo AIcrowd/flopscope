@@ -1916,18 +1916,32 @@ def outer(
 ) -> FlopscopeArray:
     """Counted version of np.outer."""
     budget = require_budget()
-    a_orig = a
-    b_orig = b
-    target_symmetry = SymmetryGroup.symmetric(axes=(0, 1)) if a_orig is b_orig else None
+    # Capture aliasing BEFORE asarray conversion so outer(v, v) is detected
+    # even when v is a list or other non-ndarray type.
+    a_orig_is_b_orig = a is b
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    if target_symmetry is not None:
-        target_symmetry = _prepare_symmetric_out(out, target_symmetry)
-    cost = a.size * b.size
+    # outer flattens its inputs to 1-D, so "i,j->ij" is always the right
+    # einsum subscripts regardless of original ndim.
+    from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+    a_flat = a.ravel() if a.ndim != 1 else a
+    b_flat = b.ravel() if b.ndim != 1 else b
+    # Preserve operand-aliasing through the asarray boundary: if the user
+    # passed the same Python object for both operands, treat them as one
+    # array for the helper's identity-pattern detection.
+    if a_orig_is_b_orig:
+        b_flat = a_flat
+    info = _resolve_cost_and_output_symmetry("i,j->ij", a_flat, b_flat)
+    cost = info.accumulation.total
+    output_sym = info.output_symmetry
+    canonical_subs = info.canonical_subscripts
+    if output_sym is not None:
+        output_sym = _prepare_symmetric_out(out, output_sym)
     with budget.deduct(
-        "outer", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "outer", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(
             _np.outer,
@@ -1935,14 +1949,14 @@ def outer(
             _to_base_ndarray(b),
             out=None if isinstance(out, SymmetricTensor) else out,
         )
-    if target_symmetry is None:
+    if output_sym is None:
         if out is not None:
             return out
-        return result  # type: ignore[return-value]  # wrapped at fnp.outer import time
-    return _wrap_result(result, out=out, symmetry=target_symmetry)  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+    return _wrap_result(result, out=out, symmetry=output_sym)  # type: ignore[return-value]
 
 
-attach_docstring(outer, _np.outer, "counted_custom", "m * n FLOPs")
+attach_docstring(outer, _np.outer, "counted_custom", "n(n+1)/2 FLOPs when v outer v")
 
 
 def _tensordot_parse_axes(a_ndim, b_ndim, axes):
