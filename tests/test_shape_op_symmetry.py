@@ -805,3 +805,145 @@ class TestTileOrbitConstantDeep:
         with pytest.warns(SymmetryLossWarning):
             result = fnp.tile(T, (2, 1))
         assert not isinstance(result, SymmetricTensor)
+
+
+# ---------------------------------------------------------------------------
+# Layer-3: Hypothesis property tests (soundness fuzzing)
+# ---------------------------------------------------------------------------
+
+from hypothesis import given, settings, strategies as st
+import math
+
+
+def _apply_perm_to_tensor(arr, perm, axes):
+    """Apply a permutation acting on `axes` to a tensor's data."""
+    ndim = arr.ndim
+    new_order = list(range(ndim))
+    axis_list = list(axes)
+    perm_arr = perm.array_form
+    # perm is a permutation of (0..len(axes)-1); for each i, axes[i] -> axes[perm[i]].
+    for i, _ in enumerate(axis_list):
+        new_order[axis_list[i]] = axis_list[perm_arr[i]]
+    return arr.transpose(new_order)
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    n_block_axes=st.integers(min_value=2, max_value=3),
+    block_size=st.integers(min_value=2, max_value=4),
+    prefix_size=st.integers(min_value=1, max_value=3),
+    suffix_size=st.integers(min_value=1, max_value=3),
+    interior_length_1=st.booleans(),
+)
+def test_reshape_soundness_property(
+    n_block_axes, block_size, prefix_size, suffix_size, interior_length_1,
+):
+    """If transport_reshape claims G survives, the data actually satisfies G."""
+    from flopscope._symmetry_transport import transport_reshape
+
+    block_axes = tuple(range(1, 1 + n_block_axes))
+    # Build input shape with optional interior length-1.
+    input_shape = [prefix_size] + [block_size] * n_block_axes + [suffix_size]
+    if interior_length_1:
+        input_shape.insert(2, 1)
+        block_axes = tuple(b if b < 2 else b + 1 for b in block_axes)
+    input_shape = tuple(input_shape)
+
+    # Build an S_n-symmetric tensor on those block axes.
+    rng = np.random.default_rng(0)
+    T = rng.standard_normal(input_shape)
+    from itertools import permutations
+    sym = np.zeros_like(T)
+    for p in permutations(range(n_block_axes)):
+        perm = list(range(len(input_shape)))
+        for i, ba in enumerate(block_axes):
+            perm[ba] = block_axes[p[i]]
+        sym += T.transpose(perm)
+    sym /= math.factorial(n_block_axes)
+
+    G = _sym(*block_axes)
+
+    # Pick a target output shape: split suffix into (suffix_size, 1).
+    output_shape = list(input_shape) + [1]
+    output_shape = tuple(output_shape)
+
+    out_group = transport_reshape(G, input_shape=input_shape, output_shape=output_shape)
+    if out_group is None:
+        return  # No claim, nothing to verify.
+
+    out_arr = sym.reshape(output_shape)
+    out_axes = out_group.axes
+    for p in out_group.elements():
+        perm = list(range(len(output_shape)))
+        for i, ba in enumerate(out_axes):
+            perm[ba] = out_axes[p.array_form[i]]
+        assert np.allclose(out_arr, out_arr.transpose(perm)), \
+            f"reshape transport claimed perm {p.array_form} survives but data disagrees"
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    n=st.integers(min_value=3, max_value=4),
+    flip_subset_size=st.integers(min_value=0, max_value=4),
+)
+def test_flip_soundness_property(n, flip_subset_size):
+    """If transport_flip claims G' survives, flipped data actually satisfies G'."""
+    from flopscope._symmetry_transport import transport_flip
+
+    flip_subset_size = min(flip_subset_size, n)
+    block_axes = tuple(range(n))
+    # Build S_n-symmetric tensor.
+    rng = np.random.default_rng(0)
+    T = rng.standard_normal((4,) * n)
+    from itertools import permutations
+    sym = np.zeros_like(T)
+    for p in permutations(range(n)):
+        sym += T.transpose(p)
+    sym /= math.factorial(n)
+
+    G = _sym(*block_axes)
+    flipped_axes = tuple(range(flip_subset_size))
+    out_arr = np.flip(sym, axis=flipped_axes) if flipped_axes else sym
+
+    out_group = transport_flip(G, ndim=n, axes_flipped=flipped_axes)
+    if out_group is None:
+        return
+
+    for p in out_group.elements():
+        out_axes = out_group.axes
+        perm = list(range(n))
+        for i, ba in enumerate(out_axes):
+            perm[ba] = out_axes[p.array_form[i]]
+        assert np.allclose(out_arr, out_arr.transpose(perm))
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    block_size=st.integers(min_value=2, max_value=4),
+    rep_factor=st.integers(min_value=1, max_value=3),
+)
+def test_tile_soundness_property(block_size, rep_factor):
+    """tile with constant reps on the block preserves S_2-symmetry."""
+    from flopscope._symmetry_transport import transport_tile
+
+    rng = np.random.default_rng(0)
+    T = rng.standard_normal((block_size, block_size))
+    T = (T + T.T) / 2  # S_2-symmetric
+    G = _sym(0, 1)
+
+    reps = (rep_factor, rep_factor)
+    output_shape = (block_size * rep_factor, block_size * rep_factor)
+    out_arr = np.tile(T, reps)
+
+    out_group = transport_tile(
+        G, input_shape=T.shape, output_shape=output_shape, reps=reps,
+    )
+    if out_group is None:
+        return
+
+    for p in out_group.elements():
+        out_axes = out_group.axes
+        perm = list(range(2))
+        for i, ba in enumerate(out_axes):
+            perm[ba] = out_axes[p.array_form[i]]
+        assert np.allclose(out_arr, out_arr.transpose(perm))
