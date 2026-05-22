@@ -442,3 +442,62 @@ class TestTransportRavel:
     def test_ravel_for_none_input(self):
         from flopscope._symmetry_transport import transport_ravel
         assert transport_ravel(None, input_shape=(3, 3)) is None
+
+
+class TestTransportFlip:
+    def test_no_axes_flipped_preserves(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _sym(0, 1)
+        result = transport_flip(G, ndim=2, axes_flipped=())
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_all_block_axes_flipped_preserves(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _sym(0, 1)
+        result = transport_flip(G, ndim=2, axes_flipped=(0, 1))
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_partial_S3_flip_yields_S2(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _sym(0, 1, 2)
+        # Flip axis 1 only: setwise stab of {1} in S_3 = perms fixing 1 = S_2 on {0,2}.
+        result = transport_flip(G, ndim=3, axes_flipped=(1,))
+        assert result is not None
+        assert result.order() == 2
+
+    def test_partial_C3_flip_drops(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _cyc(0, 1, 2)
+        # C_3 has no element fixing a singleton -> drops.
+        result = transport_flip(G, ndim=3, axes_flipped=(0,))
+        assert result is None
+
+    def test_partial_C4_flip_pair_yields_Z2(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _cyc(0, 1, 2, 3)
+        # C_4 with F_A = {0, 2}: element (0 2)(1 3) survives -> Z_2.
+        result = transport_flip(G, ndim=4, axes_flipped=(0, 2))
+        assert result is not None
+        assert result.order() == 2
+
+    def test_partial_D3_flip_yields_Z2(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _dih(0, 1, 2)
+        # D_3 with F_A = {1}: the reflection fixing axis 1 survives -> Z_2.
+        result = transport_flip(G, ndim=3, axes_flipped=(1,))
+        assert result is not None
+        assert result.order() == 2
+
+    def test_axes_outside_block_flipped_preserves(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _sym(0, 1)
+        # Flipping axis 2 (outside block) doesn't affect the block.
+        result = transport_flip(G, ndim=3, axes_flipped=(2,))
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_negative_axis_normalized(self):
+        from flopscope._symmetry_transport import transport_flip
+        G = _sym(0, 1)
+        # axis=-1 on ndim=3 means axis 2 (outside block).
+        result = transport_flip(G, ndim=3, axes_flipped=(-1,))
+        assert result is not None and set(result.axes) == {0, 1}

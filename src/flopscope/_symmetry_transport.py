@@ -15,7 +15,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
-from flopscope._symmetry_utils import intersect_groups, remap_group_axes, restrict_group_to_axes
+from flopscope._symmetry_utils import intersect_groups, remap_group_axes, restrict_group_to_axes, setwise_stabilizer
 
 
 def _stub(name: str):
@@ -289,7 +289,26 @@ def transport_squeeze(
     new_index = {old: new for new, old in enumerate(surviving)}
     axis_map = {a: new_index[a] for a in A}
     return remap_group_axes(group, axis_map)
-transport_flip = _stub("flip")
+def transport_flip(
+    group: SymmetryGroup | None,
+    *,
+    ndim: int,
+    axes_flipped,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    # Normalize axes_flipped: None -> all, int -> tuple, negative wrap.
+    if axes_flipped is None:
+        F = set(range(ndim))
+    elif isinstance(axes_flipped, int):
+        F = {axes_flipped % ndim}
+    else:
+        F = {a % ndim for a in axes_flipped}
+    A = set(group.axes or range(group.degree))
+    F_A = F & A
+    if not F_A or F_A == A:
+        return group
+    return setwise_stabilizer(group, fixed_set=F_A)
 transport_tile = _stub("tile")
 
 
