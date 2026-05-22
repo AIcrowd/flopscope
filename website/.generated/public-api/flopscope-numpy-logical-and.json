@@ -510,7 +510,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.logical_and",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
   "href": "/docs/api/numpy/logical-and/",
   "import_path": "flopscope.numpy.logical_and",
   "is_operation_cost_leaf": true,

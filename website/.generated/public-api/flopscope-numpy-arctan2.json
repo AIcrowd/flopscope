@@ -703,7 +703,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arctan2",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L422",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
   "href": "/docs/api/numpy/arctan2/",
   "import_path": "flopscope.numpy.arctan2",
   "is_operation_cost_leaf": true,

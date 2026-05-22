@@ -738,7 +738,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.trapezoid",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2317",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390",
   "href": "/docs/api/numpy/trapezoid/",
   "import_path": "flopscope.numpy.trapezoid",
   "is_operation_cost_leaf": true,

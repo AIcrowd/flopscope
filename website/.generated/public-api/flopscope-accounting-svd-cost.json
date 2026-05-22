@@ -233,7 +233,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.accounting.svd_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L173",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L178",
   "href": "/docs/api/accounting/svd-cost/",
   "import_path": "flopscope.accounting.svd_cost",
   "is_operation_cost_leaf": false,

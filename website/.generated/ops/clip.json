@@ -753,7 +753,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.clip",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1385",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1388",
   "href": "/docs/api/numpy/clip/",
   "legacy_href": "/docs/api/ops/clip/",
   "module": "numpy",

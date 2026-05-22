@@ -39,7 +39,7 @@
   ],
   "signature": "flops.PathInfo(path: list[tuple[int, ...]], steps: list[flopscope._opt_einsum._contract.StepInfo], naive_cost: int, optimized_cost: int, largest_intermediate: int, speedup: float, input_subscripts: str = '', output_subscript: str = '', size_dict: dict[str, int] = <factory>, optimizer_used: str = '', contraction_list: list = <factory>, scale_list: list[int] = <factory>, size_list: list[int] = <factory>, _oe_naive_cost: int = 0, _oe_opt_cost: int = 0) -> None",
   "slug": "path-info",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L90",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_opt_einsum/_contract.py#L136",
   "status_note": "",
   "summary": "Information about a contraction path.",
   "upstream_source_url": ""

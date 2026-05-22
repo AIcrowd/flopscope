@@ -48,7 +48,7 @@
   "related_guides": [],
   "signature": "flops.FlopscopeArray(shape, dtype=<class 'float'>, buffer=None, offset=0, strides=None, order=None)",
   "slug": "flopscope-array",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L99",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L110",
   "status_note": "",
   "summary": "A numpy ndarray subclass with FLOP-tracked operators.",
   "upstream_source_url": ""

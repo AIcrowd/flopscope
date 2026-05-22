@@ -853,7 +853,7 @@ class TestCustomOps:
         with BudgetContext(flop_budget=10**6) as budget:
             result = inner(a, b)
         assert numpy.isclose(result, 11.0)
-        assert budget.flops_used == 2
+        assert budget.flops_used == 3  # einsum "i,i->": 2*n-1 = 3 for n=2
 
     def test_outer_basic(self):
         a = numpy.array([1.0, 2.0])
@@ -869,7 +869,7 @@ class TestCustomOps:
         with BudgetContext(flop_budget=10**6) as budget:
             result = vdot(a, b)
         assert numpy.isclose(result, 32.0)
-        assert budget.flops_used == 3
+        assert budget.flops_used == 5  # einsum "i,i->": 2*n-1 = 5 for n=3
 
     def test_tensordot_int_axes(self):
         a = numpy.ones((3, 4, 5))

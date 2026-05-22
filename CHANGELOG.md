@@ -4,6 +4,26 @@
 
 ### Changed (BREAKING)
 
+- **Bilinear wrappers propagate symmetry and use joint-operand cost
+  savings (closes #59).** `matmul`, `dot`, `outer`, `inner`, `vdot`,
+  and `tensordot` (for full-inner-contraction `axes=N` cases) now route
+  through the same cost+symmetry-inference path as `fnp.einsum`.
+  - `A @ A` with symmetric `A` now returns a `SymmetricTensor` and is
+    charged the symmetry-aware FLOP cost — empirically ~52% of dense
+    (the output-symmetry savings), matching `fnp.einsum('ij,jk->ik', A, A)`.
+  - `outer(v, v)` returns a `SymmetricTensor` and is charged
+    `n(n+1)/2` unique-product FLOPs instead of dense `n²`.
+  - Analogous parity for `dot`, `inner`, `vdot`, and `tensordot(A, A, axes=N)`.
+  - The detector keys on Python `id()`, so the documented limitation
+    `A @ A.T` (with `A` non-symmetric) is NOT detected — `.T` returns
+    a view with a different `id()`. Do not "fix" this with
+    `np.shares_memory`; that would produce numerically wrong results
+    for unrelated slice views sharing a buffer.
+  - `kron` is intentionally left alone (not an einsum contraction).
+  - The public `flopscope.accounting.einsum_cost` introspection helper
+    now forwards `identity_pattern` so its numbers agree with the
+    actual einsum cost for repeated-operand cases.
+
 - **Vendored opt_einsum replaced with runtime dependency.** flopscope now
   depends on `opt_einsum>=3.3.0,<4.0.0` instead of vendoring its source.
   The remaining `flopscope._opt_einsum` is a slim ~830-line shim that

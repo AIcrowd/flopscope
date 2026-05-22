@@ -62,7 +62,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.SymmetricTensor",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L549",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570",
   "href": "/docs/api/flopscope/symmetric-tensor/",
   "import_path": "flopscope.SymmetricTensor",
   "is_operation_cost_leaf": false,

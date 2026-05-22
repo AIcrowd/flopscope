@@ -600,7 +600,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nanmean",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L849",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
   "href": "/docs/api/numpy/nanmean/",
   "legacy_href": "/docs/api/ops/nanmean/",
   "module": "numpy",

@@ -128,7 +128,7 @@ class TestCustomOps:
         a, b = numpy.array([1.0, 2.0, 3.0]), numpy.array([4.0, 5.0, 6.0])
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
             assert numpy.allclose(fnp.inner(a, b), numpy.inner(a, b))
-            assert budget.flops_used == 3
+            assert budget.flops_used == 5  # einsum "i,i->": 2*n-1 = 5 for n=3
 
     def test_outer(self):
         a, b = numpy.array([1.0, 2.0]), numpy.array([3.0, 4.0, 5.0])

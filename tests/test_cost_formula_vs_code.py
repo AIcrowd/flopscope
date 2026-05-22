@@ -377,11 +377,13 @@ def test_dot_mnk(we):
 
 
 def test_inner_n(we):
-    assert _cost_of(we.inner, numpy.random.rand(20), numpy.random.rand(20)) == 20
+    # migrated to einsum "i,i->" cost path: 2*n-1 = 39 for n=20
+    assert _cost_of(we.inner, numpy.random.rand(20), numpy.random.rand(20)) == 39
 
 
 def test_vdot_n(we):
-    assert _cost_of(we.vdot, numpy.random.rand(20), numpy.random.rand(20)) == 20
+    # migrated to einsum "i,i->" cost path: 2*n-1 = 39 for n=20
+    assert _cost_of(we.vdot, numpy.random.rand(20), numpy.random.rand(20)) == 39
 
 
 def test_outer_mn(we):

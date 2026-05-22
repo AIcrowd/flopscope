@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as _np
@@ -410,6 +411,88 @@ def _resolve_output_symmetry(
     return _infer_multi_operand_output_symmetry(path_info, output_subscript)
 
 
+@dataclass(frozen=True, slots=True)
+class _CostInfo:
+    """Output of :func:`_resolve_cost_and_output_symmetry`.
+
+    Carries everything a bilinear wrapper needs to charge budget and wrap
+    its result: the symmetry-aware accumulation cost, the inferred output
+    symmetry (or None), the canonical einsum subscript string, the shapes
+    tuple, and the full path info (reserved for future use).
+    """
+
+    accumulation: Any  # flopscope._accumulation._cost.AccumulationCost
+    output_symmetry: SymmetryGroup | None
+    canonical_subscripts: str
+    input_parts: tuple[str, ...]
+    output_subscript: str
+    shapes: tuple[tuple[int, ...], ...]
+    path_info: Any  # FlopscopePathInfo
+
+
+def _resolve_cost_and_output_symmetry(
+    subscripts: str,
+    *operands: Any,
+    optimize: str | bool | list[Any] = "auto",
+) -> _CostInfo:
+    """Run path-find + accumulation-cost + output-symmetry inference.
+
+    Does NOT execute compute; does NOT charge budget. Used by the bilinear
+    wrappers (matmul/dot/outer/inner/tensordot/vdot) to share einsum's
+    cost+symmetry-inference machinery while keeping their native BLAS-fast
+    compute paths and friendly op-names.
+
+    Parameters
+    ----------
+    subscripts : str
+        Einsum subscript string (e.g. ``"ij,jk->ik"``).
+    *operands
+        The operands as the caller sees them (raw ndarray, FlopscopeArray,
+        or SymmetricTensor — all handled).
+    optimize : str | bool | list, optional
+        Path optimizer; defaults to ``"auto"``.
+
+    Returns
+    -------
+    _CostInfo
+        Dataclass with ``accumulation``, ``output_symmetry``,
+        ``canonical_subscripts``, ``input_parts``, ``output_subscript``,
+        ``shapes``, ``path_info``.
+    """
+    canonical_subscripts, input_parts, output_subscript, shapes, path_info = (
+        _get_path_info(subscripts, operands, optimize)
+    )
+    accumulation_cost = _get_accumulation_cost(
+        canonical_subscripts=canonical_subscripts,
+        input_parts=tuple(input_parts),
+        output_subscript=output_subscript,
+        shapes=shapes,
+        operands=tuple(operands),
+    )
+    from flopscope._accumulation._path_info import FlopscopePathInfo
+
+    path_info = FlopscopePathInfo.from_inner(
+        inner=path_info,
+        accumulation=accumulation_cost,
+    )
+    output_symmetry = _resolve_output_symmetry(
+        symmetry=None,
+        operands=operands,
+        input_parts=input_parts,
+        output_subscript=output_subscript,
+        path_info=path_info,
+    )
+    return _CostInfo(
+        accumulation=accumulation_cost,
+        output_symmetry=output_symmetry,
+        canonical_subscripts=canonical_subscripts,
+        input_parts=tuple(input_parts),
+        output_subscript=output_subscript,
+        shapes=tuple(shapes),
+        path_info=path_info,
+    )
+
+
 @_counted_wrapper
 def einsum(
     subscripts: str,
@@ -475,36 +558,19 @@ def einsum(
         data against each generator of the group.
     """
     budget = require_budget()
-    canonical_subscripts, input_parts, output_subscript, shapes, path_info = (
-        _get_path_info(
-            subscripts,
-            operands,
-            optimize,
-        )
-    )
+    info = _resolve_cost_and_output_symmetry(subscripts, *operands, optimize=optimize)
+    canonical_subscripts = info.canonical_subscripts
+    accumulation_cost = info.accumulation
+    path_info = info.path_info
+    shapes = info.shapes
+    output_subscript = info.output_subscript
 
-    accumulation_cost = _get_accumulation_cost(
-        canonical_subscripts=canonical_subscripts,
-        input_parts=tuple(input_parts),
-        output_subscript=output_subscript,
-        shapes=shapes,
-        operands=tuple(operands),
-    )
-
-    from flopscope._accumulation._path_info import FlopscopePathInfo
-
-    path_info = FlopscopePathInfo.from_inner(
-        inner=path_info,
-        accumulation=accumulation_cost,
-    )
-
-    target_symmetry = _resolve_output_symmetry(
-        symmetry=symmetry,
-        operands=operands,
-        input_parts=input_parts,
-        output_subscript=output_subscript,
-        path_info=path_info,
-    )
+    # User-declared symmetry overrides the helper's inferred symmetry;
+    # otherwise honor an existing SymmetricTensor `out=` operand.
+    if symmetry is not None:
+        target_symmetry = normalize_symmetry_input(symmetry, ndim=len(output_subscript))
+    else:
+        target_symmetry = info.output_symmetry
     effective_out_symmetry = target_symmetry
     if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
         effective_out_symmetry = out.symmetry

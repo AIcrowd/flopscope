@@ -46,7 +46,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.numpy.ndarray",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L99",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L110",
   "href": "/docs/api/numpy/ndarray/",
   "import_path": "flopscope.numpy.ndarray",
   "is_operation_cost_leaf": false,

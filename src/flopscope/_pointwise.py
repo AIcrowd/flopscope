@@ -15,10 +15,7 @@ from numpy.typing import ArrayLike
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
-from flopscope._flops import (
-    _ceil_log2,
-    einsum_cost,
-)
+from flopscope._flops import _ceil_log2
 from flopscope._flops import (
     analytical_pointwise_cost as pointwise_cost,
 )
@@ -31,7 +28,6 @@ from flopscope._ndarray import (
     _to_base_ndarray,
     _to_base_ndarray_tree,
 )
-from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetric import (
     SymmetricTensor,
     _warn_symmetry_loss,
@@ -93,7 +89,14 @@ def _prepare_symmetric_out(out, target_symmetry):
 def _validate_result_symmetry(result, symmetry):
     if symmetry is None:
         return
-    if not _is_symmetric(_np.asarray(result), symmetry=symmetry):
+    result_arr = _np.asarray(result)
+    # Skip numerical validation when the result has non-finite entries:
+    # np.allclose treats inf-inf=nan as not-close, which would raise a
+    # false SymmetryError. The symmetry was already enforced structurally
+    # by the (symmetric) inputs; numerical checks on inf/nan are meaningless.
+    if not _np.all(_np.isfinite(result_arr)):
+        return
+    if not _is_symmetric(result_arr, symmetry=symmetry):
         axes = symmetry.axes
         if axes is None:
             axes = tuple(range(symmetry.degree))
@@ -1794,41 +1797,35 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    # Extract exact symmetry groups for cost calculation
-    operand_symmetries = [
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        b.symmetry if isinstance(b, SymmetricTensor) else None,
-    ]
-    has_sym = _builtins.any(s is not None for s in operand_symmetries)
+    subs: str | None
     if a.ndim == 2 and b.ndim == 2:
-        cost = einsum_cost(
-            "ij,jk->ik",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
-        cost = einsum_cost(
-            "i,i->",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "i,i->"
     else:
-        cost = a.size * b.size
-    # Track whether either operand was already a flopscope subclass; if so,
-    # preserve the subclass on the result the way ``__array_wrap__`` did
-    # pre-Stage-3 when the raw call dispatched through it. With Stage 3
-    # we strip subclasses before the raw NumPy call (to avoid recursion),
-    # so the wrap must be re-applied explicitly here.
+        subs = None
+    if subs is None:
+        cost: int = a.size * b.size
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
     with budget.deduct(
-        "dot", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "dot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
-        # Strip flopscope subclasses so the raw NumPy call does not re-dispatch
-        # through __array_ufunc__ (matmul is a ufunc) / __array_function__.
         result = _call_numpy(_np.dot, _to_base_ndarray(a), _to_base_ndarray(b))
     maybe_check_nan_inf(result, "dot")
+    if output_sym is not None:
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
     return _asflopscope(result) if inputs_were_whest else result  # type: ignore[return-value]
 
 
@@ -1843,35 +1840,38 @@ def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    # Extract exact symmetry groups for cost calculation
-    operand_symmetries = [
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        b.symmetry if isinstance(b, SymmetricTensor) else None,
-    ]
-    has_sym = _builtins.any(s is not None for s in operand_symmetries)
+    # Subscripts for the 2D×2D and 1D×1D cases; everything else falls
+    # back to a dense size×size estimate (batched matmul, mixed ndim).
+    subs: str | None
     if a.ndim == 2 and b.ndim == 2:
-        cost = einsum_cost(
-            "ij,jk->ik",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
-        cost = einsum_cost(
-            "i,i->",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "i,i->"
     else:
-        cost = a.size * b.size
+        subs = None
+    if subs is None:
+        cost: int = a.size * b.size
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
     with budget.deduct(
-        "matmul", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "matmul", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         with _np.errstate(divide="ignore", over="ignore", invalid="ignore"):
             result = _call_numpy(_np.matmul, _to_base_ndarray(a), _to_base_ndarray(b))
     maybe_check_nan_inf(result, "matmul")
+    if output_sym is not None:
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
     return _asflopscope(result) if inputs_were_whest else result  # type: ignore[return-value]
 
 
@@ -1891,16 +1891,36 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    cost = (
-        a.size
-        if (a.ndim <= 1 and b.ndim <= 1)
-        else a.size * (b.shape[-1] if b.ndim > 1 else 1)
-    )
+    subs: str | None
+    if a.ndim == 1 and b.ndim == 1:
+        subs = "i,i->"
+    elif a.ndim == 2 and b.ndim == 2:
+        subs = "ij,kj->ik"
+    else:
+        subs = None
+    if subs is None:
+        cost: int = (
+            a.size
+            if (a.ndim <= 1 and b.ndim <= 1)
+            else a.size * (b.shape[-1] if b.ndim > 1 else 1)
+        )
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     with budget.deduct(
-        "inner", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "inner", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(_np.inner, _to_base_ndarray(a), _to_base_ndarray(b))
-    return result  # type: ignore[return-value]  # wrapped at fnp.inner import time
+    if output_sym is not None:
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
+    return result  # type: ignore[return-value]
 
 
 attach_docstring(inner, _np.inner, "counted_custom", "product of matching dims")
@@ -1912,18 +1932,32 @@ def outer(
 ) -> FlopscopeArray:
     """Counted version of np.outer."""
     budget = require_budget()
-    a_orig = a
-    b_orig = b
-    target_symmetry = SymmetryGroup.symmetric(axes=(0, 1)) if a_orig is b_orig else None
+    # Capture aliasing BEFORE asarray conversion so outer(v, v) is detected
+    # even when v is a list or other non-ndarray type.
+    a_orig_is_b_orig = a is b
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    if target_symmetry is not None:
-        target_symmetry = _prepare_symmetric_out(out, target_symmetry)
-    cost = a.size * b.size
+    # outer flattens its inputs to 1-D, so "i,j->ij" is always the right
+    # einsum subscripts regardless of original ndim.
+    from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+    a_flat = a.ravel() if a.ndim != 1 else a
+    b_flat = b.ravel() if b.ndim != 1 else b
+    # Preserve operand-aliasing through the asarray boundary: if the user
+    # passed the same Python object for both operands, treat them as one
+    # array for the helper's identity-pattern detection.
+    if a_orig_is_b_orig:
+        b_flat = a_flat
+    info = _resolve_cost_and_output_symmetry("i,j->ij", a_flat, b_flat)
+    cost = info.accumulation.total
+    output_sym = info.output_symmetry
+    canonical_subs = info.canonical_subscripts
+    if output_sym is not None:
+        output_sym = _prepare_symmetric_out(out, output_sym)
     with budget.deduct(
-        "outer", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "outer", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(
             _np.outer,
@@ -1931,14 +1965,14 @@ def outer(
             _to_base_ndarray(b),
             out=None if isinstance(out, SymmetricTensor) else out,
         )
-    if target_symmetry is None:
+    if output_sym is None:
         if out is not None:
             return out
-        return result  # type: ignore[return-value]  # wrapped at fnp.outer import time
-    return _wrap_result(result, out=out, symmetry=target_symmetry)  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+    return _wrap_result(result, out=out, symmetry=output_sym)  # type: ignore[return-value]
 
 
-attach_docstring(outer, _np.outer, "counted_custom", "m * n FLOPs")
+attach_docstring(outer, _np.outer, "counted_custom", "n(n+1)/2 FLOPs when v outer v")
 
 
 def _tensordot_parse_axes(a_ndim, b_ndim, axes):
@@ -1995,6 +2029,38 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     a_contract_axes, b_contract_axes = _tensordot_parse_axes(a.ndim, b.ndim, axes)
+    # Fast path: a full inner contraction over all axes maps cleanly to
+    # einsum and benefits from joint-operand savings when a is b.
+    is_full_inner = (
+        a.ndim == b.ndim
+        and a_contract_axes == tuple(range(a.ndim))
+        and b_contract_axes == tuple(range(b.ndim))
+        and a.ndim >= 1
+    )
+    if is_full_inner:
+        # Build matching einsum subscripts (e.g. ndim=2 -> "ij,ij->").
+        letters = "abcdefghijklmnopqrstuvwxyz"[: a.ndim]
+        subs = f"{letters},{letters}->"
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        canonical_subs = info.canonical_subscripts
+        out_sym = info.output_symmetry  # scalar output — always None
+        with budget.deduct(
+            "tensordot",
+            flop_cost=cost,
+            subscripts=canonical_subs,
+            shapes=(a.shape, b.shape),
+        ):
+            result = _call_numpy(
+                _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
+            )
+        if out_sym is not None:
+            return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+    # Fallback: keep the existing sophisticated direct_product_groups path
+    # for partial contractions and unusual axes specs.
     contracted = 1
     for ax in a_contract_axes:
         if 0 <= ax < a.ndim:
@@ -2064,12 +2130,19 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    cost = a.size
+    from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+    a_flat = a.ravel() if a.ndim != 1 else a
+    b_flat = b.ravel() if b.ndim != 1 else b
+    info = _resolve_cost_and_output_symmetry("i,i->", a_flat, b_flat)
+    cost = info.accumulation.total
+    canonical_subs = info.canonical_subscripts
     with budget.deduct(
-        "vdot", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "vdot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(_np.vdot, _to_base_ndarray(a), _to_base_ndarray(b))
-    return result  # type: ignore[return-value]  # wrapped at fnp.vdot import time
+    # vdot returns a scalar, never a SymmetricTensor.
+    return result  # type: ignore[return-value]
 
 
 attach_docstring(vdot, _np.vdot, "counted_custom", "size of input FLOPs")

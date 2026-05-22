@@ -293,7 +293,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isposinf",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L345",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
   "href": "/docs/api/numpy/isposinf/",
   "legacy_href": "/docs/api/ops/isposinf/",
   "module": "numpy",

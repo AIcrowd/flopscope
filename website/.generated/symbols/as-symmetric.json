@@ -276,7 +276,7 @@
   ],
   "signature": "flops.as_symmetric(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
   "slug": "as-symmetric",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L725",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767",
   "status_note": "",
   "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
   "upstream_source_url": ""

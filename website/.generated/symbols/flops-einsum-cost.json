@@ -119,6 +119,66 @@
               ],
               "name": "operand_symmetries",
               "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Argument forwarded to the analytical "
+                    },
+                    {
+                      "external_url": "",
+                      "href": "/docs/api/numpy/einsum/",
+                      "kind": "link",
+                      "target": "einsum",
+                      "text": "einsum"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " cost formula. Defaults to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "None"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "tuple[tuple[int, ...], ...] | None, optional",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Argument forwarded to the analytical "
+                },
+                {
+                  "external_url": "",
+                  "href": "/docs/api/numpy/einsum/",
+                  "kind": "link",
+                  "target": "einsum",
+                  "text": "einsum"
+                },
+                {
+                  "kind": "text",
+                  "text": " cost formula. Defaults to "
+                },
+                {
+                  "kind": "code",
+                  "text": "None"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "identity_pattern",
+              "type": "field_list"
             }
           ],
           "title": "Parameters",
@@ -257,7 +317,7 @@
       "title": "Einsum Guide"
     }
   ],
-  "signature": "flops.flops.einsum_cost(subscripts: 'str', shapes: 'list[tuple[int, ...]]', operand_symmetries: 'list[SymmetryGroup | None] | None' = None) -> 'int'",
+  "signature": "flops.flops.einsum_cost(subscripts: 'str', shapes: 'list[tuple[int, ...]]', operand_symmetries: 'list[SymmetryGroup | None] | None' = None, identity_pattern: 'tuple[tuple[int, ...], ...] | None' = None) -> 'int'",
   "slug": "flops-einsum-cost",
   "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_flops.py#L42",
   "status_note": "",

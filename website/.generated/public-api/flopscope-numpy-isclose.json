@@ -715,7 +715,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isclose",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1160",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1163",
   "href": "/docs/api/numpy/isclose/",
   "import_path": "flopscope.numpy.isclose",
   "is_operation_cost_leaf": true,
