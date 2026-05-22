@@ -501,3 +501,56 @@ class TestTransportFlip:
         # axis=-1 on ndim=3 means axis 2 (outside block).
         result = transport_flip(G, ndim=3, axes_flipped=(-1,))
         assert result is not None and set(result.axes) == {0, 1}
+
+
+class TestTransportTile:
+    def test_constant_reps_on_orbit_preserves(self):
+        from flopscope._symmetry_transport import transport_tile
+        G = _sym(0, 1)
+        # reps (2, 2) is constant on the S_2 orbit {0, 1}; output (4, 4).
+        result = transport_tile(
+            G, input_shape=(2, 2), output_shape=(4, 4), reps=(2, 2),
+        )
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_non_constant_reps_drops(self):
+        from flopscope._symmetry_transport import transport_tile
+        G = _sym(0, 1)
+        # reps (2, 1) NOT constant on orbit {0, 1}; output (4, 2).
+        result = transport_tile(
+            G, input_shape=(2, 2), output_shape=(4, 2), reps=(2, 1),
+        )
+        assert result is None
+
+    def test_reps_outside_block_preserves(self):
+        from flopscope._symmetry_transport import transport_tile
+        G = _sym(0, 1)
+        # reps (1, 1, 2) on (3, 3, 3): axis 2 outside block; constant on orbit {0,1}.
+        result = transport_tile(
+            G, input_shape=(3, 3, 3), output_shape=(3, 3, 6), reps=(1, 1, 2),
+        )
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_C3_constant_reps_preserves(self):
+        from flopscope._symmetry_transport import transport_tile
+        G = _cyc(0, 1, 2)
+        result = transport_tile(
+            G, input_shape=(3, 3, 3), output_shape=(6, 6, 6), reps=(2, 2, 2),
+        )
+        assert result is not None and result.order() == 3
+
+    def test_reps_longer_than_input_shifts_block(self):
+        from flopscope._symmetry_transport import transport_tile
+        G = _sym(0, 1)
+        # Input (3, 3), reps=(1, 1, 1) -> output rank 3, input prepended with 1 axis.
+        # Block axes shift from (0, 1) to (1, 2).
+        result = transport_tile(
+            G, input_shape=(3, 3), output_shape=(1, 3, 3), reps=(1, 1, 1),
+        )
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_none_input_returns_none(self):
+        from flopscope._symmetry_transport import transport_tile
+        assert transport_tile(
+            None, input_shape=(3, 3), output_shape=(6, 6), reps=(2, 2),
+        ) is None

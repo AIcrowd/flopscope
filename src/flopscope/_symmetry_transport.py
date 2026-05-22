@@ -15,7 +15,14 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
-from flopscope._symmetry_utils import intersect_groups, remap_group_axes, restrict_group_to_axes, setwise_stabilizer
+from flopscope._symmetry_utils import (
+    group_orbits_on_axes,
+    intersect_groups,
+    _normalize_reps_for_output,
+    remap_group_axes,
+    restrict_group_to_axes,
+    setwise_stabilizer,
+)
 
 
 def _stub(name: str):
@@ -309,7 +316,28 @@ def transport_flip(
     if not F_A or F_A == A:
         return group
     return setwise_stabilizer(group, fixed_set=F_A)
-transport_tile = _stub("tile")
+def transport_tile(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    output_shape: tuple[int, ...],
+    reps,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    A = group.axes or tuple(range(group.degree))
+    shift = len(output_shape) - len(input_shape)
+    reps_norm = _normalize_reps_for_output(reps, output_ndim=len(output_shape))
+    # Orbit-constancy check on output-positioned reps.
+    for orbit in group_orbits_on_axes(group, A):
+        reps_in_orbit = {reps_norm[a + shift] for a in orbit}
+        if len(reps_in_orbit) > 1:
+            return None
+    if shift == 0:
+        return group
+    # Block axes shift in the output; relabel the group.
+    axis_map = {a: a + shift for a in A}
+    return remap_group_axes(group, axis_map)
 
 
 def transport_repeat(
