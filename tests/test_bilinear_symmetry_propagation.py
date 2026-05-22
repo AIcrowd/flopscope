@@ -6,7 +6,8 @@ from __future__ import annotations
 import numpy as np
 
 import flopscope
-from flopscope import SymmetryGroup, BudgetContext
+import flopscope.numpy as fnp
+from flopscope import SymmetryGroup, SymmetricTensor, BudgetContext
 
 
 # --- _resolve_cost_and_output_symmetry helper (Task 1) -------------------
@@ -75,3 +76,86 @@ def test_einsum_cost_forwards_identity_pattern():
     assert cost_aliased <= cost_distinct, (
         "Aliased A@A cost should be no greater than two-distinct-operand cost"
     )
+
+
+# --- matmul (Task 4 — closes #59) ----------------------------------------
+
+def _flops(bc, ns):
+    bn = bc.summary_dict(by_namespace=True)["by_namespace"]
+    return bn.get(ns, {}).get("flops_used", 0)
+
+
+def test_matmul_sym_self_matches_einsum():
+    """A @ A with symmetric A: cost and output type match einsum."""
+    n = 10
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        A_raw = fnp.array(rs.randn(n, n))
+        A = flopscope.symmetrize(A_raw, symmetry=sym)
+        with flopscope.namespace("mm"):
+            X = A @ A
+        with flopscope.namespace("ein"):
+            Y = fnp.einsum("ij,jk->ik", A, A)
+    assert _flops(bc, "mm") == _flops(bc, "ein"), (
+        f"matmul cost {_flops(bc, 'mm')} must equal einsum cost "
+        f"{_flops(bc, 'ein')} for A @ A with symmetric A"
+    )
+    assert isinstance(X, SymmetricTensor), f"A @ A expected SymmetricTensor, got {type(X).__name__}"
+    assert isinstance(Y, SymmetricTensor)
+
+
+def test_matmul_two_distinct_sym_not_symmetric():
+    """matmul(A, B) with distinct symmetric A, B does NOT yield SymmetricTensor."""
+    n = 6
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)):
+        A_raw = fnp.array(rs.randn(n, n))
+        B_raw = fnp.array(rs.randn(n, n))
+        A = flopscope.symmetrize(A_raw, symmetry=sym)
+        B = flopscope.symmetrize(B_raw, symmetry=sym)
+        X = A @ B
+    assert not isinstance(X, SymmetricTensor), (
+        "matmul(A, B) with distinct symmetric A, B must NOT be wrapped as "
+        "SymmetricTensor — AB is symmetric only if A and B commute, which "
+        "is non-generic."
+    )
+
+
+def test_matmul_at_transpose_not_detected():
+    """A @ A.T with non-symmetric A: oracle correctly misses the alias.
+
+    This is the documented limitation — .T returns a view (different id),
+    so the identity_pattern detector treats A and A.T as distinct."""
+    n = 4
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)):
+        A = fnp.array(rs.randn(n, n))   # NOT symmetric
+        X = A @ A.T
+    assert not isinstance(X, SymmetricTensor), (
+        "A @ A.T detection is out of scope; oracle uses Python id() which "
+        "differs between A and A.T (view-aliasing). Documented limitation."
+    )
+
+
+def test_issue_59_reproducer():
+    """Verbatim reproducer from issue #59."""
+    n = 10
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        with flopscope.namespace("init"):
+            A_raw = fnp.array(np.random.RandomState(0).randn(n, n))
+            A = flopscope.symmetrize(A_raw, symmetry=sym)
+        with flopscope.namespace("mm"):
+            X = A @ A
+        with flopscope.namespace("einsum"):
+            Y = fnp.einsum("ij,jk->ik", A, A)
+    assert _flops(bc, "mm") == _flops(bc, "einsum"), (
+        f"Issue #59: mm flops ({_flops(bc, 'mm')}) must equal einsum flops "
+        f"({_flops(bc, 'einsum')})"
+    )
+    assert isinstance(X, SymmetricTensor), (
+        f"Issue #59: type(X) must be SymmetricTensor, got {type(X).__name__}"
+    )
+    assert isinstance(Y, SymmetricTensor)

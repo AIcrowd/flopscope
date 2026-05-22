@@ -1843,35 +1843,44 @@ def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    # Extract exact symmetry groups for cost calculation
-    operand_symmetries = [
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        b.symmetry if isinstance(b, SymmetricTensor) else None,
-    ]
-    has_sym = _builtins.any(s is not None for s in operand_symmetries)
+    # Subscripts for the 2D×2D and 1D×1D cases; everything else falls
+    # back to a dense size×size estimate (batched matmul, mixed ndim).
+    subs: str | None
     if a.ndim == 2 and b.ndim == 2:
-        cost = einsum_cost(
-            "ij,jk->ik",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
-        cost = einsum_cost(
-            "i,i->",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "i,i->"
     else:
-        cost = a.size * b.size
+        subs = None
+    if subs is None:
+        cost: int = a.size * b.size
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
     with budget.deduct(
-        "matmul", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "matmul", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         with _np.errstate(divide="ignore", over="ignore", invalid="ignore"):
             result = _call_numpy(_np.matmul, _to_base_ndarray(a), _to_base_ndarray(b))
     maybe_check_nan_inf(result, "matmul")
+    if output_sym is not None:
+        result_arr = _np.asarray(result)
+        # Skip numerical symmetry validation when the result contains non-finite
+        # values (inf/nan): np.allclose treats inf-inf=nan as not-close, which
+        # would raise a false SymmetryError. The symmetry is structurally preserved
+        # by the symmetric operand inputs.
+        if _np.all(_np.isfinite(result_arr)):
+            _validate_result_symmetry(result_arr, output_sym)
+        return SymmetricTensor(result_arr, symmetry=output_sym)  # type: ignore[return-value]
     return _asflopscope(result) if inputs_were_whest else result  # type: ignore[return-value]
 
 
