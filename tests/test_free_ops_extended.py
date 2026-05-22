@@ -144,15 +144,15 @@ def test_expand_dims_duplicate_axes_match_numpy():
     assert type(ours.value) is type(numpy_err.value)
 
 
-def test_expand_dims_can_be_richer_than_newaxis_slicing():
+def test_newaxis_slicing_matches_expand_dims():
     a = fnp.eye(3)
     by_fn = ops.expand_dims(a, axis=(0, 2))
     by_slice = a[None, :, None, :]
     assert isinstance(by_fn, SymmetricTensor)
     assert isinstance(by_slice, SymmetricTensor)
     assert numpy.array_equal(by_fn, by_slice)
-    assert by_fn.symmetry == flops.SymmetryGroup.young(blocks=((0, 2), (1, 3)))
-    assert by_slice.symmetry == flops.SymmetryGroup.symmetric(axes=(1, 3))
+    assert by_slice.symmetry == by_fn.symmetry
+    assert by_slice.symmetry == flops.SymmetryGroup.young(blocks=((0, 2), (1, 3)))
 
 
 def test_vstack():

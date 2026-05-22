@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import math
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -220,10 +220,23 @@ def remap_group_for_expand_dims(
     inserted_axes = tuple(
         axis_idx for axis_idx, size in enumerate(expanded_shape) if size == 1
     )
-    inserted = None
-    if len(inserted_axes) >= 2:
-        inserted = SymmetryGroup.symmetric(axes=inserted_axes)
+    inserted = inserted_axes_symmetry(inserted_axes)
     return direct_product_groups(remapped, inserted)
+
+
+def inserted_axes_symmetry(
+    inserted_positions: Sequence[int],
+) -> SymmetryGroup | None:
+    """Symmetry of N freshly-inserted size-1 axes at the given output positions.
+
+    Used by axis-inserting operations (``expand_dims``, ``__getitem__`` with
+    ``None``/``np.newaxis``). Returns ``None`` for fewer than 2 positions
+    (no non-trivial group). For 2+, returns
+    ``SymmetryGroup.symmetric(axes=tuple(inserted_positions))``.
+    """
+    if len(inserted_positions) < 2:
+        return None
+    return SymmetryGroup.symmetric(axes=tuple(inserted_positions))
 
 
 def intersect_groups(

@@ -11,6 +11,7 @@ from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
     broadcast_group,
+    inserted_axes_symmetry,
     intersect_groups,
     normalize_symmetry_input,
     reduce_group,
@@ -295,7 +296,11 @@ def propagate_symmetry_slice(
         key = (key,)
 
     for k in key:
-        if isinstance(k, (np.ndarray, list)):
+        # Bool indices are boolean masks in numpy (add a size-1 batch axis for
+        # True / size-0 for False), not integer scalars. `isinstance(True, int)`
+        # is also True in Python, so we must check bool BEFORE the int branch
+        # below would silently misclassify it as an integer scalar index.
+        if isinstance(k, (np.ndarray, list, bool, np.bool_)):
             return None
 
     # Expand Ellipsis.
@@ -416,6 +421,22 @@ def propagate_symmetry_slice(
         if final is None:
             continue
         new_groups.append(final)
+
+    # Build the inserted-axis group from freshly-inserted None positions.
+    inserted_output_positions: list[int] = []
+    out_idx = 0
+    for k in key_expanded:
+        if k is None:
+            inserted_output_positions.append(out_idx)
+            out_idx += 1
+        elif isinstance(k, (int, np.integer)):
+            pass  # axis removed; no output slot
+        else:
+            out_idx += 1
+
+    inserted_group = inserted_axes_symmetry(inserted_output_positions)
+    if inserted_group is not None:
+        new_groups.append(inserted_group)
 
     return new_groups if new_groups else None
 
@@ -619,15 +640,36 @@ class SymmetricTensor(FlopscopeArray):
             return result if not isinstance(result, np.ndarray) else np.asarray(result)
 
         if self._symmetry is None:
+            # Even with no input symmetry, multiple inserted None axes form a
+            # free symmetric group on those axes. Run the propagator with an
+            # empty groups list so the inserted-axis logic still fires.
+            new_groups = propagate_symmetry_slice([], self.shape, key)
+            if new_groups:
+                return _wrap_tensor_result(
+                    np.asarray(result), _merge_symmetry_groups(new_groups)
+                )
             return _asplainflopscope(np.asarray(result))
 
         new_groups = propagate_symmetry_slice([self._symmetry], self.shape, key)
         new_symmetry = _merge_symmetry_groups(new_groups or [])
         if new_groups is not None:
-            if new_symmetry != self._symmetry and self._symmetry.axes is not None:
+            # Fire only on real structural reduction: the new group's order is
+            # strictly less than the original's. This silences false alarms on
+            # operations that gain symmetry (e.g. `a[None, :, None, :]`
+            # produces a richer Young group) or merely relabel axes without
+            # losing structure (e.g. `a[None, :, :]` shifts axes, preserves
+            # order). It under-fires on the rare case where original sym is
+            # broken and a same-order new group is gained on different axes;
+            # the gained group is still attached to the result so a careful
+            # user can inspect `.symmetry` directly.
+            if (
+                new_symmetry is not None
+                and self._symmetry.axes is not None
+                and new_symmetry.order() < self._symmetry.order()
+            ):
                 _warn_symmetry_loss(
                     [self._symmetry.axes],
-                    "slicing changed dim sizes or removed dims",
+                    "slicing reduced symmetric group structure",
                 )
             return _wrap_tensor_result(np.asarray(result), new_symmetry)
 
