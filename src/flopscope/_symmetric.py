@@ -11,6 +11,7 @@ from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
     broadcast_group,
+    inserted_axes_symmetry,
     intersect_groups,
     normalize_symmetry_input,
     reduce_group,
@@ -416,6 +417,22 @@ def propagate_symmetry_slice(
         if final is None:
             continue
         new_groups.append(final)
+
+    # Build the inserted-axis group from freshly-inserted None positions.
+    inserted_output_positions: list[int] = []
+    out_idx = 0
+    for k in key_expanded:
+        if k is None:
+            inserted_output_positions.append(out_idx)
+            out_idx += 1
+        elif isinstance(k, (int, np.integer)):
+            pass  # axis removed; no output slot
+        else:
+            out_idx += 1
+
+    inserted_group = inserted_axes_symmetry(inserted_output_positions)
+    if inserted_group is not None:
+        new_groups.append(inserted_group)
 
     return new_groups if new_groups else None
 
