@@ -772,6 +772,12 @@ def test_to_base_ndarray_tree_recurses_into_nested():
 # entry here. Adding a name to _PASSTHROUGH_NAMES without a matching
 # _BUILD_ARGS entry causes the parameterized test below to fail loudly
 # with KeyError, forcing the author to register realistic args.
+#
+# NOTE: for some entries (promote_types, mintypecode, broadcast_shapes,
+# isfortran, isscalar) numpy does not invoke __array_function__ — either
+# no FlopscopeArray is in args, or the function is not NEP-18-decorated.
+# For these the dispatch-spy assertion below is vacuous; only the 0-FLOP
+# assertion has meaningful coverage (against accidental budget charges).
 _BUILD_ARGS = {
     # Zero-FLOP type/shape queries:
     "ndim": lambda: (fnp.empty(4),),
@@ -781,9 +787,9 @@ _BUILD_ARGS = {
     "result_type": lambda: (fnp.empty(4),),
     "can_cast": lambda: (fnp.empty(4), np.float64),
     "min_scalar_type": lambda: (fnp.empty(4),),
-    "promote_types": lambda: (np.int32, np.float64),
+    "promote_types": lambda: (np.int32, np.float64),  # (vacuous spy)
     "find_common_type": lambda: ([np.float64], []),
-    "mintypecode": lambda: (["f", "d"],),
+    "mintypecode": lambda: (["f", "d"],),  # (vacuous spy)
     # Test-harness assertion:
     "array_equal": lambda: (fnp.empty(4), fnp.empty(4)),
     # Zero-FLOP memory-layout queries (#72):
@@ -793,10 +799,10 @@ _BUILD_ARGS = {
     # Zero-FLOP boolean predicates (#72 audit):
     "iscomplexobj": lambda: (fnp.empty(4),),
     "isrealobj": lambda: (fnp.empty(4),),
-    "isfortran": lambda: (fnp.empty(4),),
-    "isscalar": lambda: (fnp.empty(4),),
+    "isfortran": lambda: (fnp.empty(4),),  # (vacuous spy)
+    "isscalar": lambda: (fnp.empty(4),),  # (vacuous spy)
     # Zero-FLOP shape arithmetic (#72 audit):
-    "broadcast_shapes": lambda: ((4,), (4,)),
+    "broadcast_shapes": lambda: ((4,), (4,)),  # (vacuous spy)
 }
 
 
@@ -838,8 +844,8 @@ def test_passthrough_name_does_not_dispatch_or_charge(monkeypatch, name):
 
     assert bc.flops_used == 0, f"{name} charged {bc.flops_used} FLOPs"
     assert not dispatch_called, (
-        f"{name} entered __array_function__ dispatch; "
-        f"should be in _PASSTHROUGH_NAMES fast path"
+        f"{name} reached the dispatch lookup inside __array_function__; "
+        f"passthrough check failed — verify {name!r} is in _PASSTHROUGH_NAMES"
     )
 
 
