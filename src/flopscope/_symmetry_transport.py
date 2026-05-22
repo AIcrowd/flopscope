@@ -10,6 +10,7 @@ for the per-op rules and rationale.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -24,9 +25,63 @@ def _stub(name: str):
     return _impl
 
 
-# Stubs — replaced in subsequent tasks.
-transport_reshape = _stub("reshape")
-transport_ravel = _stub("ravel")
+def transport_reshape(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    output_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    A = group.axes or tuple(range(group.degree))
+    m = input_shape[A[0]]  # block axis size (must be equal for all a in A by group validity)
+
+    A_sorted = sorted(A)
+    n = len(A_sorted)
+
+    # Skeleton segment products from input (n+1 segments interleaved with n block axes).
+    seg_input = []
+    prev = -1
+    for a in A_sorted:
+        seg_input.append(math.prod(input_shape[prev + 1 : a]))
+        prev = a
+    seg_input.append(math.prod(input_shape[prev + 1 :]))
+
+    # Walk through output, matching one segment then one block axis at a time.
+    out_positions: list[int] = []
+    pos = 0
+    for k in range(n):
+        target = seg_input[k]
+        accum = 1
+        while accum < target and pos < len(output_shape):
+            accum *= output_shape[pos]
+            pos += 1
+        if accum != target:
+            return None
+        # Skip length-1 padding axes between segment and block axis (unless m == 1).
+        if m != 1:
+            while pos < len(output_shape) and output_shape[pos] == 1:
+                pos += 1
+        if pos >= len(output_shape) or output_shape[pos] != m:
+            return None
+        out_positions.append(pos)
+        pos += 1
+
+    if math.prod(output_shape[pos:]) != seg_input[-1]:
+        return None
+
+    axis_map = {a: out_positions[A_sorted.index(a)] for a in A}
+    return remap_group_axes(group, axis_map)
+
+
+def transport_ravel(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    return transport_reshape(
+        group, input_shape=input_shape, output_shape=(math.prod(input_shape),),
+    )
 def transport_concatenate(
     groups: Sequence[SymmetryGroup | None],
     *,

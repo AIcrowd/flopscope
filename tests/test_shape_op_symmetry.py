@@ -361,3 +361,84 @@ class TestTransportVHColumnStack:
             [G, G], output_ndim=2, input_ndims=[2, 2],
         )
         assert result is None
+
+
+class TestTransportReshape:
+    def test_identity_reshape_preserves(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 1)
+        result = transport_reshape(G, input_shape=(3, 3), output_shape=(3, 3))
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_identity_with_interior_length_1_preserves(self):
+        # The bug found by math-olympiad review: (3,1,3) -> (3,1,3) with S_2 on (0,2).
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 2)
+        result = transport_reshape(G, input_shape=(3, 1, 3), output_shape=(3, 1, 3))
+        assert result is not None and set(result.axes) == {0, 2}
+
+    def test_suffix_split_off_block_preserves(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(1, 2)
+        # (2, 3, 3, 4) -> (2, 3, 3, 2, 2): last axis 4 splits to (2,2), block intact.
+        result = transport_reshape(
+            G, input_shape=(2, 3, 3, 4), output_shape=(2, 3, 3, 2, 2),
+        )
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_merge_inside_block_drops(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(1, 2)
+        # (2, 3, 3, 4) -> (2, 9, 4): merges two block axes -> drop.
+        result = transport_reshape(
+            G, input_shape=(2, 3, 3, 4), output_shape=(2, 9, 4),
+        )
+        assert result is None
+
+    def test_merge_block_with_prefix_drops(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(1, 2)
+        # (2, 3, 3, 4) -> (6, 3, 4): merges axis 0 with axis 1 (block).
+        result = transport_reshape(
+            G, input_shape=(2, 3, 3, 4), output_shape=(6, 3, 4),
+        )
+        assert result is None
+
+    def test_prepend_length_1(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 1)
+        # (3, 3) -> (1, 3, 3): block shifts to (1, 2).
+        result = transport_reshape(
+            G, input_shape=(3, 3), output_shape=(1, 3, 3),
+        )
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_non_contiguous_block_preserved(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 2)
+        # (3, 5, 3) -> (1, 3, 5, 3): non-contig block preserved at (1, 3).
+        result = transport_reshape(
+            G, input_shape=(3, 5, 3), output_shape=(1, 3, 5, 3),
+        )
+        assert result is not None and set(result.axes) == {1, 3}
+
+    def test_swap_block_with_non_block_drops(self):
+        from flopscope._symmetry_transport import transport_reshape
+        G = _sym(0, 2)
+        # (3, 5, 3) -> (3, 3, 5): cannot be done by reshape; segment match fails.
+        result = transport_reshape(
+            G, input_shape=(3, 5, 3), output_shape=(3, 3, 5),
+        )
+        assert result is None
+
+
+class TestTransportRavel:
+    def test_ravel_drops_for_nondegenerate(self):
+        from flopscope._symmetry_transport import transport_ravel
+        G = _sym(0, 1)
+        result = transport_ravel(G, input_shape=(3, 3))
+        assert result is None  # Block of size 3 can't fit in 1-axis output of size 9.
+
+    def test_ravel_for_none_input(self):
+        from flopscope._symmetry_transport import transport_ravel
+        assert transport_ravel(None, input_shape=(3, 3)) is None
