@@ -11,6 +11,7 @@ import flopscope as flops
 import flopscope._free_ops as ops
 import flopscope.numpy as fnp
 from flopscope._symmetric import SymmetricTensor
+from flopscope.errors import SymmetryLossWarning
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -190,7 +191,8 @@ def test_ravel():
 
 def test_ravel_drops_symmetry():
     a = flops.as_symmetric(numpy.eye(3), symmetry=(0, 1))
-    r = ops.ravel(a)
+    with pytest.warns(SymmetryLossWarning):
+        r = ops.ravel(a)
     assert r.shape == (9,)
     assert not isinstance(r, SymmetricTensor)
 

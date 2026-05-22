@@ -1,11 +1,13 @@
 """Tests for symmetry-aware pointwise operations."""
 
 import numpy
+import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._budget import BudgetContext
 from flopscope._symmetric import SymmetricTensor, as_symmetric
+from flopscope.errors import SymmetryLossWarning
 
 
 class TestUnarySymmetry:
@@ -58,7 +60,8 @@ class TestBinarySymmetry:
         )
         B = numpy.ones((5, 5))
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
-            result = fnp.add(A, B)
+            with pytest.warns(SymmetryLossWarning):
+                result = fnp.add(A, B)
             assert budget.flops_used == 25
             assert not isinstance(result, SymmetricTensor)
 
@@ -77,9 +80,11 @@ class TestBinarySymmetry:
         )
         B = numpy.arange(25.0).reshape(5, 5)
         with BudgetContext(flop_budget=10**6, quiet=True) as function_budget:
-            expected = fnp.multiply(A, B)
+            with pytest.warns(SymmetryLossWarning):
+                expected = fnp.multiply(A, B)
         with BudgetContext(flop_budget=10**6, quiet=True) as dunder_budget:
-            result = A * B
+            with pytest.warns(SymmetryLossWarning):
+                result = A * B
         assert function_budget.flops_used == dunder_budget.flops_used
         assert not isinstance(expected, SymmetricTensor)
         assert not isinstance(result, SymmetricTensor)
@@ -100,5 +105,6 @@ class TestReductionSymmetry:
         data = numpy.eye(4)
         S = as_symmetric(data, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)))
         with BudgetContext(flop_budget=10**6, quiet=True):
-            result = fnp.sum(S)
+            with pytest.warns(SymmetryLossWarning):
+                result = fnp.sum(S)
             assert not isinstance(result, SymmetricTensor)

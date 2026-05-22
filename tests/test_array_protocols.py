@@ -16,6 +16,7 @@ import pytest
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._ndarray import FlopscopeArray
+from flopscope.errors import SymmetryLossWarning
 
 # ----- __array_ufunc__: ufunc.__call__ -----
 
@@ -695,7 +696,8 @@ def test_diagonal_of_3sym_downgrades_when_no_tensor_axis_symmetry_remains():
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1, 2)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        d = fnp.diagonal(A)
+        with pytest.warns(SymmetryLossWarning):
+            d = fnp.diagonal(A)
     assert not isinstance(d, flops.SymmetricTensor)
     assert isinstance(d, fnp.ndarray)
 

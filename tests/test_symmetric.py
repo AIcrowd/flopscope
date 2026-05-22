@@ -10,7 +10,7 @@ import flopscope.numpy as fnp
 from flopscope._budget import BudgetContext
 from flopscope._ndarray import FlopscopeArray
 from flopscope._symmetric import SymmetricTensor, as_symmetric, is_symmetric, symmetrize
-from flopscope.errors import SymmetryError
+from flopscope.errors import SymmetryError, SymmetryLossWarning
 
 
 def _s2(*axes):
@@ -81,10 +81,14 @@ def test_swapaxes_remaps_symmetry():
 
 def test_plain_slices_drop_symmetry():
     tensor = as_symmetric(np.eye(4), symmetry=_s2(0, 1))
-    assert isinstance(tensor[1:, 1:], FlopscopeArray)
-    assert not isinstance(tensor[1:, 1:], SymmetricTensor)
-    assert isinstance(tensor[::-1, ::-1], FlopscopeArray)
-    assert not isinstance(tensor[::-1, ::-1], SymmetricTensor)
+    with pytest.warns(SymmetryLossWarning):
+        sliced_fwd = tensor[1:, 1:]
+    assert isinstance(sliced_fwd, FlopscopeArray)
+    assert not isinstance(sliced_fwd, SymmetricTensor)
+    with pytest.warns(SymmetryLossWarning):
+        sliced_rev = tensor[::-1, ::-1]
+    assert isinstance(sliced_rev, FlopscopeArray)
+    assert not isinstance(sliced_rev, SymmetricTensor)
 
 
 def test_is_symmetric_checks_declared_group():

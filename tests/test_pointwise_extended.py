@@ -11,6 +11,7 @@ import pytest
 import flopscope._pointwise as ops
 from flopscope._budget import BudgetContext
 from flopscope._symmetric import SymmetricTensor, as_symmetric
+from flopscope.errors import SymmetryLossWarning
 
 # ---------------------------------------------------------------------------
 # Multi-output unary ops
@@ -268,7 +269,8 @@ def test_binary_op_mismatched_symmetry_returns_plain():
     x = as_symmetric(d1, symmetry=(0, 1))
     # y is a plain ndarray (no symmetry_info)
     with BudgetContext(flop_budget=10**6):
-        result = ops.add(x, d2)
+        with pytest.warns(SymmetryLossWarning):
+            result = ops.add(x, d2)
     # Plain array — no SymmetricTensor wrapping
     assert not isinstance(result, SymmetricTensor)
 

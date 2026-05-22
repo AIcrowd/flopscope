@@ -14,6 +14,7 @@ import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
+from flopscope.errors import SymmetryLossWarning
 
 # ----- #58: ndarray method calls on FlopscopeArray must track FLOPs -----
 
@@ -324,7 +325,8 @@ def test_no_symmetry_downgrades_to_whest_array_via_diagonal():
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        d = fnp.diagonal(A)
+        with pytest.warns(SymmetryLossWarning):
+            d = fnp.diagonal(A)
     assert not isinstance(d, flops.SymmetricTensor), (
         f"got {type(d).__name__} with empty symmetry; expected FlopscopeArray"
     )
@@ -338,7 +340,8 @@ def test_no_symmetry_downgrades_via_full_reduction():
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        s = A.sum()  # scalar — but if returned as array, must be FlopscopeArray
+        with pytest.warns(SymmetryLossWarning):
+            s = A.sum()  # scalar — but if returned as array, must be FlopscopeArray
     assert not isinstance(s, flops.SymmetricTensor)
 
 
@@ -366,7 +369,8 @@ def test_symmetric_getitem_full_reduction_via_indexing_returns_whest_array():
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        row = A[0]
+        with pytest.warns(SymmetryLossWarning):
+            row = A[0]
     assert not isinstance(row, flops.SymmetricTensor)
     assert isinstance(row, fnp.ndarray)
     assert row.shape == (4,)
@@ -427,6 +431,7 @@ def test_issue_62_reproducer():
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        d = fnp.diagonal(A)
+        with pytest.warns(SymmetryLossWarning):
+            d = fnp.diagonal(A)
     assert not isinstance(d, flops.SymmetricTensor)
     assert isinstance(d, fnp.ndarray)
