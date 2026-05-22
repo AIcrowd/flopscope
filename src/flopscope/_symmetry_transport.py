@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
-from flopscope._symmetry_utils import remap_group_axes
+from flopscope._symmetry_utils import remap_group_axes, restrict_group_to_axes
 
 
 def _stub(name: str):
@@ -32,10 +32,47 @@ transport_stack = _stub("stack")
 transport_vstack = _stub("vstack")
 transport_hstack = _stub("hstack")
 transport_column_stack = _stub("column_stack")
-transport_split = _stub("split")
-transport_hsplit = _stub("hsplit")
-transport_vsplit = _stub("vsplit")
-transport_dsplit = _stub("dsplit")
+def transport_split(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    axis: int = 0,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    a = axis % len(input_shape)
+    A = group.axes or tuple(range(group.degree))
+    keep = tuple(x for x in A if x != a)
+    if len(keep) < 2:
+        return None
+    return restrict_group_to_axes(group, keep)
+
+
+def transport_hsplit(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    # hsplit uses axis=0 for 1-D, axis=1 otherwise.
+    if len(input_shape) == 1:
+        return transport_split(group, input_shape=input_shape, axis=0)
+    return transport_split(group, input_shape=input_shape, axis=1)
+
+
+def transport_vsplit(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    return transport_split(group, input_shape=input_shape, axis=0)
+
+
+def transport_dsplit(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    return transport_split(group, input_shape=input_shape, axis=2)
 def transport_atleast_1d(
     group: SymmetryGroup | None,
     *,

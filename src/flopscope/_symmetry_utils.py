@@ -169,7 +169,11 @@ def restrict_group_to_axes(
         local_indices.append(group_axes.index(axis))
     if len(local_indices) < 2:
         return None
-    restricted = group.restrict(tuple(local_indices))
+    kept = tuple(local_indices)
+    # First compute the setwise stabilizer so that restrict() only sees
+    # permutations that map the kept set to itself.
+    stabilized = group.setwise_stabilizer(set(kept))
+    restricted = stabilized.restrict(kept)
     if restricted.order() <= 1:
         return None
     return restricted

@@ -106,3 +106,54 @@ class TestTransportAtleast:
         assert transport_atleast_1d(None, input_shape=(3, 3)) is None
         assert transport_atleast_2d(None, input_shape=(3, 3)) is None
         assert transport_atleast_3d(None, input_shape=(3, 3)) is None
+
+
+class TestTransportSplit:
+    def test_split_non_block_axis_preserves(self):
+        from flopscope._symmetry_transport import transport_split
+        # (4, 3, 3) with S_2 on (1, 2), split along axis 0.
+        G = _sym(1, 2)
+        result = transport_split(G, input_shape=(4, 3, 3), axis=0)
+        assert result is not None
+        assert set(result.axes) == {1, 2}
+        assert result.order() == 2
+
+    def test_split_in_block_drops_for_degree2(self):
+        from flopscope._symmetry_transport import transport_split
+        G = _sym(0, 1)
+        result = transport_split(G, input_shape=(3, 3), axis=0)
+        assert result is None
+
+    def test_split_in_block_preserves_subgroup_for_S3(self):
+        from flopscope._symmetry_transport import transport_split
+        # S_3 on (0, 1, 2), split along axis 0 -> pieces carry S_2 on (1, 2).
+        G = _sym(0, 1, 2)
+        result = transport_split(G, input_shape=(3, 3, 3), axis=0)
+        assert result is not None
+        assert set(result.axes) == {1, 2}
+        assert result.order() == 2
+
+    def test_hsplit_for_1d(self):
+        from flopscope._symmetry_transport import transport_hsplit
+        # hsplit on 1-D uses axis=0, and 1-D inputs can't carry multi-axis groups.
+        assert transport_hsplit(None, input_shape=(6,)) is None
+
+    def test_hsplit_for_2d_uses_axis_1(self):
+        from flopscope._symmetry_transport import transport_hsplit
+        G = _sym(0, 1)
+        # hsplit on (3, 6) splits along axis 1 - which IS in block; degree 2 -> drops.
+        assert transport_hsplit(G, input_shape=(3, 6)) is None
+
+    def test_vsplit_uses_axis_0(self):
+        from flopscope._symmetry_transport import transport_vsplit
+        G = _sym(1, 2)
+        # vsplit on (4, 3, 3) splits along axis 0 (outside block) -> preserves.
+        result = transport_vsplit(G, input_shape=(4, 3, 3))
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_dsplit_uses_axis_2(self):
+        from flopscope._symmetry_transport import transport_dsplit
+        G = _sym(0, 1)
+        # dsplit on (3, 3, 6) splits along axis 2 (outside block) -> preserves.
+        result = transport_dsplit(G, input_shape=(3, 3, 6))
+        assert result is not None and set(result.axes) == {0, 1}
