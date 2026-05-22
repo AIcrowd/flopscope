@@ -281,3 +281,38 @@ class TestTransportConcatenate:
         G1 = _sym(0, 1)
         # axis=None ravels first -> always drops.
         assert transport_concatenate([G1, G1], output_ndim=1, axis=None) is None
+
+
+class TestTransportStack:
+    def test_stack_two_identical_S2_along_axis_0(self):
+        from flopscope._symmetry_transport import transport_stack
+        G = _sym(0, 1)
+        # New axis at position 0; existing block axes (0, 1) shift to (1, 2).
+        result = transport_stack([G, G], output_ndim=3, axis=0)
+        assert result is not None
+        assert set(result.axes) == {1, 2}
+
+    def test_stack_S3_and_C3_intersect_to_C3(self):
+        from flopscope._symmetry_transport import transport_stack
+        gS = _sym(0, 1, 2)
+        gC = _cyc(0, 1, 2)
+        # New axis at position 0; block axes shift to (1, 2, 3).
+        # Intersect S_3 ∩ C_3 = C_3.
+        result = transport_stack([gS, gC], output_ndim=4, axis=0)
+        assert result is not None
+        assert set(result.axes) == {1, 2, 3}
+        # C_3 has order 3.
+        assert result.order() == 3
+
+    def test_stack_plain_input_drops(self):
+        from flopscope._symmetry_transport import transport_stack
+        G = _sym(0, 1)
+        assert transport_stack([G, None], output_ndim=3, axis=0) is None
+
+    def test_stack_at_end(self):
+        from flopscope._symmetry_transport import transport_stack
+        G = _sym(0, 1)
+        # New axis at position 2 (end). Block axes 0,1 don't shift.
+        result = transport_stack([G, G], output_ndim=3, axis=2)
+        assert result is not None
+        assert set(result.axes) == {0, 1}

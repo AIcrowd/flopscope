@@ -56,7 +56,31 @@ def transport_concatenate(
         if result is None:
             return None
     return result
-transport_stack = _stub("stack")
+def transport_stack(
+    groups: Sequence[SymmetryGroup | None],
+    *,
+    output_ndim: int,
+    axis: int = 0,
+) -> SymmetryGroup | None:
+    if any(g is None for g in groups):
+        return None
+    k = axis % output_ndim
+    # Shift each input's block axes >= k by +1.
+    shifted = []
+    for g in groups:
+        A = g.axes or tuple(range(g.degree))
+        axis_map = {a: (a if a < k else a + 1) for a in A}
+        r = remap_group_axes(g, axis_map)
+        if r is None:
+            return None
+        shifted.append(r)
+    # Intersect.
+    result = shifted[0]
+    for g in shifted[1:]:
+        result = intersect_groups(result, g, ndim=output_ndim)
+        if result is None:
+            return None
+    return result
 transport_vstack = _stub("vstack")
 transport_hstack = _stub("hstack")
 transport_column_stack = _stub("column_stack")
