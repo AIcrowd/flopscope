@@ -278,8 +278,9 @@ def transport_broadcast_to(
     input_shape: tuple[int, ...],
     output_shape: tuple[int, ...],
 ) -> SymmetryGroup | None:
-    if group is None:
-        return None
+    # NOTE: broadcast_group handles `group is None` correctly — it can still
+    # produce a non-None result when prepended equal-size axes form a new
+    # S_k symmetry on the output. Do not short-circuit on None here.
     return broadcast_group(
         group, input_shape=input_shape, output_shape=output_shape,
     )
