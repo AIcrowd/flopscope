@@ -558,36 +558,22 @@ def einsum(
         data against each generator of the group.
     """
     budget = require_budget()
-    canonical_subscripts, input_parts, output_subscript, shapes, path_info = (
-        _get_path_info(
-            subscripts,
-            operands,
-            optimize,
+    info = _resolve_cost_and_output_symmetry(subscripts, *operands, optimize=optimize)
+    canonical_subscripts = info.canonical_subscripts
+    accumulation_cost = info.accumulation
+    path_info = info.path_info
+    shapes = info.shapes
+    input_parts = info.input_parts
+    output_subscript = info.output_subscript
+
+    # User-declared symmetry overrides the helper's inferred symmetry;
+    # otherwise honor an existing SymmetricTensor `out=` operand.
+    if symmetry is not None:
+        target_symmetry = normalize_symmetry_input(
+            symmetry, ndim=len(output_subscript)
         )
-    )
-
-    accumulation_cost = _get_accumulation_cost(
-        canonical_subscripts=canonical_subscripts,
-        input_parts=tuple(input_parts),
-        output_subscript=output_subscript,
-        shapes=shapes,
-        operands=tuple(operands),
-    )
-
-    from flopscope._accumulation._path_info import FlopscopePathInfo
-
-    path_info = FlopscopePathInfo.from_inner(
-        inner=path_info,
-        accumulation=accumulation_cost,
-    )
-
-    target_symmetry = _resolve_output_symmetry(
-        symmetry=symmetry,
-        operands=operands,
-        input_parts=input_parts,
-        output_subscript=output_subscript,
-        path_info=path_info,
-    )
+    else:
+        target_symmetry = info.output_symmetry
     effective_out_symmetry = target_symmetry
     if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
         effective_out_symmetry = out.symmetry
