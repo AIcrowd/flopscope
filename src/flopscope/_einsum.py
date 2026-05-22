@@ -563,15 +563,12 @@ def einsum(
     accumulation_cost = info.accumulation
     path_info = info.path_info
     shapes = info.shapes
-    input_parts = info.input_parts
     output_subscript = info.output_subscript
 
     # User-declared symmetry overrides the helper's inferred symmetry;
     # otherwise honor an existing SymmetricTensor `out=` operand.
     if symmetry is not None:
-        target_symmetry = normalize_symmetry_input(
-            symmetry, ndim=len(output_subscript)
-        )
+        target_symmetry = normalize_symmetry_input(symmetry, ndim=len(output_subscript))
     else:
         target_symmetry = info.output_symmetry
     effective_out_symmetry = target_symmetry

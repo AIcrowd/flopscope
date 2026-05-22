@@ -15,10 +15,7 @@ from numpy.typing import ArrayLike
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
-from flopscope._flops import (
-    _ceil_log2,
-    einsum_cost,
-)
+from flopscope._flops import _ceil_log2
 from flopscope._flops import (
     analytical_pointwise_cost as pointwise_cost,
 )
@@ -31,7 +28,6 @@ from flopscope._ndarray import (
     _to_base_ndarray,
     _to_base_ndarray_tree,
 )
-from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetric import (
     SymmetricTensor,
     _warn_symmetry_loss,

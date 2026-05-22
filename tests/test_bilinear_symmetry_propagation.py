@@ -7,10 +7,10 @@ import numpy as np
 
 import flopscope
 import flopscope.numpy as fnp
-from flopscope import SymmetryGroup, SymmetricTensor, BudgetContext
-
+from flopscope import BudgetContext, SymmetricTensor, SymmetryGroup
 
 # --- _resolve_cost_and_output_symmetry helper (Task 1) -------------------
+
 
 def test_helper_returns_costinfo_for_symmetric_matmul():
     """Helper must compute symmetry-aware cost and infer output symmetry for A @ A."""
@@ -50,6 +50,7 @@ def test_helper_returns_none_symmetry_for_distinct_matmul():
 
 # --- _flops.einsum_cost side-fix (Task 3) ---------------------------------
 
+
 def test_einsum_cost_forwards_identity_pattern():
     """Public-introspection einsum_cost must respect identity_pattern to
     detect A @ A joint savings. Before the fix it always passed
@@ -80,6 +81,7 @@ def test_einsum_cost_forwards_identity_pattern():
 
 # --- matmul (Task 4 — closes #59) ----------------------------------------
 
+
 def _flops(bc, ns):
     bn = bc.summary_dict(by_namespace=True)["by_namespace"]
     return bn.get(ns, {}).get("flops_used", 0)
@@ -101,7 +103,9 @@ def test_matmul_sym_self_matches_einsum():
         f"matmul cost {_flops(bc, 'mm')} must equal einsum cost "
         f"{_flops(bc, 'ein')} for A @ A with symmetric A"
     )
-    assert isinstance(X, SymmetricTensor), f"A @ A expected SymmetricTensor, got {type(X).__name__}"
+    assert isinstance(X, SymmetricTensor), (
+        f"A @ A expected SymmetricTensor, got {type(X).__name__}"
+    )
     assert isinstance(Y, SymmetricTensor)
 
 
@@ -131,7 +135,7 @@ def test_matmul_at_transpose_not_detected():
     n = 4
     rs = np.random.RandomState(0)
     with BudgetContext(flop_budget=int(1e20)):
-        A = fnp.array(rs.randn(n, n))   # NOT symmetric
+        A = fnp.array(rs.randn(n, n))  # NOT symmetric
         X = A @ A.T
     assert not isinstance(X, SymmetricTensor), (
         "A @ A.T detection is out of scope; oracle uses Python id() which "
@@ -163,6 +167,7 @@ def test_issue_59_reproducer():
 
 # --- dot (Task 5) --------------------------------------------------------
 
+
 def test_dot_sym_self_matches_einsum():
     """dot(A, A) with symmetric A: cost and output type match einsum."""
     n = 8
@@ -184,6 +189,7 @@ def test_dot_sym_self_matches_einsum():
 
 # --- outer (Task 6) ------------------------------------------------------
 
+
 def test_outer_sym_self_matches_einsum():
     """outer(v, v) cost and output type match einsum('i,j->ij', v, v)."""
     n = 12
@@ -203,6 +209,7 @@ def test_outer_sym_self_matches_einsum():
 
 # --- inner (Task 7) ------------------------------------------------------
 
+
 def test_inner_sym_self_matches_einsum_1d():
     """inner(v, v) cost matches einsum('i,i->', v, v)."""
     n = 8
@@ -218,6 +225,7 @@ def test_inner_sym_self_matches_einsum_1d():
 
 # --- vdot (Task 8) -------------------------------------------------------
 
+
 def test_vdot_sym_self_matches_einsum():
     """vdot(v, v) cost matches einsum('i,i->', v, v)."""
     n = 8
@@ -232,6 +240,7 @@ def test_vdot_sym_self_matches_einsum():
 
 
 # --- tensordot (Task 9) --------------------------------------------------
+
 
 def test_tensordot_sym_self_axes2_matches_einsum():
     """tensordot(A, A, axes=2) (full contraction) cost matches einsum."""
