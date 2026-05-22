@@ -16,10 +16,12 @@ from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
+    broadcast_group,
     group_orbits_on_axes,
     intersect_groups,
     _normalize_reps_for_output,
     remap_group_axes,
+    remap_group_for_expand_dims,
     restrict_group_to_axes,
     setwise_stabilizer,
 )
@@ -270,8 +272,26 @@ def transport_atleast_3d(
         return group
     # len(input_shape) <= 1: cannot carry a multi-axis group; defensive None.
     return None
-transport_broadcast_to = _stub("broadcast_to")
-transport_expand_dims = _stub("expand_dims")
+def transport_broadcast_to(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    output_shape: tuple[int, ...],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    return broadcast_group(
+        group, input_shape=input_shape, output_shape=output_shape,
+    )
+
+
+def transport_expand_dims(
+    group: SymmetryGroup | None,
+    *,
+    input_ndim: int,
+    axis,
+) -> SymmetryGroup | None:
+    return remap_group_for_expand_dims(group, ndim=input_ndim, axis=axis)
 def transport_squeeze(
     group: SymmetryGroup | None,
     *,

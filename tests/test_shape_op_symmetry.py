@@ -554,3 +554,36 @@ class TestTransportTile:
         assert transport_tile(
             None, input_shape=(3, 3), output_shape=(6, 6), reps=(2, 2),
         ) is None
+
+
+class TestTransportBroadcastExpand:
+    def test_broadcast_to_prepended_axes(self):
+        from flopscope._symmetry_transport import transport_broadcast_to
+        G = _sym(0, 1)
+        # (3, 3) -> (4, 3, 3): prepend axis of size 4.
+        result = transport_broadcast_to(
+            G, input_shape=(3, 3), output_shape=(4, 3, 3),
+        )
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_broadcast_to_length_1_expanded_drops(self):
+        from flopscope._symmetry_transport import transport_broadcast_to
+        # (1, 1) S_2(0,1) broadcast to (3, 3): block axes expanded -> drop block.
+        G = _sym(0, 1)
+        result = transport_broadcast_to(
+            G, input_shape=(1, 1), output_shape=(3, 3),
+        )
+        # Existing broadcast_group implementation drops both length-1 block axes -> None.
+        assert result is None
+
+    def test_expand_dims_at_position_0(self):
+        from flopscope._symmetry_transport import transport_expand_dims
+        G = _sym(0, 1)
+        result = transport_expand_dims(G, input_ndim=2, axis=0)
+        assert result is not None and set(result.axes) == {1, 2}
+
+    def test_expand_dims_at_end(self):
+        from flopscope._symmetry_transport import transport_expand_dims
+        G = _sym(0, 1)
+        result = transport_expand_dims(G, input_ndim=2, axis=2)
+        assert result is not None and set(result.axes) == {0, 1}
