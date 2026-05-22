@@ -238,3 +238,46 @@ class TestTransportAxisPermutation:
         result = transport_matrix_transpose(G, ndim=3)
         # Block (1, 2) under swap(1, 2) -> still (1, 2) (set unchanged).
         assert result is not None and set(result.axes) == {1, 2}
+
+
+class TestTransportConcatenate:
+    def test_identical_groups_off_block_axis_preserves(self):
+        from flopscope._symmetry_transport import transport_concatenate
+        G1 = _sym(0, 1)
+        G2 = _sym(0, 1)
+        result = transport_concatenate(
+            [G1, G2], output_ndim=3, axis=2,
+        )
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_plain_input_forces_drop(self):
+        from flopscope._symmetry_transport import transport_concatenate
+        G1 = _sym(0, 1)
+        result = transport_concatenate(
+            [G1, None], output_ndim=3, axis=2,
+        )
+        assert result is None
+
+    def test_concat_on_block_axis_for_degree2_drops(self):
+        from flopscope._symmetry_transport import transport_concatenate
+        G1 = _sym(0, 1)
+        G2 = _sym(0, 1)
+        # Concat along axis 0 (in block); restriction to {1} is degree-1 -> drop.
+        result = transport_concatenate([G1, G2], output_ndim=2, axis=0)
+        assert result is None
+
+    def test_concat_S3_along_block_axis_yields_S2(self):
+        from flopscope._symmetry_transport import transport_concatenate
+        G1 = _sym(0, 1, 2)
+        G2 = _sym(0, 1, 2)
+        # Restrict S_3 to {1, 2} -> S_2.
+        result = transport_concatenate([G1, G2], output_ndim=3, axis=0)
+        assert result is not None
+        assert set(result.axes) == {1, 2}
+        assert result.order() == 2
+
+    def test_concat_axis_none_drops(self):
+        from flopscope._symmetry_transport import transport_concatenate
+        G1 = _sym(0, 1)
+        # axis=None ravels first -> always drops.
+        assert transport_concatenate([G1, G1], output_ndim=1, axis=None) is None

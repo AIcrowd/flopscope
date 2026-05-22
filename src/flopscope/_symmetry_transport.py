@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
-from flopscope._symmetry_utils import remap_group_axes, restrict_group_to_axes
+from flopscope._symmetry_utils import intersect_groups, remap_group_axes, restrict_group_to_axes
 
 
 def _stub(name: str):
@@ -27,7 +27,35 @@ def _stub(name: str):
 # Stubs — replaced in subsequent tasks.
 transport_reshape = _stub("reshape")
 transport_ravel = _stub("ravel")
-transport_concatenate = _stub("concatenate")
+def transport_concatenate(
+    groups: Sequence[SymmetryGroup | None],
+    *,
+    output_ndim: int,
+    axis: int | None,
+) -> SymmetryGroup | None:
+    if axis is None:
+        return None
+    if any(g is None for g in groups):
+        return None
+    # Restrict each input's group to axes != axis.
+    restricted = []
+    for g in groups:
+        A = g.axes or tuple(range(g.degree))
+        a = axis % (max(output_ndim, len(A) + 1))
+        keep = tuple(x for x in A if x != a)
+        if len(keep) < 2:
+            return None
+        r = restrict_group_to_axes(g, keep)
+        if r is None:
+            return None
+        restricted.append(r)
+    # Intersect across all restricted groups.
+    result = restricted[0]
+    for g in restricted[1:]:
+        result = intersect_groups(result, g, ndim=output_ndim)
+        if result is None:
+            return None
+    return result
 transport_stack = _stub("stack")
 transport_vstack = _stub("vstack")
 transport_hstack = _stub("hstack")
