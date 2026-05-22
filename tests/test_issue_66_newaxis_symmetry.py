@@ -10,8 +10,8 @@ import flopscope as flops
 import flopscope._free_ops as ops
 import flopscope.numpy as fnp
 from flopscope import SymmetryGroup
+from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import inserted_axes_symmetry
-
 
 # ---------------------------------------------------------------------------
 # inserted_axes_symmetry() unit tests
@@ -50,6 +50,7 @@ def test_issue_66_example_1_corrected_full_slices():
     """eye(3)[None, :, None, :] should match expand_dims(eye(3), axis=(0, 2))."""
     a = fnp.eye(3)
     by_slice = a[None, :, None, :]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 3, 1, 3)
     assert by_slice.symmetry == SymmetryGroup.young(blocks=((0, 2), (1, 3)))
 
@@ -58,6 +59,7 @@ def test_issue_66_example_2_corrected_asymmetric_slice():
     """eye(3)[None, :, None, 1:2] keeps inserted-axis pair; original sym broken."""
     a = fnp.eye(3)
     by_slice = a[None, :, None, 1:2]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 3, 1, 1)
     assert by_slice.symmetry == SymmetryGroup.young(blocks=((0, 2),))
 
@@ -66,6 +68,7 @@ def test_original_sym_broken_inserted_still_survives():
     """eye(3)[None, None, 0:1, 1:2] retains the two-inserted-axes pair only."""
     a = fnp.eye(3)
     by_slice = a[None, None, 0:1, 1:2]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 1, 1, 1)
     assert by_slice.symmetry == SymmetryGroup.symmetric(axes=(0, 1))
 
@@ -74,6 +77,7 @@ def test_single_none_builds_no_inserted_group():
     """eye(3)[None, :, :] has remapped original sym only; no inserted group."""
     a = fnp.eye(3)
     by_slice = a[None, :, :]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 3, 3)
     assert by_slice.symmetry == SymmetryGroup.symmetric(axes=(1, 2))
 
@@ -128,6 +132,7 @@ def test_preexisting_size_one_not_lumped_with_existing_symmetry():
     assert tensor.symmetry == SymmetryGroup.symmetric(axes=(0, 2))
 
     by_slice = tensor[None, :, :, None, :]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 3, 1, 1, 3)
 
     expected = SymmetryGroup.direct_product(
@@ -149,6 +154,7 @@ def test_ellipsis_and_none_combine():
     """eye(3)[None, ..., None] gives remapped sym((1,2)) + inserted sym((0,3))."""
     a = fnp.eye(3)
     by_slice = a[None, ..., None]
+    assert isinstance(by_slice, SymmetricTensor)
     assert by_slice.shape == (1, 3, 3, 1)
     expected = SymmetryGroup.direct_product(
         SymmetryGroup.symmetric(axes=(1, 2)),
