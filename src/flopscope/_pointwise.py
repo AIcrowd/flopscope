@@ -30,8 +30,8 @@ from flopscope._ndarray import (
 )
 from flopscope._symmetric import (
     SymmetricTensor,
-    _warn_symmetry_loss,
 )
+from flopscope.errors import _warn_symmetry_loss
 from flopscope._symmetric import (
     is_symmetric as _is_symmetric,
 )

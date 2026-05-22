@@ -151,3 +151,49 @@ class CostFallbackWarning(FlopscopeWarning):
     flag with :class:`SymmetryLossWarning` since both are
     symmetry-related diagnostics).
     """
+
+
+import os as _os
+import sys as _sys
+import warnings as _warnings
+
+
+# Used by _user_stacklevel() to skip frames inside the flopscope package.
+_FLOPSCOPE_PKG_DIR = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _user_stacklevel() -> int:
+    """Stacklevel for :func:`warnings.warn` that points to the first frame
+    outside the ``flopscope`` package — i.e. the user's call site.
+
+    Walks the active call stack starting from the caller of
+    :func:`_warn_symmetry_loss`. Robust to changes in the number of
+    decorator/wrapper layers between user code and the warn site.
+    """
+    frame = _sys._getframe(2)
+    level = 2
+    while frame is not None:
+        if not frame.f_code.co_filename.startswith(_FLOPSCOPE_PKG_DIR):
+            return level
+        frame = frame.f_back
+        level += 1
+    return 3
+
+
+def _warn_symmetry_loss(
+    lost_dims: list[tuple[int, ...]],
+    reason: str,
+) -> None:
+    """Emit a :class:`SymmetryLossWarning` if warnings are enabled."""
+    from flopscope._config import get_setting
+
+    if not get_setting("symmetry_warnings"):
+        return
+    dim_str = ", ".join(str(g) for g in lost_dims)
+    _warnings.warn(
+        f"Symmetry lost along dims {dim_str}: {reason}. "
+        "Use as_symmetric() to re-tag if you know the result is symmetric. "
+        "Suppress with flops.configure(symmetry_warnings=False).",
+        SymmetryLossWarning,
+        stacklevel=_user_stacklevel(),
+    )
