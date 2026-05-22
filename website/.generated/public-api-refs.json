@@ -51,7 +51,7 @@
     "kind": "class",
     "label": "flops.SymmetricTensor",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592"
   },
   "SymmetryGroup": {
     "canonical_name": "SymmetryGroup",
@@ -357,7 +357,7 @@
     "kind": "function",
     "label": "flops.as_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789"
   },
   "asarray": {
     "canonical_name": "asarray",
@@ -1626,7 +1626,7 @@
     "kind": "class",
     "label": "flops.SymmetricTensor",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592"
   },
   "flops.SymmetryGroup": {
     "canonical_name": "SymmetryGroup",
@@ -2364,7 +2364,7 @@
     "kind": "function",
     "label": "flops.as_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789"
   },
   "flops.asarray": {
     "canonical_name": "asarray",
@@ -3993,7 +3993,7 @@
     "kind": "function",
     "label": "flops.is_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189"
   },
   "flops.isclose": {
     "canonical_name": "isclose",
@@ -7566,7 +7566,7 @@
     "kind": "function",
     "label": "flops.symmetrize",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63"
   },
   "flops.take": {
     "canonical_name": "take",
@@ -8052,7 +8052,7 @@
     "kind": "class",
     "label": "flops.SymmetricTensor",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592"
   },
   "flopscope.SymmetryGroup": {
     "canonical_name": "SymmetryGroup",
@@ -8790,7 +8790,7 @@
     "kind": "function",
     "label": "flops.as_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789"
   },
   "flopscope.asarray": {
     "canonical_name": "asarray",
@@ -10275,7 +10275,7 @@
     "kind": "function",
     "label": "flops.is_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189"
   },
   "flopscope.isclose": {
     "canonical_name": "isclose",
@@ -11328,7 +11328,7 @@
     "kind": "class",
     "label": "flops.SymmetricTensor",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592"
   },
   "flopscope.numpy.SymmetryGroup": {
     "canonical_name": "SymmetryGroup",
@@ -11346,7 +11346,7 @@
     "kind": "function",
     "label": "flops.as_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789"
   },
   "flopscope.numpy.base_repr": {
     "canonical_name": "base_repr",
@@ -11526,7 +11526,7 @@
     "kind": "function",
     "label": "flops.is_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189"
   },
   "flopscope.numpy.isnat": {
     "canonical_name": "isnat",
@@ -11661,7 +11661,7 @@
     "kind": "function",
     "label": "flops.symmetrize",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63"
   },
   "flopscope.numpy.testing.assert_allclose": {
     "canonical_name": "testing.assert_allclose",
@@ -13974,7 +13974,7 @@
     "kind": "function",
     "label": "flops.symmetrize",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63"
   },
   "flopscope.take": {
     "canonical_name": "take",
@@ -14424,7 +14424,7 @@
     "kind": "class",
     "label": "flops.SymmetricTensor",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592"
   },
   "fnp.SymmetryGroup": {
     "canonical_name": "SymmetryGroup",
@@ -14676,7 +14676,7 @@
     "kind": "function",
     "label": "flops.as_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789"
   },
   "fnp.asarray": {
     "canonical_name": "asarray",
@@ -16071,7 +16071,7 @@
     "kind": "function",
     "label": "flops.is_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189"
   },
   "fnp.isclose": {
     "canonical_name": "isclose",
@@ -19032,7 +19032,7 @@
     "kind": "function",
     "label": "flops.symmetrize",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63"
   },
   "fnp.take": {
     "canonical_name": "take",
@@ -19779,7 +19779,7 @@
     "kind": "function",
     "label": "flops.is_symmetric",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189"
   },
   "isclose": {
     "canonical_name": "isclose",
@@ -23352,7 +23352,7 @@
     "kind": "function",
     "label": "flops.symmetrize",
     "module": "flopscope._symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63"
   },
   "take": {
     "canonical_name": "take",

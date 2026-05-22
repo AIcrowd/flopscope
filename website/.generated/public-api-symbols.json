@@ -535,7 +535,7 @@
     ],
     "signature": "flops.SymmetricTensor(input_array: 'np.ndarray', *, symmetry: 'SymmetryGroup') -> 'SymmetricTensor'",
     "slug": "symmetric-tensor",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L570",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592",
     "status_note": "",
     "summary": "An ndarray that carries symmetry metadata.",
     "upstream_source_url": ""
@@ -859,7 +859,7 @@
     ],
     "signature": "flops.as_symmetric(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
     "slug": "as-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L767",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789",
     "status_note": "",
     "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
     "upstream_source_url": ""
@@ -4147,7 +4147,7 @@
     "module": "numpy",
     "name": "errstate",
     "related_guides": [],
-    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10707cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10a93cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "errstate",
     "source_url": "",
     "status_note": "",
@@ -16178,7 +16178,7 @@
     ],
     "signature": "flops.is_symmetric(data: 'np.ndarray', *, symmetry, atol: 'float' = 1e-06, rtol: 'float' = 1e-05) -> 'bool'",
     "slug": "is-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189",
     "status_note": "",
     "summary": "Check whether *data* is invariant under the given symmetry.",
     "upstream_source_url": ""
@@ -24227,7 +24227,7 @@
     "related_guides": [],
     "signature": "flops.symmetrize(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
     "slug": "symmetrize",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L61",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63",
     "status_note": "",
     "summary": "Project an array onto the invariant subspace of a permutation group.",
     "upstream_source_url": ""
