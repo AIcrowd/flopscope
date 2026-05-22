@@ -194,3 +194,47 @@ class TestTransportRepeatRoll:
         G = _sym(0, 1)
         # Even one block axis rolled => drop.
         assert transport_roll(G, input_shape=(3, 3, 4), axis=(0, 2)) is None
+
+
+class TestTransportAxisPermutation:
+    def test_transpose_reverses_block_axes(self):
+        from flopscope._symmetry_transport import transport_transpose
+        G = _sym(0, 1)
+        # transpose with axes=None reverses all axes.
+        result = transport_transpose(G, ndim=2, axes=None)
+        assert result is not None and set(result.axes) == {0, 1}
+
+    def test_transpose_explicit_perm(self):
+        from flopscope._symmetry_transport import transport_transpose
+        G = _sym(0, 1)
+        # transpose with axes=(1, 0) swaps; S_2 still on (0, 1) but generators relabeled.
+        result = transport_transpose(G, ndim=2, axes=(1, 0))
+        assert result is not None
+        assert set(result.axes) == {0, 1}
+
+    def test_swapaxes(self):
+        from flopscope._symmetry_transport import transport_swapaxes
+        G = _sym(0, 1)
+        # On a (3,3,4) tensor with S_2 on (0,1), swapaxes(0, 2) sends:
+        # axis 0 -> 2, axis 1 -> 1, axis 2 -> 0. So new block axes are (2, 1).
+        result = transport_swapaxes(G, ndim=3, axis1=0, axis2=2)
+        assert result is not None
+        assert set(result.axes) == {1, 2}
+
+    def test_moveaxis(self):
+        from flopscope._symmetry_transport import transport_moveaxis
+        G = _sym(0, 1)
+        # moveaxis source=0, destination=2 on rank-3: axis 0 moves to position 2.
+        # After move: original axis 0 is now at position 2, axes 1,2 shift down.
+        result = transport_moveaxis(G, ndim=3, source=0, destination=2)
+        assert result is not None
+        # Original axes (0, 1) -> new positions (2, 0).
+        assert set(result.axes) == {0, 2}
+
+    def test_matrix_transpose_swaps_last_two(self):
+        from flopscope._symmetry_transport import transport_matrix_transpose
+        G = _sym(1, 2)
+        # matrix_transpose = swapaxes(-2, -1) on rank-3: swap axes 1 and 2.
+        result = transport_matrix_transpose(G, ndim=3)
+        # Block (1, 2) under swap(1, 2) -> still (1, 2) (set unchanged).
+        assert result is not None and set(result.axes) == {1, 2}

@@ -180,7 +180,64 @@ def transport_roll(
     if rolled & A:
         return None
     return group
-transport_transpose = _stub("transpose")
-transport_swapaxes = _stub("swapaxes")
-transport_moveaxis = _stub("moveaxis")
-transport_matrix_transpose = _stub("matrix_transpose")
+def transport_transpose(
+    group: SymmetryGroup | None,
+    *,
+    ndim: int,
+    axes: Sequence[int] | None = None,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    if axes is None:
+        order = tuple(reversed(range(ndim)))
+    else:
+        order = tuple(a % ndim for a in axes)
+    mapping = {old: new for new, old in enumerate(order)}
+    return remap_group_axes(group, mapping)
+
+
+def transport_swapaxes(
+    group: SymmetryGroup | None,
+    *,
+    ndim: int,
+    axis1: int,
+    axis2: int,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    a1 = axis1 % ndim
+    a2 = axis2 % ndim
+    order = list(range(ndim))
+    order[a1], order[a2] = order[a2], order[a1]
+    mapping = {old: new for new, old in enumerate(order)}
+    return remap_group_axes(group, mapping)
+
+
+def transport_moveaxis(
+    group: SymmetryGroup | None,
+    *,
+    ndim: int,
+    source: int | Sequence[int],
+    destination: int | Sequence[int],
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    src = (source,) if isinstance(source, int) else tuple(source)
+    dst = (destination,) if isinstance(destination, int) else tuple(destination)
+    src = tuple(s % ndim for s in src)
+    dst = tuple(d % ndim for d in dst)
+    order = [i for i in range(ndim) if i not in src]
+    for d, s in sorted(zip(dst, src)):
+        order.insert(d, s)
+    mapping = {old: new for new, old in enumerate(order)}
+    return remap_group_axes(group, mapping)
+
+
+def transport_matrix_transpose(
+    group: SymmetryGroup | None,
+    *,
+    ndim: int,
+) -> SymmetryGroup | None:
+    if ndim < 2:
+        return None
+    return transport_swapaxes(group, ndim=ndim, axis1=ndim - 2, axis2=ndim - 1)
