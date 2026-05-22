@@ -78,9 +78,10 @@ def test_single_none_builds_no_inserted_group():
     assert by_slice.symmetry == SymmetryGroup.symmetric(axes=(1, 2))
 
 
-def test_preexisting_size_one_not_lumped_with_inserted():
-    """A (3,1) SymmetricTensor indexed [None, :, None] makes only the two fresh
-    Nones symmetric, NOT lumping with the pre-existing size-1 axis.
+def test_preexisting_size_one_not_lumped_when_no_input_symmetry():
+    """No-input-symmetry path: a (3,1) view-as-SymmetricTensor indexed
+    [None, :, None] gives sym((0, 2)) over the two fresh Nones, NOT
+    sym((0, 2, 3)) which would also include the pre-existing size-1.
 
     Note: fnp.zeros returns a FlopscopeArray (not SymmetricTensor), which
     doesn't go through our __getitem__ path. We use .view(SymmetricTensor)
@@ -94,8 +95,54 @@ def test_preexisting_size_one_not_lumped_with_inserted():
     assert tensor._symmetry is None
     by_slice = tensor[None, :, None]
     assert by_slice.shape == (1, 3, 1, 1)
-    # Inserted axes [0, 2]. Pre-existing size-1 at axis 3 is NOT lumped.
+    # Inserted axes [0, 2]. Pre-existing size-1 at output axis 3 is NOT lumped.
     assert getattr(by_slice, "symmetry", None) == SymmetryGroup.symmetric(axes=(0, 2))
+
+
+def test_preexisting_size_one_not_lumped_with_existing_symmetry():
+    """A SymmetricTensor with non-trivial symmetry AND a pre-existing size-1
+    axis: indexing with Nones produces a direct product of the remapped original
+    sym and the inserted-axis sym, with the pre-existing size-1 axis excluded
+    from both. This is the case the "not lumped" rule is really about.
+
+    Input: shape (3, 1, 3) with sym((0, 2)); axis 1 is the pre-existing size-1.
+    Key:   [None, :, :, None, :]
+    Output: shape (1, 3, 1, 1, 3); pre-existing size-1 lands at output axis 2.
+    Expected:
+      - remapped original sym → sym((1, 4))  (input axes 0, 2 → output axes 1, 4)
+      - inserted axes (None positions 0, 3 in output) → sym((0, 3))
+      - Output axis 2 (the pre-existing size-1) is in NEITHER group.
+    """
+    sym_matrix = numpy.array(
+        [
+            [1.0, 2.0, 3.0],
+            [2.0, 4.0, 5.0],
+            [3.0, 5.0, 6.0],
+        ]
+    )
+    data = sym_matrix[:, numpy.newaxis, :]
+    tensor = flops.as_symmetric(
+        data, symmetry=SymmetryGroup.symmetric(axes=(0, 2))
+    )
+    assert tensor.shape == (3, 1, 3)
+    assert tensor.symmetry == SymmetryGroup.symmetric(axes=(0, 2))
+
+    by_slice = tensor[None, :, :, None, :]
+    assert by_slice.shape == (1, 3, 1, 1, 3)
+
+    expected = SymmetryGroup.direct_product(
+        SymmetryGroup.symmetric(axes=(1, 4)),  # remapped original
+        SymmetryGroup.symmetric(axes=(0, 3)),  # inserted axes only
+    )
+    assert by_slice.symmetry == expected
+
+    # Negative assertion: explicitly NOT the version where the pre-existing
+    # size-1 (output axis 2) is lumped with the freshly-inserted Nones.
+    wrong_if_lumped = SymmetryGroup.direct_product(
+        SymmetryGroup.symmetric(axes=(1, 4)),
+        SymmetryGroup.symmetric(axes=(0, 2, 3)),
+    )
+    assert by_slice.symmetry != wrong_if_lumped
 
 
 def test_ellipsis_and_none_combine():
