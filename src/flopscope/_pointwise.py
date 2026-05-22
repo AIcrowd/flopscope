@@ -1801,41 +1801,35 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    # Extract exact symmetry groups for cost calculation
-    operand_symmetries = [
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        b.symmetry if isinstance(b, SymmetricTensor) else None,
-    ]
-    has_sym = _builtins.any(s is not None for s in operand_symmetries)
+    subs: str | None
     if a.ndim == 2 and b.ndim == 2:
-        cost = einsum_cost(
-            "ij,jk->ik",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
-        cost = einsum_cost(
-            "i,i->",
-            shapes=[a.shape, b.shape],
-            operand_symmetries=operand_symmetries if has_sym else None,
-        )
+        subs = "i,i->"
     else:
-        cost = a.size * b.size
-    # Track whether either operand was already a flopscope subclass; if so,
-    # preserve the subclass on the result the way ``__array_wrap__`` did
-    # pre-Stage-3 when the raw call dispatched through it. With Stage 3
-    # we strip subclasses before the raw NumPy call (to avoid recursion),
-    # so the wrap must be re-applied explicitly here.
+        subs = None
+    if subs is None:
+        cost: int = a.size * b.size
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
     with budget.deduct(
-        "dot", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "dot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
-        # Strip flopscope subclasses so the raw NumPy call does not re-dispatch
-        # through __array_ufunc__ (matmul is a ufunc) / __array_function__.
         result = _call_numpy(_np.dot, _to_base_ndarray(a), _to_base_ndarray(b))
     maybe_check_nan_inf(result, "dot")
+    if output_sym is not None:
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
     return _asflopscope(result) if inputs_were_whest else result  # type: ignore[return-value]
 
 

@@ -159,3 +159,24 @@ def test_issue_59_reproducer():
         f"Issue #59: type(X) must be SymmetricTensor, got {type(X).__name__}"
     )
     assert isinstance(Y, SymmetricTensor)
+
+
+# --- dot (Task 5) --------------------------------------------------------
+
+def test_dot_sym_self_matches_einsum():
+    """dot(A, A) with symmetric A: cost and output type match einsum."""
+    n = 8
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        A_raw = fnp.array(rs.randn(n, n))
+        A = flopscope.symmetrize(A_raw, symmetry=sym)
+        with flopscope.namespace("dt"):
+            X = fnp.dot(A, A)
+        with flopscope.namespace("ein"):
+            Y = fnp.einsum("ij,jk->ik", A, A)
+    assert _flops(bc, "dt") == _flops(bc, "ein"), (
+        f"dot cost {_flops(bc, 'dt')} != einsum cost {_flops(bc, 'ein')}"
+    )
+    assert isinstance(X, SymmetricTensor)
+    assert isinstance(Y, SymmetricTensor)
