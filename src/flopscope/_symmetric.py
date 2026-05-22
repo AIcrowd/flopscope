@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import warnings
 
 import numpy as np
@@ -246,10 +248,30 @@ def is_symmetric(
 # ---------------------------------------------------------------------------
 
 
+_FLOPSCOPE_PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _user_stacklevel() -> int:
+    """Stacklevel for :func:`warnings.warn` that points to the first frame
+    outside the ``flopscope`` package — i.e. the user's call site.
+
+    Walks the active call stack starting from the caller of
+    :func:`_warn_symmetry_loss`. Robust to changes in the number of
+    decorator/wrapper layers between user code and the warn site.
+    """
+    frame = sys._getframe(2)
+    level = 2
+    while frame is not None:
+        if not frame.f_code.co_filename.startswith(_FLOPSCOPE_PKG_DIR):
+            return level
+        frame = frame.f_back
+        level += 1
+    return 3
+
+
 def _warn_symmetry_loss(
     lost_dims: list[tuple[int, ...]],
     reason: str,
-    stacklevel: int = 3,
 ) -> None:
     """Emit a :class:`SymmetryLossWarning` if warnings are enabled."""
     if not get_setting("symmetry_warnings"):
@@ -260,7 +282,7 @@ def _warn_symmetry_loss(
         "Use as_symmetric() to re-tag if you know the result is symmetric. "
         "Suppress with flops.configure(symmetry_warnings=False).",
         SymmetryLossWarning,
-        stacklevel=stacklevel,
+        stacklevel=_user_stacklevel(),
     )
 
 

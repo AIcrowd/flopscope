@@ -391,7 +391,7 @@
   ],
   "signature": "flops.is_symmetric(data: 'np.ndarray', *, symmetry, atol: 'float' = 1e-06, rtol: 'float' = 1e-05) -> 'bool'",
   "slug": "is-symmetric",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L187",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189",
   "status_note": "",
   "summary": "Check whether *data* is invariant under the given symmetry.",
   "upstream_source_url": ""
