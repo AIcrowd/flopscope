@@ -135,3 +135,51 @@ def test_no_input_symmetry_still_gains_inserted_group():
     assert result.shape == (1, 1, 3, 3)
     # Inserted positions 0, 1 form a free sym((0,1)) — symmetry from nothing.
     assert getattr(result, "symmetry", None) == SymmetryGroup.symmetric(axes=(0, 1))
+
+
+# ---------------------------------------------------------------------------
+# Equivalence property: tensor[K] == expand_dims(tensor[slice_part], newaxes)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "key, slice_part, expand_dims_axis",
+    [
+        # (None, :, None, :) — strip Nones → (:, :); expand at output positions (0, 2)
+        (
+            (None, slice(None), None, slice(None)),
+            (slice(None), slice(None)),
+            (0, 2),
+        ),
+        # (None, :, None, 1:2) — strip Nones → (:, 1:2); expand at (0, 2)
+        (
+            (None, slice(None), None, slice(1, 2)),
+            (slice(None), slice(1, 2)),
+            (0, 2),
+        ),
+        # (None, None, 0:1, 1:2) — strip Nones → (0:1, 1:2); expand at (0, 1)
+        (
+            (None, None, slice(0, 1), slice(1, 2)),
+            (slice(0, 1), slice(1, 2)),
+            (0, 1),
+        ),
+        # (None, 0, None, :) — strip Nones → (0, :); expand at output positions (0, 1)
+        (
+            (None, 0, None, slice(None)),
+            (0, slice(None)),
+            (0, 1),
+        ),
+    ],
+)
+def test_newaxis_indexing_equivalent_to_slice_then_expand_dims(
+    key, slice_part, expand_dims_axis
+):
+    a = fnp.eye(3)
+    by_slice = a[key]
+    intermediate = a[slice_part]
+    by_expand = ops.expand_dims(intermediate, axis=expand_dims_axis)
+
+    assert numpy.array_equal(by_slice, by_expand)
+    by_slice_sym = getattr(by_slice, "symmetry", None)
+    by_expand_sym = getattr(by_expand, "symmetry", None)
+    assert by_slice_sym == by_expand_sym
