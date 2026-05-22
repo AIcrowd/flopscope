@@ -14,6 +14,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from flopscope._perm_group import SymmetryGroup
+from flopscope._symmetry_utils import remap_group_axes
 
 
 def _stub(name: str):
@@ -40,7 +41,30 @@ transport_atleast_2d = _stub("atleast_2d")
 transport_atleast_3d = _stub("atleast_3d")
 transport_broadcast_to = _stub("broadcast_to")
 transport_expand_dims = _stub("expand_dims")
-transport_squeeze = _stub("squeeze")
+def transport_squeeze(
+    group: SymmetryGroup | None,
+    *,
+    input_shape: tuple[int, ...],
+    axis: int | tuple[int, ...] | None,
+) -> SymmetryGroup | None:
+    if group is None:
+        return None
+    A = group.axes or tuple(range(group.degree))
+    # Resolve axis to a sorted tuple of axes being squeezed.
+    if axis is None:
+        squeezed = tuple(i for i, s in enumerate(input_shape) if s == 1)
+    elif isinstance(axis, int):
+        squeezed = (axis % len(input_shape),)
+    else:
+        squeezed = tuple(sorted(a % len(input_shape) for a in axis))
+    # Rule (b): if any squeezed axis is in the block, drop.
+    if any(a in A for a in squeezed):
+        return None
+    # Rule (a): shift block axes > each squeezed axis down by 1, preserving order.
+    surviving = sorted(i for i in range(len(input_shape)) if i not in squeezed)
+    new_index = {old: new for new, old in enumerate(surviving)}
+    axis_map = {a: new_index[a] for a in A}
+    return remap_group_axes(group, axis_map)
 transport_flip = _stub("flip")
 transport_roll = _stub("roll")
 transport_tile = _stub("tile")
