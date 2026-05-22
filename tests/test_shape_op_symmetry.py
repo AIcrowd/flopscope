@@ -947,3 +947,20 @@ def test_tile_soundness_property(block_size, rep_factor):
         for i, ba in enumerate(out_axes):
             perm[ba] = out_axes[p.array_form[i]]
         assert np.allclose(out_arr, out_arr.transpose(perm))
+
+
+class TestSuppression:
+    def test_symmetry_warnings_off_silences_all_drops(self, recwarn):
+        flops.configure(symmetry_warnings=False)
+        try:
+            T = as_symmetric(np.eye(3), symmetry=_sym(0, 1))
+            _ = fnp.reshape(T, -1)  # would normally warn
+            _ = fnp.ravel(T)
+            _ = fnp.flip(T, axis=0)  # partial flip drops
+            from flopscope.errors import SymmetryLossWarning
+            sym_warnings = [
+                w for w in recwarn.list if issubclass(w.category, SymmetryLossWarning)
+            ]
+            assert sym_warnings == []
+        finally:
+            flops.configure(symmetry_warnings=True)
