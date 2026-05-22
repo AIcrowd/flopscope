@@ -2033,6 +2033,38 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     a_contract_axes, b_contract_axes = _tensordot_parse_axes(a.ndim, b.ndim, axes)
+    # Fast path: a full inner contraction over all axes maps cleanly to
+    # einsum and benefits from joint-operand savings when a is b.
+    is_full_inner = (
+        a.ndim == b.ndim
+        and a_contract_axes == tuple(range(a.ndim))
+        and b_contract_axes == tuple(range(b.ndim))
+        and a.ndim >= 1
+    )
+    if is_full_inner:
+        # Build matching einsum subscripts (e.g. ndim=2 -> "ij,ij->").
+        letters = "abcdefghijklmnopqrstuvwxyz"[: a.ndim]
+        subs = f"{letters},{letters}->"
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        canonical_subs = info.canonical_subscripts
+        out_sym = info.output_symmetry  # scalar output — always None
+        with budget.deduct(
+            "tensordot",
+            flop_cost=cost,
+            subscripts=canonical_subs,
+            shapes=(a.shape, b.shape),
+        ):
+            result = _call_numpy(
+                _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
+            )
+        if out_sym is not None:
+            return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+    # Fallback: keep the existing sophisticated direct_product_groups path
+    # for partial contractions and unusual axes specs.
     contracted = 1
     for ax in a_contract_axes:
         if 0 <= ax < a.ndim:

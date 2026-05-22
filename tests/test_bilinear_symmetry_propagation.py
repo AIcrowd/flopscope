@@ -229,3 +229,22 @@ def test_vdot_sym_self_matches_einsum():
         with flopscope.namespace("ein"):
             y = fnp.einsum("i,i->", v, v)
     assert _flops(bc, "vd") == _flops(bc, "ein")
+
+
+# --- tensordot (Task 9) --------------------------------------------------
+
+def test_tensordot_sym_self_axes2_matches_einsum():
+    """tensordot(A, A, axes=2) (full contraction) cost matches einsum."""
+    n = 6
+    sym = SymmetryGroup.symmetric(axes=(0, 1))
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        A_raw = fnp.array(rs.randn(n, n))
+        A = flopscope.symmetrize(A_raw, symmetry=sym)
+        with flopscope.namespace("td"):
+            x = fnp.tensordot(A, A, axes=2)
+        with flopscope.namespace("ein"):
+            y = fnp.einsum("ij,ij->", A, A)
+    assert _flops(bc, "td") == _flops(bc, "ein"), (
+        f"tensordot {_flops(bc, 'td')} != einsum {_flops(bc, 'ein')}"
+    )
