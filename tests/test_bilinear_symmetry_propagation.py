@@ -199,3 +199,18 @@ def test_outer_sym_self_matches_einsum():
     )
     assert isinstance(X, SymmetricTensor)
     assert isinstance(Y, SymmetricTensor)
+
+
+# --- inner (Task 7) ------------------------------------------------------
+
+def test_inner_sym_self_matches_einsum_1d():
+    """inner(v, v) cost matches einsum('i,i->', v, v)."""
+    n = 8
+    rs = np.random.RandomState(0)
+    with BudgetContext(flop_budget=int(1e20)) as bc:
+        v = fnp.array(rs.randn(n))
+        with flopscope.namespace("in"):
+            x = fnp.inner(v, v)
+        with flopscope.namespace("ein"):
+            y = fnp.einsum("i,i->", v, v)
+    assert _flops(bc, "in") == _flops(bc, "ein")

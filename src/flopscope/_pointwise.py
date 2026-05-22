@@ -1895,16 +1895,36 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    cost = (
-        a.size
-        if (a.ndim <= 1 and b.ndim <= 1)
-        else a.size * (b.shape[-1] if b.ndim > 1 else 1)
-    )
+    subs: str | None
+    if a.ndim == 1 and b.ndim == 1:
+        subs = "i,i->"
+    elif a.ndim == 2 and b.ndim == 2:
+        subs = "ij,kj->ik"
+    else:
+        subs = None
+    if subs is None:
+        cost: int = (
+            a.size
+            if (a.ndim <= 1 and b.ndim <= 1)
+            else a.size * (b.shape[-1] if b.ndim > 1 else 1)
+        )
+        output_sym = None
+        canonical_subs: str | None = None
+    else:
+        from flopscope._einsum import _resolve_cost_and_output_symmetry
+
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        cost = info.accumulation.total
+        output_sym = info.output_symmetry
+        canonical_subs = info.canonical_subscripts
     with budget.deduct(
-        "inner", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "inner", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
     ):
         result = _call_numpy(_np.inner, _to_base_ndarray(a), _to_base_ndarray(b))
-    return result  # type: ignore[return-value]  # wrapped at fnp.inner import time
+    if output_sym is not None:
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
+    return result  # type: ignore[return-value]
 
 
 attach_docstring(inner, _np.inner, "counted_custom", "product of matching dims")
