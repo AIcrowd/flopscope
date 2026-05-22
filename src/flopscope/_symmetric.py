@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import os
-import sys
-import warnings
-
 import numpy as np
 
-from flopscope._config import get_setting
 from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
