@@ -669,16 +669,34 @@ class SymmetricTensor(FlopscopeArray):
         return out
 
     def reshape(self, *shape, **kwargs):  # type: ignore[override]
-        return _asplainflopscope(np.reshape(np.asarray(self), *shape, **kwargs))
+        from flopscope._free_ops import reshape as _reshape
+        return _reshape(self, *shape, **kwargs)
 
     def ravel(self, order: str = "C"):  # type: ignore[override]
-        return _asplainflopscope(np.ravel(np.asarray(self), order=order))  # type: ignore[arg-type]
+        from flopscope._free_ops import ravel as _ravel
+        return _ravel(self, order=order)
 
     def flatten(self, order: str = "C"):  # type: ignore[override]
-        return _asplainflopscope(np.asarray(self).flatten(order))  # type: ignore[arg-type]
+        from flopscope._free_ops import ravel as _ravel
+        from flopscope.errors import SymmetryLossWarning, _warn_symmetry_loss
+        # Warn independently (not via _ravel) so the warning has a distinct call
+        # site and is not deduplicated with the separate tensor.ravel() call.
+        from flopscope._symmetry_transport import transport_ravel
+        in_group = self._symmetry
+        if in_group is not None:
+            out_group = transport_ravel(in_group, input_shape=np.asarray(self).shape)
+            if out_group is None:
+                _warn_symmetry_loss(
+                    lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+                    reason="flatten collapses to a single axis; block cannot fit",
+                    stacklevel=2,
+                )
+        out = _ravel(self, order=order)
+        return np.array(out, copy=True)
 
     def squeeze(self, axis=None):  # type: ignore[override]
-        return _asplainflopscope(np.squeeze(np.asarray(self), axis=axis))
+        from flopscope._free_ops import squeeze as _squeeze
+        return _squeeze(self, axis=axis)
 
     def astype(  # type: ignore[override]
         self,

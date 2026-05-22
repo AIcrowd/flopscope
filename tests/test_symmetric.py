@@ -31,10 +31,12 @@ def test_array_finalize_is_conservative():
     assert finalized.symmetry is None
 
 
-def test_copy_preserves_symmetry_but_shape_changing_views_drop_it():
+def test_copy_preserves_symmetry_and_shape_methods_now_transport(recwarn):
+    """After issue #68, shape methods either transport symmetry or warn on drop."""
     tensor = as_symmetric(np.eye(3), symmetry=_s2(0, 1))
 
     copied = tensor.copy()
+    # reshape((-1,)) collapses S_2 on (0,1) of (3,3) into a 1-D shape — drops with warning.
     reshaped = tensor.reshape(-1)
     raveled = tensor.ravel()
     flattened = tensor.flatten()
@@ -42,10 +44,25 @@ def test_copy_preserves_symmetry_but_shape_changing_views_drop_it():
 
     assert isinstance(copied, SymmetricTensor)
     assert copied.symmetry == tensor.symmetry
+    # reshape/ravel/flatten to 1-D drop the multi-axis group.
     assert not isinstance(reshaped, SymmetricTensor)
     assert not isinstance(raveled, SymmetricTensor)
     assert not isinstance(flattened, SymmetricTensor)
+    # astype is not in the shape-op transport scope; remains as-is.
     assert not isinstance(cast, SymmetricTensor)
+    # The three shape ops should have emitted SymmetryLossWarning.
+    from flopscope.errors import SymmetryLossWarning
+    sym_warnings = [w for w in recwarn.list if issubclass(w.category, SymmetryLossWarning)]
+    assert len(sym_warnings) >= 3  # reshape, ravel, flatten each warn
+
+
+def test_symmetric_tensor_squeeze_preserves_block(recwarn):
+    """Squeezing an axis outside the block now preserves symmetry."""
+    data = np.eye(3).reshape(1, 3, 3)
+    tensor = as_symmetric(data, symmetry=_s2(1, 2))
+    squeezed = tensor.squeeze(axis=0)
+    assert isinstance(squeezed, SymmetricTensor)
+    assert set(squeezed.symmetry.axes) == {0, 1}
 
 
 def test_transpose_remaps_symmetry():
