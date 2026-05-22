@@ -93,7 +93,14 @@ def _prepare_symmetric_out(out, target_symmetry):
 def _validate_result_symmetry(result, symmetry):
     if symmetry is None:
         return
-    if not _is_symmetric(_np.asarray(result), symmetry=symmetry):
+    result_arr = _np.asarray(result)
+    # Skip numerical validation when the result has non-finite entries:
+    # np.allclose treats inf-inf=nan as not-close, which would raise a
+    # false SymmetryError. The symmetry was already enforced structurally
+    # by the (symmetric) inputs; numerical checks on inf/nan are meaningless.
+    if not _np.all(_np.isfinite(result_arr)):
+        return
+    if not _is_symmetric(result_arr, symmetry=symmetry):
         axes = symmetry.axes
         if axes is None:
             axes = tuple(range(symmetry.degree))
@@ -1873,14 +1880,8 @@ def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
             result = _call_numpy(_np.matmul, _to_base_ndarray(a), _to_base_ndarray(b))
     maybe_check_nan_inf(result, "matmul")
     if output_sym is not None:
-        result_arr = _np.asarray(result)
-        # Skip numerical symmetry validation when the result contains non-finite
-        # values (inf/nan): np.allclose treats inf-inf=nan as not-close, which
-        # would raise a false SymmetryError. The symmetry is structurally preserved
-        # by the symmetric operand inputs.
-        if _np.all(_np.isfinite(result_arr)):
-            _validate_result_symmetry(result_arr, output_sym)
-        return SymmetricTensor(result_arr, symmetry=output_sym)  # type: ignore[return-value]
+        _validate_result_symmetry(result, output_sym)
+        return SymmetricTensor(_np.asarray(result), symmetry=output_sym)  # type: ignore[return-value]
     return _asflopscope(result) if inputs_were_whest else result  # type: ignore[return-value]
 
 
