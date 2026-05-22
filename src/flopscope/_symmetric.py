@@ -636,6 +636,14 @@ class SymmetricTensor(FlopscopeArray):
             return result if not isinstance(result, np.ndarray) else np.asarray(result)
 
         if self._symmetry is None:
+            # Even with no input symmetry, multiple inserted None axes form a
+            # free symmetric group on those axes. Run the propagator with an
+            # empty groups list so the inserted-axis logic still fires.
+            new_groups = propagate_symmetry_slice([], self.shape, key)
+            if new_groups:
+                return _wrap_tensor_result(
+                    np.asarray(result), _merge_symmetry_groups(new_groups)
+                )
             return _asplainflopscope(np.asarray(result))
 
         new_groups = propagate_symmetry_slice([self._symmetry], self.shape, key)
