@@ -307,8 +307,46 @@ def setwise_stabilizer(
     return result if result.order() > 1 else None
 
 
-def group_orbits_on_axes(*args, **kwargs):  # populated in Task 3
-    raise NotImplementedError("group_orbits_on_axes implemented in Task 3")
+def group_orbits_on_axes(
+    group: SymmetryGroup,
+    axes: Sequence[int],
+) -> list[set[int]]:
+    """Return the orbits of `group`'s action on the given tensor `axes`.
+
+    Axes not acted on by `group` are returned as singleton orbits. Output
+    order is deterministic (axes appear in their first-encounter order).
+    """
+    axis_list = list(axes)
+    group_axes = group.axes
+    if group_axes is None:
+        group_axes = tuple(range(group.degree))
+    # Map: tensor-axis -> set of tensor-axes reachable by any generator.
+    # For axes outside group_axes, the orbit is just itself.
+    seen: set[int] = set()
+    orbits: list[set[int]] = []
+    for a in axis_list:
+        if a in seen:
+            continue
+        if a not in group_axes:
+            orbits.append({a})
+            seen.add(a)
+            continue
+        orbit: set[int] = set()
+        frontier = {a}
+        while frontier:
+            x = frontier.pop()
+            if x in orbit:
+                continue
+            orbit.add(x)
+            local_x = group_axes.index(x)
+            for generator in group.generators:
+                local_y = generator.array_form[local_x]
+                y = group_axes[local_y]
+                if y not in orbit:
+                    frontier.add(y)
+        orbits.append(orbit)
+        seen |= orbit
+    return orbits
 
 
 def _normalize_reps_for_output(*args, **kwargs):  # populated in Task 4

@@ -56,3 +56,35 @@ class TestSetwiseStabilizer:
         result = setwise_stabilizer(G, fixed_set={0, 5})
         # Effective fixed = {0}; stabilizer of {0} in S_2 = trivial -> None.
         assert result is None
+
+
+class TestGroupOrbitsOnAxes:
+    def test_S3_single_orbit_on_all_axes(self):
+        G = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        orbits = group_orbits_on_axes(G, [0, 1, 2])
+        assert len(orbits) == 1
+        assert orbits[0] == {0, 1, 2}
+
+    def test_C3_single_orbit(self):
+        G = SymmetryGroup.cyclic(axes=(0, 1, 2))
+        orbits = group_orbits_on_axes(G, [0, 1, 2])
+        assert len(orbits) == 1
+        assert orbits[0] == {0, 1, 2}
+
+    def test_two_disjoint_S2_orbits_via_direct_product(self):
+        # S_2 on (0,1) direct-product S_2 on (3,4): two separate orbits.
+        gA = SymmetryGroup.symmetric(axes=(0, 1))
+        gB = SymmetryGroup.symmetric(axes=(3, 4))
+        from flopscope._symmetry_utils import direct_product_groups
+        G = direct_product_groups(gA, gB)
+        orbits = group_orbits_on_axes(G, [0, 1, 3, 4])
+        # Order may vary; compare as set of frozensets.
+        as_sets = {frozenset(o) for o in orbits}
+        assert as_sets == {frozenset({0, 1}), frozenset({3, 4})}
+
+    def test_singleton_orbit_for_axis_outside_group(self):
+        # Axis 5 isn't acted on by G, so it's its own orbit.
+        G = SymmetryGroup.symmetric(axes=(0, 1))
+        orbits = group_orbits_on_axes(G, [0, 1, 5])
+        as_sets = {frozenset(o) for o in orbits}
+        assert as_sets == {frozenset({0, 1}), frozenset({5})}
