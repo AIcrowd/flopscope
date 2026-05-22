@@ -653,10 +653,23 @@ class SymmetricTensor(FlopscopeArray):
         new_groups = propagate_symmetry_slice([self._symmetry], self.shape, key)
         new_symmetry = _merge_symmetry_groups(new_groups or [])
         if new_groups is not None:
-            if new_symmetry != self._symmetry and self._symmetry.axes is not None:
+            # Fire only on real structural reduction: the new group's order is
+            # strictly less than the original's. This silences false alarms on
+            # operations that gain symmetry (e.g. `a[None, :, None, :]`
+            # produces a richer Young group) or merely relabel axes without
+            # losing structure (e.g. `a[None, :, :]` shifts axes, preserves
+            # order). It under-fires on the rare case where original sym is
+            # broken and a same-order new group is gained on different axes;
+            # the gained group is still attached to the result so a careful
+            # user can inspect `.symmetry` directly.
+            if (
+                new_symmetry is not None
+                and self._symmetry.axes is not None
+                and new_symmetry.order() < self._symmetry.order()
+            ):
                 _warn_symmetry_loss(
                     [self._symmetry.axes],
-                    "slicing changed dim sizes or removed dims",
+                    "slicing reduced symmetric group structure",
                 )
             return _wrap_tensor_result(np.asarray(result), new_symmetry)
 

@@ -185,6 +185,61 @@ def test_no_input_symmetry_still_gains_inserted_group():
 
 
 # ---------------------------------------------------------------------------
+# Warning predicate: SymmetryLossWarning fires only on real structural
+# reduction (new.order() < old.order()), not on gains or axis-relabels.
+# ---------------------------------------------------------------------------
+
+
+def _count_symmetry_warnings(callable_):
+    """Helper: run `callable_()` and count SymmetryLossWarning instances."""
+    import warnings as _warnings
+
+    from flopscope.errors import SymmetryLossWarning
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        callable_()
+        return sum(
+            1 for w in caught if issubclass(w.category, SymmetryLossWarning)
+        )
+
+
+def test_no_warning_on_gained_symmetry_via_none_insertion():
+    """`a[None, :, None, :]` produces RICHER symmetry, not loss — no warning."""
+    a = fnp.eye(3)
+    n = _count_symmetry_warnings(lambda: a[None, :, None, :])
+    assert n == 0
+
+
+def test_no_warning_on_axis_relabel_via_single_none():
+    """`a[None, :, :]` shifts axes but preserves order — no warning."""
+    a = fnp.eye(3)
+    n = _count_symmetry_warnings(lambda: a[None, :, :])
+    assert n == 0
+
+
+def test_no_warning_on_ellipsis_and_none():
+    """`a[None, ..., None]` gains an inserted pair on top of remapped original — no warning."""
+    a = fnp.eye(3)
+    n = _count_symmetry_warnings(lambda: a[None, ..., None])
+    assert n == 0
+
+
+def test_warning_fires_on_real_order_reduction():
+    """`a[:, 0]` removes axis 1 from the symmetric group; original order drops to 1."""
+    a = fnp.eye(3)
+    n = _count_symmetry_warnings(lambda: a[:, 0])
+    assert n == 1
+
+
+def test_warning_fires_on_asymmetric_slice():
+    """`a[0:2, 0:2]` breaks the original sym; resulting tensor is no longer symmetric."""
+    a = fnp.eye(3)
+    n = _count_symmetry_warnings(lambda: a[0:2, 0:2])
+    assert n == 1
+
+
+# ---------------------------------------------------------------------------
 # Bool indexing bailout: boolean masks are not integer scalars.
 # `isinstance(True, int)` is True in Python, so without an explicit bool check
 # the propagator would treat `True` as an integer index (removes axis 0) when
