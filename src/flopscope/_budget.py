@@ -193,6 +193,50 @@ def _counted_wrapper(fn):
     return wrapped
 
 
+# ----- Stack-walk tripwire for issue #69 -----
+#
+# Every @_counted_wrapper call creates a new inner `wrapped` function
+# instance, but Python compiles its body once — `wrapped.__code__` is the
+# SAME `code` object across all decorator invocations. We capture it once
+# here as a stable marker. `__array_function__` and `__array_ufunc__` walk
+# the call stack looking for a frame with this code object: if found, the
+# protocol was triggered from inside an fnp wrapper (= a wrapper forgot to
+# strip a FlopscopeArray before calling raw numpy) — that's a bug, raise.
+
+import sys as _sys
+
+
+def _capture_wrapped_code():
+    """Capture the `code` object of `_counted_wrapper`'s inner `wrapped`."""
+    @_counted_wrapper
+    def _probe(*args, **kwargs):
+        pass
+    return _probe.__code__
+
+
+_WRAPPED_CO = _capture_wrapped_code()
+
+
+def _called_from_wrapper() -> bool:
+    """True iff a `_counted_wrapper.wrapped` frame appears in the call stack.
+
+    Used by `FlopscopeArray.__array_function__` and `__array_ufunc__` to
+    distinguish "user wrote np.<f>(whest) at top level" (depth=0, auto-route
+    with warning) from "an fnp wrapper forgot to strip and leaked WhestArray
+    into raw numpy" (depth>0, raise loudly).
+
+    Implementation: walks `frame.f_back` chain and compares `f.f_code is
+    _WRAPPED_CO` (single C-level pointer comparison per frame). Cost is
+    O(stack depth) and only paid on actual protocol entries.
+    """
+    f = _sys._getframe(1)  # skip this frame
+    while f is not None:
+        if f.f_code is _WRAPPED_CO:
+            return True
+        f = f.f_back
+    return False
+
+
 _thread_local = threading.local()
 _all_budget_contexts: weakref.WeakSet[BudgetContext] = weakref.WeakSet()
 
