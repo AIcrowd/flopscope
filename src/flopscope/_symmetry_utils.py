@@ -181,11 +181,12 @@ def restrict_group_to_axes(
 ) -> SymmetryGroup | None:
     """Restrict a group to a specific ordered subset of its tensor axes.
 
-    Precondition (inherited from :meth:`SymmetryGroup.restrict`): every
-    element of ``group`` must setwise-preserve ``axes``. For free-permuting
-    groups like ``symmetric(A)`` this is only satisfied when
-    ``axes == group.axes`` — see ``reduce_group`` for the
-    setwise-stabilizer+restrict composition that handles strict subsets.
+    The helper composes :meth:`SymmetryGroup.setwise_stabilizer` and
+    :meth:`SymmetryGroup.restrict` so strict subsets of free-permuting groups
+    (e.g. ``symmetric(A)``) project cleanly to a sub-action. Provenance is
+    preserved only in the no-op case (``axes == group.axes``); strict-subset
+    results carry ``_known_kind=None`` — the "sub-symmetric is still symmetric"
+    rule lives in ``reduce_group``, not here.
     """
     if group is None:
         return None

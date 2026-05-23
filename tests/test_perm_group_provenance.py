@@ -72,13 +72,19 @@ class TestRestrictGroupToAxesProvenance:
         restricted = restrict_group_to_axes(g, axes=(0, 1, 2))
         assert restricted is g
 
-    def test_restrict_strict_subset_of_symmetric_raises(self):
-        # Documented behavior: restrict() requires setwise-preservation.
-        # symmetric(A) doesn't preserve any T⊊A. This is the existing
-        # behavior — provenance code must not silently swallow it.
+    def test_restrict_strict_subset_of_symmetric_returns_subsymmetric_without_kind(
+        self,
+    ):
+        # `restrict_group_to_axes` composes setwise_stabilizer + restrict, so
+        # a strict subset of a free-permuting group projects to S_|T| on T.
+        # Our provenance preservation is scoped to the no-op case (T == A);
+        # strict-subset results carry `_known_kind=None` — the "sub-symmetric
+        # is still symmetric" rule lives in `reduce_group`, not here.
         g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3))
-        with pytest.raises(KeyError):
-            restrict_group_to_axes(g, axes=(0, 1, 2))
+        restricted = restrict_group_to_axes(g, axes=(0, 1, 2))
+        assert restricted is not None
+        assert restricted.order() == 6  # S_3
+        assert restricted._known_kind is None
 
 
 class TestIntersectGroupsProvenance:
