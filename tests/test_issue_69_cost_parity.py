@@ -357,6 +357,34 @@ CASES.append(
 )
 
 
+def _setup_polyval(rng):
+    p = fnp.asarray(rng.random((5,)))
+    x = fnp.asarray(rng.random((100,)))
+    return (p, x), {}
+
+
+def _oracle_polyval(p, x):
+    # Horner's method: result = p[0]; for c in p[1:]: result = result * x + c
+    # numpy.polyval seeds result = p[0] (a scalar broadcast, no multiply charge).
+    # Each of the deg=len(p)-1 iterations costs: 1 multiply + 1 add over x.size.
+    # Total: deg * 2 * x.size ops — exactly what polyval_cost returns.
+    # Use plain np.ones (uncharged) so initialization doesn't add spurious FLOPs.
+    result = np.array(p[0]) * np.ones(x.shape)  # plain numpy broadcast, no fnp charge
+    for i in range(1, len(p)):
+        result = fnp.add(fnp.multiply(result, x), p[i])
+
+
+CASES.append(
+    CostParityCase(
+        name="polyval",
+        setup=_setup_polyval,
+        wrapper=fnp.polyval,
+        oracle=_oracle_polyval,
+        tolerance=0.0,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""
