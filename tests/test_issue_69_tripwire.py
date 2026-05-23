@@ -96,3 +96,19 @@ def test_inside_wrapper_array_ufunc_leak_raises():
             match=r"WhestArray reached numpy\.add from inside an fnp wrapper",
         ):
             buggy_ufunc_wrapper(a)
+
+
+def test_polyval_works_on_flopscopearray_inputs():
+    """Regression for issue #69: polyval used to TypeError on FlopscopeArray.
+
+    After fix: fnp.polyval(p_whest, x_whest) produces the correct numeric
+    result, charges nonzero FLOPs, does NOT emit auto-route warnings (since
+    we're calling fnp.polyval directly, not np.polyval), and does NOT raise
+    the in-wrapper tripwire (since we strip before calling _np.polyval).
+    """
+    p = fnp.asarray([1.0, 2.0, 3.0])
+    x = fnp.asarray([1.0, 2.0, 3.0])
+    with BudgetContext(flop_budget=10**14) as bc:
+        result = fnp.polyval(p, x)
+    np.testing.assert_array_equal(np.asarray(result), np.array([6.0, 11.0, 18.0]))
+    assert bc.flops_used > 0

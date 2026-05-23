@@ -10,7 +10,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
-from flopscope._ndarray import FlopscopeArray
+from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
 # ---------------------------------------------------------------------------
@@ -81,20 +81,23 @@ def roots_cost(n: int) -> int:
 def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
     """Evaluate a polynomial at given points. Wraps ``numpy.polyval``.
 
-    ``x`` is converted via ``asanyarray`` so ndarray subclasses
-    (e.g. ``numpy.ma.MaskedArray``) are preserved through the call —
-    matches numpy's own ``polyval`` contract.
+    Both ``p`` and ``x`` are converted to plain ``np.ndarray`` (via
+    ``_to_base_ndarray`` after ``np.asarray``) before being passed to
+    ``_np.polyval``, because numpy's polyval implementation internally calls
+    ``np.zeros_like(x)`` and other ops that do not handle
+    ``FlopscopeArray`` subclasses (they are not in the
+    ``__array_function__`` allowlist).
     """
     budget = require_budget()
-    p = _np.asarray(p)
-    x = _np.asanyarray(x)
-    deg = len(p) - 1
-    m = x.size
+    p_arr = _to_base_ndarray(_np.asarray(p))
+    x_arr = _to_base_ndarray(_np.asarray(x))
+    deg = len(p_arr) - 1
+    m = x_arr.size
     cost = polyval_cost(deg, m)
     with budget.deduct(
-        "polyval", flop_cost=cost, subscripts=None, shapes=(p.shape, x.shape)
+        "polyval", flop_cost=cost, subscripts=None, shapes=(p_arr.shape, x_arr.shape)
     ):
-        result = _call_numpy(_np.polyval, p, x)
+        result = _call_numpy(_np.polyval, p_arr, x_arr)
     return result  # type: ignore[return-value]
 
 
