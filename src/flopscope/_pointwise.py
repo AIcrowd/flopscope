@@ -2182,15 +2182,16 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     # np.cross supports axisa/axisb/axisc kwargs that change output shape,
-    # so we need the output shape to compute the cost. The common case
-    # (cross(a[..., 3], b[..., 3])) has output size = a.shape[0] * 3 for 2D
-    # input. For more exotic axisa/axisb/axisc usage the cost is approximate.
+    # so we need the output shape to compute the cost. For default-axis usage,
+    # the output has the same total size as a (cross(a[..., 3], b[..., 3])).
+    # Using a.size instead of a.shape[0]*3 correctly handles batched inputs
+    # of any shape (e.g. (B, N, 3) → cost = B*N*3*5, not B*3*5). Issue #69.
     # Putting the numpy call inside `with budget.deduct(...)` ensures backend
     # wall-time is attributed to this op (issue #69 — previously called
     # outside the budget block).
     stripped_a = _to_base_ndarray(a)
     stripped_b = _to_base_ndarray(b)
-    cost_provisional = _builtins.max(a.shape[0] * 3 * 5, 1)
+    cost_provisional = _builtins.max(a.size * 5, 1)
     with budget.deduct(
         "cross",
         flop_cost=cost_provisional,
