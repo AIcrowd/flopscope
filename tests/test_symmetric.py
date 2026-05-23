@@ -53,7 +53,7 @@ def test_copy_preserves_symmetry_and_shape_methods_now_transport(recwarn):
     # The three shape ops should have emitted SymmetryLossWarning.
     from flopscope.errors import SymmetryLossWarning
     sym_warnings = [w for w in recwarn.list if issubclass(w.category, SymmetryLossWarning)]
-    assert len(sym_warnings) >= 3  # reshape, ravel, flatten each warn
+    assert len(sym_warnings) == 3  # reshape, ravel, flatten each warn once
 
 
 def test_symmetric_tensor_squeeze_preserves_block(recwarn):

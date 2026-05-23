@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import functools
 import math
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Sequence
 
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
+    _normalize_reps_for_output,
     broadcast_group,
     group_orbits_on_axes,
     intersect_groups,
-    _normalize_reps_for_output,
     remap_group_axes,
     remap_group_for_expand_dims,
     restrict_group_to_axes,
@@ -28,15 +27,9 @@ from flopscope._symmetry_utils import (
 )
 
 
-def _stub(name: str):
-    def _impl(*args, **kwargs):  # pragma: no cover - replaced per task
-        raise NotImplementedError(f"transport_{name} not yet implemented")
-    _impl.__name__ = f"transport_{name}"
-    return _impl
-
-
 def _zero_size_guard(fn):
     """Decorator: any transport receiving a zero-size shape drops to None."""
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         for key in ("input_shape", "output_shape"):
@@ -44,6 +37,7 @@ def _zero_size_guard(fn):
             if shape is not None and 0 in shape:
                 return None
         return fn(*args, **kwargs)
+
     return wrapper
 
 
@@ -57,7 +51,9 @@ def transport_reshape(
     if group is None:
         return None
     A = group.axes or tuple(range(group.degree))
-    m = input_shape[A[0]]  # block axis size (must be equal for all a in A by group validity)
+    m = input_shape[
+        A[0]
+    ]  # block axis size (must be equal for all a in A by group validity)
 
     A_sorted = sorted(A)
     n = len(A_sorted)
@@ -104,8 +100,12 @@ def transport_ravel(
     input_shape: tuple[int, ...],
 ) -> SymmetryGroup | None:
     return transport_reshape(
-        group, input_shape=input_shape, output_shape=(math.prod(input_shape),),
+        group,
+        input_shape=input_shape,
+        output_shape=(math.prod(input_shape),),
     )
+
+
 def transport_concatenate(
     groups: Sequence[SymmetryGroup | None],
     *,
@@ -135,6 +135,8 @@ def transport_concatenate(
         if result is None:
             return None
     return result
+
+
 def transport_stack(
     groups: Sequence[SymmetryGroup | None],
     *,
@@ -160,6 +162,8 @@ def transport_stack(
         if result is None:
             return None
     return result
+
+
 def transport_vstack(
     groups: Sequence[SymmetryGroup | None],
     *,
@@ -170,7 +174,7 @@ def transport_vstack(
     # For any input that's 1-D, the promoted form has the data axis at position 1,
     # and 1-D inputs carry no multi-axis group anyway -> None for them.
     promoted = []
-    for g, nd in zip(groups, input_ndims):
+    for g, nd in zip(groups, input_ndims, strict=True):
         if nd >= 2:
             promoted.append(g)
         else:
@@ -200,12 +204,14 @@ def transport_column_stack(
     # column_stack: promote 1-D (N,) -> (N, 1), then concat axis=1.
     # 1-D inputs become column vectors with no multi-axis group.
     promoted = []
-    for g, nd in zip(groups, input_ndims):
+    for g, nd in zip(groups, input_ndims, strict=True):
         if nd >= 2:
             promoted.append(g)
         else:
             promoted.append(None)
     return transport_concatenate(promoted, output_ndim=output_ndim, axis=1)
+
+
 @_zero_size_guard
 def transport_split(
     group: SymmetryGroup | None,
@@ -251,6 +257,8 @@ def transport_dsplit(
     input_shape: tuple[int, ...],
 ) -> SymmetryGroup | None:
     return transport_split(group, input_shape=input_shape, axis=2)
+
+
 @_zero_size_guard
 def transport_atleast_1d(
     group: SymmetryGroup | None,
@@ -294,6 +302,8 @@ def transport_atleast_3d(
         return group
     # len(input_shape) <= 1: cannot carry a multi-axis group; defensive None.
     return None
+
+
 @_zero_size_guard
 def transport_broadcast_to(
     group: SymmetryGroup | None,
@@ -305,7 +315,9 @@ def transport_broadcast_to(
     # produce a non-None result when prepended equal-size axes form a new
     # S_k symmetry on the output. Do not short-circuit on None here.
     return broadcast_group(
-        group, input_shape=input_shape, output_shape=output_shape,
+        group,
+        input_shape=input_shape,
+        output_shape=output_shape,
     )
 
 
@@ -316,6 +328,8 @@ def transport_expand_dims(
     axis,
 ) -> SymmetryGroup | None:
     return remap_group_for_expand_dims(group, ndim=input_ndim, axis=axis)
+
+
 @_zero_size_guard
 def transport_squeeze(
     group: SymmetryGroup | None,
@@ -341,6 +355,8 @@ def transport_squeeze(
     new_index = {old: new for new, old in enumerate(surviving)}
     axis_map = {a: new_index[a] for a in A}
     return remap_group_axes(group, axis_map)
+
+
 def transport_flip(
     group: SymmetryGroup | None,
     *,
@@ -361,6 +377,8 @@ def transport_flip(
     if not F_A or F_A == A:
         return group
     return setwise_stabilizer(group, fixed_set=F_A)
+
+
 @_zero_size_guard
 def transport_tile(
     group: SymmetryGroup | None,
@@ -425,6 +443,8 @@ def transport_roll(
     if rolled & A:
         return None
     return group
+
+
 def transport_transpose(
     group: SymmetryGroup | None,
     *,
@@ -472,7 +492,7 @@ def transport_moveaxis(
     src = tuple(s % ndim for s in src)
     dst = tuple(d % ndim for d in dst)
     order = [i for i in range(ndim) if i not in src]
-    for d, s in sorted(zip(dst, src)):
+    for d, s in sorted(zip(dst, src, strict=True)):
         order.insert(d, s)
     mapping = {old: new for new, old in enumerate(order)}
     return remap_group_axes(group, mapping)

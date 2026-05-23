@@ -16,7 +16,7 @@ from flopscope._symmetry_utils import (
     restrict_group_to_axes,
     validate_symmetry_group,
 )
-from flopscope.errors import SymmetryError, SymmetryLossWarning
+from flopscope.errors import SymmetryError
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -242,8 +242,9 @@ def is_symmetric(
 # Symmetry-loss warning helper
 # ---------------------------------------------------------------------------
 
-from flopscope.errors import _warn_symmetry_loss  # re-exported for back-compat
-
+from flopscope.errors import (  # noqa: E402
+    _warn_symmetry_loss,
+)  # re-exported for back-compat
 
 # ---------------------------------------------------------------------------
 # Symmetry propagation helpers
@@ -670,18 +671,19 @@ class SymmetricTensor(FlopscopeArray):
 
     def reshape(self, *shape, **kwargs):  # type: ignore[override]
         from flopscope._free_ops import reshape as _reshape
+
         return _reshape(self, *shape, **kwargs)
 
     def ravel(self, order: str = "C"):  # type: ignore[override]
         from flopscope._free_ops import ravel as _ravel
+
         return _ravel(self, order=order)
 
     def flatten(self, order: str = "C"):  # type: ignore[override]
         from flopscope._free_ops import ravel as _ravel
-        from flopscope.errors import SymmetryLossWarning, _warn_symmetry_loss
-        # Warn independently (not via _ravel) so the warning has a distinct call
-        # site and is not deduplicated with the separate tensor.ravel() call.
         from flopscope._symmetry_transport import transport_ravel
+        from flopscope.errors import _warn_symmetry_loss
+
         in_group = self._symmetry
         if in_group is not None:
             out_group = transport_ravel(in_group, input_shape=np.asarray(self).shape)
@@ -689,13 +691,14 @@ class SymmetricTensor(FlopscopeArray):
                 _warn_symmetry_loss(
                     lost_dims=[in_group.axes or tuple(range(in_group.degree))],
                     reason="flatten collapses to a single axis; block cannot fit",
-                    stacklevel=2,
                 )
-        out = _ravel(self, order=order)
+        # Pass the raw ndarray view so _ravel does not emit a second warning.
+        out = _ravel(np.asarray(self), order=order)
         return np.array(out, copy=True)
 
     def squeeze(self, axis=None):  # type: ignore[override]
         from flopscope._free_ops import squeeze as _squeeze
+
         return _squeeze(self, axis=axis)
 
     def astype(  # type: ignore[override]
