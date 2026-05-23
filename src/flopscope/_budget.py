@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import sys as _sys
 import threading
 import time
 import weakref
@@ -202,9 +203,6 @@ def _counted_wrapper(fn):
 # the call stack looking for a frame with this code object: if found, the
 # protocol was triggered from inside an fnp wrapper (= a wrapper forgot to
 # strip a FlopscopeArray before calling raw numpy) — that's a bug, raise.
-
-import sys as _sys
-
 
 def _capture_wrapped_code():
     """Capture the `code` object of `_counted_wrapper`'s inner `wrapped`."""
