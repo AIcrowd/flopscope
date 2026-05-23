@@ -417,4 +417,11 @@ XFAIL_PATTERNS: dict[str, str] = {
     # follow-up triage required to add the missing _to_base_ndarray() strips.
     "TestUfunc::test_sum": NEEDS_TRIAGE,
     "TestUfunc::test_ufunc_at_scalar_value_fastpath": NEEDS_TRIAGE,
+    # MaskedArray subok=True propagation: flopscope wrappers return
+    # FlopscopeArray instead of np.ma.MaskedArray on np.isclose / np.std /
+    # np.var with masked inputs. Same root cause as TestMoveaxis above.
+    # Triage queued; not in scope for issue-70.
+    "TestIsclose::test_masked_arrays": NEEDS_TRIAGE,
+    "TestNonarrayArgs::test_std_with_mean_keyword_keepdims_true_masked": NEEDS_TRIAGE,
+    "TestNonarrayArgs::test_var_with_mean_keyword_keepdims_true_masked": NEEDS_TRIAGE,
 }
