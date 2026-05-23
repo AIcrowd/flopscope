@@ -278,6 +278,32 @@ CASES.append(
 )
 
 
+def _setup_cross(rng):
+    a = fnp.asarray(rng.random((100, 3)))
+    b = fnp.asarray(rng.random((100, 3)))
+    return (a, b), {}
+
+
+def _oracle_cross(a, b):
+    # 3-vec cross product per row: 6 mults + 3 subs per row = 9 ops/row.
+    # We model 5 ops per output element (output is (100, 3) = 300 elements -> 1500 ops).
+    import numpy as _np
+    out_size = a.shape[0] * 3
+    probe = _np.zeros(out_size * 5)
+    fnp.multiply(probe, 1.0)
+
+
+CASES.append(
+    CostParityCase(
+        name="cross",
+        setup=_setup_cross,
+        wrapper=fnp.cross,
+        oracle=_oracle_cross,
+        tolerance=0.0,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

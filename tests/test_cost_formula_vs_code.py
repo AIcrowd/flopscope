@@ -409,8 +409,8 @@ def test_kron_numel_output(we):
 
 
 def test_cross_6n(we):
-    # cross charges r.size * 3
-    assert _cost_of(we.cross, numpy.random.rand(5, 3), numpy.random.rand(5, 3)) == 45
+    # cross charges a.shape[0] * 3 * 5 (5 ops/output element, issue #69)
+    assert _cost_of(we.cross, numpy.random.rand(5, 3), numpy.random.rand(5, 3)) == 75
 
 
 def test_einsum_mnk(we):
@@ -568,9 +568,10 @@ class TestLinalgDelegates:
         )
 
     def test_cross(self, we):
+        # linalg.cross charges out_size * 5 (5 ops/output element, issue #69)
         assert (
             _cost_of(we.linalg.cross, numpy.random.rand(5, 3), numpy.random.rand(5, 3))
-            == 45
+            == 75
         )
 
     def test_matrix_power(self, we):

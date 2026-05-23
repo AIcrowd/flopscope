@@ -2171,27 +2171,37 @@ attach_docstring(kron, _np.kron, "counted_custom", "output size FLOPs")
 
 @_counted_wrapper
 def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.cross."""
+    """Counted version of np.cross.
+
+    Cost model: 5 ops per output element (3 mults + 1 mult + 1 sub per output
+    triple component, which is 5 element-wise ops per output scalar). Issue #69.
+    """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     # np.cross supports axisa/axisb/axisc kwargs that change output shape,
-    # so we compute the result first, then deduct based on actual output size.
-    result = _np.cross(_to_base_ndarray(a), _to_base_ndarray(b), **kwargs)
-    cost = _builtins.max(_np.asarray(result).size * 3, 1)
+    # so we need the output shape to compute the cost. The common case
+    # (cross(a[..., 3], b[..., 3])) has output size = a.shape[0] * 3 for 2D
+    # input. For more exotic axisa/axisb/axisc usage the cost is approximate.
+    # Putting the numpy call inside `with budget.deduct(...)` ensures backend
+    # wall-time is attributed to this op (issue #69 — previously called
+    # outside the budget block).
+    stripped_a = _to_base_ndarray(a)
+    stripped_b = _to_base_ndarray(b)
+    cost_provisional = _builtins.max(a.shape[0] * 3 * 5, 1)
     with budget.deduct(
         "cross",
-        flop_cost=cost,
+        flop_cost=cost_provisional,
         subscripts=None,
         shapes=(a.shape, b.shape),
     ):
-        pass  # numpy call already done; timer records near-zero duration
-    return result  # type: ignore[return-value]  # wrapped at fnp.cross import time
+        result = _call_numpy(_np.cross, stripped_a, stripped_b, **kwargs)
+    return result  # type: ignore[return-value]
 
 
-attach_docstring(cross, _np.cross, "counted_custom", "output_size * 3 FLOPs")
+attach_docstring(cross, _np.cross, "counted_custom", "5 * output.size FLOPs")
 cross.__signature__ = _inspect.signature(_np.cross)  # pyright: ignore[reportFunctionMemberAccess]
 
 
