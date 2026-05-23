@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
-import flopscope as flops
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
-    setwise_stabilizer,
-    group_orbits_on_axes,
     _normalize_reps_for_output,
+    group_orbits_on_axes,
+    setwise_stabilizer,
 )
 
 
@@ -76,6 +73,7 @@ class TestGroupOrbitsOnAxes:
         gA = SymmetryGroup.symmetric(axes=(0, 1))
         gB = SymmetryGroup.symmetric(axes=(3, 4))
         from flopscope._symmetry_utils import direct_product_groups
+
         G = direct_product_groups(gA, gB)
         orbits = group_orbits_on_axes(G, [0, 1, 3, 4])
         # Order may vary; compare as set of frozensets.
