@@ -160,6 +160,31 @@ CASES.extend([
 ])
 
 
+def _setup_unwrap(rng):
+    a = fnp.asarray(rng.random((1000,)) * 8.0)
+    return (a,), {}
+
+
+def _oracle_unwrap(a):
+    # numpy.unwrap (simplified): diff -> mod -> add -> subtract -> cumsum -> where
+    dd = fnp.diff(a)
+    ddmod = fnp.mod(fnp.add(dd, np.pi), 2 * np.pi)
+    fnp.subtract(ddmod, np.pi)
+    fnp.cumsum(dd)
+    fnp.where(ddmod > 0, ddmod, 0.0)
+
+
+CASES.append(
+    CostParityCase(
+        name="unwrap",
+        setup=_setup_unwrap,
+        wrapper=fnp.unwrap,
+        oracle=_oracle_unwrap,
+        tolerance=0.10,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

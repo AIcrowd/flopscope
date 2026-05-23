@@ -83,7 +83,7 @@ class TestAnalyticalCost:
         assert _analytical_cost("gradient", n=1000) == 1000
 
     def test_unwrap_linear(self):
-        assert _analytical_cost("unwrap", n=1000) == 1000
+        assert _analytical_cost("unwrap", n=1000) == 7000  # 7 * numel (issue #69)
 
     # --- Convolution (cost = n * k) ---
 

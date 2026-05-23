@@ -17,7 +17,7 @@ class TestUnwrap:
             from flopscope.numpy import unwrap
 
             unwrap(x)
-            assert budget.flops_used == 20
+            assert budget.flops_used == 140  # 7 * numel (issue #69)
 
     def test_outside_context_uses_global_default(self):
         from flopscope.numpy import unwrap

@@ -23,16 +23,22 @@ def unwrap_cost(shape: tuple[int, ...]) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: numel(input).
+        Estimated FLOP count: ``7 * numel(input)``.
 
     Notes
     -----
-    Cost covers element-wise differencing and conditional adjustment.
+    NumPy's unwrap (``numpy.lib._function_base_impl.unwrap``) does
+    approximately 6 full-array ufunc passes: ``diff``, ``mod``, ``add``,
+    ``subtract``, ``cumsum``, and ``where``. The ``where`` pass with two
+    real-array arguments charges 2*(N-1) elements rather than N-1,
+    bringing the effective total to ~7*(N-1). We charge a fixed
+    ``7 * numel`` to approximate the sum without tracking numpy's
+    internal implementation byte-by-byte. Issue #69.
     """
     numel = 1
     for d in shape:
         numel *= d
-    return max(numel, 1)
+    return max(7 * numel, 1)
 
 
 @_counted_wrapper
@@ -55,7 +61,7 @@ def unwrap(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(unwrap, _np.unwrap, "counted_custom", "numel(input) FLOPs")
+attach_docstring(unwrap, _np.unwrap, "counted_custom", "7 * numel(input) FLOPs")
 
 import sys as _sys  # noqa: E402
 

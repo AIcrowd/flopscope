@@ -102,8 +102,12 @@ def _analytical_cost(op: str, **kwargs: int) -> int:
         return n
 
     # --- Differencing (cost = n) ---
-    if op in ("diff", "ediff1d", "gradient", "unwrap"):
+    if op in ("diff", "ediff1d", "gradient"):
         return n
+
+    # --- Phase unwrapping (~7 ufunc passes, issue #69) ---
+    if op == "unwrap":
+        return 7 * n
 
     # --- Convolution/correlation (cost = n * k) ---
     if op in ("convolve", "correlate"):
