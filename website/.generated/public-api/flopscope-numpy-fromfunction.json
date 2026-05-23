@@ -647,7 +647,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fromfunction",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1425",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1782",
   "href": "/docs/api/numpy/fromfunction/",
   "import_path": "flopscope.numpy.fromfunction",
   "is_operation_cost_leaf": true,

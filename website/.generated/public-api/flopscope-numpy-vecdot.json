@@ -525,7 +525,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.vecdot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1251",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1245",
   "href": "/docs/api/numpy/vecdot/",
   "import_path": "flopscope.numpy.vecdot",
   "is_operation_cost_leaf": true,

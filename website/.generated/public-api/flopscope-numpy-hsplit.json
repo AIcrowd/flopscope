@@ -334,7 +334,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.hsplit",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L507",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L621",
   "href": "/docs/api/numpy/hsplit/",
   "import_path": "flopscope.numpy.hsplit",
   "is_operation_cost_leaf": true,

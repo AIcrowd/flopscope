@@ -353,7 +353,7 @@
   "schema_version": 1,
   "slug": "promote_types",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1729",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2100",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.promote_types.html"
   }
 }

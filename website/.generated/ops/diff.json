@@ -572,7 +572,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.diff",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2207",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2209",
   "href": "/docs/api/numpy/diff/",
   "legacy_href": "/docs/api/ops/diff/",
   "module": "numpy",

@@ -162,7 +162,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.array_split",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L917",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1158",
   "href": "/docs/api/numpy/array-split/",
   "legacy_href": "/docs/api/ops/array_split/",
   "module": "numpy",

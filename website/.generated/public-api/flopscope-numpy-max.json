@@ -773,7 +773,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.max",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L846",
   "href": "/docs/api/numpy/max/",
   "import_path": "flopscope.numpy.max",
   "is_operation_cost_leaf": true,

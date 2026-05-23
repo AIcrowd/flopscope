@@ -348,7 +348,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.can_cast",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1082",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1398",
   "href": "/docs/api/numpy/can-cast/",
   "import_path": "flopscope.numpy.can_cast",
   "is_operation_cost_leaf": true,

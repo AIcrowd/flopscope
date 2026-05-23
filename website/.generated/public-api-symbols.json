@@ -262,7 +262,7 @@
     ],
     "signature": "flops.BudgetContext(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None)",
     "slug": "budget-context",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386",
     "status_note": "",
     "summary": "Context manager for FLOP budget enforcement.",
     "upstream_source_url": ""
@@ -363,7 +363,7 @@
     ],
     "signature": "flops.OpRecord(op_name: str, subscripts: str | None, shapes: tuple, flop_cost: int, cumulative: int, namespace: str | None = None, flopscope_context_start_offset_s: float | None = None, flopscope_backend_duration_s: float | None = None, flopscope_overhead_duration_s: float | None = None)",
     "slug": "op-record",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15",
     "status_note": "",
     "summary": "Record of a single counted operation.",
     "upstream_source_url": ""
@@ -535,7 +535,7 @@
     ],
     "signature": "flops.SymmetricTensor(input_array: 'np.ndarray', *, symmetry: 'SymmetryGroup') -> 'SymmetricTensor'",
     "slug": "symmetric-tensor",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L552",
     "status_note": "",
     "summary": "An ndarray that carries symmetry metadata.",
     "upstream_source_url": ""
@@ -576,7 +576,7 @@
     "related_guides": [],
     "signature": "flops.SymmetryGroup(*generators: '_Permutation', axes: 'tuple[Any, ...] | None' = None) -> 'None'",
     "slug": "symmetry-group",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_perm_group.py#L233",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_perm_group.py#L260",
     "status_note": "",
     "summary": "A finite symmetry group defined by explicit generators.",
     "upstream_source_url": ""
@@ -859,7 +859,7 @@
     ],
     "signature": "flops.as_symmetric(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
     "slug": "as-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L789",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L769",
     "status_note": "",
     "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
     "upstream_source_url": ""
@@ -1173,7 +1173,7 @@
     "related_guides": [],
     "signature": "fnp.base_repr(number, base=2, padding=0)",
     "slug": "base-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L985",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1290",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return a string representation of a number in the given base system.",
     "upstream_source_url": ""
@@ -1613,7 +1613,7 @@
     "related_guides": [],
     "signature": "fnp.binary_repr(num, width=None)",
     "slug": "binary-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L999",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1304",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return the binary representation of the input number as a string.",
     "upstream_source_url": ""
@@ -2190,7 +2190,7 @@
     "related_guides": [],
     "signature": "flops.budget(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None) -> 'BudgetContext'",
     "slug": "budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773",
     "status_note": "",
     "summary": "Create a ``BudgetContext`` usable as a context manager or decorator.",
     "upstream_source_url": ""
@@ -2549,7 +2549,7 @@
     "related_guides": [],
     "signature": "flops.budget_reset() -> 'None'",
     "slug": "budget-reset",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990",
     "status_note": "",
     "summary": "Clear accumulated session-wide budget data.",
     "upstream_source_url": ""
@@ -3082,7 +3082,7 @@
     "related_guides": [],
     "signature": "flops.budget_summary_dict(by_namespace: 'bool' = False) -> 'dict'",
     "slug": "budget-summary-dict",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958",
     "status_note": "",
     "summary": "Return aggregated budget data across all recorded contexts.",
     "upstream_source_url": ""
@@ -3368,11 +3368,43 @@
                       },
                       {
                         "kind": "code",
-                        "text": "500_000"
+                        "text": "50_000"
                       },
                       {
                         "kind": "text",
-                        "text": "."
+                        "text": " \u2014 accepts\ngroups up to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "|S_8| = 40_320"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " with a small margin; rejects "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "|S_9|"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "\nand larger.  Tune via "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "flops.configure(dimino_budget=...)"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ";\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "benchmarks/_perm_group_calibration.py"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " recommends a value for the\nhost machine."
                       }
                     ],
                     "type": "paragraph"
@@ -3386,11 +3418,43 @@
                   },
                   {
                     "kind": "code",
-                    "text": "500_000"
+                    "text": "50_000"
                   },
                   {
                     "kind": "text",
-                    "text": "."
+                    "text": " \u2014 accepts\ngroups up to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "|S_8| = 40_320"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " with a small margin; rejects "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "|S_9|"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "\nand larger.  Tune via "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "flops.configure(dimino_budget=...)"
+                  },
+                  {
+                    "kind": "text",
+                    "text": ";\n"
+                  },
+                  {
+                    "kind": "code",
+                    "text": "benchmarks/_perm_group_calibration.py"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " recommends a value for the\nhost machine."
                   }
                 ],
                 "name": "dimino_budget",
@@ -4147,7 +4211,7 @@
     "module": "numpy",
     "name": "errstate",
     "related_guides": [],
-    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10a93cec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x105db4ec0>, all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "errstate",
     "source_url": "",
     "status_note": "",
@@ -7518,7 +7582,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Weighted FLOP cost of least-squares solution."
+                "text": "Weighted FLOP cost of least-squares via SVD."
               }
             ],
             "type": "paragraph"
@@ -7572,6 +7636,126 @@
                   }
                 ],
                 "name": "n",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Argument forwarded to the analytical "
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/linalg/lstsq/",
+                        "kind": "link",
+                        "target": "linalg.lstsq",
+                        "text": "linalg.lstsq"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " cost formula. Defaults to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "1"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int, optional",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Argument forwarded to the analytical "
+                  },
+                  {
+                    "external_url": "",
+                    "href": "/docs/api/numpy/linalg/lstsq/",
+                    "kind": "link",
+                    "target": "linalg.lstsq",
+                    "text": "linalg.lstsq"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " cost formula. Defaults to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "1"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "b_cols",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Argument forwarded to the analytical "
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/linalg/lstsq/",
+                        "kind": "link",
+                        "target": "linalg.lstsq",
+                        "text": "linalg.lstsq"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " cost formula. Defaults to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "1"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int, optional",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Argument forwarded to the analytical "
+                  },
+                  {
+                    "external_url": "",
+                    "href": "/docs/api/numpy/linalg/lstsq/",
+                    "kind": "link",
+                    "target": "linalg.lstsq",
+                    "text": "linalg.lstsq"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " cost formula. Defaults to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "1"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "b_ndim",
                 "type": "field_list"
               }
             ],
@@ -7656,7 +7840,121 @@
               },
               {
                 "kind": "text",
-                "text": " (SVD-based) by default."
+                "text": " (SVD-based). Cost decomposition:\n"
+              },
+              {
+                "kind": "code",
+                "text": "svd(m,n) + ut_b + k*c + reconstruction"
+              },
+              {
+                "kind": "text",
+                "text": " where "
+              },
+              {
+                "kind": "code",
+                "text": "k = min(m, n)"
+              },
+              {
+                "kind": "text",
+                "text": "\nand "
+              },
+              {
+                "kind": "code",
+                "text": "c = b_cols"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "When "
+              },
+              {
+                "kind": "code",
+                "text": "b_ndim == 1"
+              },
+              {
+                "kind": "text",
+                "text": " (1D RHS), the intermediate matmuls are 2D\u00d71D\n(NumPy dispatches "
+              },
+              {
+                "kind": "code",
+                "text": "(k,m)@(m,)"
+              },
+              {
+                "kind": "text",
+                "text": " differently from "
+              },
+              {
+                "kind": "code",
+                "text": "(k,m)@(m,c)"
+              },
+              {
+                "kind": "text",
+                "text": "):\n"
+              },
+              {
+                "kind": "code",
+                "text": "ut_b = k * m * m"
+              },
+              {
+                "kind": "text",
+                "text": " and "
+              },
+              {
+                "kind": "code",
+                "text": "reconstruction = n * k * k"
+              },
+              {
+                "kind": "text",
+                "text": ".\nWhen "
+              },
+              {
+                "kind": "code",
+                "text": "b_ndim == 2"
+              },
+              {
+                "kind": "text",
+                "text": " (2D RHS), both are standard 2D\u00d72D matmuls:\n"
+              },
+              {
+                "kind": "code",
+                "text": "ut_b = matmul_cost(k, m, c)"
+              },
+              {
+                "kind": "text",
+                "text": " and "
+              },
+              {
+                "kind": "code",
+                "text": "reconstruction = matmul_cost(n, k, c)"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Issue #69 (was previously just "
+              },
+              {
+                "kind": "code",
+                "text": "svd_cost"
+              },
+              {
+                "kind": "text",
+                "text": " ignoring the\nback-substitution)."
               }
             ],
             "type": "paragraph"
@@ -7684,11 +7982,11 @@
         "title": "Linear Algebra Guide"
       }
     ],
-    "signature": "flops.flops.lstsq_cost(m: 'int', n: 'int') -> 'int'",
+    "signature": "flops.flops.lstsq_cost(m: 'int', n: 'int', b_cols: 'int' = 1, b_ndim: 'int' = 1) -> 'int'",
     "slug": "flops-lstsq-cost",
     "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L152",
     "status_note": "",
-    "summary": "Weighted FLOP cost of least-squares solution.",
+    "summary": "Weighted FLOP cost of least-squares via SVD.",
     "upstream_source_url": ""
   },
   "flops.matrix_norm_cost": {
@@ -7957,7 +8255,15 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Weighted FLOP cost of matrix power A**k."
+                "text": "Weighted FLOP cost of matrix power "
+              },
+              {
+                "kind": "code",
+                "text": "A**k"
+              },
+              {
+                "kind": "text",
+                "text": "."
               }
             ],
             "type": "paragraph"
@@ -8087,7 +8393,42 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Uses exponentiation by repeated squaring. For $k < 0$, adds $n^3$ for\nthe initial matrix inversion."
+                "text": "Uses exponentiation by repeated squaring. For "
+              },
+              {
+                "kind": "code",
+                "text": "k < 0"
+              },
+              {
+                "kind": "text",
+                "text": ", adds\n"
+              },
+              {
+                "kind": "code",
+                "text": "matmul_cost(n, n, n)"
+              },
+              {
+                "kind": "text",
+                "text": " for the initial matrix inversion (LU-based).\nPer-matmul cost is delegated to "
+              },
+              {
+                "kind": "code",
+                "text": "matmul_cost(n, n, n)"
+              },
+              {
+                "kind": "text",
+                "text": " so this formula\ntracks "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/matmul/",
+                "kind": "link",
+                "target": "matmul",
+                "text": "fnp.matmul"
+              },
+              {
+                "kind": "text",
+                "text": "'s convention automatically (issue #69; the FMA=2\nunification of 2026-05-20 previously left this wrapper undercounting\nby ~2x)."
               }
             ],
             "type": "paragraph"
@@ -8115,7 +8456,7 @@
     "slug": "flops-matrix-power-cost",
     "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L102",
     "status_note": "",
-    "summary": "Weighted FLOP cost of matrix power A**k.",
+    "summary": "Weighted FLOP cost of matrix power ``A**k``.",
     "upstream_source_url": ""
   },
   "flops.matrix_rank_cost": {
@@ -8754,7 +9095,7 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Weighted FLOP cost of pseudoinverse."
+                "text": "Weighted FLOP cost of Moore-Penrose pseudoinverse."
               }
             ],
             "type": "paragraph"
@@ -8884,7 +9225,80 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Computed via SVD."
+                "text": "NumPy implements "
+              },
+              {
+                "kind": "code",
+                "text": "pinv"
+              },
+              {
+                "kind": "text",
+                "text": " as: "
+              },
+              {
+                "kind": "code",
+                "text": "svd(A, full_matrices=False)"
+              },
+              {
+                "kind": "text",
+                "text": " \u2192\nthreshold tiny singular values \u2192 multiply "
+              },
+              {
+                "kind": "code",
+                "text": "vt.T"
+              },
+              {
+                "kind": "text",
+                "text": " by "
+              },
+              {
+                "kind": "code",
+                "text": "s_inv"
+              },
+              {
+                "kind": "text",
+                "text": "\nbroadcasted \u2192 matmul with "
+              },
+              {
+                "kind": "code",
+                "text": "u.T"
+              },
+              {
+                "kind": "text",
+                "text": ". We compose the cost from\n"
+              },
+              {
+                "kind": "code",
+                "text": "svd_cost"
+              },
+              {
+                "kind": "text",
+                "text": " and "
+              },
+              {
+                "kind": "code",
+                "text": "matmul_cost"
+              },
+              {
+                "kind": "text",
+                "text": " so this formula tracks those\nhelpers automatically (issue #69; was previously missing the\npost-SVD reconstruction)."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Total: "
+              },
+              {
+                "kind": "code",
+                "text": "svd(m,n) + threshold(min(m,n)) + diag_scale(n*min(m,n))\n+ matmul(n, min(m,n), m)"
+              },
+              {
+                "kind": "text",
+                "text": "."
               }
             ],
             "type": "paragraph"
@@ -8914,9 +9328,9 @@
     ],
     "signature": "flops.flops.pinv_cost(m: 'int', n: 'int') -> 'int'",
     "slug": "flops-pinv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268",
     "status_note": "",
-    "summary": "Weighted FLOP cost of pseudoinverse.",
+    "summary": "Weighted FLOP cost of Moore-Penrose pseudoinverse.",
     "upstream_source_url": ""
   },
   "flops.pointwise_cost": {
@@ -12931,7 +13345,7 @@
     ],
     "signature": "flops.flops.tensorinv_cost(a_shape: 'tuple', ind: 'int' = 2) -> 'int'",
     "slug": "flops-tensorinv-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397",
     "status_note": "",
     "summary": "Weighted FLOP cost of tensor inverse.",
     "upstream_source_url": ""
@@ -13166,7 +13580,7 @@
     ],
     "signature": "flops.flops.tensorsolve_cost(a_shape: 'tuple', ind: 'int | None' = None) -> 'int'",
     "slug": "flops-tensorsolve-cost",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340",
     "status_note": "",
     "summary": "Weighted FLOP cost of tensor solve.",
     "upstream_source_url": ""
@@ -13446,7 +13860,100 @@
             "inline": [
               {
                 "kind": "text",
-                "text": "Cost covers element-wise differencing and conditional adjustment."
+                "text": "NumPy's unwrap ("
+              },
+              {
+                "kind": "code",
+                "text": "flops.lib._function_base_impl.unwrap"
+              },
+              {
+                "kind": "text",
+                "text": ") does\napproximately 6 full-array ufunc passes: "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/diff/",
+                "kind": "link",
+                "target": "diff",
+                "text": "diff"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/mod/",
+                "kind": "link",
+                "target": "mod",
+                "text": "mod"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/add/",
+                "kind": "link",
+                "target": "add",
+                "text": "add"
+              },
+              {
+                "kind": "text",
+                "text": ",\n"
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/subtract/",
+                "kind": "link",
+                "target": "subtract",
+                "text": "subtract"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/cumsum/",
+                "kind": "link",
+                "target": "cumsum",
+                "text": "cumsum"
+              },
+              {
+                "kind": "text",
+                "text": ", and "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/where/",
+                "kind": "link",
+                "target": "where",
+                "text": "where"
+              },
+              {
+                "kind": "text",
+                "text": ". The "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/where/",
+                "kind": "link",
+                "target": "where",
+                "text": "where"
+              },
+              {
+                "kind": "text",
+                "text": " pass with two\nreal-array arguments charges 2*(N-1) elements rather than N-1,\nbringing the effective total to ~7*(N-1). We charge a fixed\n"
+              },
+              {
+                "kind": "code",
+                "text": "7 * numel"
+              },
+              {
+                "kind": "text",
+                "text": " to approximate the sum without tracking numpy's\ninternal implementation byte-by-byte. Issue #69."
               }
             ],
             "type": "paragraph"
@@ -14207,7 +14714,7 @@
     "related_guides": [],
     "signature": "fnp.fromfile(*args, **kwargs)",
     "slug": "fromfile",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1411",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1768",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from data in a text or binary file.",
     "upstream_source_url": ""
@@ -14622,7 +15129,7 @@
     "related_guides": [],
     "signature": "fnp.fromregex(file, regexp, dtype, encoding=None)",
     "slug": "fromregex",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1453",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1810",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from a text file, using regular expression parsing.",
     "upstream_source_url": ""
@@ -15026,7 +15533,7 @@
     "related_guides": [],
     "signature": "fnp.fromstring(*args, **kwargs)",
     "slug": "fromstring",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1467",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1824",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "A new 1-D array initialized from text data in a string.",
     "upstream_source_url": ""
@@ -16178,7 +16685,7 @@
     ],
     "signature": "flops.is_symmetric(data: 'np.ndarray', *, symmetry, atol: 'float' = 1e-06, rtol: 'float' = 1e-05) -> 'bool'",
     "slug": "is-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L189",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L184",
     "status_note": "",
     "summary": "Check whether *data* is invariant under the given symmetry.",
     "upstream_source_url": ""
@@ -16586,7 +17093,7 @@
     "related_guides": [],
     "signature": "fnp.isnat(*args, **kwargs)",
     "slug": "isnat",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
     "upstream_source_url": ""
@@ -16861,7 +17368,7 @@
     "related_guides": [],
     "signature": "flops.namespace(name: 'str') -> '_NamespaceScope'",
     "slug": "namespace",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282",
     "status_note": "",
     "summary": "Create a nested namespace scope for the active budget context.",
     "upstream_source_url": ""
@@ -24227,7 +24734,7 @@
     "related_guides": [],
     "signature": "flops.symmetrize(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
     "slug": "symmetrize",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L58",
     "status_note": "",
     "summary": "Project an array onto the invariant subspace of a permutation group.",
     "upstream_source_url": ""

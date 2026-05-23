@@ -595,7 +595,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.inner",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1886",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1880",
   "href": "/docs/api/numpy/inner/",
   "legacy_href": "/docs/api/ops/inner/",
   "module": "numpy",

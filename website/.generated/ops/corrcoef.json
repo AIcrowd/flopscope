@@ -810,7 +810,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.corrcoef",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2382",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2384",
   "href": "/docs/api/numpy/corrcoef/",
   "legacy_href": "/docs/api/ops/corrcoef/",
   "module": "numpy",

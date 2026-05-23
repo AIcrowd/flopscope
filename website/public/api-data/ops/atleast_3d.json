@@ -325,7 +325,7 @@
   "schema_version": 1,
   "slug": "atleast_3d",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L975",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1259",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/shape_base.py#L139"
   }
 }

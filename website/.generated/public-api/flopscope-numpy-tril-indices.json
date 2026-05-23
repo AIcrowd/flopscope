@@ -456,7 +456,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.tril_indices",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2010",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2381",
   "href": "/docs/api/numpy/tril-indices/",
   "import_path": "flopscope.numpy.tril_indices",
   "is_operation_cost_leaf": true,

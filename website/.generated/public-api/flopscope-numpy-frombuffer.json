@@ -356,7 +356,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.frombuffer",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1392",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1749",
   "href": "/docs/api/numpy/frombuffer/",
   "import_path": "flopscope.numpy.frombuffer",
   "is_operation_cost_leaf": true,

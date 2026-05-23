@@ -380,7 +380,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.rollaxis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1874",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2245",
   "href": "/docs/api/numpy/rollaxis/",
   "legacy_href": "/docs/api/ops/rollaxis/",
   "module": "numpy",

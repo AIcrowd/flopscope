@@ -707,7 +707,7 @@
   "schema_version": 1,
   "slug": "isclose",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1163",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1157",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/numeric.py#L2337"
   }
 }

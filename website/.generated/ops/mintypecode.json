@@ -281,7 +281,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.mintypecode",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1635",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2006",
   "href": "/docs/api/numpy/mintypecode/",
   "legacy_href": "/docs/api/ops/mintypecode/",
   "module": "numpy",

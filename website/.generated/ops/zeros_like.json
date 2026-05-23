@@ -471,7 +471,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.zeros_like",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L240",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L253",
   "href": "/docs/api/numpy/zeros-like/",
   "legacy_href": "/docs/api/ops/zeros_like/",
   "module": "numpy",

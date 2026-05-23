@@ -332,7 +332,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ix_",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1580",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1937",
   "href": "/docs/api/numpy/ix-/",
   "import_path": "flopscope.numpy.ix_",
   "is_operation_cost_leaf": true,

@@ -464,7 +464,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.triu_indices",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2042",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2413",
   "href": "/docs/api/numpy/triu-indices/",
   "legacy_href": "/docs/api/ops/triu_indices/",
   "module": "numpy",

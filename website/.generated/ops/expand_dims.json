@@ -475,7 +475,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.expand_dims",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L548",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L705",
   "href": "/docs/api/numpy/expand-dims/",
   "legacy_href": "/docs/api/ops/expand_dims/",
   "module": "numpy",
@@ -591,7 +591,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.expand_dims(a: 'ArrayLike', axis: 'int | tuple[int, ...]') -> 'FlopscopeArray'",
+  "signature": "fnp.expand_dims(a: 'ArrayLike', axis) -> 'FlopscopeArray'",
   "slug": "expand_dims",
   "summary": "Expand the shape of an array.",
   "upstream_ref_label": "NumPy Ref",

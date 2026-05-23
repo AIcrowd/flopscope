@@ -513,7 +513,7 @@
   "related_guides": [],
   "signature": "flops.symmetrize(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
   "slug": "symmetrize",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L63",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L58",
   "status_note": "",
   "summary": "Project an array onto the invariant subspace of a permutation group.",
   "upstream_source_url": ""

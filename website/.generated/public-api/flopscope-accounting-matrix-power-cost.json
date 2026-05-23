@@ -156,15 +156,7 @@
             },
             {
               "kind": "text",
-              "text": ", adds "
-            },
-            {
-              "kind": "code",
-              "text": "n**3"
-            },
-            {
-              "kind": "text",
-              "text": "\nfor the initial matrix inversion. Per-matmul cost is delegated to\n"
+              "text": ", adds\n"
             },
             {
               "kind": "code",
@@ -172,7 +164,15 @@
             },
             {
               "kind": "text",
-              "text": " so this formula tracks "
+              "text": " for the initial matrix inversion (LU-based).\nPer-matmul cost is delegated to "
+            },
+            {
+              "kind": "code",
+              "text": "matmul_cost(n, n, n)"
+            },
+            {
+              "kind": "text",
+              "text": " so this formula\ntracks "
             },
             {
               "external_url": "",
@@ -183,7 +183,7 @@
             },
             {
               "kind": "text",
-              "text": "'s\nconvention automatically (issue #69; the FMA=2 unification of\n2026-05-20 previously left this wrapper undercounting by ~2x)."
+              "text": "'s convention automatically (issue #69; the FMA=2\nunification of 2026-05-20 previously left this wrapper undercounting\nby ~2x)."
             }
           ],
           "type": "paragraph"
@@ -217,7 +217,7 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "Uses exponentiation by repeated squaring. For ``k < 0``, adds ``n**3`` for the initial matrix inversion. Per-matmul cost is delegated to ``matmul_cost(n, n, n)`` so this formula tracks ``fnp.matmul``'s convention automatically (issue #69; the FMA=2 unification of 2026-05-20 previously left this wrapper undercounting by ~2x)."
+    "Uses exponentiation by repeated squaring. For ``k < 0``, adds ``matmul_cost(n, n, n)`` for the initial matrix inversion (LU-based). Per-matmul cost is delegated to ``matmul_cost(n, n, n)`` so this formula tracks ``fnp.matmul``'s convention automatically (issue #69; the FMA=2 unification of 2026-05-20 previously left this wrapper undercounting by ~2x)."
   ],
   "numpy_ref": "",
   "operation": null,

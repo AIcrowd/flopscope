@@ -309,7 +309,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.base_repr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L985",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1290",
   "href": "/docs/api/numpy/base-repr/",
   "import_path": "flopscope.numpy.base_repr",
   "is_operation_cost_leaf": true,

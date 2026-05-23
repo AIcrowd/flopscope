@@ -376,7 +376,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.reciprocal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
   "href": "/docs/api/numpy/reciprocal/",
   "import_path": "flopscope.numpy.reciprocal",
   "is_operation_cost_leaf": true,

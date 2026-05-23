@@ -489,7 +489,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.subtract",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
   "href": "/docs/api/numpy/subtract/",
   "legacy_href": "/docs/api/ops/subtract/",
   "module": "numpy",

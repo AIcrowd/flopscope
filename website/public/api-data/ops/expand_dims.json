@@ -467,7 +467,7 @@
     "name": "expand_dims",
     "notes": "Insert new size-1 axis.",
     "numpy_ref": "np.expand_dims",
-    "signature": "fnp.expand_dims(a: 'ArrayLike', axis: 'int | tuple[int, ...]') -> 'FlopscopeArray'",
+    "signature": "fnp.expand_dims(a: 'ArrayLike', axis) -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Expand the shape of an array.",
     "weight": 0.0
@@ -475,7 +475,7 @@
   "schema_version": 1,
   "slug": "expand_dims",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L548",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L705",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_shape_base_impl.py#L511"
   }
 }

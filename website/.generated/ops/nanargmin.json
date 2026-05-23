@@ -284,7 +284,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nanargmin",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L846",
   "href": "/docs/api/numpy/nanargmin/",
   "legacy_href": "/docs/api/ops/nanargmin/",
   "module": "numpy",

@@ -522,7 +522,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.not_equal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
   "href": "/docs/api/numpy/not-equal/",
   "import_path": "flopscope.numpy.not_equal",
   "is_operation_cost_leaf": true,

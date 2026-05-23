@@ -488,7 +488,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ones",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L130",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L143",
   "href": "/docs/api/numpy/ones/",
   "import_path": "flopscope.numpy.ones",
   "is_operation_cost_leaf": true,

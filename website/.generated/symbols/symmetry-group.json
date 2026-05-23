@@ -34,7 +34,7 @@
   "related_guides": [],
   "signature": "flops.SymmetryGroup(*generators: '_Permutation', axes: 'tuple[Any, ...] | None' = None) -> 'None'",
   "slug": "symmetry-group",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_perm_group.py#L233",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_perm_group.py#L260",
   "status_note": "",
   "summary": "A finite symmetry group defined by explicit generators.",
   "upstream_source_url": ""

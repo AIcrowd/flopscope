@@ -158,15 +158,7 @@
             },
             {
               "kind": "text",
-              "text": ", adds "
-            },
-            {
-              "kind": "code",
-              "text": "n**3"
-            },
-            {
-              "kind": "text",
-              "text": "\nfor the initial matrix inversion. Per-matmul cost is delegated to\n"
+              "text": ", adds\n"
             },
             {
               "kind": "code",
@@ -174,7 +166,15 @@
             },
             {
               "kind": "text",
-              "text": " so this formula tracks "
+              "text": " for the initial matrix inversion (LU-based).\nPer-matmul cost is delegated to "
+            },
+            {
+              "kind": "code",
+              "text": "matmul_cost(n, n, n)"
+            },
+            {
+              "kind": "text",
+              "text": " so this formula\ntracks "
             },
             {
               "external_url": "",
@@ -185,7 +185,7 @@
             },
             {
               "kind": "text",
-              "text": "'s\nconvention automatically (issue #69; the FMA=2 unification of\n2026-05-20 previously left this wrapper undercounting by ~2x)."
+              "text": "'s convention automatically (issue #69; the FMA=2\nunification of 2026-05-20 previously left this wrapper undercounting\nby ~2x)."
             }
           ],
           "type": "paragraph"

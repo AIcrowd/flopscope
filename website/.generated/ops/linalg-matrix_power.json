@@ -392,7 +392,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linalg.matrix_power",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L135",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L137",
   "href": "/docs/api/numpy/linalg/matrix-power/",
   "legacy_href": "/docs/api/ops/linalg-matrix_power/",
   "module": "numpy.linalg",

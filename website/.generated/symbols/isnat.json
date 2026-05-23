@@ -401,7 +401,7 @@
   "related_guides": [],
   "signature": "fnp.isnat(*args, **kwargs)",
   "slug": "isnat",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L348",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
   "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
   "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
   "upstream_source_url": ""

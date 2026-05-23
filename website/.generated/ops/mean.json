@@ -776,7 +776,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.mean",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1440",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1434",
   "href": "/docs/api/numpy/mean/",
   "legacy_href": "/docs/api/ops/mean/",
   "module": "numpy",

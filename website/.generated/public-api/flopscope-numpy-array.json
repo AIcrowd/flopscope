@@ -857,7 +857,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.array",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L97",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L110",
   "href": "/docs/api/numpy/array/",
   "import_path": "flopscope.numpy.array",
   "is_operation_cost_leaf": true,

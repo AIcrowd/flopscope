@@ -439,7 +439,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.copy",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L580",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L750",
   "href": "/docs/api/numpy/copy/",
   "legacy_href": "/docs/api/ops/copy/",
   "module": "numpy",

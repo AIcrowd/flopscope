@@ -282,7 +282,7 @@
     "name": "moveaxis",
     "notes": "Move axes to new positions.",
     "numpy_ref": "np.moveaxis",
-    "signature": "fnp.moveaxis(a: 'ArrayLike', source: 'int | Sequence[int]', destination: 'int | Sequence[int]') -> 'FlopscopeArray'",
+    "signature": "fnp.moveaxis(a: 'ArrayLike', source, destination) -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Move axes of an array to new positions.",
     "weight": 0.0
@@ -290,7 +290,7 @@
   "schema_version": 1,
   "slug": "moveaxis",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L397",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L431",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/numeric.py#L1448"
   }
 }

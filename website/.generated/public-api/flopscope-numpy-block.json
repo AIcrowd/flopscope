@@ -933,7 +933,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.block",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1013",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1318",
   "href": "/docs/api/numpy/block/",
   "import_path": "flopscope.numpy.block",
   "is_operation_cost_leaf": true,

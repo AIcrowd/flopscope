@@ -587,7 +587,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.take_along_axis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1980",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2351",
   "href": "/docs/api/numpy/take-along-axis/",
   "legacy_href": "/docs/api/ops/take_along_axis/",
   "module": "numpy",

@@ -399,7 +399,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.tri",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2002",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2373",
   "href": "/docs/api/numpy/tri/",
   "import_path": "flopscope.numpy.tri",
   "is_operation_cost_leaf": true,

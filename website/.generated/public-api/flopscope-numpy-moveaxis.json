@@ -291,7 +291,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.moveaxis",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L397",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L431",
   "href": "/docs/api/numpy/moveaxis/",
   "import_path": "flopscope.numpy.moveaxis",
   "is_operation_cost_leaf": true,
@@ -389,7 +389,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.moveaxis(a: 'ArrayLike', source: 'int | Sequence[int]', destination: 'int | Sequence[int]') -> 'FlopscopeArray'",
+  "signature": "fnp.moveaxis(a: 'ArrayLike', source, destination) -> 'FlopscopeArray'",
   "slug": "moveaxis",
   "summary": "Move axes of an array to new positions.",
   "upstream_ref_label": "NumPy Ref",

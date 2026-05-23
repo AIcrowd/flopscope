@@ -595,7 +595,7 @@
   "schema_version": 1,
   "slug": "inner",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1886",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1880",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.inner.html"
   }
 }

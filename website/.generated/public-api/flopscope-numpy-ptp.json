@@ -456,7 +456,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ptp",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L846",
   "href": "/docs/api/numpy/ptp/",
   "import_path": "flopscope.numpy.ptp",
   "is_operation_cost_leaf": true,

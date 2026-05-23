@@ -437,7 +437,7 @@
   "schema_version": 1,
   "slug": "permute_dims",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1689",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2060",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/fromnumeric.py#L630"
   }
 }

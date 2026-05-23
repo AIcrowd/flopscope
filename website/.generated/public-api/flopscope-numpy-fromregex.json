@@ -410,7 +410,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.fromregex",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1453",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1810",
   "href": "/docs/api/numpy/fromregex/",
   "import_path": "flopscope.numpy.fromregex",
   "is_operation_cost_leaf": true,

@@ -75,7 +75,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.numpy.trapz",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2450",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2452",
   "href": "/docs/api/numpy/trapz/",
   "import_path": "flopscope.numpy.trapz",
   "is_operation_cost_leaf": true,

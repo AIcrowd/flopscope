@@ -465,7 +465,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unpackbits",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2066",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2437",
   "href": "/docs/api/numpy/unpackbits/",
   "legacy_href": "/docs/api/ops/unpackbits/",
   "module": "numpy",

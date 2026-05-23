@@ -824,7 +824,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.interp",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2480",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2482",
   "href": "/docs/api/numpy/interp/",
   "legacy_href": "/docs/api/ops/interp/",
   "module": "numpy",

@@ -450,7 +450,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.stack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L445",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L490",
   "href": "/docs/api/numpy/stack/",
   "legacy_href": "/docs/api/ops/stack/",
   "module": "numpy",

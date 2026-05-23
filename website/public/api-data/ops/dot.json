@@ -810,7 +810,7 @@
   "schema_version": 1,
   "slug": "dot",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1792",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1786",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.dot.html"
   }
 }

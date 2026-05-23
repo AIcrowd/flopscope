@@ -504,7 +504,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isfinite",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L842",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1082",
   "href": "/docs/api/numpy/isfinite/",
   "legacy_href": "/docs/api/ops/isfinite/",
   "module": "numpy",

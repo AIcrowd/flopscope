@@ -488,7 +488,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.delete",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1204",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1543",
   "href": "/docs/api/numpy/delete/",
   "legacy_href": "/docs/api/ops/delete/",
   "module": "numpy",
