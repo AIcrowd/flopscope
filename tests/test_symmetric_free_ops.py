@@ -368,3 +368,19 @@ class TestIntegration:
             fnp.diag(np.arange(10, dtype=float))  # numel(output)=100
             fnp.diagflat(np.arange(5, dtype=float))  # numel(output)=25
             assert budget.flops_used == 100 + 100 + 25
+
+
+class TestSymmetryInferredSlot:
+    """The `_symmetry_inferred` slot is present and defaults to False."""
+
+    def test_slot_present_and_defaults_false(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        assert arr._symmetry_inferred is False
