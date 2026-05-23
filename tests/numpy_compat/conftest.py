@@ -118,11 +118,19 @@ def _snapshot_numpy_module(source_np):
 _ORIGINAL_NUMPY = _snapshot_numpy_module(np)
 
 
-def _current_flopscope():
-    """Return the currently imported flopscope module, reimporting if needed."""
-    mod = sys.modules.get("flopscope")
+def _current_flopscope_numpy():
+    """Return the `flopscope.numpy` module, reimporting if needed.
+
+    The patch loop resolves REGISTRY names via getattr() on the returned
+    module. After the JAX-style rebrand, registry names like
+    ``zeros_like``, ``einsum``, ``linalg.outer`` live under
+    ``flopscope.numpy.*``, not on the top-level ``flopscope`` module.
+    Pointing at the wrong module makes every lookup silently
+    AttributeError — the entire harness becomes a no-op.
+    """
+    mod = sys.modules.get("flopscope.numpy")
     if mod is None:
-        mod = importlib.import_module("flopscope")
+        mod = importlib.import_module("flopscope.numpy")
     return mod
 
 
@@ -188,7 +196,7 @@ def _patch_numpy():
     ufuncs, custom ops, submodule functions, and free ops. The frozen
     numpy copy prevents infinite recursion.
     """
-    fnp = _current_flopscope()
+    fnp = _current_flopscope_numpy()
 
     for name, meta in REGISTRY.items():
         cat = meta["category"]
