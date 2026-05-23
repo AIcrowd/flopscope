@@ -351,6 +351,9 @@ class SymmetryGroup:
     def order(self) -> int:
         if self._order is not None:
             return self._order
+        if self._known_kind is not None:
+            self._order = _closed_form_order(self._known_kind)
+            return self._order
         self._order = len(self.elements())
         return self._order
 
