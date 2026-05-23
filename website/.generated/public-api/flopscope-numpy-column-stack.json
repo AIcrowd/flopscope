@@ -224,7 +224,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.column_stack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1432",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1436",
   "href": "/docs/api/numpy/column-stack/",
   "import_path": "flopscope.numpy.column_stack",
   "is_operation_cost_leaf": true,

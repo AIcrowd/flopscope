@@ -532,7 +532,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.equal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/equal/",
   "import_path": "flopscope.numpy.equal",
   "is_operation_cost_leaf": true,
@@ -672,7 +672,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.equal(*args, **kwargs)",
+  "signature": "fnp.equal(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "equal",
   "summary": "Return (x1 == x2) element-wise.",
   "upstream_ref_label": "NumPy Ref",

@@ -385,7 +385,7 @@
     "name": "rint",
     "notes": "Round to nearest integer element-wise.",
     "numpy_ref": "np.rint",
-    "signature": "fnp.rint(*args, **kwargs)",
+    "signature": "fnp.rint(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Round elements of the array to the nearest integer.",
     "weight": 1.0
@@ -393,7 +393,7 @@
   "schema_version": 1,
   "slug": "rint",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

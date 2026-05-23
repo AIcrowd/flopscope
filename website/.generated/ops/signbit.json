@@ -336,7 +336,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.signbit",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/signbit/",
   "legacy_href": "/docs/api/ops/signbit/",
   "module": "numpy",
@@ -405,7 +405,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.signbit(*args, **kwargs)",
+  "signature": "fnp.signbit(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "signbit",
   "summary": "Returns element-wise True where signbit is set (less than zero).",
   "upstream_ref_label": "NumPy Ref",

@@ -306,7 +306,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.real_if_close",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/real-if-close/",
   "legacy_href": "/docs/api/ops/real_if_close/",
   "module": "numpy",

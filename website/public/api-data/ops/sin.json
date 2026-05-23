@@ -511,7 +511,7 @@
     "name": "sin",
     "notes": "Element-wise sine.",
     "numpy_ref": "np.sin",
-    "signature": "fnp.sin(*args, **kwargs)",
+    "signature": "fnp.sin(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Trigonometric sine, element-wise.",
     "weight": 16.0
@@ -519,7 +519,7 @@
   "schema_version": 1,
   "slug": "sin",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

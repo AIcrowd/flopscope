@@ -650,7 +650,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_left_shift",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/bitwise-left-shift/",
   "import_path": "flopscope.numpy.bitwise_left_shift",
   "is_operation_cost_leaf": true,
@@ -773,7 +773,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.bitwise_left_shift(*args, **kwargs)",
+  "signature": "fnp.bitwise_left_shift(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "bitwise_left_shift",
   "summary": "Shift the bits of an integer to the left.",
   "upstream_ref_label": "NumPy Ref",

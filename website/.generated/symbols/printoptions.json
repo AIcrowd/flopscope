@@ -175,7 +175,7 @@
   "related_guides": [],
   "signature": "fnp.printoptions(*args, **kwargs)",
   "slug": "printoptions",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/arrayprint.py#L372",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/arrayprint.py#L372",
   "status_note": "",
   "summary": "Context manager for setting print options.",
   "upstream_source_url": ""

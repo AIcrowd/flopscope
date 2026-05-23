@@ -517,7 +517,7 @@
     "name": "ldexp",
     "notes": "Return x1 * 2**x2 element-wise.",
     "numpy_ref": "np.ldexp",
-    "signature": "fnp.ldexp(*args, **kwargs)",
+    "signature": "fnp.ldexp(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Returns x1 * 2**x2, element-wise.",
     "weight": 1.0
@@ -525,7 +525,7 @@
   "schema_version": 1,
   "slug": "ldexp",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

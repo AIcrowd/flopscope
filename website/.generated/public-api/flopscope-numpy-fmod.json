@@ -598,7 +598,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fmod",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/fmod/",
   "import_path": "flopscope.numpy.fmod",
   "is_operation_cost_leaf": true,
@@ -726,7 +726,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.fmod(*args, **kwargs)",
+  "signature": "fnp.fmod(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "fmod",
   "summary": "Returns the element-wise remainder of division.",
   "upstream_ref_label": "NumPy Ref",

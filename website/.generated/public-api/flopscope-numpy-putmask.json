@@ -406,7 +406,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.putmask",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2171",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2175",
   "href": "/docs/api/numpy/putmask/",
   "import_path": "flopscope.numpy.putmask",
   "is_operation_cost_leaf": true,

@@ -563,7 +563,7 @@
     "name": "floor_divide",
     "notes": "Element-wise floor division.",
     "numpy_ref": "np.floor_divide",
-    "signature": "fnp.floor_divide(*args, **kwargs)",
+    "signature": "fnp.floor_divide(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the largest integer smaller or equal to the division of the inputs. It is equivalent to the Python ``//`` operator and pairs with the Python ``%`` (`remainder`), function so that ``a = a % b + b * (a // b)`` up to roundoff.",
     "weight": 16.0
@@ -571,7 +571,7 @@
   "schema_version": 1,
   "slug": "floor_divide",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

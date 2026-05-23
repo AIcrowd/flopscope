@@ -411,7 +411,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.cos",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/cos/",
   "legacy_href": "/docs/api/ops/cos/",
   "module": "numpy",
@@ -482,7 +482,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.cos(*args, **kwargs)",
+  "signature": "fnp.cos(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "cos",
   "summary": "Cosine element-wise.",
   "upstream_ref_label": "NumPy Ref",

@@ -628,7 +628,7 @@
     "name": "left_shift",
     "notes": "Element-wise left bit shift (legacy name).",
     "numpy_ref": "np.left_shift",
-    "signature": "fnp.left_shift(*args, **kwargs)",
+    "signature": "fnp.left_shift(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Shift the bits of an integer to the left.",
     "weight": 1.0
@@ -636,7 +636,7 @@
   "schema_version": 1,
   "slug": "left_shift",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -242,7 +242,7 @@
             },
             {
               "kind": "output",
-              "text": "'101'"
+              "text": "    '101'"
             },
             {
               "kind": "input",
@@ -251,7 +251,7 @@
             },
             {
               "kind": "output",
-              "text": "'11'"
+              "text": "    '11'"
             },
             {
               "kind": "input",
@@ -260,7 +260,7 @@
             },
             {
               "kind": "output",
-              "text": "'00012'"
+              "text": "    '00012'"
             }
           ],
           "type": "doctest_block"
@@ -304,12 +304,12 @@
     "unsupported_directives": []
   },
   "example": {
-    "code": ">>> import numpy as np\n>>> np.base_repr(5)\n'101'\n>>> np.base_repr(6, 5)\n'11'\n>>> np.base_repr(7, base=5, padding=3)\n'00012'\n\n>>> np.base_repr(10, base=16)\n'A'\n>>> np.base_repr(32, base=16)\n'20'",
+    "code": ">>> import numpy as np\n    >>> np.base_repr(5)\n    '101'\n    >>> np.base_repr(6, 5)\n    '11'\n    >>> np.base_repr(7, base=5, padding=3)\n    '00012'\n\n    >>> np.base_repr(10, base=16)\n    'A'\n    >>> np.base_repr(32, base=16)\n    '20'",
     "output": "",
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.base_repr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1290",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1294",
   "href": "/docs/api/numpy/base-repr/",
   "import_path": "flopscope.numpy.base_repr",
   "is_operation_cost_leaf": true,

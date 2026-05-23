@@ -703,7 +703,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arctan2",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/arctan2/",
   "import_path": "flopscope.numpy.arctan2",
   "is_operation_cost_leaf": true,
@@ -831,7 +831,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.arctan2(*args, **kwargs)",
+  "signature": "fnp.arctan2(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "arctan2",
   "summary": "Element-wise arc tangent of ``x1/x2`` choosing the quadrant correctly.",
   "upstream_ref_label": "NumPy Ref",

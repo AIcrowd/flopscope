@@ -397,7 +397,7 @@
   "related_guides": [],
   "signature": "fnp.fromstring(*args, **kwargs)",
   "slug": "fromstring",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1824",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1828",
   "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
   "summary": "A new 1-D array initialized from text data in a string.",
   "upstream_source_url": ""

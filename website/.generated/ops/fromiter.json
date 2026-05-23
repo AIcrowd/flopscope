@@ -342,7 +342,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fromiter",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1796",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1800",
   "href": "/docs/api/numpy/fromiter/",
   "legacy_href": "/docs/api/ops/fromiter/",
   "module": "numpy",

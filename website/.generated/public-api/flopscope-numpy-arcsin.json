@@ -619,7 +619,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arcsin",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/arcsin/",
   "import_path": "flopscope.numpy.arcsin",
   "is_operation_cost_leaf": true,
@@ -784,7 +784,7 @@
       "unresolved": true
     }
   ],
-  "signature": "fnp.arcsin(*args, **kwargs)",
+  "signature": "fnp.arcsin(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "arcsin",
   "summary": "Inverse sine, element-wise.",
   "upstream_ref_label": "NumPy Ref",

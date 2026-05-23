@@ -754,7 +754,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.pow",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/pow/",
   "import_path": "flopscope.numpy.pow",
   "is_operation_cost_leaf": true,
@@ -845,7 +845,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.pow(*args, **kwargs)",
+  "signature": "flopscope.numpy.pow(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-pow",
   "summary": "First array elements raised to powers from second array, element-wise.",
   "upstream_source_url": "",

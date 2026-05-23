@@ -336,7 +336,7 @@
   "schema_version": 1,
   "slug": "packbits",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2038",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2042",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.packbits.html"
   }
 }

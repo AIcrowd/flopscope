@@ -374,7 +374,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.squeeze",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L679",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L683",
   "href": "/docs/api/numpy/squeeze/",
   "legacy_href": "/docs/api/ops/squeeze/",
   "module": "numpy",

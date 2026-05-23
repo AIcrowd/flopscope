@@ -420,7 +420,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.hypot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/hypot/",
   "legacy_href": "/docs/api/ops/hypot/",
   "module": "numpy",
@@ -491,7 +491,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.hypot(*args, **kwargs)",
+  "signature": "fnp.hypot(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "hypot",
   "summary": "Given the \"legs\" of a right triangle, return its hypotenuse.",
   "upstream_ref_label": "NumPy Ref",

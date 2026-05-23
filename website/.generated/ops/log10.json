@@ -532,7 +532,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.log10",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/log10/",
   "legacy_href": "/docs/api/ops/log10/",
   "module": "numpy",
@@ -619,7 +619,7 @@
       "unresolved": true
     }
   ],
-  "signature": "fnp.log10(*args, **kwargs)",
+  "signature": "fnp.log10(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "log10",
   "summary": "Return the base 10 logarithm of the input array, element-wise.",
   "upstream_ref_label": "NumPy Ref",

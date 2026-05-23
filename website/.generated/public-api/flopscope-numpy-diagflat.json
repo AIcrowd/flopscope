@@ -273,7 +273,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.diagflat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1580",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1584",
   "href": "/docs/api/numpy/diagflat/",
   "import_path": "flopscope.numpy.diagflat",
   "is_operation_cost_leaf": true,

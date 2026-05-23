@@ -359,7 +359,7 @@
             },
             {
               "kind": "output",
-              "text": "'11'"
+              "text": "    '11'"
             },
             {
               "kind": "input",
@@ -368,7 +368,7 @@
             },
             {
               "kind": "output",
-              "text": "'-11'"
+              "text": "    '-11'"
             },
             {
               "kind": "input",
@@ -377,7 +377,7 @@
             },
             {
               "kind": "output",
-              "text": "'0011'"
+              "text": "    '0011'"
             }
           ],
           "type": "doctest_block"
@@ -440,12 +440,12 @@
     "unsupported_directives": []
   },
   "example": {
-    "code": ">>> import numpy as np\n>>> np.binary_repr(3)\n'11'\n>>> np.binary_repr(-3)\n'-11'\n>>> np.binary_repr(3, width=4)\n'0011'\n\nThe two's complement is returned when the input number is negative and\nwidth is specified:\n\n>>> np.binary_repr(-3, width=3)\n'101'\n>>> np.binary_repr(-3, width=5)\n'11101'",
+    "code": ">>> import numpy as np\n    >>> np.binary_repr(3)\n    '11'\n    >>> np.binary_repr(-3)\n    '-11'\n    >>> np.binary_repr(3, width=4)\n    '0011'\n\n    The two's complement is returned when the input number is negative and\n    width is specified:\n\n    >>> np.binary_repr(-3, width=3)\n    '101'\n    >>> np.binary_repr(-3, width=5)\n    '11101'",
     "output": "",
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.binary_repr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1304",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1308",
   "href": "/docs/api/numpy/binary-repr/",
   "import_path": "flopscope.numpy.binary_repr",
   "is_operation_cost_leaf": true,

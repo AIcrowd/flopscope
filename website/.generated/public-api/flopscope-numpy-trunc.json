@@ -435,7 +435,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.trunc",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/trunc/",
   "import_path": "flopscope.numpy.trunc",
   "is_operation_cost_leaf": true,
@@ -561,7 +561,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.trunc(*args, **kwargs)",
+  "signature": "fnp.trunc(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "trunc",
   "summary": "Return the truncated value of the input, element-wise.",
   "upstream_ref_label": "NumPy Ref",

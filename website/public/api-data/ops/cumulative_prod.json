@@ -539,7 +539,7 @@
   "schema_version": 1,
   "slug": "cumulative_prod",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L846",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L853",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/fromnumeric.py#L2713"
   }
 }

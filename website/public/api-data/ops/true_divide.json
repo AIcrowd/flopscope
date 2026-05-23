@@ -534,7 +534,7 @@
     "name": "true_divide",
     "notes": "Element-wise true division (explicit).",
     "numpy_ref": "np.true_divide",
-    "signature": "fnp.true_divide(*args, **kwargs)",
+    "signature": "fnp.true_divide(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Divide arguments element-wise.",
     "weight": 1.0
@@ -542,7 +542,7 @@
   "schema_version": 1,
   "slug": "true_divide",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

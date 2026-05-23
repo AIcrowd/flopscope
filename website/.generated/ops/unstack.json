@@ -437,7 +437,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unstack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2469",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2473",
   "href": "/docs/api/numpy/unstack/",
   "legacy_href": "/docs/api/ops/unstack/",
   "module": "numpy",

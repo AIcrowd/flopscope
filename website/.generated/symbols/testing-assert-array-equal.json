@@ -751,7 +751,7 @@
   "related_guides": [],
   "signature": "flops.testing.assert_array_equal(actual, desired, err_msg='', verbose=True, *, strict=False)",
   "slug": "testing-assert-array-equal",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/testing/_private/utils.py#L932",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/testing/_private/utils.py#L932",
   "status_note": "",
   "summary": "Raises an AssertionError if two array_like objects are not equal.",
   "upstream_source_url": ""

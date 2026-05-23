@@ -602,7 +602,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_or",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/bitwise-or/",
   "import_path": "flopscope.numpy.bitwise_or",
   "is_operation_cost_leaf": true,
@@ -735,7 +735,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.bitwise_or(*args, **kwargs)",
+  "signature": "fnp.bitwise_or(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "bitwise_or",
   "summary": "Compute the bit-wise OR of two arrays element-wise.",
   "upstream_ref_label": "NumPy Ref",

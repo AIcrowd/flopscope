@@ -908,7 +908,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.matmul",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1829",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1836",
   "href": "/docs/api/numpy/matmul/",
   "legacy_href": "/docs/api/ops/matmul/",
   "module": "numpy",

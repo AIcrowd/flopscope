@@ -509,7 +509,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.less",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/less/",
   "import_path": "flopscope.numpy.less",
   "is_operation_cost_leaf": true,
@@ -649,7 +649,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.less(*args, **kwargs)",
+  "signature": "fnp.less(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "less",
   "summary": "Return the truth value of (x1 < x2) element-wise.",
   "upstream_ref_label": "NumPy Ref",

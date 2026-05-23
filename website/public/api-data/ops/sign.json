@@ -447,7 +447,7 @@
     "name": "sign",
     "notes": "Element-wise sign function.",
     "numpy_ref": "np.sign",
-    "signature": "fnp.sign(*args, **kwargs)",
+    "signature": "fnp.sign(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Returns an element-wise indication of the sign of a number.",
     "weight": 1.0
@@ -455,7 +455,7 @@
   "schema_version": 1,
   "slug": "sign",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

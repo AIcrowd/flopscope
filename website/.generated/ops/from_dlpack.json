@@ -363,7 +363,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.from_dlpack",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1735",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1739",
   "href": "/docs/api/numpy/from-dlpack/",
   "legacy_href": "/docs/api/ops/from_dlpack/",
   "module": "numpy",

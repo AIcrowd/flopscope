@@ -489,7 +489,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.delete",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1543",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1547",
   "href": "/docs/api/numpy/delete/",
   "import_path": "flopscope.numpy.delete",
   "is_operation_cost_leaf": true,

@@ -213,7 +213,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.geterr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/_ufunc_config.py#L109",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/_ufunc_config.py#L109",
   "href": "/docs/api/numpy/geterr/",
   "import_path": "flopscope.numpy.geterr",
   "is_operation_cost_leaf": true,

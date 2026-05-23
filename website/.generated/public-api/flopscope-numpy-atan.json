@@ -704,7 +704,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.atan",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/atan/",
   "import_path": "flopscope.numpy.atan",
   "is_operation_cost_leaf": true,
@@ -830,7 +830,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.atan(*args, **kwargs)",
+  "signature": "flopscope.numpy.atan(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-atan",
   "summary": "Trigonometric inverse tangent, element-wise.",
   "upstream_source_url": "",

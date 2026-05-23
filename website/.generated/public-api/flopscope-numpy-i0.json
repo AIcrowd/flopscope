@@ -312,7 +312,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.i0",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/i0/",
   "import_path": "flopscope.numpy.i0",
   "is_operation_cost_leaf": true,

@@ -402,7 +402,7 @@
   "schema_version": 1,
   "slug": "shares_memory",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2309",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2313",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.shares_memory.html"
   }
 }

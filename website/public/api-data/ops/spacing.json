@@ -351,7 +351,7 @@
     "name": "spacing",
     "notes": "Return ULP spacing for each element.",
     "numpy_ref": "np.spacing",
-    "signature": "fnp.spacing(*args, **kwargs)",
+    "signature": "fnp.spacing(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the distance between x and the nearest adjacent number.",
     "weight": 1.0
@@ -359,7 +359,7 @@
   "schema_version": 1,
   "slug": "spacing",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

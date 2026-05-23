@@ -141,7 +141,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.sort_complex",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1129",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1136",
   "href": "/docs/api/numpy/sort-complex/",
   "import_path": "flopscope.numpy.sort_complex",
   "is_operation_cost_leaf": true,

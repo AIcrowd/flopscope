@@ -403,7 +403,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.rint",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/rint/",
   "legacy_href": "/docs/api/ops/rint/",
   "module": "numpy",
@@ -519,7 +519,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.rint(*args, **kwargs)",
+  "signature": "fnp.rint(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "rint",
   "summary": "Round elements of the array to the nearest integer.",
   "upstream_ref_label": "NumPy Ref",

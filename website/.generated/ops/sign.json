@@ -462,7 +462,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.sign",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/sign/",
   "legacy_href": "/docs/api/ops/sign/",
   "module": "numpy",
@@ -533,7 +533,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.sign(*args, **kwargs)",
+  "signature": "fnp.sign(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "sign",
   "summary": "Returns an element-wise indication of the sign of a number.",
   "upstream_ref_label": "NumPy Ref",

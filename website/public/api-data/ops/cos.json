@@ -396,7 +396,7 @@
     "name": "cos",
     "notes": "Element-wise cosine.",
     "numpy_ref": "np.cos",
-    "signature": "fnp.cos(*args, **kwargs)",
+    "signature": "fnp.cos(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Cosine element-wise.",
     "weight": 16.0
@@ -404,7 +404,7 @@
   "schema_version": 1,
   "slug": "cos",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

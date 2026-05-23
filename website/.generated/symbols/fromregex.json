@@ -408,7 +408,7 @@
   "related_guides": [],
   "signature": "fnp.fromregex(file, regexp, dtype, encoding=None)",
   "slug": "fromregex",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1810",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1814",
   "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
   "summary": "Construct an array from a text file, using regular expression parsing.",
   "upstream_source_url": ""

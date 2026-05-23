@@ -509,7 +509,7 @@
     "name": "arctanh",
     "notes": "Element-wise inverse hyperbolic tangent.",
     "numpy_ref": "np.arctanh",
-    "signature": "fnp.arctanh(*args, **kwargs)",
+    "signature": "fnp.arctanh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Inverse hyperbolic tangent element-wise.",
     "weight": 16.0
@@ -517,7 +517,7 @@
   "schema_version": 1,
   "slug": "arctanh",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

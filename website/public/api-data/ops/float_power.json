@@ -670,7 +670,7 @@
     "name": "float_power",
     "notes": "Element-wise exponentiation in float64.",
     "numpy_ref": "np.float_power",
-    "signature": "fnp.float_power(*args, **kwargs)",
+    "signature": "fnp.float_power(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "First array elements raised to powers from second array, element-wise.",
     "weight": 16.0
@@ -678,7 +678,7 @@
   "schema_version": 1,
   "slug": "float_power",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

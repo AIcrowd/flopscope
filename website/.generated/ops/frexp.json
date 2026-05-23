@@ -554,7 +554,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.frexp",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L378",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L385",
   "href": "/docs/api/numpy/frexp/",
   "legacy_href": "/docs/api/ops/frexp/",
   "module": "numpy",
@@ -683,7 +683,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.frexp(*args, **kwargs)",
+  "signature": "fnp.frexp(x: 'ArrayLike', out: 'tuple[FlopscopeArray, FlopscopeArray] | None' = None, **kwargs: 'Any') -> 'tuple[FlopscopeArray, FlopscopeArray]'",
   "slug": "frexp",
   "summary": "Decompose the elements of x into mantissa and twos exponent.",
   "upstream_ref_label": "NumPy Ref",

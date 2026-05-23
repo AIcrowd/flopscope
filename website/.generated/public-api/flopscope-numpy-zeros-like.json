@@ -472,7 +472,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.zeros_like",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L253",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L254",
   "href": "/docs/api/numpy/zeros-like/",
   "import_path": "flopscope.numpy.zeros_like",
   "is_operation_cost_leaf": true,

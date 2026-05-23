@@ -428,7 +428,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.vdot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2126",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2133",
   "href": "/docs/api/numpy/vdot/",
   "import_path": "flopscope.numpy.vdot",
   "is_operation_cost_leaf": true,

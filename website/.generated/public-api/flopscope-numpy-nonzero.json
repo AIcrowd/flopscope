@@ -541,7 +541,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nonzero",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2022",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2026",
   "href": "/docs/api/numpy/nonzero/",
   "import_path": "flopscope.numpy.nonzero",
   "is_operation_cost_leaf": true,

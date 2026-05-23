@@ -412,7 +412,7 @@
     "name": "nextafter",
     "notes": "Return next float after x1 toward x2 element-wise.",
     "numpy_ref": "np.nextafter",
-    "signature": "fnp.nextafter(*args, **kwargs)",
+    "signature": "fnp.nextafter(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the next floating-point value after x1 towards x2, element-wise.",
     "weight": 1.0
@@ -420,7 +420,7 @@
   "schema_version": 1,
   "slug": "nextafter",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -243,7 +243,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.may_share_memory",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1989",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1993",
   "href": "/docs/api/numpy/may-share-memory/",
   "legacy_href": "/docs/api/ops/may_share_memory/",
   "module": "numpy",

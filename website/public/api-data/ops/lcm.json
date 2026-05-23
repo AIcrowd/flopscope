@@ -231,7 +231,7 @@
     "name": "lcm",
     "notes": "Element-wise least common multiple.",
     "numpy_ref": "np.lcm",
-    "signature": "fnp.lcm(*args, **kwargs)",
+    "signature": "fnp.lcm(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Returns the lowest common multiple of ``|x1|`` and ``|x2|``",
     "weight": 16.0
@@ -239,7 +239,7 @@
   "schema_version": 1,
   "slug": "lcm",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

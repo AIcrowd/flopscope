@@ -477,7 +477,7 @@
     "name": "add",
     "notes": "Element-wise addition.",
     "numpy_ref": "np.add",
-    "signature": "fnp.add(*args, **kwargs)",
+    "signature": "fnp.add(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Add arguments element-wise.",
     "weight": 1.0
@@ -485,7 +485,7 @@
   "schema_version": 1,
   "slug": "add",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

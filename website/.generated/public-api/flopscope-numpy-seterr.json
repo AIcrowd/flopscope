@@ -620,7 +620,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.seterr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/_ufunc_config.py#L20",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/_ufunc_config.py#L20",
   "href": "/docs/api/numpy/seterr/",
   "import_path": "flopscope.numpy.seterr",
   "is_operation_cost_leaf": true,

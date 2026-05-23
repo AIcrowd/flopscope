@@ -488,7 +488,7 @@
     "name": "arcsinh",
     "notes": "Element-wise inverse hyperbolic sine.",
     "numpy_ref": "np.arcsinh",
-    "signature": "fnp.arcsinh(*args, **kwargs)",
+    "signature": "fnp.arcsinh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Inverse hyperbolic sine element-wise.",
     "weight": 16.0
@@ -496,7 +496,7 @@
   "schema_version": 1,
   "slug": "arcsinh",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

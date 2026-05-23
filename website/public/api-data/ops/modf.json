@@ -444,7 +444,7 @@
     "name": "modf",
     "notes": "Return fractional and integral parts element-wise.",
     "numpy_ref": "np.modf",
-    "signature": "fnp.modf(*args, **kwargs)",
+    "signature": "fnp.modf(x: 'ArrayLike', out: 'tuple[FlopscopeArray, FlopscopeArray] | None' = None, **kwargs: 'Any') -> 'tuple[FlopscopeArray, FlopscopeArray]'",
     "status": "supported",
     "summary": "Return the fractional and integral parts of an array, element-wise.",
     "weight": 1.0
@@ -452,7 +452,7 @@
   "schema_version": 1,
   "slug": "modf",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L378",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L385",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

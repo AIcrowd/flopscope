@@ -707,7 +707,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arctan",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/arctan/",
   "import_path": "flopscope.numpy.arctan",
   "is_operation_cost_leaf": true,
@@ -849,7 +849,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.arctan(*args, **kwargs)",
+  "signature": "fnp.arctan(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "arctan",
   "summary": "Trigonometric inverse tangent, element-wise.",
   "upstream_ref_label": "NumPy Ref",

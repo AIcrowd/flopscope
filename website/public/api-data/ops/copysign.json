@@ -485,7 +485,7 @@
     "name": "copysign",
     "notes": "Copy sign of x2 to magnitude of x1 element-wise.",
     "numpy_ref": "np.copysign",
-    "signature": "fnp.copysign(*args, **kwargs)",
+    "signature": "fnp.copysign(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Change the sign of x1 to that of x2, element-wise.",
     "weight": 1.0
@@ -493,7 +493,7 @@
   "schema_version": 1,
   "slug": "copysign",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

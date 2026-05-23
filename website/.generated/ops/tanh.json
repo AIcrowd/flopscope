@@ -456,7 +456,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.tanh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/tanh/",
   "legacy_href": "/docs/api/ops/tanh/",
   "module": "numpy",
@@ -527,7 +527,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.tanh(*args, **kwargs)",
+  "signature": "fnp.tanh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "tanh",
   "summary": "Compute hyperbolic tangent element-wise.",
   "upstream_ref_label": "NumPy Ref",

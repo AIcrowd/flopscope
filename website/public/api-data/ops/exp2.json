@@ -349,7 +349,7 @@
     "name": "exp2",
     "notes": "Element-wise 2^x.",
     "numpy_ref": "np.exp2",
-    "signature": "fnp.exp2(*args, **kwargs)",
+    "signature": "fnp.exp2(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Calculate `2**p` for all `p` in the input array.",
     "weight": 16.0
@@ -357,7 +357,7 @@
   "schema_version": 1,
   "slug": "exp2",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

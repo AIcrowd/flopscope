@@ -628,7 +628,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ravel",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L723",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L727",
   "href": "/docs/api/numpy/ravel/",
   "legacy_href": "/docs/api/ops/ravel/",
   "module": "numpy",

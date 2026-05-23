@@ -368,7 +368,7 @@
   "schema_version": 1,
   "slug": "tril",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L939",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L943",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/lib/_twodim_base_impl.py#L441"
   }
 }

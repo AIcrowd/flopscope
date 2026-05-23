@@ -587,7 +587,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.reshape",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L367",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L371",
   "href": "/docs/api/numpy/reshape/",
   "legacy_href": "/docs/api/ops/reshape/",
   "module": "numpy",

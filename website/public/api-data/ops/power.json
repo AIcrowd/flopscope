@@ -739,7 +739,7 @@
     "name": "power",
     "notes": "Element-wise exponentiation x**y.",
     "numpy_ref": "np.power",
-    "signature": "fnp.power(*args, **kwargs)",
+    "signature": "fnp.power(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "First array elements raised to powers from second array, element-wise.",
     "weight": 16.0
@@ -747,7 +747,7 @@
   "schema_version": 1,
   "slug": "power",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }
