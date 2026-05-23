@@ -910,3 +910,64 @@ class TestStats:
     def test_scalar_input(self, we):
         """Scalar input should charge 1 FLOP."""
         assert _cost_of(flopscope.stats.norm.pdf, 0.0) == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue #69 — pinned constants for fixes that changed cost formulas.
+# These complement tests/test_issue_69_cost_parity.py by pinning the
+# *formula* (not the parity) so accidental future tweaks fail loudly.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "shape,n,expected",
+    [
+        ((1000,), 1, 999),          # numel - 1
+        ((1000,), 3, 2994),         # 3*1000 - 3*4//2 = 2994
+        ((1000,), 10, 9945),        # 10*1000 - 10*11//2 = 9945
+        ((50, 50), 1, 2450),        # along last axis: 50 * (50-1) = 2450
+    ],
+)
+def test_diff_cost_pinned(shape, n, expected, we):
+    a = we.asarray(numpy.zeros(shape))
+    assert _cost_of(we.diff, a, n=n) == expected
+
+
+@pytest.mark.parametrize(
+    "shape,expected",
+    [
+        ((10,), 16),                         # one axis: 2 * 10 * max(10-2, 0) // 10 = 2*10*8//10 = 16
+        ((50, 50), 9600),                    # per-axis: 2*2500*48//50 = 4800; two axes: 9600
+        ((20, 20, 20), 43200),              # per-axis: 2*8000*18//20 = 14400; three axes: 43200
+    ],
+)
+def test_gradient_cost_pinned(shape, expected, we):
+    f = we.asarray(numpy.zeros(shape))
+    assert _cost_of(we.gradient, f) == expected
+
+
+@pytest.mark.parametrize("size,expected", [(100, 700), (1000, 7000)])
+def test_unwrap_cost_pinned(size, expected, we):
+    a = we.asarray(numpy.zeros(size))
+    assert _cost_of(we.unwrap, a) == expected
+
+
+def test_convolve_cost_pinned(we):
+    a = we.asarray(numpy.zeros(200))
+    v = we.asarray(numpy.zeros(50))
+    # 2*200*50 - 200 - 50 = 19750
+    assert _cost_of(we.convolve, a, v) == 19750
+
+
+def test_cross_cost_pinned(we):
+    a = we.asarray(numpy.zeros((100, 3)))
+    b = we.asarray(numpy.zeros((100, 3)))
+    # 5 ops per output element; output.size = 100*3 = 300, formula: a.shape[0]*3*5 = 1500
+    assert _cost_of(we.cross, a, b) == 1500
+
+
+def test_matrix_power_cost_pinned(we):
+    a = we.asarray(numpy.eye(20))
+    # n=4: 2 squarings, each matmul_cost(20,20,20) = 2*20^3 - 20^2 = 15600
+    # total = 2 * 15600 = 31200
+    assert _cost_of(we.linalg.matrix_power, a, 4) == 31200
