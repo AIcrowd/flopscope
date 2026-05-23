@@ -132,6 +132,25 @@
 - `_accumulation/_cost.py:aggregate_reduction` body implemented (was a
   signature-locked `NotImplementedError`).
 
+### Fixed (#69)
+
+- `fnp.polyval` no longer crashes when called with a `FlopscopeArray` input (was passing un-stripped array to numpy's polyval, which internally called `np.zeros_like` on a `FlopscopeArray`).
+- `fnp.diff(a, n=k)` for `k > 1` now charges correctly (was using only the final iteration's size; now sums over all `k` iterations).
+- `fnp.gradient(f)` cost now scales with `ndim` and per-axis interior size (was charging `f.size` regardless of how many axes were differenced).
+- `fnp.unwrap(a)` cost bumped from `numel` to `7 * numel` to match numpy's full ufunc decomposition.
+- `fnp.linalg.matrix_power(A, k)` per-matmul charge corrected to use `matmul_cost` (was `n³`, missing the FMA=2 factor introduced in the 2026-05-20 unification).
+- `fnp.linalg.pinv(A)` and `fnp.linalg.lstsq(A, b)` now include the post-SVD reconstruction cost (matmul + threshold + diag-scale) that was previously omitted.
+- `fnp.convolve(a, v)` and `fnp.correlate(a, v)` cost corrected to `2*a*v - a - v` (matches the FMA=1 accumulator convention used by `matmul_cost`).
+- `fnp.cross(a, b)` and `fnp.linalg.cross(a, b)` cost corrected to `5 * output.size` (was `3 * output.size`) AND the numpy call is now inside the `budget.deduct` block so backend wall-time is attributed correctly.
+
+### Added (#69)
+
+- Stack-walk-based tripwire in `FlopscopeArray.__array_function__` / `__array_ufunc__` that raises `RuntimeError` when a `FlopscopeArray` reaches raw `_np.<func>` from inside an `@_counted_wrapper`-decorated function (catches "wrapper forgot to strip" bugs at the leak site).
+- `UserWarning` (de-duped per call site via Python's `warnings` module) when `np.<func>(whestarray)` is called at top level instead of `fnp.<func>(whestarray)` — explains the recommended call form without breaking existing usage.
+- `flopscope._flops.matmul_cost(m, k, n)` helper, used by `pinv_cost`, `lstsq_cost`, and `matrix_power_cost` so compound formulas track `fnp.matmul`'s accounting automatically.
+- `tests/test_issue_69_cost_parity.py` — parametrized regression test asserting wrapper FLOPs match the sum of fnp.primitive FLOPs from a manual decomposition (14 entries covering all the above wrappers).
+- `tests/test_issue_69_tripwire.py` — boundary contract tests for the tripwire + auto-route warning behavior.
+
 ### Removed
 
 - `flopscope._opt_einsum._paths` — now upstream
