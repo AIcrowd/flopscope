@@ -152,7 +152,14 @@ def restrict_group_to_axes(
     group: SymmetryGroup | None,
     axes: Iterable[int],
 ) -> SymmetryGroup | None:
-    """Restrict a group to a specific ordered subset of its tensor axes."""
+    """Restrict a group to a specific ordered subset of its tensor axes.
+
+    Precondition (inherited from :meth:`SymmetryGroup.restrict`): every
+    element of ``group`` must setwise-preserve ``axes``. For free-permuting
+    groups like ``symmetric(A)`` this is only satisfied when
+    ``axes == group.axes`` — see ``reduce_group`` for the
+    setwise-stabilizer+restrict composition that handles strict subsets.
+    """
     if group is None:
         return None
     validate_symmetry_group(group)
@@ -160,6 +167,9 @@ def restrict_group_to_axes(
     if group_axes is None:
         group_axes = tuple(range(group.degree))
     wanted_axes = _normalize_axis_tuple(axes, what="restricted axes")
+    if wanted_axes == group_axes:
+        # No-op: kind passes through via the interned original.
+        return group
     local_indices = []
     for axis in wanted_axes:
         if axis not in group_axes:
