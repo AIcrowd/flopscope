@@ -98,7 +98,7 @@ class TestTransportSqueeze:
         result = transport_squeeze(G, input_shape=(1, 3, 3), axis=0)
         # After squeeze, block axes (1, 2) shift to (0, 1).
         assert result is not None
-        assert set(result.axes) == {0, 1}
+        assert set(result.axes or ()) == {0, 1}
         assert result.order() == 2
 
     def test_squeeze_inside_block_drops(self):
@@ -116,7 +116,7 @@ class TestTransportSqueeze:
         G = _sym(1, 2)
         result = transport_squeeze(G, input_shape=(1, 3, 3, 1), axis=None)
         assert result is not None
-        assert set(result.axes) == {0, 1}
+        assert set(result.axes or ()) == {0, 1}
 
     def test_squeeze_none_input_returns_none(self):
         from flopscope._symmetry_transport import transport_squeeze
@@ -130,14 +130,14 @@ class TestTransportAtleast:
 
         G = _sym(0, 1)
         result = transport_atleast_1d(G, input_shape=(3, 3))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_atleast_2d_noop_on_2d(self):
         from flopscope._symmetry_transport import transport_atleast_2d
 
         G = _sym(0, 1)
         result = transport_atleast_2d(G, input_shape=(3, 3))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_atleast_3d_appends_trailing_axis_for_2d(self):
         from flopscope._symmetry_transport import transport_atleast_3d
@@ -146,7 +146,7 @@ class TestTransportAtleast:
         # NumPy: (M, N) -> (M, N, 1). Block axes unchanged.
         result = transport_atleast_3d(G, input_shape=(3, 3))
         assert result is not None
-        assert set(result.axes) == {0, 1}
+        assert set(result.axes or ()) == {0, 1}
         assert result.order() == 2
 
     def test_atleast_3d_noop_on_3d(self):
@@ -154,7 +154,7 @@ class TestTransportAtleast:
 
         G = _sym(1, 2)
         result = transport_atleast_3d(G, input_shape=(4, 3, 3))
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_atleast_kd_none_input(self):
         from flopscope._symmetry_transport import (
@@ -176,7 +176,7 @@ class TestTransportSplit:
         G = _sym(1, 2)
         result = transport_split(G, input_shape=(4, 3, 3), axis=0)
         assert result is not None
-        assert set(result.axes) == {1, 2}
+        assert set(result.axes or ()) == {1, 2}
         assert result.order() == 2
 
     def test_split_in_block_drops_for_degree2(self):
@@ -193,7 +193,7 @@ class TestTransportSplit:
         G = _sym(0, 1, 2)
         result = transport_split(G, input_shape=(3, 3, 3), axis=0)
         assert result is not None
-        assert set(result.axes) == {1, 2}
+        assert set(result.axes or ()) == {1, 2}
         assert result.order() == 2
 
     def test_hsplit_for_1d(self):
@@ -215,7 +215,7 @@ class TestTransportSplit:
         G = _sym(1, 2)
         # vsplit on (4, 3, 3) splits along axis 0 (outside block) -> preserves.
         result = transport_vsplit(G, input_shape=(4, 3, 3))
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_dsplit_uses_axis_2(self):
         from flopscope._symmetry_transport import transport_dsplit
@@ -223,7 +223,7 @@ class TestTransportSplit:
         G = _sym(0, 1)
         # dsplit on (3, 3, 6) splits along axis 2 (outside block) -> preserves.
         result = transport_dsplit(G, input_shape=(3, 3, 6))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
 
 class TestTransportRepeatRoll:
@@ -232,7 +232,7 @@ class TestTransportRepeatRoll:
 
         G = _sym(0, 1)
         result = transport_repeat(G, input_shape=(3, 3, 4), axis=2)
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_repeat_inside_block_drops(self):
         from flopscope._symmetry_transport import transport_repeat
@@ -253,7 +253,7 @@ class TestTransportRepeatRoll:
 
         G = _sym(0, 1)
         result = transport_roll(G, input_shape=(3, 3, 4), axis=2)
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_roll_inside_block_drops(self):
         from flopscope._symmetry_transport import transport_roll
@@ -276,7 +276,7 @@ class TestTransportAxisPermutation:
         G = _sym(0, 1)
         # transpose with axes=None reverses all axes.
         result = transport_transpose(G, ndim=2, axes=None)
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_transpose_explicit_perm(self):
         from flopscope._symmetry_transport import transport_transpose
@@ -285,7 +285,7 @@ class TestTransportAxisPermutation:
         # transpose with axes=(1, 0) swaps; S_2 still on (0, 1) but generators relabeled.
         result = transport_transpose(G, ndim=2, axes=(1, 0))
         assert result is not None
-        assert set(result.axes) == {0, 1}
+        assert set(result.axes or ()) == {0, 1}
 
     def test_swapaxes(self):
         from flopscope._symmetry_transport import transport_swapaxes
@@ -295,7 +295,7 @@ class TestTransportAxisPermutation:
         # axis 0 -> 2, axis 1 -> 1, axis 2 -> 0. So new block axes are (2, 1).
         result = transport_swapaxes(G, ndim=3, axis1=0, axis2=2)
         assert result is not None
-        assert set(result.axes) == {1, 2}
+        assert set(result.axes or ()) == {1, 2}
 
     def test_moveaxis(self):
         from flopscope._symmetry_transport import transport_moveaxis
@@ -306,7 +306,7 @@ class TestTransportAxisPermutation:
         result = transport_moveaxis(G, ndim=3, source=0, destination=2)
         assert result is not None
         # Original axes (0, 1) -> new positions (2, 0).
-        assert set(result.axes) == {0, 2}
+        assert set(result.axes or ()) == {0, 2}
 
     def test_matrix_transpose_swaps_last_two(self):
         from flopscope._symmetry_transport import transport_matrix_transpose
@@ -315,7 +315,7 @@ class TestTransportAxisPermutation:
         # matrix_transpose = swapaxes(-2, -1) on rank-3: swap axes 1 and 2.
         result = transport_matrix_transpose(G, ndim=3)
         # Block (1, 2) under swap(1, 2) -> still (1, 2) (set unchanged).
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
 
 class TestTransportConcatenate:
@@ -329,7 +329,7 @@ class TestTransportConcatenate:
             output_ndim=3,
             axis=2,
         )
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_plain_input_forces_drop(self):
         from flopscope._symmetry_transport import transport_concatenate
@@ -359,7 +359,7 @@ class TestTransportConcatenate:
         # Restrict S_3 to {1, 2} -> S_2.
         result = transport_concatenate([G1, G2], output_ndim=3, axis=0)
         assert result is not None
-        assert set(result.axes) == {1, 2}
+        assert set(result.axes or ()) == {1, 2}
         assert result.order() == 2
 
     def test_concat_axis_none_drops(self):
@@ -378,7 +378,7 @@ class TestTransportStack:
         # New axis at position 0; existing block axes (0, 1) shift to (1, 2).
         result = transport_stack([G, G], output_ndim=3, axis=0)
         assert result is not None
-        assert set(result.axes) == {1, 2}
+        assert set(result.axes or ()) == {1, 2}
 
     def test_stack_S3_and_C3_intersect_to_C3(self):
         from flopscope._symmetry_transport import transport_stack
@@ -389,7 +389,7 @@ class TestTransportStack:
         # Intersect S_3 ∩ C_3 = C_3.
         result = transport_stack([gS, gC], output_ndim=4, axis=0)
         assert result is not None
-        assert set(result.axes) == {1, 2, 3}
+        assert set(result.axes or ()) == {1, 2, 3}
         # C_3 has order 3.
         assert result.order() == 3
 
@@ -406,7 +406,7 @@ class TestTransportStack:
         # New axis at position 2 (end). Block axes 0,1 don't shift.
         result = transport_stack([G, G], output_ndim=3, axis=2)
         assert result is not None
-        assert set(result.axes) == {0, 1}
+        assert set(result.axes or ()) == {0, 1}
 
 
 class TestTransportVHColumnStack:
@@ -432,7 +432,7 @@ class TestTransportVHColumnStack:
             output_ndim=3,
             input_ndims=[3, 3],
         )
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_hstack_2d_along_1(self):
         from flopscope._symmetry_transport import transport_hstack
@@ -478,7 +478,7 @@ class TestTransportReshape:
 
         G = _sym(0, 1)
         result = transport_reshape(G, input_shape=(3, 3), output_shape=(3, 3))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_identity_with_interior_length_1_preserves(self):
         # The bug found by math-olympiad review: (3,1,3) -> (3,1,3) with S_2 on (0,2).
@@ -486,7 +486,7 @@ class TestTransportReshape:
 
         G = _sym(0, 2)
         result = transport_reshape(G, input_shape=(3, 1, 3), output_shape=(3, 1, 3))
-        assert result is not None and set(result.axes) == {0, 2}
+        assert result is not None and set(result.axes or ()) == {0, 2}
 
     def test_suffix_split_off_block_preserves(self):
         from flopscope._symmetry_transport import transport_reshape
@@ -498,7 +498,7 @@ class TestTransportReshape:
             input_shape=(2, 3, 3, 4),
             output_shape=(2, 3, 3, 2, 2),
         )
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_merge_inside_block_drops(self):
         from flopscope._symmetry_transport import transport_reshape
@@ -534,7 +534,7 @@ class TestTransportReshape:
             input_shape=(3, 3),
             output_shape=(1, 3, 3),
         )
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_non_contiguous_block_preserved(self):
         from flopscope._symmetry_transport import transport_reshape
@@ -546,7 +546,7 @@ class TestTransportReshape:
             input_shape=(3, 5, 3),
             output_shape=(1, 3, 5, 3),
         )
-        assert result is not None and set(result.axes) == {1, 3}
+        assert result is not None and set(result.axes or ()) == {1, 3}
 
     def test_swap_block_with_non_block_drops(self):
         from flopscope._symmetry_transport import transport_reshape
@@ -581,14 +581,14 @@ class TestTransportFlip:
 
         G = _sym(0, 1)
         result = transport_flip(G, ndim=2, axes_flipped=())
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_all_block_axes_flipped_preserves(self):
         from flopscope._symmetry_transport import transport_flip
 
         G = _sym(0, 1)
         result = transport_flip(G, ndim=2, axes_flipped=(0, 1))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_partial_S3_flip_yields_S2(self):
         from flopscope._symmetry_transport import transport_flip
@@ -631,7 +631,7 @@ class TestTransportFlip:
         G = _sym(0, 1)
         # Flipping axis 2 (outside block) doesn't affect the block.
         result = transport_flip(G, ndim=3, axes_flipped=(2,))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_negative_axis_normalized(self):
         from flopscope._symmetry_transport import transport_flip
@@ -639,7 +639,7 @@ class TestTransportFlip:
         G = _sym(0, 1)
         # axis=-1 on ndim=3 means axis 2 (outside block).
         result = transport_flip(G, ndim=3, axes_flipped=(-1,))
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
 
 class TestTransportTile:
@@ -654,7 +654,7 @@ class TestTransportTile:
             output_shape=(4, 4),
             reps=(2, 2),
         )
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_non_constant_reps_drops(self):
         from flopscope._symmetry_transport import transport_tile
@@ -680,7 +680,7 @@ class TestTransportTile:
             output_shape=(3, 3, 6),
             reps=(1, 1, 2),
         )
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
     def test_C3_constant_reps_preserves(self):
         from flopscope._symmetry_transport import transport_tile
@@ -706,7 +706,7 @@ class TestTransportTile:
             output_shape=(1, 3, 3),
             reps=(1, 1, 1),
         )
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_none_input_returns_none(self):
         from flopscope._symmetry_transport import transport_tile
@@ -733,7 +733,7 @@ class TestTransportBroadcastExpand:
             input_shape=(3, 3),
             output_shape=(4, 3, 3),
         )
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_broadcast_to_length_1_expanded_drops(self):
         from flopscope._symmetry_transport import transport_broadcast_to
@@ -753,14 +753,14 @@ class TestTransportBroadcastExpand:
 
         G = _sym(0, 1)
         result = transport_expand_dims(G, input_ndim=2, axis=0)
-        assert result is not None and set(result.axes) == {1, 2}
+        assert result is not None and set(result.axes or ()) == {1, 2}
 
     def test_expand_dims_at_end(self):
         from flopscope._symmetry_transport import transport_expand_dims
 
         G = _sym(0, 1)
         result = transport_expand_dims(G, input_ndim=2, axis=2)
-        assert result is not None and set(result.axes) == {0, 1}
+        assert result is not None and set(result.axes or ()) == {0, 1}
 
 
 class TestOutOfScopeOpsWarn:
@@ -918,7 +918,7 @@ class TestReshapeSegmentMatchingDeep:
         )
         result = fnp.reshape(T, (3, 1, 3))
         assert isinstance(result, SymmetricTensor)
-        assert set(result.symmetry.axes) == {0, 2}
+        assert set(result.symmetry.axes or ()) == {0, 2}
 
     def test_suffix_split_preserves(self):
         T = as_symmetric(
@@ -929,7 +929,7 @@ class TestReshapeSegmentMatchingDeep:
         np.asarray(T)[1, 0, 1, 2] = np.asarray(T)[1, 1, 0, 2] = 5.0
         result = fnp.reshape(T, (2, 3, 3, 2, 2))
         assert isinstance(result, SymmetricTensor)
-        assert set(result.symmetry.axes) == {1, 2}
+        assert set(result.symmetry.axes or ()) == {1, 2}
 
     def test_merge_in_block_drops_with_warning(self):
         from flopscope.errors import SymmetryLossWarning
@@ -951,7 +951,7 @@ class TestTileOrbitConstantDeep:
         )
         result = fnp.tile(T, (2, 2))  # output (4, 4)
         assert isinstance(result, SymmetricTensor)
-        assert set(result.symmetry.axes) == {0, 1}
+        assert set(result.symmetry.axes or ()) == {0, 1}
         # Verify symmetry of output data.
         out_arr = np.asarray(result)
         assert np.allclose(out_arr, out_arr.T)
@@ -1040,7 +1040,7 @@ def test_reshape_soundness_property(
         return  # No claim, nothing to verify.
 
     out_arr = sym.reshape(output_shape)
-    out_axes = out_group.axes
+    out_axes = out_group.axes or tuple(range(out_group.degree))
     for p in out_group.elements():
         perm = list(range(len(output_shape)))
         for i, ba in enumerate(out_axes):
@@ -1080,7 +1080,7 @@ def test_flip_soundness_property(n, flip_subset_size):
         return
 
     for p in out_group.elements():
-        out_axes = out_group.axes
+        out_axes = out_group.axes or tuple(range(out_group.degree))
         perm = list(range(n))
         for i, ba in enumerate(out_axes):
             perm[ba] = out_axes[p.array_form[i]]
@@ -1115,7 +1115,7 @@ def test_tile_soundness_property(block_size, rep_factor):
         return
 
     for p in out_group.elements():
-        out_axes = out_group.axes
+        out_axes = out_group.axes or tuple(range(out_group.degree))
         perm = list(range(2))
         for i, ba in enumerate(out_axes):
             perm[ba] = out_axes[p.array_form[i]]

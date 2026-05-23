@@ -699,7 +699,7 @@ class SymmetricTensor(FlopscopeArray):
     def squeeze(self, axis=None):  # type: ignore[override]
         from flopscope._free_ops import squeeze as _squeeze
 
-        return _squeeze(self, axis=axis)
+        return _squeeze(self, axis=axis)  # type: ignore[arg-type]
 
     def astype(  # type: ignore[override]
         self,

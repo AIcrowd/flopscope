@@ -376,7 +376,11 @@ def reshape(a: ArrayLike, /, *args: Any, **kwargs: Any) -> FlopscopeArray:
     )
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="reshape merges or splits axes inside the symmetric block",
         )
     if out_group is not None:
@@ -417,8 +421,8 @@ def swapaxes(a: ArrayLike, axis1: int, axis2: int) -> FlopscopeArray:
         axis2=axis2,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(swapaxes, _np.swapaxes, "free", "0 FLOPs")
@@ -440,8 +444,8 @@ def moveaxis(
         destination=destination,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(moveaxis, _np.moveaxis, "free", "0 FLOPs")
@@ -468,7 +472,11 @@ def concatenate(
     )
     if any(g is not None for g in groups) and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[g.axes for g in groups if g is not None],
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
             reason="concatenate breaks block symmetry or mixes with plain inputs",
         )
     if out_group is not None:
@@ -497,12 +505,16 @@ def stack(
     out_group = _st.transport_stack(groups, output_ndim=result.ndim, axis=axis)
     if any(g is not None for g in groups) and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[g.axes for g in groups if g is not None],
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
             reason="stack inputs disagree or include plain arrays",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(stack, _np.stack, "free", "0 FLOPs")
@@ -525,12 +537,16 @@ def vstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     )
     if any(g is not None for g in groups) and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[g.axes for g in groups if g is not None],
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
             reason="vstack breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(vstack, _np.vstack, "free", "0 FLOPs")
@@ -549,7 +565,11 @@ def hstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     )
     if any(g is not None for g in groups) and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[g.axes for g in groups if g is not None],
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
             reason="hstack breaks block symmetry",
         )
     if out_group is not None:
@@ -574,7 +594,11 @@ def split(
     out_group = _st.transport_split(in_group, input_shape=ary_arr.shape, axis=axis)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason=f"split along axis {axis} breaks block symmetry",
         )
     with budget.deduct(
@@ -605,7 +629,11 @@ def hsplit(
     raw_pieces = _np.hsplit(ary_arr, indices_or_sections)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="hsplit breaks block symmetry",
         )
     if out_group is not None:
@@ -629,7 +657,11 @@ def vsplit(
     out_group = _st.transport_vsplit(in_group, input_shape=ary_arr.shape)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="vsplit breaks block symmetry",
         )
     with budget.deduct(
@@ -655,7 +687,11 @@ def squeeze(
     out_group = _st.transport_squeeze(in_group, input_shape=a_arr.shape, axis=axis)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="squeeze removes an axis inside the symmetric block",
         )
     if out_group is not None:
@@ -677,8 +713,8 @@ def expand_dims(a: ArrayLike, axis) -> FlopscopeArray:
         axis=axis,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(expand_dims, _np.expand_dims, "free", "0 FLOPs")
@@ -696,7 +732,11 @@ def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         result = _call_numpy(_np.ravel, a_arr, **kwargs)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="ravel collapses to a single axis; block cannot fit",
         )
     if out_group is not None:
@@ -764,7 +804,11 @@ def tile(A: ArrayLike, reps: int | Sequence[int]) -> FlopscopeArray:
         pass  # cost deducted; result already computed
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="tile reps not constant on block orbit",
         )
     if out_group is not None:
@@ -786,7 +830,7 @@ def repeat(
     a_arr = _np.asarray(a)
     in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
     out_group = _st.transport_repeat(in_group, input_shape=a_arr.shape, axis=axis)
-    result = _np.repeat(a_arr, repeats, axis=axis)
+    result = _np.repeat(a_arr, repeats, axis=axis)  # type: ignore[arg-type]
     cost = max(result.size, 1)
     with budget.deduct(
         "repeat", flop_cost=cost, subscripts=None, shapes=(a_arr.shape,)
@@ -794,7 +838,11 @@ def repeat(
         pass  # cost deducted; result already computed
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="repeat along a block axis breaks block symmetry",
         )
     if out_group is not None:
@@ -820,7 +868,11 @@ def flip(
     )
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="flip on a proper subset of block axes breaks group action",
         )
     if out_group is not None:
@@ -843,7 +895,11 @@ def roll(
     out_group = _st.transport_roll(in_group, input_shape=a_arr.shape, axis=axis)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="roll along a block axis breaks block symmetry",
         )
     if out_group is not None:
@@ -939,12 +995,16 @@ def broadcast_to(
     )
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="broadcast_to expands length-1 block axes",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)
-    return _asplainflopscope(result)
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(broadcast_to, _np.broadcast_to, "free", "0 FLOPs")
@@ -1146,7 +1206,11 @@ def atleast_1d(
         out_group = _st.transport_atleast_1d(in_group, input_shape=a_arr.shape)
         if in_group is not None and out_group is None:
             _warn_symmetry_loss(
-                lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
                 reason="atleast_1d incompatible with block structure",
             )
         if out_group is not None:
@@ -1154,8 +1218,8 @@ def atleast_1d(
         return _asplainflopscope(result)
 
     if len(arys) == 1:
-        return _one(arys[0])
-    return tuple(_one(a) for a in arys)
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_1d, _np.atleast_1d, "free", "0 FLOPs")
@@ -1173,7 +1237,11 @@ def atleast_2d(
         out_group = _st.transport_atleast_2d(in_group, input_shape=a_arr.shape)
         if in_group is not None and out_group is None:
             _warn_symmetry_loss(
-                lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
                 reason="atleast_2d incompatible with block structure",
             )
         if out_group is not None:
@@ -1181,8 +1249,8 @@ def atleast_2d(
         return _asplainflopscope(result)
 
     if len(arys) == 1:
-        return _one(arys[0])
-    return tuple(_one(a) for a in arys)
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_2d, _np.atleast_2d, "free", "0 FLOPs")
@@ -1200,7 +1268,11 @@ def atleast_3d(
         out_group = _st.transport_atleast_3d(in_group, input_shape=a_arr.shape)
         if in_group is not None and out_group is None:
             _warn_symmetry_loss(
-                lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
                 reason="atleast_3d incompatible with block structure",
             )
         if out_group is not None:
@@ -1208,8 +1280,8 @@ def atleast_3d(
         return _asplainflopscope(result)
 
     if len(arys) == 1:
-        return _one(arys[0])
-    return tuple(_one(a) for a in arys)
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_3d, _np.atleast_3d, "free", "0 FLOPs")
@@ -1370,7 +1442,11 @@ def column_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     )
     if any(g is not None for g in groups) and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[g.axes for g in groups if g is not None],
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
             reason="column_stack breaks block symmetry",
         )
     if out_group is not None:
@@ -1533,7 +1609,11 @@ def dsplit(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
     out_group = _st.transport_dsplit(in_group, input_shape=ary_arr.shape)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="dsplit breaks block symmetry",
         )
     with budget.deduct(
@@ -1891,7 +1971,11 @@ def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
     out_group = _st.transport_matrix_transpose(in_group, ndim=x_arr.ndim)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
-            lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
             reason="matrix_transpose: rank too low for sym",
         )
     if out_group is not None:

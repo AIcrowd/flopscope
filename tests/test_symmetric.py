@@ -65,7 +65,7 @@ def test_symmetric_tensor_squeeze_preserves_block(recwarn):
     tensor = as_symmetric(data, symmetry=_s2(1, 2))
     squeezed = tensor.squeeze(axis=0)
     assert isinstance(squeezed, SymmetricTensor)
-    assert set(squeezed.symmetry.axes) == {0, 1}
+    assert set(squeezed.symmetry.axes or ()) == {0, 1}
 
 
 def test_transpose_remaps_symmetry():

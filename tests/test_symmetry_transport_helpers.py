@@ -17,7 +17,7 @@ class TestSetwiseStabilizer:
         assert result is not None
         # Stabilizer of {1} in S_3 = perms mapping 1->1 = S_2 on {0, 2}
         assert result.order() == 2
-        assert set(result.axes) == {0, 1, 2}
+        assert set(result.axes or ()) == {0, 1, 2}
 
     def test_full_set_returns_full_group(self):
         G = SymmetryGroup.symmetric(axes=(0, 1, 2))
@@ -75,6 +75,7 @@ class TestGroupOrbitsOnAxes:
         from flopscope._symmetry_utils import direct_product_groups
 
         G = direct_product_groups(gA, gB)
+        assert G is not None  # both inputs are non-None, so result is non-None
         orbits = group_orbits_on_axes(G, [0, 1, 3, 4])
         # Order may vary; compare as set of frozensets.
         as_sets = {frozenset(o) for o in orbits}

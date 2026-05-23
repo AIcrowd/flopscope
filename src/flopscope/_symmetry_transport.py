@@ -119,7 +119,8 @@ def transport_concatenate(
     # Restrict each input's group to axes != axis.
     restricted = []
     for g in groups:
-        A = g.axes or tuple(range(g.degree))
+        assert g is not None  # narrowed by the earlier any(g is None) check
+        A = g.axes if g.axes is not None else tuple(range(g.degree))
         a = axis % (max(output_ndim, len(A) + 1))
         keep = tuple(x for x in A if x != a)
         if len(keep) < 2:
@@ -149,7 +150,8 @@ def transport_stack(
     # Shift each input's block axes >= k by +1.
     shifted = []
     for g in groups:
-        A = g.axes or tuple(range(g.degree))
+        assert g is not None  # narrowed by the earlier any(g is None) check
+        A = g.axes if g.axes is not None else tuple(range(g.degree))
         axis_map = {a: (a if a < k else a + 1) for a in A}
         r = remap_group_axes(g, axis_map)
         if r is None:
@@ -428,7 +430,7 @@ def transport_roll(
     group: SymmetryGroup | None,
     *,
     input_shape: tuple[int, ...],
-    axis: int | tuple[int, ...] | None,
+    axis: int | Sequence[int] | None,
 ) -> SymmetryGroup | None:
     if group is None:
         return None
