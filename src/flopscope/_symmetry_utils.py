@@ -289,6 +289,16 @@ def intersect_groups(
     """Intersect two groups after embedding them into the same tensor rank."""
     if a is None or b is None:
         return None
+    # Easy known-kind case — same group ∩ itself = itself. Preserve
+    # provenance without enumeration. Skip trivial groups (order <= 1)
+    # so the existing "None means no symmetry" convention holds.
+    if (
+        a._known_kind is not None
+        and a._known_kind == b._known_kind
+    ):
+        if a.order() <= 1:
+            return None
+        return a
     if a.axes is not None and b.axes is not None and a.axes == b.axes:
         common = sorted(
             set(a.elements()) & set(b.elements()),

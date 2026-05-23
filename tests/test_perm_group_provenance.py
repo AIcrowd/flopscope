@@ -7,6 +7,7 @@ import pytest
 from flopscope._perm_group import _GROUP_INTERN, SymmetryGroup
 from flopscope._symmetry_utils import (
     embed_group,
+    intersect_groups,
     remap_group_axes,
     restrict_group_to_axes,
 )
@@ -72,3 +73,32 @@ class TestRestrictGroupToAxesProvenance:
         g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3))
         with pytest.raises(KeyError):
             restrict_group_to_axes(g, axes=(0, 1, 2))
+
+
+class TestIntersectGroupsProvenance:
+    def test_same_kind_intersect_returns_same_instance(self):
+        # symmetric(A) interned, so two calls give the same object.
+        a = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        b = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        assert a is b  # sanity: interning works
+        result = intersect_groups(a, b, ndim=3)
+        assert result is a
+        assert result._known_kind == ("symmetric", (0, 1, 2))
+
+    def test_identity_kind_intersect_returns_none(self):
+        # Two identity-kind groups intersect to themselves, which is trivial
+        # → existing convention is to return None for trivial intersections.
+        a = SymmetryGroup.symmetric(axes=(0,))  # tagged identity
+        b = SymmetryGroup.symmetric(axes=(0,))
+        result = intersect_groups(a, b, ndim=1)
+        assert result is None  # trivial group → None per existing convention
+
+    def test_unknown_intersection_stays_none(self):
+        # symmetric ∩ cyclic on the same axes: intersection is cyclic
+        # (cyclic ⊂ symmetric), but we don't claim that in the conservative
+        # rule. _known_kind stays None.
+        s = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        c = SymmetryGroup.cyclic(axes=(0, 1, 2))
+        result = intersect_groups(s, c, ndim=3)
+        assert result is not None
+        assert result._known_kind is None  # conservative — no inference
