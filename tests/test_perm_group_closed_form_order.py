@@ -6,7 +6,22 @@ import math
 
 import pytest
 
-from flopscope._perm_group import SymmetryGroup, _closed_form_order, _dimino
+from flopscope._perm_group import (
+    _GROUP_INTERN,
+    SymmetryGroup,
+    _closed_form_order,
+    _dimino,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_intern_registry():
+    # Clear before and after each test so mutation of factory output
+    # (which now returns interned singletons after #73) doesn't bleed
+    # across tests. Same isolation pattern as test_perm_group_interning.py.
+    _GROUP_INTERN.clear()
+    yield
+    _GROUP_INTERN.clear()
 
 
 class TestClosedFormOrder:

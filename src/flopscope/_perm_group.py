@@ -12,10 +12,15 @@ Core algorithms:
 from __future__ import annotations
 
 import math
+import weakref
 from functools import reduce
 from typing import Any
 
 __all__ = ["SymmetryGroup"]
+
+_GROUP_INTERN: weakref.WeakValueDictionary[tuple, SymmetryGroup] = (
+    weakref.WeakValueDictionary()
+)
 
 
 class _Cycle:
@@ -256,6 +261,7 @@ class SymmetryGroup:
     """A finite symmetry group defined by explicit generators."""
 
     __slots__ = (
+        "__weakref__",
         "_generators",
         "_degree",
         "_axes",
@@ -518,7 +524,7 @@ class SymmetryGroup:
         if k == 1:
             g = cls(_Permutation.identity(1), axes=norm_axes)
             g._known_kind = ("identity", norm_axes)
-            return g
+            return cls._intern(g)
         gens = []
         for i in range(k - 1):
             arr = list(range(k))
@@ -526,7 +532,7 @@ class SymmetryGroup:
             gens.append(_Permutation(arr))
         g = cls(*gens, axes=norm_axes)
         g._known_kind = ("symmetric", norm_axes)
-        return g
+        return cls._intern(g)
 
     @classmethod
     def cyclic(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
@@ -535,11 +541,11 @@ class SymmetryGroup:
         if k == 1:
             g = cls(_Permutation.identity(1), axes=norm_axes)
             g._known_kind = ("identity", norm_axes)
-            return g
+            return cls._intern(g)
         gen = _Permutation(list(range(1, k)) + [0])
         g = cls(gen, axes=norm_axes)
         g._known_kind = ("cyclic", norm_axes)
-        return g
+        return cls._intern(g)
 
     @classmethod
     def dihedral(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
@@ -551,7 +557,7 @@ class SymmetryGroup:
         reflection = _Permutation([0] + list(range(k - 1, 0, -1)))
         g = cls(rotation, reflection, axes=norm_axes)
         g._known_kind = ("dihedral", norm_axes)
-        return g
+        return cls._intern(g)
 
     @classmethod
     def young(
@@ -602,7 +608,27 @@ class SymmetryGroup:
         child_kinds = tuple(group._known_kind for group in groups)
         if all(kind is not None for kind in child_kinds):
             g._known_kind = ("direct_product", tuple(sorted(child_kinds, key=repr)))
-        return g
+        return cls._intern(g)
+
+    @classmethod
+    def _intern(cls, group: SymmetryGroup) -> SymmetryGroup:
+        """Return the canonical instance for ``group``'s known kind.
+
+        Unknown-kind groups (``_known_kind is None``) are returned as-is
+        without registry interaction. Known-kind groups participate in
+        process-wide interning by ``_known_kind`` — the first construction
+        wins the registry slot; subsequent equivalent constructions return
+        the same Python object so caches (``_order``, ``_elements``,
+        ``_canonical_action_cache``) are shared across the equivalence
+        class.
+        """
+        if group._known_kind is None:
+            return group
+        existing = _GROUP_INTERN.get(group._known_kind)
+        if existing is not None:
+            return existing
+        _GROUP_INTERN[group._known_kind] = group
+        return group
 
     def as_sympy(self):
         try:
