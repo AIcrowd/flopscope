@@ -179,6 +179,28 @@ def restrict_group_to_axes(
     return restricted
 
 
+def _remap_kind(kind: tuple | None, axis_map: Mapping[Any, Any]) -> tuple | None:
+    """Apply ``axis_map`` to the axes inside a ``_known_kind`` tag.
+
+    Returns ``None`` if any leaf axis is missing from the map (caller's
+    responsibility to ensure full coverage).
+    """
+    if kind is None:
+        return None
+    name = kind[0]
+    if name in ("identity", "symmetric", "cyclic", "dihedral"):
+        try:
+            return (name, tuple(axis_map[a] for a in kind[1]))
+        except KeyError:
+            return None
+    if name == "direct_product":
+        children = tuple(_remap_kind(child, axis_map) for child in kind[1])
+        if any(child is None for child in children):
+            return None
+        return ("direct_product", tuple(sorted(children, key=repr)))
+    return None
+
+
 def remap_group_axes(
     group: SymmetryGroup | None,
     axis_map: Mapping[int, int],
@@ -196,10 +218,15 @@ def remap_group_axes(
             raise ValueError(f"missing remap for axis {axis}")
         remapped_axes.append(axis_map[axis])
     _normalize_axis_tuple(remapped_axes, what="remapped axes")
-    return SymmetryGroup.from_generators(
+    remapped = SymmetryGroup.from_generators(
         group.generator_literals,  # pyright: ignore[reportArgumentType]
         axes=tuple(remapped_axes),  # type: ignore[arg-type]
     )
+    new_kind = _remap_kind(group._known_kind, axis_map)
+    if new_kind is not None:
+        remapped._known_kind = new_kind
+        remapped = SymmetryGroup._intern(remapped)
+    return remapped
 
 
 def remap_group_for_expand_dims(
