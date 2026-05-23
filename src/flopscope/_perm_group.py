@@ -675,7 +675,7 @@ class _DiminoBudgetExceeded(Exception):
 def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
     """Enumerate all group elements via Dimino's algorithm.
 
-    Consults the configured ``dimino_budget`` setting (default 500_000); if the
+    Consults the configured ``dimino_budget`` setting (default 50_000); if the
     seen-set size exceeds the budget, raises :class:`_DiminoBudgetExceeded`
     instead of running indefinitely. Callers should catch and fall back to a
     dense (no-symmetry) cost via :class:`flopscope.errors.CostFallbackWarning`.

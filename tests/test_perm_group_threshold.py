@@ -27,8 +27,20 @@ class TestIsOversizedForCostModel:
         assert _is_oversized_for_cost_model(g) is False
 
     def test_large_known_kind_group_is_oversized_above_budget(self):
-        # |S_12| = 479_001_600 > default budget 500_000
+        # |S_12| = 479_001_600 >> default budget 50_000
         g = SymmetryGroup.symmetric(axes=tuple(range(12)))
+        assert _is_oversized_for_cost_model(g) is True
+
+    def test_s_8_fits_under_default_budget(self):
+        # |S_8| = 40_320 < 50_000 → fits with margin.
+        # Confirms the shipped default accepts the S_8-class cold-cost
+        # tier deliberately (see _config.py docstring).
+        g = SymmetryGroup.symmetric(axes=tuple(range(8)))
+        assert _is_oversized_for_cost_model(g) is False
+
+    def test_s_9_exceeds_default_budget(self):
+        # |S_9| = 362_880 > 50_000 → bails to dense cost.
+        g = SymmetryGroup.symmetric(axes=tuple(range(9)))
         assert _is_oversized_for_cost_model(g) is True
 
     def test_high_degree_but_small_order_is_not_oversized(self):
@@ -41,6 +53,14 @@ class TestIsOversizedForCostModel:
         flops.configure(dimino_budget=1)
         g = SymmetryGroup.symmetric(axes=(0, 1, 2))  # |G| = 6 > 1
         assert _is_oversized_for_cost_model(g) is True
+
+
+class TestShippedDefaultBudget:
+    def test_default_dimino_budget_is_50000(self):
+        # Pinned: |S_8| = 40_320 fits with margin; |S_9| = 362_880 doesn't.
+        # See benchmarks/_perm_group_calibration.py for the empirical
+        # justification. Tune via flops.configure(dimino_budget=...).
+        assert _get_setting("dimino_budget") == 50_000
 
 
 class TestRemovedSymbols:

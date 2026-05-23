@@ -4,7 +4,7 @@ from __future__ import annotations
 
 _SETTINGS: dict[str, object] = {
     "check_nan_inf": False,
-    "dimino_budget": 500_000,
+    "dimino_budget": 50_000,
     "einsum_path_cache_size": 4096,
     "partition_budget": 100_000,
     "symmetry_warnings": True,
@@ -43,7 +43,11 @@ def configure(**kwargs: object) -> None:
     dimino_budget : int
         Maximum number of group elements during whole-expression G_pt closure.
         Pathological declared-symmetry cases that exceed this budget fall back
-        to dense cost with a CostFallbackWarning.  Default ``500_000``.
+        to dense cost with a CostFallbackWarning.  Default ``50_000`` — accepts
+        groups up to ``|S_8| = 40_320`` with a small margin; rejects ``|S_9|``
+        and larger.  Tune via ``flops.configure(dimino_budget=...)``;
+        ``benchmarks/_perm_group_calibration.py`` recommends a value for the
+        host machine.
     einsum_path_cache_size : int
         Maximum number of entries in the einsum path cache.
         Changing this rebuilds the cache (old entries are discarded).
