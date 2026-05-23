@@ -63,3 +63,85 @@ class TestOrderDispatch:
         g._order = None
         g._known_kind = None
         assert g.order() == 6  # via _dimino
+
+
+class TestFactoryTagging:
+    def test_symmetric_tag(self):
+        assert SymmetryGroup.symmetric(axes=(0, 1, 2))._known_kind == (
+            "symmetric",
+            (0, 1, 2),
+        )
+
+    def test_symmetric_degree_one_is_identity(self):
+        assert SymmetryGroup.symmetric(axes=(0,))._known_kind == ("identity", (0,))
+
+    def test_cyclic_tag(self):
+        assert SymmetryGroup.cyclic(axes=(0, 1, 2))._known_kind == (
+            "cyclic",
+            (0, 1, 2),
+        )
+
+    def test_cyclic_degree_one_is_identity(self):
+        assert SymmetryGroup.cyclic(axes=(0,))._known_kind == ("identity", (0,))
+
+    def test_dihedral_tag(self):
+        assert SymmetryGroup.dihedral(axes=(0, 1, 2, 3))._known_kind == (
+            "dihedral",
+            (0, 1, 2, 3),
+        )
+
+    def test_dihedral_degree_two_falls_through_to_symmetric(self):
+        # dihedral(k=2) falls through to symmetric (existing behavior); k>=2 → symmetric tag
+        assert SymmetryGroup.dihedral(axes=(0, 1))._known_kind == (
+            "symmetric",
+            (0, 1),
+        )
+
+    def test_direct_product_sorts_children(self):
+        a = SymmetryGroup.symmetric(axes=(3, 4))
+        b = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        g_ab = SymmetryGroup.direct_product(a, b)
+        g_ba = SymmetryGroup.direct_product(b, a)
+        expected = (
+            "direct_product",
+            (("symmetric", (0, 1, 2)), ("symmetric", (3, 4))),
+        )
+        assert g_ab._known_kind == expected
+        assert g_ba._known_kind == expected
+
+    def test_direct_product_unknown_child_poisons(self):
+        known = SymmetryGroup.symmetric(axes=(0, 1))
+        unknown = SymmetryGroup.from_generators([[1, 0]], axes=(2, 3))
+        # from_generators does not tag, so the direct product can't either
+        g = SymmetryGroup.direct_product(known, unknown)
+        assert g._known_kind is None
+
+    def test_young_tag_via_direct_product(self):
+        # young always routes through direct_product
+        y = SymmetryGroup.young(blocks=[(0, 1), (2, 3, 4)])
+        assert y._known_kind == (
+            "direct_product",
+            (("symmetric", (0, 1)), ("symmetric", (2, 3, 4))),
+        )
+
+    def test_direct_product_sorts_mixed_axis_types(self):
+        # Regression: tuple comparison fails on mixed-type axes.
+        # The sort uses key=repr so it stays total-ordered.
+        a = SymmetryGroup.symmetric(axes=("x", "y"))
+        b = SymmetryGroup.symmetric(axes=(0, 1))
+        # Should not raise.
+        g = SymmetryGroup.direct_product(a, b)
+        assert g._known_kind is not None
+        assert g._known_kind[0] == "direct_product"
+        assert len(g._known_kind[1]) == 2
+
+    def test_from_generators_no_tag(self):
+        g = SymmetryGroup.from_generators([[1, 0]], axes=(0, 1))
+        assert g._known_kind is None
+
+    def test_order_uses_closed_form_for_tagged_factories(self):
+        # Now that factories tag, order() should be O(1) — verify by checking
+        # that _elements wasn't enumerated.
+        g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3, 4, 5, 6))
+        assert g.order() == 5040
+        assert g._elements is None  # not enumerated; _dimino not called

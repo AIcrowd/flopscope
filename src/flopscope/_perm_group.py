@@ -516,22 +516,30 @@ class SymmetryGroup:
         norm_axes = _normalize_axes(axes)
         k = len(norm_axes)
         if k == 1:
-            return cls(_Permutation.identity(1), axes=norm_axes)
+            g = cls(_Permutation.identity(1), axes=norm_axes)
+            g._known_kind = ("identity", norm_axes)
+            return g
         gens = []
         for i in range(k - 1):
             arr = list(range(k))
             arr[i], arr[i + 1] = arr[i + 1], arr[i]
             gens.append(_Permutation(arr))
-        return cls(*gens, axes=norm_axes)
+        g = cls(*gens, axes=norm_axes)
+        g._known_kind = ("symmetric", norm_axes)
+        return g
 
     @classmethod
     def cyclic(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
         norm_axes = _normalize_axes(axes)
         k = len(norm_axes)
         if k == 1:
-            return cls(_Permutation.identity(1), axes=norm_axes)
+            g = cls(_Permutation.identity(1), axes=norm_axes)
+            g._known_kind = ("identity", norm_axes)
+            return g
         gen = _Permutation(list(range(1, k)) + [0])
-        return cls(gen, axes=norm_axes)
+        g = cls(gen, axes=norm_axes)
+        g._known_kind = ("cyclic", norm_axes)
+        return g
 
     @classmethod
     def dihedral(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
@@ -541,7 +549,9 @@ class SymmetryGroup:
             return cls.symmetric(axes=norm_axes)
         rotation = _Permutation(list(range(1, k)) + [0])
         reflection = _Permutation([0] + list(range(k - 1, 0, -1)))
-        return cls(rotation, reflection, axes=norm_axes)
+        g = cls(rotation, reflection, axes=norm_axes)
+        g._known_kind = ("dihedral", norm_axes)
+        return g
 
     @classmethod
     def young(
@@ -588,7 +598,11 @@ class SymmetryGroup:
 
         if not generators:
             generators.append(_Permutation.identity(total_degree))
-        return cls(*generators, axes=tuple(merged_axes))
+        g = cls(*generators, axes=tuple(merged_axes))
+        child_kinds = tuple(group._known_kind for group in groups)
+        if all(kind is not None for kind in child_kinds):
+            g._known_kind = ("direct_product", tuple(sorted(child_kinds, key=repr)))
+        return g
 
     def as_sympy(self):
         try:
