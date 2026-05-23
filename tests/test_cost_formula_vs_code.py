@@ -480,9 +480,10 @@ class TestLinalgSolvers:
         assert _cost_of(we.linalg.inv, numpy.random.rand(8, 8)) == 512
 
     def test_lstsq_mnk(self, we):
+        # lstsq_cost(10,5,b_cols=1,b_ndim=1): svd=250, ut_b=k*m*m=5*10*10=500, divide=5, recon=n*k*k=5*5*5=125 -> 880
         assert (
             _cost_of(we.linalg.lstsq, numpy.random.rand(10, 5), numpy.random.rand(10))
-            == 250
+            == 880
         )
 
     def test_pinv_mnk(self, we):

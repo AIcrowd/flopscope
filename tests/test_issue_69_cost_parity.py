@@ -328,6 +328,35 @@ CASES.append(
 )
 
 
+def _setup_lstsq(rng):
+    a = fnp.asarray(rng.random((40, 25)))
+    b = fnp.asarray(rng.random((40,)))
+    return (a, b), {"rcond": None}
+
+
+def _oracle_lstsq(a, b, rcond=None):
+    # numpy.lstsq via SVD:
+    #   u, s, vt = svd(a, full_matrices=False)  -> (m,k), (k,), (k,n) where k=min(m,n)
+    #   ub = u.T @ b                            -> (k,) for 1D b, (k,c) for 2D
+    #   ub_scaled = ub / s                      -> k * c divides (c=1 for 1D b)
+    #   x = vt.T @ ub_scaled                    -> (n,) for 1D b, (n,c) for 2D
+    u, s, vt = fnp.linalg.svd(a, full_matrices=False)
+    ub = fnp.matmul(u.T, b)
+    ub_scaled = fnp.divide(ub, s)
+    fnp.matmul(vt.T, ub_scaled)
+
+
+CASES.append(
+    CostParityCase(
+        name="lstsq",
+        setup=_setup_lstsq,
+        wrapper=lambda a, b, rcond=None: fnp.linalg.lstsq(a, b, rcond=rcond),
+        oracle=_oracle_lstsq,
+        tolerance=0.05,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""
