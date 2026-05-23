@@ -13,8 +13,8 @@ New cases are added one per wrapper-fix task (Tasks 7-15).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pytest
