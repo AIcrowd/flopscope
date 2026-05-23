@@ -391,7 +391,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.radians",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/radians/",
   "import_path": "flopscope.numpy.radians",
   "is_operation_cost_leaf": true,
@@ -489,7 +489,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.radians(*args, **kwargs)",
+  "signature": "fnp.radians(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "radians",
   "summary": "Convert angles from degrees to radians.",
   "upstream_ref_label": "NumPy Ref",

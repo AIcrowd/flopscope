@@ -616,7 +616,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.asin",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/asin/",
   "import_path": "flopscope.numpy.asin",
   "is_operation_cost_leaf": true,
@@ -765,7 +765,7 @@
       "unresolved": true
     }
   ],
-  "signature": "flopscope.numpy.asin(*args, **kwargs)",
+  "signature": "flopscope.numpy.asin(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-asin",
   "summary": "Inverse sine, element-wise.",
   "upstream_source_url": "",

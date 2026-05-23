@@ -373,7 +373,7 @@
     "name": "radians",
     "notes": "Convert degrees to radians element-wise.",
     "numpy_ref": "np.radians",
-    "signature": "fnp.radians(*args, **kwargs)",
+    "signature": "fnp.radians(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Convert angles from degrees to radians.",
     "weight": 1.0
@@ -381,7 +381,7 @@
   "schema_version": 1,
   "slug": "radians",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -368,3 +368,202 @@ class TestIntegration:
             fnp.diag(np.arange(10, dtype=float))  # numel(output)=100
             fnp.diagflat(np.arange(5, dtype=float))  # numel(output)=25
             assert budget.flops_used == 100 + 100 + 25
+
+
+class TestSymmetryInferredSlot:
+    """The `_symmetry_inferred` slot is present and defaults to False."""
+
+    def test_slot_present_and_defaults_false(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        assert arr._symmetry_inferred is False
+
+
+class TestSymmetryInferredSlotPickleRoundtrip:
+    """Pickle round-trip must not leave `_symmetry_inferred` uninitialized.
+
+    The spec says the marker's pickle-survival is unspecified — but the slot
+    must always be accessible after unpickling (defaulting to False if not
+    preserved is fine; AttributeError is not).
+    """
+
+    def test_pickle_roundtrip_does_not_raise_on_attribute_access(self):
+        import pickle
+
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        restored = pickle.loads(pickle.dumps(arr))
+        # The slot must exist and be readable. Either False or True is OK
+        # per spec; AttributeError is not.
+        value = restored._symmetry_inferred
+        assert value in (True, False)
+
+
+class TestSymmetryInferredSlotCopyDoesNotPropagate:
+    """copy() must not propagate the inferred marker (spec: marker is per-array)."""
+
+    def test_copy_of_inferred_array_clears_marker(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        # Manually flip the marker to simulate an inferred-symmetry array
+        # (the helper that does this is in Task 3 — here we set it directly
+        # so we can exercise the copy path in isolation).
+        arr._symmetry_inferred = True
+        copy = arr.copy()
+        assert copy._symmetry_inferred is False
+
+
+class TestWrapWithInferredSymmetry:
+    def test_sets_marker(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+        from flopscope._symmetry_utils import wrap_with_inferred_symmetry
+
+        result = wrap_with_inferred_symmetry(
+            np.zeros((3, 3)),
+            flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        assert isinstance(result, SymmetricTensor)
+        assert result._symmetry_inferred is True
+        assert result.symmetry == flops.SymmetryGroup.symmetric(axes=(0, 1))
+
+    def test_none_symmetry_returns_plain_ndarray(self):
+        import numpy as np
+
+        from flopscope._symmetric import SymmetricTensor
+        from flopscope._symmetry_utils import wrap_with_inferred_symmetry
+
+        result = wrap_with_inferred_symmetry(np.zeros((3, 4)), None)
+        assert not isinstance(result, SymmetricTensor)
+
+
+class TestAutoInferenceSetsMarker:
+    """zeros / ones / full / *_like with auto-inferred symmetry mark the array."""
+
+    def test_zeros_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.zeros((3, 3))
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_ones_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.ones((4, 4))
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_full_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.full((3, 3), 5.0)
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_zeros_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.zeros_like(np.empty((3, 3)))
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_ones_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.ones_like(np.empty((4, 4)))
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_full_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = fnp.full_like(np.empty((3, 3)), 7.0)
+        assert isinstance(arr, SymmetricTensor)
+        assert arr._symmetry_inferred is True
+
+    def test_zeros_like_symmetric_input_NOT_inferred(self):
+        """Propagated explicit symmetry must not be marked inferred."""
+        import numpy as np
+
+        import flopscope as flops
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        source = flops.as_symmetric(
+            np.eye(3), symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1))
+        )
+        result = fnp.zeros_like(source)
+        assert isinstance(result, SymmetricTensor)
+        assert result._symmetry_inferred is False
+
+
+class TestMarkerNotPropagated:
+    """Marker is set only by wrap_with_inferred_symmetry; ops produce fresh arrays without it."""
+
+    def test_symmetrize_clears_marker(self):
+        import flopscope as flops
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        src = fnp.zeros((3, 3))
+        assert isinstance(src, SymmetricTensor)
+        assert src._symmetry_inferred is True
+        out = flops.symmetrize(src, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)))
+        assert getattr(out, "_symmetry_inferred", False) is False
+
+    def test_add_clears_marker(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        src = fnp.zeros((3, 3))
+        assert isinstance(src, SymmetricTensor)
+        assert src._symmetry_inferred is True
+        out = np.add(src, src)
+        assert getattr(out, "_symmetry_inferred", False) is False
+
+    def test_asarray_strips_marker(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        src = fnp.zeros((3, 3))
+        plain = np.asarray(src)
+        assert getattr(plain, "_symmetry_inferred", False) is False

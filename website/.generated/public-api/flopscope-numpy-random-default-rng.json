@@ -9,7 +9,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Construct a new Generator with the default BitGenerator (PCG64)."
+              "text": "default_rng(seed=None) Construct a new Generator with the default BitGenerator (PCG64)."
             }
           ],
           "type": "paragraph"
@@ -674,7 +674,7 @@
   "see_also": [],
   "signature": "fnp.random.default_rng(seed: 'Any' = None) -> '_CountedGenerator'",
   "slug": "random-default_rng",
-  "summary": "Construct a new Generator with the default BitGenerator (PCG64).",
+  "summary": "default_rng(seed=None) Construct a new Generator with the default BitGenerator (PCG64).",
   "upstream_ref_label": "NumPy Ref",
   "upstream_source_label": "numpy source",
   "upstream_source_url": "",

@@ -419,7 +419,7 @@
     "name": "expm1",
     "notes": "Element-wise e^x - 1 (accurate near zero).",
     "numpy_ref": "np.expm1",
-    "signature": "fnp.expm1(*args, **kwargs)",
+    "signature": "fnp.expm1(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Calculate ``exp(x) - 1`` for all elements in the array.",
     "weight": 16.0
@@ -427,7 +427,7 @@
   "schema_version": 1,
   "slug": "expm1",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

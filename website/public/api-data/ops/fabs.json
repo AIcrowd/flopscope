@@ -420,7 +420,7 @@
     "name": "fabs",
     "notes": "Element-wise absolute value (always float).",
     "numpy_ref": "np.fabs",
-    "signature": "fnp.fabs(*args, **kwargs)",
+    "signature": "fnp.fabs(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Compute the absolute values element-wise.",
     "weight": 1.0
@@ -428,7 +428,7 @@
   "schema_version": 1,
   "slug": "fabs",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -467,7 +467,7 @@
             },
             {
               "kind": "output",
-              "text": "array([0., 2.])"
+              "text": "    array([0., 2.])"
             },
             {
               "kind": "input",
@@ -476,7 +476,7 @@
             },
             {
               "kind": "output",
-              "text": "array([0.4, 1.6])"
+              "text": "    array([0.4, 1.6])"
             },
             {
               "kind": "input",
@@ -485,7 +485,7 @@
             },
             {
               "kind": "output",
-              "text": "array([0., 2., 2., 4., 4.])"
+              "text": "    array([0., 2., 2., 4., 4.])"
             },
             {
               "kind": "input",
@@ -494,7 +494,7 @@
             },
             {
               "kind": "output",
-              "text": "array([ 1,  2,  3, 11])"
+              "text": "    array([ 1,  2,  3, 11])"
             },
             {
               "kind": "input",
@@ -503,7 +503,7 @@
             },
             {
               "kind": "output",
-              "text": "array([ 0,  0,  0, 10])"
+              "text": "    array([ 0,  0,  0, 10])"
             }
           ],
           "type": "doctest_block"
@@ -541,12 +541,12 @@
     "unsupported_directives": []
   },
   "example": {
-    "code": ">>> import numpy as np\n>>> np.round([0.37, 1.64])\narray([0., 2.])\n>>> np.round([0.37, 1.64], decimals=1)\narray([0.4, 1.6])\n>>> np.round([.5, 1.5, 2.5, 3.5, 4.5]) # rounds to nearest even value\narray([0., 2., 2., 4., 4.])\n>>> np.round([1,2,3,11], decimals=1) # ndarray of ints is returned\narray([ 1,  2,  3, 11])\n>>> np.round([1,2,3,11], decimals=-1)\narray([ 0,  0,  0, 10])",
+    "code": ">>> import numpy as np\n    >>> np.round([0.37, 1.64])\n    array([0., 2.])\n    >>> np.round([0.37, 1.64], decimals=1)\n    array([0.4, 1.6])\n    >>> np.round([.5, 1.5, 2.5, 3.5, 4.5]) # rounds to nearest even value\n    array([0., 2., 2., 4., 4.])\n    >>> np.round([1,2,3,11], decimals=1) # ndarray of ints is returned\n    array([ 1,  2,  3, 11])\n    >>> np.round([1,2,3,11], decimals=-1)\n    array([ 0,  0,  0, 10])",
     "output": "",
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.round",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1092",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1099",
   "href": "/docs/api/numpy/round/",
   "import_path": "flopscope.numpy.round",
   "is_operation_cost_leaf": true,

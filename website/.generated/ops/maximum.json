@@ -562,7 +562,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.maximum",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/maximum/",
   "legacy_href": "/docs/api/ops/maximum/",
   "module": "numpy",
@@ -733,7 +733,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.maximum(*args, **kwargs)",
+  "signature": "fnp.maximum(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "maximum",
   "summary": "Element-wise maximum of array elements.",
   "upstream_ref_label": "NumPy Ref",

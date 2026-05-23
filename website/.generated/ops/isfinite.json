@@ -504,7 +504,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isfinite",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1082",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1086",
   "href": "/docs/api/numpy/isfinite/",
   "legacy_href": "/docs/api/ops/isfinite/",
   "module": "numpy",
@@ -622,7 +622,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.isfinite(*args, **kwargs)",
+  "signature": "fnp.isfinite(x: 'ArrayLike', **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "isfinite",
   "summary": "Test element-wise for finiteness (not infinity and not Not a Number).",
   "upstream_ref_label": "NumPy Ref",

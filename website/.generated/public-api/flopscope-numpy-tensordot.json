@@ -950,7 +950,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.tensordot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2008",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2015",
   "href": "/docs/api/numpy/tensordot/",
   "import_path": "flopscope.numpy.tensordot",
   "is_operation_cost_leaf": true,

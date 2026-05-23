@@ -857,7 +857,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.linspace",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L235",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L236",
   "href": "/docs/api/numpy/linspace/",
   "legacy_href": "/docs/api/ops/linspace/",
   "module": "numpy",

@@ -379,7 +379,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.deg2rad",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/deg2rad/",
   "import_path": "flopscope.numpy.deg2rad",
   "is_operation_cost_leaf": true,
@@ -479,7 +479,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.deg2rad(*args, **kwargs)",
+  "signature": "flopscope.numpy.deg2rad(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-deg2rad",
   "summary": "Convert angles from degrees to radians.",
   "upstream_source_url": "",

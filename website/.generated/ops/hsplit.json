@@ -333,7 +333,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.hsplit",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L621",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L625",
   "href": "/docs/api/numpy/hsplit/",
   "legacy_href": "/docs/api/ops/hsplit/",
   "module": "numpy",

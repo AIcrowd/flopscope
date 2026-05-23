@@ -164,7 +164,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.budget_reset",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L993",
   "href": "/docs/api/flopscope/budget-reset/",
   "import_path": "flopscope.budget_reset",
   "is_operation_cost_leaf": false,

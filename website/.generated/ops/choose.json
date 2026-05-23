@@ -977,7 +977,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.choose",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1406",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1410",
   "href": "/docs/api/numpy/choose/",
   "legacy_href": "/docs/api/ops/choose/",
   "module": "numpy",

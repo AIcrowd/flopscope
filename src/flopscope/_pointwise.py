@@ -70,12 +70,19 @@ def _prepare_symmetric_out(out, target_symmetry):
     if not isinstance(out, SymmetricTensor):
         return target_symmetry
     carried_symmetry = out.symmetry
+    inferred = getattr(out, "_symmetry_inferred", False)
     if target_symmetry is None:
+        if inferred:
+            return None
         raise ValueError("out symmetry does not match result symmetry")
     if carried_symmetry is not None and carried_symmetry != target_symmetry:
+        if inferred:
+            return None
         raise ValueError("out symmetry does not match result symmetry")
 
     if not _is_symmetric(_np.asarray(out), symmetry=target_symmetry):
+        if inferred:
+            return None
         axes = target_symmetry.axes
         if axes is None:
             axes = tuple(range(target_symmetry.degree))

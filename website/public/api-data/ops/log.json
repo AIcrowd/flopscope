@@ -576,7 +576,7 @@
     "name": "log",
     "notes": "Element-wise natural logarithm.",
     "numpy_ref": "np.log",
-    "signature": "fnp.log(*args, **kwargs)",
+    "signature": "fnp.log(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Natural logarithm, element-wise.",
     "weight": 16.0
@@ -584,7 +584,7 @@
   "schema_version": 1,
   "slug": "log",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -429,7 +429,7 @@
     "name": "heaviside",
     "notes": "Heaviside step function element-wise.",
     "numpy_ref": "np.heaviside",
-    "signature": "fnp.heaviside(*args, **kwargs)",
+    "signature": "fnp.heaviside(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Compute the Heaviside step function.",
     "weight": 1.0
@@ -437,7 +437,7 @@
   "schema_version": 1,
   "slug": "heaviside",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

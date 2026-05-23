@@ -318,7 +318,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fliplr",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1715",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1719",
   "href": "/docs/api/numpy/fliplr/",
   "import_path": "flopscope.numpy.fliplr",
   "is_operation_cost_leaf": true,

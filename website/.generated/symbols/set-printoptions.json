@@ -1254,7 +1254,7 @@
   "related_guides": [],
   "signature": "fnp.set_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None, nanstr=None, infstr=None, formatter=None, sign=None, floatmode=None, *, legacy=None, override_repr=None)",
   "slug": "set-printoptions",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/arrayprint.py#L113",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/arrayprint.py#L113",
   "status_note": "",
   "summary": "Set printing options.",
   "upstream_source_url": ""

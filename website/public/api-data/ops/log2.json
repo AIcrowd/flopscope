@@ -552,7 +552,7 @@
     "name": "log2",
     "notes": "Element-wise base-2 logarithm.",
     "numpy_ref": "np.log2",
-    "signature": "fnp.log2(*args, **kwargs)",
+    "signature": "fnp.log2(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Base-2 logarithm of `x`.",
     "weight": 16.0
@@ -560,7 +560,7 @@
   "schema_version": 1,
   "slug": "log2",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

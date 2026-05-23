@@ -541,7 +541,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arctanh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/arctanh/",
   "legacy_href": "/docs/api/ops/arctanh/",
   "module": "numpy",
@@ -627,7 +627,7 @@
       "unresolved": true
     }
   ],
-  "signature": "fnp.arctanh(*args, **kwargs)",
+  "signature": "fnp.arctanh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "arctanh",
   "summary": "Inverse hyperbolic tangent element-wise.",
   "upstream_ref_label": "NumPy Ref",

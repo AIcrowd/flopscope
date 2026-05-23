@@ -359,7 +359,7 @@
   "schema_version": 1,
   "slug": "copyto",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1519",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1523",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.copyto.html"
   }
 }

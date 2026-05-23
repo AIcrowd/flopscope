@@ -648,3 +648,22 @@ def wrap_with_trusted_symmetry(data, symmetry: SymmetryGroup | None):
     from flopscope._symmetric import SymmetricTensor
 
     return SymmetricTensor(array, symmetry=symmetry)
+
+
+def wrap_with_inferred_symmetry(data, symmetry: SymmetryGroup | None):
+    """Wrap data with auto-inferred symmetry metadata.
+
+    Identical to :func:`wrap_with_trusted_symmetry` except the resulting
+    array carries ``_symmetry_inferred = True``. Read by
+    ``_prepare_symmetric_out`` to decide whether a non-symmetric ``out=``
+    write should silently downgrade the target (inferred) or raise
+    (explicit). Internal call sites only — never expose to user code.
+    """
+    array = np.asarray(data)
+    if symmetry is None:
+        return array
+    from flopscope._symmetric import SymmetricTensor
+
+    obj = SymmetricTensor(array, symmetry=symmetry)
+    obj._symmetry_inferred = True
+    return obj

@@ -489,7 +489,7 @@
     "name": "isfinite",
     "notes": "Test for finite values element-wise. Cost: numel(input).",
     "numpy_ref": "np.isfinite",
-    "signature": "fnp.isfinite(*args, **kwargs)",
+    "signature": "fnp.isfinite(x: 'ArrayLike', **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Test element-wise for finiteness (not infinity and not Not a Number).",
     "weight": 1.0
@@ -497,7 +497,7 @@
   "schema_version": 1,
   "slug": "isfinite",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1082",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1086",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

@@ -589,7 +589,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.nan_to_num",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/nan-to-num/",
   "import_path": "flopscope.numpy.nan_to_num",
   "is_operation_cost_leaf": true,

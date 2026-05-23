@@ -6430,7 +6430,7 @@
       "module": "numpy.random",
       "namespace": "numpy",
       "slug": "flopscope-numpy-random-default-rng",
-      "summary": "Construct a new Generator with the default BitGenerator (PCG64)."
+      "summary": "default_rng(seed=None) Construct a new Generator with the default BitGenerator (PCG64)."
     },
     {
       "callable": true,
@@ -13560,7 +13560,7 @@
       "module": "numpy.random",
       "namespace": "numpy",
       "slug": "flopscope-numpy-random-default-rng",
-      "summary": "Construct a new Generator with the default BitGenerator (PCG64)."
+      "summary": "default_rng(seed=None) Construct a new Generator with the default BitGenerator (PCG64)."
     },
     {
       "callable": true,

@@ -321,7 +321,7 @@
     "name": "signbit",
     "notes": "Returns True for elements with negative sign bit.",
     "numpy_ref": "np.signbit",
-    "signature": "fnp.signbit(*args, **kwargs)",
+    "signature": "fnp.signbit(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Returns element-wise True where signbit is set (less than zero).",
     "weight": 1.0
@@ -329,7 +329,7 @@
   "schema_version": 1,
   "slug": "signbit",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

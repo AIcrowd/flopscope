@@ -34,6 +34,7 @@ _SESSION_STATE = {
     "last_report_ts": 0.0,
     "failed_nodeids": [],
     "errored_nodeids": [],
+    "failure_details": [],  # (nodeid, longrepr_str) for force-exit dump
 }
 
 
@@ -53,9 +54,13 @@ def pytest_runtest_logreport(report):
         if report.failed:
             _SESSION_STATE["failed_count"] += 1
             _SESSION_STATE["failed_nodeids"].append(report.nodeid)
+            _SESSION_STATE["failure_details"].append(
+                (report.nodeid, str(report.longrepr))
+            )
     elif report.failed:  # setup or teardown error
         _SESSION_STATE["errored_count"] += 1
         _SESSION_STATE["errored_nodeids"].append(report.nodeid)
+        _SESSION_STATE["failure_details"].append((report.nodeid, str(report.longrepr)))
 
 
 def pytest_sessionstart(session):
@@ -133,6 +138,13 @@ def pytest_sessionstart(session):
                     lines.append(f"  FAILED  {nodeid}")
                 for nodeid in _SESSION_STATE["errored_nodeids"]:
                     lines.append(f"  ERRORED {nodeid}")
+                # Dump tracebacks for failures so they survive the force-exit.
+                # Without this, the worker's longrepr is lost when the
+                # controller exits before printing the session summary.
+                for nodeid, longrepr in _SESSION_STATE["failure_details"]:
+                    lines.append(f"\n--- traceback for {nodeid} ---")
+                    lines.append(longrepr)
+                    lines.append("--- end traceback ---")
                 sys.stderr.write("\n".join(lines) + "\n")
                 sys.stderr.flush()
                 rc = (

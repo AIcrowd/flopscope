@@ -494,7 +494,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isinf",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1098",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1102",
   "href": "/docs/api/numpy/isinf/",
   "legacy_href": "/docs/api/ops/isinf/",
   "module": "numpy",
@@ -611,7 +611,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.isinf(*args, **kwargs)",
+  "signature": "fnp.isinf(x: 'ArrayLike', **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "isinf",
   "summary": "Test element-wise for positive or negative infinity.",
   "upstream_ref_label": "NumPy Ref",

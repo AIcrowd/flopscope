@@ -560,7 +560,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.arccosh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/arccosh/",
   "legacy_href": "/docs/api/ops/arccosh/",
   "module": "numpy",
@@ -689,7 +689,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.arccosh(*args, **kwargs)",
+  "signature": "fnp.arccosh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "arccosh",
   "summary": "Inverse hyperbolic cosine, element-wise.",
   "upstream_ref_label": "NumPy Ref",

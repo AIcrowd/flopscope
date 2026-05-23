@@ -474,7 +474,7 @@
     "name": "subtract",
     "notes": "Element-wise subtraction.",
     "numpy_ref": "np.subtract",
-    "signature": "fnp.subtract(*args, **kwargs)",
+    "signature": "fnp.subtract(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Subtract arguments, element-wise.",
     "weight": 1.0
@@ -482,7 +482,7 @@
   "schema_version": 1,
   "slug": "subtract",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

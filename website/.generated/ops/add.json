@@ -492,7 +492,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.add",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/add/",
   "legacy_href": "/docs/api/ops/add/",
   "module": "numpy",
@@ -565,7 +565,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.add(*args, **kwargs)",
+  "signature": "fnp.add(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "add",
   "summary": "Add arguments element-wise.",
   "upstream_ref_label": "NumPy Ref",

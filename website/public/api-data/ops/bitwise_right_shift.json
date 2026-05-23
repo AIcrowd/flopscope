@@ -562,7 +562,7 @@
     "name": "bitwise_right_shift",
     "notes": "Element-wise right bit shift.",
     "numpy_ref": "np.bitwise_right_shift",
-    "signature": "fnp.bitwise_right_shift(*args, **kwargs)",
+    "signature": "fnp.bitwise_right_shift(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Shift the bits of an integer to the right.",
     "weight": 1.0
@@ -570,7 +570,7 @@
   "schema_version": 1,
   "slug": "bitwise_right_shift",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

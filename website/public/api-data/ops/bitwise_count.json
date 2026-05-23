@@ -358,7 +358,7 @@
     "name": "bitwise_count",
     "notes": "Count set bits element-wise (popcount).",
     "numpy_ref": "np.bitwise_count",
-    "signature": "fnp.bitwise_count(*args, **kwargs)",
+    "signature": "fnp.bitwise_count(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Computes the number of 1-bits in the absolute value of ``x``. Analogous to the builtin `int.bit_count` or ``popcount`` in C++.",
     "weight": 1.0
@@ -366,7 +366,7 @@
   "schema_version": 1,
   "slug": "bitwise_count",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

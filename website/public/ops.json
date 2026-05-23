@@ -8313,7 +8313,7 @@
       "numpy_ref": "np.random.default_rng",
       "slug": "random-default_rng",
       "status": "supported",
-      "summary": "Construct a new Generator with the default BitGenerator (PCG64).",
+      "summary": "default_rng(seed=None) Construct a new Generator with the default BitGenerator (PCG64).",
       "weight": 0.0
     },
     {

@@ -679,7 +679,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_not",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/bitwise-not/",
   "legacy_href": "/docs/api/ops/bitwise_not/",
   "module": "numpy",
@@ -812,7 +812,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.bitwise_not(*args, **kwargs)",
+  "signature": "fnp.bitwise_not(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "bitwise_not",
   "summary": "Compute bit-wise inversion, or bit-wise NOT, element-wise.",
   "upstream_ref_label": "NumPy Ref",

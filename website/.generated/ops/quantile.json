@@ -1745,7 +1745,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.quantile",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1703",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1710",
   "href": "/docs/api/numpy/quantile/",
   "legacy_href": "/docs/api/ops/quantile/",
   "module": "numpy",

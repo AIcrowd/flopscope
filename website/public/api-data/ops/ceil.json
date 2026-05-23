@@ -422,7 +422,7 @@
     "name": "ceil",
     "notes": "Element-wise ceiling.",
     "numpy_ref": "np.ceil",
-    "signature": "fnp.ceil(*args, **kwargs)",
+    "signature": "fnp.ceil(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return the ceiling of the input, element-wise.",
     "weight": 1.0
@@ -430,7 +430,7 @@
   "schema_version": 1,
   "slug": "ceil",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

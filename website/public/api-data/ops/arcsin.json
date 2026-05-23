@@ -595,7 +595,7 @@
     "name": "arcsin",
     "notes": "Element-wise inverse sine.",
     "numpy_ref": "np.arcsin",
-    "signature": "fnp.arcsin(*args, **kwargs)",
+    "signature": "fnp.arcsin(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Inverse sine, element-wise.",
     "weight": 16.0
@@ -603,7 +603,7 @@
   "schema_version": 1,
   "slug": "arcsin",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

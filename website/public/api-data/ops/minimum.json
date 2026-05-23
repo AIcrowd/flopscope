@@ -547,7 +547,7 @@
     "name": "minimum",
     "notes": "Element-wise minimum (propagates NaN).",
     "numpy_ref": "np.minimum",
-    "signature": "fnp.minimum(*args, **kwargs)",
+    "signature": "fnp.minimum(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Element-wise minimum of array elements.",
     "weight": 1.0
@@ -555,7 +555,7 @@
   "schema_version": 1,
   "slug": "minimum",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

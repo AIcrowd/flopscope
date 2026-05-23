@@ -262,7 +262,7 @@
     ],
     "signature": "flops.BudgetContext(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None)",
     "slug": "budget-context",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L389",
     "status_note": "",
     "summary": "Context manager for FLOP budget enforcement.",
     "upstream_source_url": ""
@@ -361,7 +361,7 @@
         "title": "Budget Planning & Debugging"
       }
     ],
-    "signature": "flops.OpRecord(op_name: str, subscripts: str | None, shapes: tuple, flop_cost: int, cumulative: int, namespace: str | None = None, flopscope_context_start_offset_s: float | None = None, flopscope_backend_duration_s: float | None = None, flopscope_overhead_duration_s: float | None = None)",
+    "signature": "flops.OpRecord(op_name: ForwardRef('str'), subscripts: ForwardRef('str | None'), shapes: ForwardRef('tuple'), flop_cost: ForwardRef('int'), cumulative: ForwardRef('int'), namespace: ForwardRef('str | None') = None, flopscope_context_start_offset_s: ForwardRef('float | None') = None, flopscope_backend_duration_s: ForwardRef('float | None') = None, flopscope_overhead_duration_s: ForwardRef('float | None') = None)",
     "slug": "op-record",
     "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15",
     "status_note": "",
@@ -859,7 +859,7 @@
     ],
     "signature": "flops.as_symmetric(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
     "slug": "as-symmetric",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L769",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L771",
     "status_note": "",
     "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
     "upstream_source_url": ""
@@ -1111,7 +1111,7 @@
               },
               {
                 "kind": "output",
-                "text": "'101'"
+                "text": "    '101'"
               },
               {
                 "kind": "input",
@@ -1120,7 +1120,7 @@
               },
               {
                 "kind": "output",
-                "text": "'11'"
+                "text": "    '11'"
               },
               {
                 "kind": "input",
@@ -1129,7 +1129,7 @@
               },
               {
                 "kind": "output",
-                "text": "'00012'"
+                "text": "    '00012'"
               }
             ],
             "type": "doctest_block"
@@ -1173,7 +1173,7 @@
     "related_guides": [],
     "signature": "fnp.base_repr(number, base=2, padding=0)",
     "slug": "base-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1290",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1294",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return a string representation of a number in the given base system.",
     "upstream_source_url": ""
@@ -1542,7 +1542,7 @@
               },
               {
                 "kind": "output",
-                "text": "'11'"
+                "text": "    '11'"
               },
               {
                 "kind": "input",
@@ -1551,7 +1551,7 @@
               },
               {
                 "kind": "output",
-                "text": "'-11'"
+                "text": "    '-11'"
               },
               {
                 "kind": "input",
@@ -1560,7 +1560,7 @@
               },
               {
                 "kind": "output",
-                "text": "'0011'"
+                "text": "    '0011'"
               }
             ],
             "type": "doctest_block"
@@ -1613,7 +1613,7 @@
     "related_guides": [],
     "signature": "fnp.binary_repr(num, width=None)",
     "slug": "binary-repr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1304",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1308",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Return the binary representation of the input number as a string.",
     "upstream_source_url": ""
@@ -2190,7 +2190,7 @@
     "related_guides": [],
     "signature": "flops.budget(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None) -> 'BudgetContext'",
     "slug": "budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L776",
     "status_note": "",
     "summary": "Create a ``BudgetContext`` usable as a context manager or decorator.",
     "upstream_source_url": ""
@@ -2549,7 +2549,7 @@
     "related_guides": [],
     "signature": "flops.budget_reset() -> 'None'",
     "slug": "budget-reset",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L993",
     "status_note": "",
     "summary": "Clear accumulated session-wide budget data.",
     "upstream_source_url": ""
@@ -3082,7 +3082,7 @@
     "related_guides": [],
     "signature": "flops.budget_summary_dict(by_namespace: 'bool' = False) -> 'dict'",
     "slug": "budget-summary-dict",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L961",
     "status_note": "",
     "summary": "Return aggregated budget data across all recorded contexts.",
     "upstream_source_url": ""
@@ -4211,7 +4211,7 @@
     "module": "numpy",
     "name": "errstate",
     "related_guides": [],
-    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x105db4ec0>, all=None, divide=None, over=None, under=None, invalid=None)",
+    "signature": "fnp.errstate(*, call=<numpy._core._ufunc_config._unspecified object at 0x10a775b10>, all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "errstate",
     "source_url": "",
     "status_note": "",
@@ -14714,7 +14714,7 @@
     "related_guides": [],
     "signature": "fnp.fromfile(*args, **kwargs)",
     "slug": "fromfile",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1768",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1772",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from data in a text or binary file.",
     "upstream_source_url": ""
@@ -15129,7 +15129,7 @@
     "related_guides": [],
     "signature": "fnp.fromregex(file, regexp, dtype, encoding=None)",
     "slug": "fromregex",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1810",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1814",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Construct an array from a text file, using regular expression parsing.",
     "upstream_source_url": ""
@@ -15533,7 +15533,7 @@
     "related_guides": [],
     "signature": "fnp.fromstring(*args, **kwargs)",
     "slug": "fromstring",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1824",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1828",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "A new 1-D array initialized from text data in a string.",
     "upstream_source_url": ""
@@ -15862,7 +15862,7 @@
     "related_guides": [],
     "signature": "fnp.get_printoptions()",
     "slug": "get-printoptions",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/arrayprint.py#L318",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/arrayprint.py#L318",
     "status_note": "",
     "summary": "Return the current print options.",
     "upstream_source_url": ""
@@ -16080,7 +16080,7 @@
     "related_guides": [],
     "signature": "fnp.geterr()",
     "slug": "geterr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/_ufunc_config.py#L109",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/_ufunc_config.py#L109",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Get the current way of handling floating-point errors.",
     "upstream_source_url": ""
@@ -17091,9 +17091,9 @@
     "module": "flopscope._pointwise",
     "name": "isnat",
     "related_guides": [],
-    "signature": "fnp.isnat(*args, **kwargs)",
+    "signature": "fnp.isnat(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "slug": "isnat",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
     "upstream_source_url": ""
@@ -17368,7 +17368,7 @@
     "related_guides": [],
     "signature": "flops.namespace(name: 'str') -> '_NamespaceScope'",
     "slug": "namespace",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L285",
     "status_note": "",
     "summary": "Create a nested namespace scope for the active budget context.",
     "upstream_source_url": ""
@@ -19563,7 +19563,7 @@
     "related_guides": [],
     "signature": "fnp.printoptions(*args, **kwargs)",
     "slug": "printoptions",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/arrayprint.py#L372",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/arrayprint.py#L372",
     "status_note": "",
     "summary": "Context manager for setting print options.",
     "upstream_source_url": ""
@@ -22647,7 +22647,7 @@
     "related_guides": [],
     "signature": "fnp.set_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None, nanstr=None, infstr=None, formatter=None, sign=None, floatmode=None, *, legacy=None, override_repr=None)",
     "slug": "set-printoptions",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/arrayprint.py#L113",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/arrayprint.py#L113",
     "status_note": "",
     "summary": "Set printing options.",
     "upstream_source_url": ""
@@ -23262,7 +23262,7 @@
     "related_guides": [],
     "signature": "fnp.seterr(all=None, divide=None, over=None, under=None, invalid=None)",
     "slug": "seterr",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/_core/_ufunc_config.py#L20",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/_core/_ufunc_config.py#L20",
     "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
     "summary": "Set how floating-point errors are handled.",
     "upstream_source_url": ""
@@ -25356,7 +25356,7 @@
     "related_guides": [],
     "signature": "flops.testing.assert_allclose(actual, desired, rtol=1e-07, atol=0, equal_nan=True, err_msg='', verbose=True, *, strict=False)",
     "slug": "testing-assert-allclose",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/testing/_private/utils.py#L1611",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/testing/_private/utils.py#L1611",
     "status_note": "",
     "summary": "Raises an AssertionError if two objects are not equal up to desired tolerance.",
     "upstream_source_url": ""
@@ -26114,7 +26114,7 @@
     "related_guides": [],
     "signature": "flops.testing.assert_array_equal(actual, desired, err_msg='', verbose=True, *, strict=False)",
     "slug": "testing-assert-array-equal",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/testing/_private/utils.py#L932",
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/testing/_private/utils.py#L932",
     "status_note": "",
     "summary": "Raises an AssertionError if two array_like objects are not equal.",
     "upstream_source_url": ""

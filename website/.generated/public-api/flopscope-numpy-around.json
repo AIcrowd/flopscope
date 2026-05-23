@@ -168,7 +168,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.numpy.around",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1007",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1014",
   "href": "/docs/api/numpy/around/",
   "import_path": "flopscope.numpy.around",
   "is_operation_cost_leaf": true,

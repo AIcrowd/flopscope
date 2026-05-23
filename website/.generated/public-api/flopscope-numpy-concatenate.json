@@ -661,7 +661,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.concatenate",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L454",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L458",
   "href": "/docs/api/numpy/concatenate/",
   "import_path": "flopscope.numpy.concatenate",
   "is_operation_cost_leaf": true,

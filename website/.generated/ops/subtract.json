@@ -489,7 +489,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.subtract",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/subtract/",
   "legacy_href": "/docs/api/ops/subtract/",
   "module": "numpy",
@@ -562,7 +562,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.subtract(*args, **kwargs)",
+  "signature": "fnp.subtract(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "subtract",
   "summary": "Subtract arguments, element-wise.",
   "upstream_ref_label": "NumPy Ref",

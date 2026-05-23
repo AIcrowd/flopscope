@@ -534,7 +534,7 @@
     "name": "arccosh",
     "notes": "Element-wise inverse hyperbolic cosine.",
     "numpy_ref": "np.arccosh",
-    "signature": "fnp.arccosh(*args, **kwargs)",
+    "signature": "fnp.arccosh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Inverse hyperbolic cosine, element-wise.",
     "weight": 16.0
@@ -542,7 +542,7 @@
   "schema_version": 1,
   "slug": "arccosh",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

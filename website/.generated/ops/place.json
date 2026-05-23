@@ -387,7 +387,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.place",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2069",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2073",
   "href": "/docs/api/numpy/place/",
   "legacy_href": "/docs/api/ops/place/",
   "module": "numpy",

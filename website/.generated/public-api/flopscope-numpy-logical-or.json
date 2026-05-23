@@ -542,7 +542,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.logical_or",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/logical-or/",
   "import_path": "flopscope.numpy.logical_or",
   "is_operation_cost_leaf": true,
@@ -671,7 +671,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.logical_or(*args, **kwargs)",
+  "signature": "fnp.logical_or(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "logical_or",
   "summary": "Compute the truth value of x1 OR x2 element-wise.",
   "upstream_ref_label": "NumPy Ref",

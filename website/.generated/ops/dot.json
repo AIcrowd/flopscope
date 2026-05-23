@@ -810,7 +810,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.dot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1786",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1793",
   "href": "/docs/api/numpy/dot/",
   "legacy_href": "/docs/api/ops/dot/",
   "module": "numpy",

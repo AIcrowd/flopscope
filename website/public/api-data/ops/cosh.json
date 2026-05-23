@@ -379,7 +379,7 @@
     "name": "cosh",
     "notes": "Element-wise hyperbolic cosine.",
     "numpy_ref": "np.cosh",
-    "signature": "fnp.cosh(*args, **kwargs)",
+    "signature": "fnp.cosh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Hyperbolic cosine, element-wise.",
     "weight": 16.0
@@ -387,7 +387,7 @@
   "schema_version": 1,
   "slug": "cosh",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

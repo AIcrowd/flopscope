@@ -268,7 +268,7 @@
   "related_guides": [],
   "signature": "flops.namespace(name: 'str') -> '_NamespaceScope'",
   "slug": "namespace",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L285",
   "status_note": "",
   "summary": "Create a nested namespace scope for the active budget context.",
   "upstream_source_url": ""

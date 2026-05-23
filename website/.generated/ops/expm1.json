@@ -434,7 +434,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.expm1",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/expm1/",
   "legacy_href": "/docs/api/ops/expm1/",
   "module": "numpy",
@@ -526,7 +526,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.expm1(*args, **kwargs)",
+  "signature": "fnp.expm1(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "expm1",
   "summary": "Calculate ``exp(x) - 1`` for all elements in the array.",
   "upstream_ref_label": "NumPy Ref",

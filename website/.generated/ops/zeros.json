@@ -457,7 +457,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.zeros",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L131",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L132",
   "href": "/docs/api/numpy/zeros/",
   "legacy_href": "/docs/api/ops/zeros/",
   "module": "numpy",

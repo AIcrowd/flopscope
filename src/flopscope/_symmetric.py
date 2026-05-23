@@ -555,7 +555,7 @@ class SymmetricTensor(FlopscopeArray):
     Do not instantiate directly; use :func:`as_symmetric`.
     """
 
-    __slots__ = ("_symmetry",)
+    __slots__ = ("_symmetry", "_symmetry_inferred")
 
     def __new__(
         cls,
@@ -565,10 +565,12 @@ class SymmetricTensor(FlopscopeArray):
     ) -> SymmetricTensor:
         obj = np.asarray(input_array).view(cls)
         obj._symmetry = symmetry
+        obj._symmetry_inferred = False
         return obj
 
     def __array_finalize__(self, obj: object) -> None:
         self._symmetry = None
+        self._symmetry_inferred = False
 
     def __array_wrap__(self, out_arr, context=None, return_scalar=False):
         result = super().__array_wrap__(out_arr, context, return_scalar)

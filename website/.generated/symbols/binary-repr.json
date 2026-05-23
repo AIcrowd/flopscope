@@ -362,7 +362,7 @@
             },
             {
               "kind": "output",
-              "text": "'11'"
+              "text": "    '11'"
             },
             {
               "kind": "input",
@@ -371,7 +371,7 @@
             },
             {
               "kind": "output",
-              "text": "'-11'"
+              "text": "    '-11'"
             },
             {
               "kind": "input",
@@ -380,7 +380,7 @@
             },
             {
               "kind": "output",
-              "text": "'0011'"
+              "text": "    '0011'"
             }
           ],
           "type": "doctest_block"
@@ -433,7 +433,7 @@
   "related_guides": [],
   "signature": "fnp.binary_repr(num, width=None)",
   "slug": "binary-repr",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1304",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1308",
   "status_note": "This symbol is exported from flopscope, but it is excluded from the operation registry and therefore does not appear in the operation cost index.",
   "summary": "Return the binary representation of the input number as a string.",
   "upstream_source_url": ""

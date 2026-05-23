@@ -240,7 +240,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.lcm",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/lcm/",
   "import_path": "flopscope.numpy.lcm",
   "is_operation_cost_leaf": true,
@@ -310,7 +310,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.lcm(*args, **kwargs)",
+  "signature": "fnp.lcm(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "lcm",
   "summary": "Returns the lowest common multiple of ``|x1|`` and ``|x2|``",
   "upstream_ref_label": "NumPy Ref",

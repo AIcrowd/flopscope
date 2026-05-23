@@ -615,7 +615,7 @@
   "related_guides": [],
   "signature": "flops.testing.assert_allclose(actual, desired, rtol=1e-07, atol=0, equal_nan=True, err_msg='', verbose=True, *, strict=False)",
   "slug": "testing-assert-allclose",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.14/site-packages/numpy/testing/_private/utils.py#L1611",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/.venv/lib/python3.10/site-packages/numpy/testing/_private/utils.py#L1611",
   "status_note": "",
   "summary": "Raises an AssertionError if two objects are not equal up to desired tolerance.",
   "upstream_source_url": ""

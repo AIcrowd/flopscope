@@ -410,7 +410,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.isnat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/isnat/",
   "import_path": "flopscope.numpy.isnat",
   "is_operation_cost_leaf": true,
@@ -531,7 +531,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.isnat(*args, **kwargs)",
+  "signature": "flopscope.numpy.isnat(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-isnat",
   "summary": "Test element-wise for NaT (not a time) and return result as a boolean array.",
   "upstream_source_url": "",

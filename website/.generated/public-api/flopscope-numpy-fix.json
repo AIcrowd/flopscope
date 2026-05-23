@@ -223,7 +223,7 @@
             },
             {
               "kind": "output",
-              "text": "3.0"
+              "text": "    3.0"
             },
             {
               "kind": "input",
@@ -232,7 +232,7 @@
             },
             {
               "kind": "output",
-              "text": "3"
+              "text": "    3"
             },
             {
               "kind": "input",
@@ -241,7 +241,7 @@
             },
             {
               "kind": "output",
-              "text": "array([ 2.,  2., -2., -2.])"
+              "text": "    array([ 2.,  2., -2., -2.])"
             }
           ],
           "type": "doctest_block"
@@ -262,12 +262,12 @@
     "unsupported_directives": []
   },
   "example": {
-    "code": ">>> import numpy as np\n>>> np.fix(3.14)\n3.0\n>>> np.fix(3)\n3\n>>> np.fix([2.1, 2.9, -2.1, -2.9])\narray([ 2.,  2., -2., -2.])",
+    "code": ">>> import numpy as np\n    >>> np.fix(3.14)\n    3.0\n    >>> np.fix(3)\n    3\n    >>> np.fix([2.1, 2.9, -2.1, -2.9])\n    array([ 2.,  2., -2., -2.])",
     "output": "",
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.fix",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/fix/",
   "import_path": "flopscope.numpy.fix",
   "is_operation_cost_leaf": true,

@@ -221,7 +221,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.diag_indices_from",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1572",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1576",
   "href": "/docs/api/numpy/diag-indices-from/",
   "import_path": "flopscope.numpy.diag_indices_from",
   "is_operation_cost_leaf": true,

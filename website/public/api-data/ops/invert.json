@@ -652,7 +652,7 @@
     "name": "invert",
     "notes": "Bitwise NOT element-wise.",
     "numpy_ref": "np.invert",
-    "signature": "fnp.invert(*args, **kwargs)",
+    "signature": "fnp.invert(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Compute bit-wise inversion, or bit-wise NOT, element-wise.",
     "weight": 1.0
@@ -660,7 +660,7 @@
   "schema_version": 1,
   "slug": "invert",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

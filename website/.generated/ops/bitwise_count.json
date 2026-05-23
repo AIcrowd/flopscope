@@ -386,7 +386,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_count",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/bitwise-count/",
   "legacy_href": "/docs/api/ops/bitwise_count/",
   "module": "numpy",
@@ -456,7 +456,7 @@
     }
   ],
   "see_also": [],
-  "signature": "fnp.bitwise_count(*args, **kwargs)",
+  "signature": "fnp.bitwise_count(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "bitwise_count",
   "summary": "Computes the number of 1-bits in the absolute value of ``x``. Analogous to the builtin `int.bit_count` or ``popcount`` in C++.",
   "upstream_ref_label": "NumPy Ref",

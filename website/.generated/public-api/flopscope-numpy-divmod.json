@@ -599,7 +599,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.divmod",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L498",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L505",
   "href": "/docs/api/numpy/divmod/",
   "import_path": "flopscope.numpy.divmod",
   "is_operation_cost_leaf": true,
@@ -762,7 +762,7 @@
       "unresolved": false
     }
   ],
-  "signature": "flopscope.numpy.divmod(*args, **kwargs)",
+  "signature": "flopscope.numpy.divmod(x: 'ArrayLike', y: 'ArrayLike', out: 'tuple[FlopscopeArray, FlopscopeArray] | None' = None, **kwargs: 'Any') -> 'tuple[FlopscopeArray, FlopscopeArray]'",
   "slug": "flopscope-numpy-divmod",
   "summary": "Return element-wise quotient and remainder simultaneously.",
   "upstream_source_url": "",

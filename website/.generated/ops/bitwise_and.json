@@ -578,7 +578,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_and",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
   "href": "/docs/api/numpy/bitwise-and/",
   "legacy_href": "/docs/api/ops/bitwise_and/",
   "module": "numpy",
@@ -699,7 +699,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.bitwise_and(*args, **kwargs)",
+  "signature": "fnp.bitwise_and(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "bitwise_and",
   "summary": "Compute the bit-wise AND of two arrays element-wise.",
   "upstream_ref_label": "NumPy Ref",

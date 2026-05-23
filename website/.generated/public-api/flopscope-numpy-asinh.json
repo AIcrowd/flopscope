@@ -512,7 +512,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.asinh",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/asinh/",
   "import_path": "flopscope.numpy.asinh",
   "is_operation_cost_leaf": true,
@@ -582,7 +582,7 @@
   ],
   "schema_version": 1,
   "see_also": [],
-  "signature": "flopscope.numpy.asinh(*args, **kwargs)",
+  "signature": "flopscope.numpy.asinh(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-asinh",
   "summary": "Inverse hyperbolic sine element-wise.",
   "upstream_source_url": "",

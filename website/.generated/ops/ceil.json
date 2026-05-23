@@ -437,7 +437,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ceil",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/ceil/",
   "legacy_href": "/docs/api/ops/ceil/",
   "module": "numpy",
@@ -551,7 +551,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.ceil(*args, **kwargs)",
+  "signature": "fnp.ceil(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "ceil",
   "summary": "Return the ceiling of the input, element-wise.",
   "upstream_ref_label": "NumPy Ref",

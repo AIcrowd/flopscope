@@ -424,7 +424,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.isnan",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1066",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1070",
   "href": "/docs/api/numpy/isnan/",
   "legacy_href": "/docs/api/ops/isnan/",
   "module": "numpy",
@@ -551,7 +551,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.isnan(*args, **kwargs)",
+  "signature": "fnp.isnan(x: 'ArrayLike', **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "isnan",
   "summary": "Test element-wise for NaN and return result as a boolean array.",
   "upstream_ref_label": "NumPy Ref",

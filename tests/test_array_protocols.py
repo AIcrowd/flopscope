@@ -987,3 +987,54 @@ def test_perf_warm_inplace_add_scalar_on_symmetric_is_fast():
         "warm in-place add lost symmetry object identity; "
         "_inplace_from_result is constructing a fresh group somewhere"
     )
+
+
+class TestIssue70AutoInferredOutDowngrade:
+    """Regression: issue #70 — auto-inferred symmetry on `out=` target.
+
+    np.zeros_like(plain_3x3) auto-infers S_n symmetry; using it as `out=`
+    for an asymmetric write used to raise. With the provenance marker,
+    inferred-symmetry out= targets silently downgrade to plain ndarray.
+    """
+
+    def test_inferred_out_downgrades_silently(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        plain_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        mask_np = np.array(
+            [[True, False, True], [False, True, False], [True, False, True]]
+        )
+        out = fnp.zeros_like(plain_np)
+        assert isinstance(out, SymmetricTensor)
+        assert out._symmetry_inferred is True
+
+        # Before the issue-70 fix this raised ``ValueError: out symmetry does
+        # not match result symmetry``. The whole point of the canary is that
+        # the call now completes without raising. We deliberately do NOT
+        # assert the values at mask=False positions: numpy <2.3 leaves
+        # unwritten ``out`` cells uninitialized when both ``out=`` and
+        # ``where=`` are given on an ndarray subclass; that behavior is
+        # outside the scope of this fix.
+        np.positive(plain_np, out=out, where=mask_np)
+        actual = np.asarray(out)
+        np.testing.assert_array_equal(actual[mask_np], plain_np[mask_np])
+
+    def test_explicit_symmetry_out_still_raises(self):
+        import numpy as np
+        import pytest
+
+        import flopscope as flops
+        import flopscope.numpy as fnp
+
+        plain = fnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        out = flops.as_symmetric(
+            np.zeros((3, 3)), symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1))
+        )
+        mask = fnp.array(
+            [[True, False, True], [False, True, False], [True, False, True]]
+        )
+        with pytest.raises(ValueError, match="out symmetry does not match"):
+            np.positive(plain, out=out, where=mask)

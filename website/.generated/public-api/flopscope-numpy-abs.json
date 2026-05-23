@@ -520,7 +520,7 @@
     "source": "derived"
   },
   "flopscope_ref": "flopscope.numpy.abs",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/abs/",
   "import_path": "flopscope.numpy.abs",
   "is_operation_cost_leaf": true,
@@ -587,7 +587,7 @@
   ],
   "schema_version": 1,
   "see_also": [],
-  "signature": "flopscope.numpy.abs(*args, **kwargs)",
+  "signature": "flopscope.numpy.abs(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "flopscope-numpy-abs",
   "summary": "Calculate the absolute value element-wise.",
   "upstream_source_url": "",

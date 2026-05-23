@@ -27,18 +27,20 @@ uv run pytest tests/numpy_compat/ --pyargs numpy._core.tests.test_umath -n auto 
 uv run pytest tests/numpy_compat/ --pyargs numpy._core.tests.test_umath -k "sqrt" -n auto -v
 ```
 
-## Current results (2026-04-03)
+## Current results (2026-05-23)
 
 | Suite | Module | Passed | xfailed |
 |-------|--------|--------|---------|
-| Core math | `test_umath` | 4,668 | 13 |
-| Ufunc infra | `test_ufunc` | 795 | 7 |
+| Core math | `test_umath` | 4,667 | 16 |
+| Ufunc infra | `test_ufunc` | 799 | 26 |
 | Numeric ops | `test_numeric` | 1,560 | 20 |
-| Linear algebra | `test_linalg` | 48 | 255 |
-| FFT | `test_pocketfft` | 114 | 34 |
-| Polynomials | `test_polynomial` | 36 | 2 |
-| Random | `test_random` | 142 | 0 |
-| **Total** | | **7,363** | **331** |
+| Linear algebra | `test_linalg` | 438 | 2 |
+| FFT | `test_pocketfft` | 150 | 0 |
+| Polynomials | `test_polynomial` | 41 | 0 |
+| Random | `test_random` | 143 | 2 |
+| **Total** | | **8,098** | **66** |
+
+**Note:** The harness was restored on 2026-05-23 after a regression in the JAX-style rebrand where `_current_flopscope_numpy()` incorrectly pointed to an unpatched module, leaving `_PATCHED` empty. With the fix applied, all non-blacklisted operations are now properly instrumented during NumPy's test runs.
 
 ## Triaging failures
 

@@ -275,7 +275,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.broadcast_arrays",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1364",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1368",
   "href": "/docs/api/numpy/broadcast-arrays/",
   "import_path": "flopscope.numpy.broadcast_arrays",
   "is_operation_cost_leaf": true,

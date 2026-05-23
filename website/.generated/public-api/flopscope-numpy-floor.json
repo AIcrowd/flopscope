@@ -485,7 +485,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.floor",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/floor/",
   "import_path": "flopscope.numpy.floor",
   "is_operation_cost_leaf": true,
@@ -613,7 +613,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.floor(*args, **kwargs)",
+  "signature": "fnp.floor(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "floor",
   "summary": "Return the floor of the input, element-wise.",
   "upstream_ref_label": "NumPy Ref",

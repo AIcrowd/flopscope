@@ -261,7 +261,7 @@
   ],
   "signature": "flops.BudgetContext(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None)",
   "slug": "budget-context",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L389",
   "status_note": "",
   "summary": "Context manager for FLOP budget enforcement.",
   "upstream_source_url": ""

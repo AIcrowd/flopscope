@@ -851,7 +851,7 @@
   "schema_version": 1,
   "slug": "array",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L110",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L111",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.array.html"
   }
 }

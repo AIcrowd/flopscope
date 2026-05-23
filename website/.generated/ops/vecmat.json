@@ -532,7 +532,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.vecmat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1333",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L1340",
   "href": "/docs/api/numpy/vecmat/",
   "legacy_href": "/docs/api/ops/vecmat/",
   "module": "numpy",

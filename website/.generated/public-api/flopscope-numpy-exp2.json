@@ -365,7 +365,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.exp2",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L336",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L343",
   "href": "/docs/api/numpy/exp2/",
   "import_path": "flopscope.numpy.exp2",
   "is_operation_cost_leaf": true,
@@ -458,7 +458,7 @@
       "unresolved": false
     }
   ],
-  "signature": "fnp.exp2(*args, **kwargs)",
+  "signature": "fnp.exp2(x: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
   "slug": "exp2",
   "summary": "Calculate `2**p` for all `p` in the input array.",
   "upstream_ref_label": "NumPy Ref",

@@ -494,7 +494,7 @@
     "name": "logical_and",
     "notes": "Element-wise logical AND.",
     "numpy_ref": "np.logical_and",
-    "signature": "fnp.logical_and(*args, **kwargs)",
+    "signature": "fnp.logical_and(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Compute the truth value of x1 AND x2 element-wise.",
     "weight": 1.0
@@ -502,7 +502,7 @@
   "schema_version": 1,
   "slug": "logical_and",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }

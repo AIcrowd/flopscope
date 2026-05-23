@@ -37,7 +37,7 @@
       "title": "Budget Planning & Debugging"
     }
   ],
-  "signature": "flops.OpRecord(op_name: str, subscripts: str | None, shapes: tuple, flop_cost: int, cumulative: int, namespace: str | None = None, flopscope_context_start_offset_s: float | None = None, flopscope_backend_duration_s: float | None = None, flopscope_overhead_duration_s: float | None = None)",
+  "signature": "flops.OpRecord(op_name: ForwardRef('str'), subscripts: ForwardRef('str | None'), shapes: ForwardRef('tuple'), flop_cost: ForwardRef('int'), cumulative: ForwardRef('int'), namespace: ForwardRef('str | None') = None, flopscope_context_start_offset_s: ForwardRef('float | None') = None, flopscope_backend_duration_s: ForwardRef('float | None') = None, flopscope_overhead_duration_s: ForwardRef('float | None') = None)",
   "slug": "op-record",
   "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15",
   "status_note": "",

@@ -506,7 +506,7 @@
     "name": "not_equal",
     "notes": "Element-wise x1 != x2.",
     "numpy_ref": "np.not_equal",
-    "signature": "fnp.not_equal(*args, **kwargs)",
+    "signature": "fnp.not_equal(x: 'ArrayLike', y: 'ArrayLike', out: 'FlopscopeArray | None' = None, **kwargs: 'Any') -> 'FlopscopeArray'",
     "status": "supported",
     "summary": "Return (x1 != x2) element-wise.",
     "weight": 1.0
@@ -514,7 +514,7 @@
   "schema_version": 1,
   "slug": "not_equal",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L420",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/code_generators/ufunc_docstrings.py"
   }
 }
