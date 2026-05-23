@@ -2201,12 +2201,16 @@ def diff(a: ArrayLike, n: int = 1, axis: int = -1, **kwargs: Any) -> FlopscopeAr
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    # Pre-compute output size: along the diff axis, size decreases by n
+    # numpy.diff implements `for _ in range(n): a = subtract(a[1:], a[:-1])`,
+    # so the cost is the SUM over n iterations of (numel_along_axis - k) for
+    # k = 1..n. Closed form: n*L - n*(n+1)//2, scaled by the product of
+    # the other axes' sizes. Issue #69.
     ax = axis if axis >= 0 else axis + a.ndim
-    out_axis_len = a.shape[ax] - n
-    cost = _builtins.max(
-        int(_np.prod(a.shape[:ax])) * out_axis_len * int(_np.prod(a.shape[ax + 1 :])), 1
-    )
+    L = a.shape[ax]
+    prod_outside = int(_np.prod(a.shape[:ax]))
+    prod_inside = int(_np.prod(a.shape[ax + 1 :]))
+    per_iter_sum = n * L - n * (n + 1) // 2
+    cost = _builtins.max(prod_outside * per_iter_sum * prod_inside, 1)
     with budget.deduct(
         "diff",
         flop_cost=cost,
@@ -2217,7 +2221,7 @@ def diff(a: ArrayLike, n: int = 1, axis: int = -1, **kwargs: Any) -> FlopscopeAr
     return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
 
 
-attach_docstring(diff, _np.diff, "counted_custom", "numel(output) FLOPs")
+attach_docstring(diff, _np.diff, "counted_custom", "n*L - n*(n+1)/2 FLOPs along the diff axis")
 diff.__signature__ = _inspect.signature(_np.diff)  # pyright: ignore[reportFunctionMemberAccess]
 
 

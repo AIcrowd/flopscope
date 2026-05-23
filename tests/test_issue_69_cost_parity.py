@@ -54,6 +54,30 @@ def _oracle_diff_n1(a, n=1, axis=-1):
     return fnp.subtract(a[1:], a[:-1])
 
 
+def _setup_diff_n3(rng):
+    a = fnp.asarray(rng.random((1000,)))
+    return (a,), {"n": 3}
+
+
+def _oracle_diff_n3(a, n=3, axis=-1):
+    out = a
+    for _ in range(n):
+        out = fnp.subtract(out[1:], out[:-1])
+    return out
+
+
+def _setup_diff_n10(rng):
+    a = fnp.asarray(rng.random((1000,)))
+    return (a,), {"n": 10}
+
+
+def _oracle_diff_n10(a, n=10, axis=-1):
+    out = a
+    for _ in range(n):
+        out = fnp.subtract(out[1:], out[:-1])
+    return out
+
+
 CASES: list[CostParityCase] = [
     CostParityCase(
         name="diff_n1",
@@ -63,6 +87,23 @@ CASES: list[CostParityCase] = [
         tolerance=0.0,
     ),
 ]
+
+CASES.extend([
+    CostParityCase(
+        name="diff_n3",
+        setup=_setup_diff_n3,
+        wrapper=fnp.diff,
+        oracle=_oracle_diff_n3,
+        tolerance=0.0,
+    ),
+    CostParityCase(
+        name="diff_n10",
+        setup=_setup_diff_n10,
+        wrapper=fnp.diff,
+        oracle=_oracle_diff_n10,
+        tolerance=0.0,
+    ),
+])
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
