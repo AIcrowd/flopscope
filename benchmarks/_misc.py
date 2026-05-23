@@ -57,7 +57,7 @@ _FORMULA_STRINGS: dict[str, str] = {
     "diff": "n",
     "ediff1d": "n",
     "gradient": "n",
-    "unwrap": "n",
+    "unwrap": "7 * n",
     "convolve": "n * k",
     "correlate": "n * k",
     "corrcoef": "f^2 * s",
