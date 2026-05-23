@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys as _sys
 import warnings as _warnings
 
 _DEFAULT_DOCS_ROOT = "https://aicrowd.github.io/flopscope/docs"
@@ -152,10 +153,6 @@ class CostFallbackWarning(FlopscopeWarning):
     flag with :class:`SymmetryLossWarning` since both are
     symmetry-related diagnostics).
     """
-
-
-import sys as _sys
-import warnings as _warnings
 
 
 # Used by _user_stacklevel() to skip frames inside the flopscope package.
