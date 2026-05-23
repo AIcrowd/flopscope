@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from flopscope._perm_group import SymmetryGroup, _closed_form_order
+from flopscope._perm_group import SymmetryGroup, _closed_form_order, _dimino
 
 
 class TestClosedFormOrder:
@@ -145,3 +145,38 @@ class TestFactoryTagging:
         g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3, 4, 5, 6))
         assert g.order() == 5040
         assert g._elements is None  # not enumerated; _dimino not called
+
+
+class TestClosedFormVsDimino:
+    """Pin the closed-form formula against _dimino ground truth.
+
+    For small n, _dimino enumeration is the source of truth. The closed
+    form should match it exactly.
+    """
+
+    @pytest.mark.parametrize("n", [2, 3, 4, 5, 6])
+    def test_symmetric_matches_dimino(self, n):
+        g = SymmetryGroup.symmetric(axes=tuple(range(n)))
+        assert g.order() == len(_dimino(g._generators)) == math.factorial(n)
+
+    @pytest.mark.parametrize("n", [2, 3, 4, 5, 6, 7, 8, 9, 10])
+    def test_cyclic_matches_dimino(self, n):
+        g = SymmetryGroup.cyclic(axes=tuple(range(n)))
+        assert g.order() == len(_dimino(g._generators)) == n
+
+    @pytest.mark.parametrize("n", [3, 4, 5, 6, 7, 8])
+    def test_dihedral_matches_dimino(self, n):
+        g = SymmetryGroup.dihedral(axes=tuple(range(n)))
+        assert g.order() == len(_dimino(g._generators)) == 2 * n
+
+    def test_direct_product_matches_dimino(self):
+        a = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        b = SymmetryGroup.cyclic(axes=(3, 4, 5, 6))
+        g = SymmetryGroup.direct_product(a, b)
+        # |S_3 × C_4| = 6 * 4 = 24
+        assert g.order() == len(_dimino(g._generators)) == 24
+
+    def test_young_matches_dimino(self):
+        g = SymmetryGroup.young(blocks=[(0, 1), (2, 3, 4)])
+        # |S_2 × S_3| = 2 * 6 = 12
+        assert g.order() == len(_dimino(g._generators)) == 12
