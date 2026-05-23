@@ -118,7 +118,100 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Cost covers element-wise differencing and conditional adjustment."
+              "text": "NumPy's unwrap ("
+            },
+            {
+              "kind": "code",
+              "text": "flops.lib._function_base_impl.unwrap"
+            },
+            {
+              "kind": "text",
+              "text": ") does\napproximately 6 full-array ufunc passes: "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/diff/",
+              "kind": "link",
+              "target": "diff",
+              "text": "diff"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/mod/",
+              "kind": "link",
+              "target": "mod",
+              "text": "mod"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/add/",
+              "kind": "link",
+              "target": "add",
+              "text": "add"
+            },
+            {
+              "kind": "text",
+              "text": ",\n"
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/subtract/",
+              "kind": "link",
+              "target": "subtract",
+              "text": "subtract"
+            },
+            {
+              "kind": "text",
+              "text": ", "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/cumsum/",
+              "kind": "link",
+              "target": "cumsum",
+              "text": "cumsum"
+            },
+            {
+              "kind": "text",
+              "text": ", and "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/where/",
+              "kind": "link",
+              "target": "where",
+              "text": "where"
+            },
+            {
+              "kind": "text",
+              "text": ". The "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/where/",
+              "kind": "link",
+              "target": "where",
+              "text": "where"
+            },
+            {
+              "kind": "text",
+              "text": " pass with two\nreal-array arguments charges 2*(N-1) elements rather than N-1,\nbringing the effective total to ~7*(N-1). We charge a fixed\n"
+            },
+            {
+              "kind": "code",
+              "text": "7 * numel"
+            },
+            {
+              "kind": "text",
+              "text": " to approximate the sum without tracking numpy's\ninternal implementation byte-by-byte. Issue #69."
             }
           ],
           "type": "paragraph"
@@ -152,7 +245,7 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "Cost covers element-wise differencing and conditional adjustment."
+    "NumPy's unwrap (``flops.lib._function_base_impl.unwrap``) does approximately 6 full-array ufunc passes: ``diff``, ``mod``, ``add``, ``subtract``, ``cumsum``, and ``where``. The ``where`` pass with two real-array arguments charges 2*(N-1) elements rather than N-1, bringing the effective total to ~7*(N-1). We charge a fixed ``7 * numel`` to approximate the sum without tracking numpy's internal implementation byte-by-byte. Issue #69."
   ],
   "numpy_ref": "",
   "operation": null,

@@ -336,7 +336,7 @@
   "related_guides": [],
   "signature": "flops.budget_summary_dict(by_namespace: 'bool' = False) -> 'dict'",
   "slug": "budget-summary-dict",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958",
   "status_note": "",
   "summary": "Return aggregated budget data across all recorded contexts.",
   "upstream_source_url": ""

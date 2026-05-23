@@ -941,7 +941,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.gradient",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2223",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2237",
   "href": "/docs/api/numpy/gradient/",
   "import_path": "flopscope.numpy.gradient",
   "is_operation_cost_leaf": true,

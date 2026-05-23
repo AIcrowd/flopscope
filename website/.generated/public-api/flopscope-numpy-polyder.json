@@ -392,7 +392,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polyder",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L144",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L147",
   "href": "/docs/api/numpy/polyder/",
   "import_path": "flopscope.numpy.polyder",
   "is_operation_cost_leaf": true,

@@ -10,7 +10,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Weighted FLOP cost of pseudoinverse."
+              "text": "Weighted FLOP cost of Moore-Penrose pseudoinverse."
             }
           ],
           "type": "paragraph"
@@ -140,7 +140,80 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Computed via SVD."
+              "text": "NumPy implements "
+            },
+            {
+              "kind": "code",
+              "text": "pinv"
+            },
+            {
+              "kind": "text",
+              "text": " as: "
+            },
+            {
+              "kind": "code",
+              "text": "svd(A, full_matrices=False)"
+            },
+            {
+              "kind": "text",
+              "text": " \u2192\nthreshold tiny singular values \u2192 multiply "
+            },
+            {
+              "kind": "code",
+              "text": "vt.T"
+            },
+            {
+              "kind": "text",
+              "text": " by "
+            },
+            {
+              "kind": "code",
+              "text": "s_inv"
+            },
+            {
+              "kind": "text",
+              "text": "\nbroadcasted \u2192 matmul with "
+            },
+            {
+              "kind": "code",
+              "text": "u.T"
+            },
+            {
+              "kind": "text",
+              "text": ". We compose the cost from\n"
+            },
+            {
+              "kind": "code",
+              "text": "svd_cost"
+            },
+            {
+              "kind": "text",
+              "text": " and "
+            },
+            {
+              "kind": "code",
+              "text": "matmul_cost"
+            },
+            {
+              "kind": "text",
+              "text": " so this formula tracks those\nhelpers automatically (issue #69; was previously missing the\npost-SVD reconstruction)."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Total: "
+            },
+            {
+              "kind": "code",
+              "text": "svd(m,n) + threshold(min(m,n)) + diag_scale(n*min(m,n))\n+ matmul(n, min(m,n), m)"
+            },
+            {
+              "kind": "text",
+              "text": "."
             }
           ],
           "type": "paragraph"
@@ -162,7 +235,7 @@
   },
   "example": null,
   "flopscope_ref": "flopscope.accounting.pinv_cost",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268",
   "href": "/docs/api/accounting/pinv-cost/",
   "import_path": "flopscope.accounting.pinv_cost",
   "is_operation_cost_leaf": false,
@@ -174,7 +247,8 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "Computed via SVD."
+    "NumPy implements ``pinv`` as: ``svd(A, full_matrices=False)`` \u2192 threshold tiny singular values \u2192 multiply ``vt.T`` by ``s_inv`` broadcasted \u2192 matmul with ``u.T``. We compose the cost from ``svd_cost`` and ``matmul_cost`` so this formula tracks those helpers automatically (issue #69; was previously missing the post-SVD reconstruction).",
+    "Total: ``svd(m,n) + threshold(min(m,n)) + diag_scale(n*min(m,n)) + matmul(n, min(m,n), m)``."
   ],
   "numpy_ref": "",
   "operation": null,
@@ -208,7 +282,7 @@
   "see_also": [],
   "signature": "flopscope.accounting.pinv_cost(m: 'int', n: 'int') -> 'int'",
   "slug": "flopscope-accounting-pinv-cost",
-  "summary": "Weighted FLOP cost of pseudoinverse.",
+  "summary": "Weighted FLOP cost of Moore-Penrose pseudoinverse.",
   "upstream_source_url": "",
   "weight": 1.0
 }

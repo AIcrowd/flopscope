@@ -342,6 +342,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
+    { name = "numpydoc" },
     { name = "opt-einsum" },
     { name = "rich" },
 ]
@@ -375,6 +376,7 @@ dev = [
 requires-dist = [
     { name = "gitlint", marker = "extra == 'dev'", specifier = ">=0.19" },
     { name = "numpy", specifier = ">=2.0.0,<2.5.0" },
+    { name = "numpydoc", specifier = ">=1.10.0" },
     { name = "numpydoc", marker = "extra == 'docs'", specifier = ">=1.8" },
     { name = "opt-einsum", specifier = ">=3.3.0,<4.0.0" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },

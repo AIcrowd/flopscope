@@ -6,7 +6,7 @@
     "kind": "class",
     "label": "flops.BudgetContext",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386"
   },
   "FlopscopeArray": {
     "canonical_name": "FlopscopeArray",
@@ -24,7 +24,7 @@
     "kind": "class",
     "label": "flops.OpRecord",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15"
   },
   "PathInfo": {
     "canonical_name": "PathInfo",
@@ -663,7 +663,7 @@
     "kind": "function",
     "label": "flops.budget",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773"
   },
   "budget_live": {
     "canonical_name": "budget_live",
@@ -681,7 +681,7 @@
     "kind": "function",
     "label": "flops.budget_reset",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990"
   },
   "budget_summary": {
     "canonical_name": "budget_summary",
@@ -699,7 +699,7 @@
     "kind": "function",
     "label": "flops.budget_summary_dict",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958"
   },
   "can_cast": {
     "canonical_name": "can_cast",
@@ -852,7 +852,7 @@
     "kind": "op",
     "label": "fnp.convolve",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2315"
   },
   "copy": {
     "canonical_name": "copy",
@@ -888,7 +888,7 @@
     "kind": "op",
     "label": "fnp.corrcoef",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2348"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2382"
   },
   "correlate": {
     "canonical_name": "correlate",
@@ -897,7 +897,7 @@
     "kind": "op",
     "label": "fnp.correlate",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2305"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2339"
   },
   "cos": {
     "canonical_name": "cos",
@@ -933,7 +933,7 @@
     "kind": "op",
     "label": "fnp.cov",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2369"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2403"
   },
   "cross": {
     "canonical_name": "cross",
@@ -1068,7 +1068,7 @@
     "kind": "op",
     "label": "fnp.diff",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2197"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2207"
   },
   "digitize": {
     "canonical_name": "digitize",
@@ -1131,7 +1131,7 @@
     "kind": "op",
     "label": "fnp.ediff1d",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2247"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
   },
   "eig_cost": {
     "canonical_name": "flops.eig_cost",
@@ -1581,7 +1581,7 @@
     "kind": "class",
     "label": "flops.BudgetContext",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386"
   },
   "flops.FlopscopeArray": {
     "canonical_name": "FlopscopeArray",
@@ -1599,7 +1599,7 @@
     "kind": "class",
     "label": "flops.OpRecord",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15"
   },
   "flops.PathInfo": {
     "canonical_name": "PathInfo",
@@ -1869,7 +1869,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.pinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268"
   },
   "flops.accounting.pointwise_cost": {
     "canonical_name": "flops.pointwise_cost",
@@ -2049,7 +2049,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397"
   },
   "flops.accounting.tensorsolve_cost": {
     "canonical_name": "flops.tensorsolve_cost",
@@ -2058,7 +2058,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorsolve_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340"
   },
   "flops.accounting.trace_cost": {
     "canonical_name": "flops.trace_cost",
@@ -2670,7 +2670,7 @@
     "kind": "function",
     "label": "flops.budget",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773"
   },
   "flops.budget_live": {
     "canonical_name": "budget_live",
@@ -2688,7 +2688,7 @@
     "kind": "function",
     "label": "flops.budget_reset",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990"
   },
   "flops.budget_summary": {
     "canonical_name": "budget_summary",
@@ -2706,7 +2706,7 @@
     "kind": "function",
     "label": "flops.budget_summary_dict",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958"
   },
   "flops.can_cast": {
     "canonical_name": "can_cast",
@@ -2859,7 +2859,7 @@
     "kind": "op",
     "label": "fnp.convolve",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2315"
   },
   "flops.copy": {
     "canonical_name": "copy",
@@ -2895,7 +2895,7 @@
     "kind": "op",
     "label": "fnp.corrcoef",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2348"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2382"
   },
   "flops.correlate": {
     "canonical_name": "correlate",
@@ -2904,7 +2904,7 @@
     "kind": "op",
     "label": "fnp.correlate",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2305"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2339"
   },
   "flops.cos": {
     "canonical_name": "cos",
@@ -2940,7 +2940,7 @@
     "kind": "op",
     "label": "fnp.cov",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2369"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2403"
   },
   "flops.cross": {
     "canonical_name": "cross",
@@ -3075,7 +3075,7 @@
     "kind": "op",
     "label": "fnp.diff",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2197"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2207"
   },
   "flops.digitize": {
     "canonical_name": "digitize",
@@ -3138,7 +3138,7 @@
     "kind": "op",
     "label": "fnp.ediff1d",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2247"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
   },
   "flops.eig_cost": {
     "canonical_name": "flops.eig_cost",
@@ -3741,7 +3741,7 @@
     "kind": "op",
     "label": "fnp.gradient",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2223"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2237"
   },
   "flops.greater": {
     "canonical_name": "greater",
@@ -3957,7 +3957,7 @@
     "kind": "op",
     "label": "fnp.interp",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2446"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2480"
   },
   "flops.intersect1d": {
     "canonical_name": "intersect1d",
@@ -4335,7 +4335,7 @@
     "kind": "op",
     "label": "fnp.linalg.lstsq",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L174"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
   },
   "flops.linalg.matmul": {
     "canonical_name": "linalg.matmul",
@@ -4362,7 +4362,7 @@
     "kind": "op",
     "label": "fnp.linalg.matrix_power",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L130"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L135"
   },
   "flops.linalg.matrix_rank": {
     "canonical_name": "linalg.matrix_rank",
@@ -4416,7 +4416,7 @@
     "kind": "op",
     "label": "fnp.linalg.pinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L237"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L305"
   },
   "flops.linalg.qr": {
     "canonical_name": "linalg.qr",
@@ -4479,7 +4479,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L354"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L422"
   },
   "flops.linalg.tensorsolve": {
     "canonical_name": "linalg.tensorsolve",
@@ -4488,7 +4488,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorsolve",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L299"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L367"
   },
   "flops.linalg.trace": {
     "canonical_name": "linalg.trace",
@@ -4839,7 +4839,7 @@
     "kind": "function",
     "label": "flops.namespace",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282"
   },
   "flops.nan_to_num": {
     "canonical_name": "nan_to_num",
@@ -5145,7 +5145,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.pinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268"
   },
   "flops.place": {
     "canonical_name": "place",
@@ -5172,7 +5172,7 @@
     "kind": "op",
     "label": "fnp.poly",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L236"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L239"
   },
   "flops.poly_cost": {
     "canonical_name": "flops.poly_cost",
@@ -5190,7 +5190,7 @@
     "kind": "op",
     "label": "fnp.polyadd",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L106"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L109"
   },
   "flops.polyadd_cost": {
     "canonical_name": "flops.polyadd_cost",
@@ -5208,7 +5208,7 @@
     "kind": "op",
     "label": "fnp.polyder",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L144"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L147"
   },
   "flops.polyder_cost": {
     "canonical_name": "flops.polyder_cost",
@@ -5226,7 +5226,7 @@
     "kind": "op",
     "label": "fnp.polydiv",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L199"
   },
   "flops.polydiv_cost": {
     "canonical_name": "flops.polydiv_cost",
@@ -5244,7 +5244,7 @@
     "kind": "op",
     "label": "fnp.polyfit",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L218"
   },
   "flops.polyfit_cost": {
     "canonical_name": "flops.polyfit_cost",
@@ -5262,7 +5262,7 @@
     "kind": "op",
     "label": "fnp.polyint",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L159"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L162"
   },
   "flops.polyint_cost": {
     "canonical_name": "flops.polyint_cost",
@@ -5280,7 +5280,7 @@
     "kind": "op",
     "label": "fnp.polymul",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L177"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L180"
   },
   "flops.polymul_cost": {
     "canonical_name": "flops.polymul_cost",
@@ -5298,7 +5298,7 @@
     "kind": "op",
     "label": "fnp.polysub",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L125"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L128"
   },
   "flops.polysub_cost": {
     "canonical_name": "flops.polysub_cost",
@@ -6963,7 +6963,7 @@
     "kind": "op",
     "label": "fnp.roots",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L255"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L258"
   },
   "flops.roots_cost": {
     "canonical_name": "flops.roots_cost",
@@ -7620,7 +7620,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397"
   },
   "flops.tensorsolve_cost": {
     "canonical_name": "flops.tensorsolve_cost",
@@ -7629,7 +7629,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorsolve_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340"
   },
   "flops.testing.assert_allclose": {
     "canonical_name": "testing.assert_allclose",
@@ -7692,7 +7692,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "flops.trapz": {
     "canonical_name": "trapezoid",
@@ -7701,7 +7701,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "flops.tri": {
     "canonical_name": "tri",
@@ -7890,7 +7890,7 @@
     "kind": "op",
     "label": "fnp.unwrap",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L38"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L44"
   },
   "flops.unwrap_cost": {
     "canonical_name": "flops.unwrap_cost",
@@ -8007,7 +8007,7 @@
     "kind": "class",
     "label": "flops.BudgetContext",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386"
   },
   "flopscope.FlopscopeArray": {
     "canonical_name": "FlopscopeArray",
@@ -8025,7 +8025,7 @@
     "kind": "class",
     "label": "flops.OpRecord",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15"
   },
   "flopscope.PathInfo": {
     "canonical_name": "PathInfo",
@@ -8295,7 +8295,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.pinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268"
   },
   "flopscope.accounting.pointwise_cost": {
     "canonical_name": "flops.pointwise_cost",
@@ -8475,7 +8475,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397"
   },
   "flopscope.accounting.tensorsolve_cost": {
     "canonical_name": "flops.tensorsolve_cost",
@@ -8484,7 +8484,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorsolve_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340"
   },
   "flopscope.accounting.trace_cost": {
     "canonical_name": "flops.trace_cost",
@@ -9078,7 +9078,7 @@
     "kind": "function",
     "label": "flops.budget",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773"
   },
   "flopscope.budget_live": {
     "canonical_name": "budget_live",
@@ -9096,7 +9096,7 @@
     "kind": "function",
     "label": "flops.budget_reset",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990"
   },
   "flopscope.budget_summary": {
     "canonical_name": "budget_summary",
@@ -9114,7 +9114,7 @@
     "kind": "function",
     "label": "flops.budget_summary_dict",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958"
   },
   "flopscope.can_cast": {
     "canonical_name": "can_cast",
@@ -9249,7 +9249,7 @@
     "kind": "op",
     "label": "fnp.convolve",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2315"
   },
   "flopscope.copy": {
     "canonical_name": "copy",
@@ -9285,7 +9285,7 @@
     "kind": "op",
     "label": "fnp.corrcoef",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2348"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2382"
   },
   "flopscope.correlate": {
     "canonical_name": "correlate",
@@ -9294,7 +9294,7 @@
     "kind": "op",
     "label": "fnp.correlate",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2305"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2339"
   },
   "flopscope.cos": {
     "canonical_name": "cos",
@@ -9330,7 +9330,7 @@
     "kind": "op",
     "label": "fnp.cov",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2369"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2403"
   },
   "flopscope.cross": {
     "canonical_name": "cross",
@@ -9456,7 +9456,7 @@
     "kind": "op",
     "label": "fnp.diff",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2197"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2207"
   },
   "flopscope.digitize": {
     "canonical_name": "digitize",
@@ -9519,7 +9519,7 @@
     "kind": "op",
     "label": "fnp.ediff1d",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2247"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
   },
   "flopscope.einsum": {
     "canonical_name": "einsum",
@@ -10059,7 +10059,7 @@
     "kind": "op",
     "label": "fnp.gradient",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2223"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2237"
   },
   "flopscope.greater": {
     "canonical_name": "greater",
@@ -10248,7 +10248,7 @@
     "kind": "op",
     "label": "fnp.interp",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2446"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2480"
   },
   "flopscope.intersect1d": {
     "canonical_name": "intersect1d",
@@ -10608,7 +10608,7 @@
     "kind": "op",
     "label": "fnp.linalg.lstsq",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L174"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
   },
   "flopscope.linalg.matmul": {
     "canonical_name": "linalg.matmul",
@@ -10635,7 +10635,7 @@
     "kind": "op",
     "label": "fnp.linalg.matrix_power",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L130"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L135"
   },
   "flopscope.linalg.matrix_rank": {
     "canonical_name": "linalg.matrix_rank",
@@ -10689,7 +10689,7 @@
     "kind": "op",
     "label": "fnp.linalg.pinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L237"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L305"
   },
   "flopscope.linalg.qr": {
     "canonical_name": "linalg.qr",
@@ -10752,7 +10752,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L354"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L422"
   },
   "flopscope.linalg.tensorsolve": {
     "canonical_name": "linalg.tensorsolve",
@@ -10761,7 +10761,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorsolve",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L299"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L367"
   },
   "flopscope.linalg.trace": {
     "canonical_name": "linalg.trace",
@@ -11067,7 +11067,7 @@
     "kind": "function",
     "label": "flops.namespace",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282"
   },
   "flopscope.nan_to_num": {
     "canonical_name": "nan_to_num",
@@ -11283,7 +11283,7 @@
     "kind": "class",
     "label": "flops.BudgetContext",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386"
   },
   "flopscope.numpy.FlopscopeArray": {
     "canonical_name": "FlopscopeArray",
@@ -11301,7 +11301,7 @@
     "kind": "class",
     "label": "flops.OpRecord",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15"
   },
   "flopscope.numpy.PathInfo": {
     "canonical_name": "PathInfo",
@@ -11382,7 +11382,7 @@
     "kind": "function",
     "label": "flops.budget",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773"
   },
   "flopscope.numpy.budget_live": {
     "canonical_name": "budget_live",
@@ -11400,7 +11400,7 @@
     "kind": "function",
     "label": "flops.budget_reset",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990"
   },
   "flopscope.numpy.budget_summary": {
     "canonical_name": "budget_summary",
@@ -11418,7 +11418,7 @@
     "kind": "function",
     "label": "flops.budget_summary_dict",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958"
   },
   "flopscope.numpy.clear_einsum_cache": {
     "canonical_name": "clear_einsum_cache",
@@ -11544,7 +11544,7 @@
     "kind": "function",
     "label": "flops.namespace",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282"
   },
   "flopscope.numpy.ndenumerate": {
     "canonical_name": "ndenumerate",
@@ -11778,7 +11778,7 @@
     "kind": "op",
     "label": "fnp.poly",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L236"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L239"
   },
   "flopscope.polyadd": {
     "canonical_name": "polyadd",
@@ -11787,7 +11787,7 @@
     "kind": "op",
     "label": "fnp.polyadd",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L106"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L109"
   },
   "flopscope.polyder": {
     "canonical_name": "polyder",
@@ -11796,7 +11796,7 @@
     "kind": "op",
     "label": "fnp.polyder",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L144"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L147"
   },
   "flopscope.polydiv": {
     "canonical_name": "polydiv",
@@ -11805,7 +11805,7 @@
     "kind": "op",
     "label": "fnp.polydiv",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L199"
   },
   "flopscope.polyfit": {
     "canonical_name": "polyfit",
@@ -11814,7 +11814,7 @@
     "kind": "op",
     "label": "fnp.polyfit",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L218"
   },
   "flopscope.polyint": {
     "canonical_name": "polyint",
@@ -11823,7 +11823,7 @@
     "kind": "op",
     "label": "fnp.polyint",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L159"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L162"
   },
   "flopscope.polymul": {
     "canonical_name": "polymul",
@@ -11832,7 +11832,7 @@
     "kind": "op",
     "label": "fnp.polymul",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L177"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L180"
   },
   "flopscope.polysub": {
     "canonical_name": "polysub",
@@ -11841,7 +11841,7 @@
     "kind": "op",
     "label": "fnp.polysub",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L125"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L128"
   },
   "flopscope.polyval": {
     "canonical_name": "polyval",
@@ -13416,7 +13416,7 @@
     "kind": "op",
     "label": "fnp.roots",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L255"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L258"
   },
   "flopscope.rot90": {
     "canonical_name": "rot90",
@@ -14055,7 +14055,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "flopscope.trapz": {
     "canonical_name": "trapezoid",
@@ -14064,7 +14064,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "flopscope.tri": {
     "canonical_name": "tri",
@@ -14253,7 +14253,7 @@
     "kind": "op",
     "label": "fnp.unwrap",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L38"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L44"
   },
   "flopscope.vander": {
     "canonical_name": "vander",
@@ -14379,7 +14379,7 @@
     "kind": "class",
     "label": "flops.BudgetContext",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L344"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L386"
   },
   "fnp.FlopscopeArray": {
     "canonical_name": "FlopscopeArray",
@@ -14397,7 +14397,7 @@
     "kind": "class",
     "label": "flops.OpRecord",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L14"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L15"
   },
   "fnp.PathInfo": {
     "canonical_name": "PathInfo",
@@ -14910,7 +14910,7 @@
     "kind": "function",
     "label": "flops.budget",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773"
   },
   "fnp.budget_live": {
     "canonical_name": "budget_live",
@@ -14928,7 +14928,7 @@
     "kind": "function",
     "label": "flops.budget_reset",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L948"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L990"
   },
   "fnp.budget_summary": {
     "canonical_name": "budget_summary",
@@ -14946,7 +14946,7 @@
     "kind": "function",
     "label": "flops.budget_summary_dict",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L916"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L958"
   },
   "fnp.can_cast": {
     "canonical_name": "can_cast",
@@ -15072,7 +15072,7 @@
     "kind": "op",
     "label": "fnp.convolve",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2315"
   },
   "fnp.copy": {
     "canonical_name": "copy",
@@ -15108,7 +15108,7 @@
     "kind": "op",
     "label": "fnp.corrcoef",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2348"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2382"
   },
   "fnp.correlate": {
     "canonical_name": "correlate",
@@ -15117,7 +15117,7 @@
     "kind": "op",
     "label": "fnp.correlate",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2305"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2339"
   },
   "fnp.cos": {
     "canonical_name": "cos",
@@ -15153,7 +15153,7 @@
     "kind": "op",
     "label": "fnp.cov",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2369"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2403"
   },
   "fnp.cross": {
     "canonical_name": "cross",
@@ -15270,7 +15270,7 @@
     "kind": "op",
     "label": "fnp.diff",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2197"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2207"
   },
   "fnp.digitize": {
     "canonical_name": "digitize",
@@ -15324,7 +15324,7 @@
     "kind": "op",
     "label": "fnp.ediff1d",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2247"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281"
   },
   "fnp.einsum": {
     "canonical_name": "einsum",
@@ -15855,7 +15855,7 @@
     "kind": "op",
     "label": "fnp.gradient",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2223"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2237"
   },
   "fnp.greater": {
     "canonical_name": "greater",
@@ -16044,7 +16044,7 @@
     "kind": "op",
     "label": "fnp.interp",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2446"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2480"
   },
   "fnp.intersect1d": {
     "canonical_name": "intersect1d",
@@ -16404,7 +16404,7 @@
     "kind": "op",
     "label": "fnp.linalg.lstsq",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L174"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
   },
   "fnp.linalg.matmul": {
     "canonical_name": "linalg.matmul",
@@ -16431,7 +16431,7 @@
     "kind": "op",
     "label": "fnp.linalg.matrix_power",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L130"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L135"
   },
   "fnp.linalg.matrix_rank": {
     "canonical_name": "linalg.matrix_rank",
@@ -16485,7 +16485,7 @@
     "kind": "op",
     "label": "fnp.linalg.pinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L237"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L305"
   },
   "fnp.linalg.qr": {
     "canonical_name": "linalg.qr",
@@ -16548,7 +16548,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L354"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L422"
   },
   "fnp.linalg.tensorsolve": {
     "canonical_name": "linalg.tensorsolve",
@@ -16557,7 +16557,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorsolve",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L299"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L367"
   },
   "fnp.linalg.trace": {
     "canonical_name": "linalg.trace",
@@ -16863,7 +16863,7 @@
     "kind": "function",
     "label": "flops.namespace",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282"
   },
   "fnp.nan_to_num": {
     "canonical_name": "nan_to_num",
@@ -17169,7 +17169,7 @@
     "kind": "op",
     "label": "fnp.poly",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L236"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L239"
   },
   "fnp.polyadd": {
     "canonical_name": "polyadd",
@@ -17178,7 +17178,7 @@
     "kind": "op",
     "label": "fnp.polyadd",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L106"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L109"
   },
   "fnp.polyder": {
     "canonical_name": "polyder",
@@ -17187,7 +17187,7 @@
     "kind": "op",
     "label": "fnp.polyder",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L144"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L147"
   },
   "fnp.polydiv": {
     "canonical_name": "polydiv",
@@ -17196,7 +17196,7 @@
     "kind": "op",
     "label": "fnp.polydiv",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L199"
   },
   "fnp.polyfit": {
     "canonical_name": "polyfit",
@@ -17205,7 +17205,7 @@
     "kind": "op",
     "label": "fnp.polyfit",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L218"
   },
   "fnp.polyint": {
     "canonical_name": "polyint",
@@ -17214,7 +17214,7 @@
     "kind": "op",
     "label": "fnp.polyint",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L159"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L162"
   },
   "fnp.polymul": {
     "canonical_name": "polymul",
@@ -17223,7 +17223,7 @@
     "kind": "op",
     "label": "fnp.polymul",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L177"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L180"
   },
   "fnp.polysub": {
     "canonical_name": "polysub",
@@ -17232,7 +17232,7 @@
     "kind": "op",
     "label": "fnp.polysub",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L125"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L128"
   },
   "fnp.polyval": {
     "canonical_name": "polyval",
@@ -18771,7 +18771,7 @@
     "kind": "op",
     "label": "fnp.roots",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L255"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L258"
   },
   "fnp.rot90": {
     "canonical_name": "rot90",
@@ -19113,7 +19113,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "fnp.tri": {
     "canonical_name": "tri",
@@ -19302,7 +19302,7 @@
     "kind": "op",
     "label": "fnp.unwrap",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L38"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L44"
   },
   "fnp.vander": {
     "canonical_name": "vander",
@@ -19527,7 +19527,7 @@
     "kind": "op",
     "label": "fnp.gradient",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2223"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2237"
   },
   "greater": {
     "canonical_name": "greater",
@@ -19743,7 +19743,7 @@
     "kind": "op",
     "label": "fnp.interp",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2446"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2480"
   },
   "intersect1d": {
     "canonical_name": "intersect1d",
@@ -20121,7 +20121,7 @@
     "kind": "op",
     "label": "fnp.linalg.lstsq",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L174"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
   },
   "linalg.matmul": {
     "canonical_name": "linalg.matmul",
@@ -20148,7 +20148,7 @@
     "kind": "op",
     "label": "fnp.linalg.matrix_power",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L130"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L135"
   },
   "linalg.matrix_rank": {
     "canonical_name": "linalg.matrix_rank",
@@ -20202,7 +20202,7 @@
     "kind": "op",
     "label": "fnp.linalg.pinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L237"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L305"
   },
   "linalg.qr": {
     "canonical_name": "linalg.qr",
@@ -20265,7 +20265,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorinv",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L354"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L422"
   },
   "linalg.tensorsolve": {
     "canonical_name": "linalg.tensorsolve",
@@ -20274,7 +20274,7 @@
     "kind": "op",
     "label": "fnp.linalg.tensorsolve",
     "module": "fnp.linalg",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L299"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L367"
   },
   "linalg.trace": {
     "canonical_name": "linalg.trace",
@@ -20625,7 +20625,7 @@
     "kind": "function",
     "label": "flops.namespace",
     "module": "flopscope._budget",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L240"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L282"
   },
   "nan_to_num": {
     "canonical_name": "nan_to_num",
@@ -20931,7 +20931,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.pinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L268"
   },
   "place": {
     "canonical_name": "place",
@@ -20958,7 +20958,7 @@
     "kind": "op",
     "label": "fnp.poly",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L236"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L239"
   },
   "poly_cost": {
     "canonical_name": "flops.poly_cost",
@@ -20976,7 +20976,7 @@
     "kind": "op",
     "label": "fnp.polyadd",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L106"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L109"
   },
   "polyadd_cost": {
     "canonical_name": "flops.polyadd_cost",
@@ -20994,7 +20994,7 @@
     "kind": "op",
     "label": "fnp.polyder",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L144"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L147"
   },
   "polyder_cost": {
     "canonical_name": "flops.polyder_cost",
@@ -21012,7 +21012,7 @@
     "kind": "op",
     "label": "fnp.polydiv",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L196"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L199"
   },
   "polydiv_cost": {
     "canonical_name": "flops.polydiv_cost",
@@ -21030,7 +21030,7 @@
     "kind": "op",
     "label": "fnp.polyfit",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L215"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L218"
   },
   "polyfit_cost": {
     "canonical_name": "flops.polyfit_cost",
@@ -21048,7 +21048,7 @@
     "kind": "op",
     "label": "fnp.polyint",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L159"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L162"
   },
   "polyint_cost": {
     "canonical_name": "flops.polyint_cost",
@@ -21066,7 +21066,7 @@
     "kind": "op",
     "label": "fnp.polymul",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L177"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L180"
   },
   "polymul_cost": {
     "canonical_name": "flops.polymul_cost",
@@ -21084,7 +21084,7 @@
     "kind": "op",
     "label": "fnp.polysub",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L125"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L128"
   },
   "polysub_cost": {
     "canonical_name": "flops.polysub_cost",
@@ -22749,7 +22749,7 @@
     "kind": "op",
     "label": "fnp.roots",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L255"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L258"
   },
   "roots_cost": {
     "canonical_name": "flops.roots_cost",
@@ -23406,7 +23406,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorinv_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397"
   },
   "tensorsolve_cost": {
     "canonical_name": "flops.tensorsolve_cost",
@@ -23415,7 +23415,7 @@
     "kind": "cost_helper",
     "label": "flops.flops.tensorsolve_cost",
     "module": "flopscope.numpy.linalg._solvers",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340"
   },
   "testing.assert_allclose": {
     "canonical_name": "testing.assert_allclose",
@@ -23478,7 +23478,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "trapz": {
     "canonical_name": "trapezoid",
@@ -23487,7 +23487,7 @@
     "kind": "op",
     "label": "fnp.trapezoid",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2390"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2424"
   },
   "tri": {
     "canonical_name": "tri",
@@ -23676,7 +23676,7 @@
     "kind": "op",
     "label": "fnp.unwrap",
     "module": "fnp",
-    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L38"
+    "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_unwrap.py#L44"
   },
   "unwrap_cost": {
     "canonical_name": "flops.unwrap_cost",

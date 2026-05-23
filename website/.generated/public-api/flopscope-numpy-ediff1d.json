@@ -296,7 +296,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.ediff1d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2247",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281",
   "href": "/docs/api/numpy/ediff1d/",
   "import_path": "flopscope.numpy.ediff1d",
   "is_operation_cost_leaf": true,
