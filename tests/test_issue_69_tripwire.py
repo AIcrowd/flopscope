@@ -98,6 +98,22 @@ def test_inside_wrapper_array_ufunc_leak_raises():
             buggy_ufunc_wrapper(a)
 
 
+def test_passthrough_from_inside_wrapper_does_not_raise():
+    """PASSTHROUGH ops (np.shape, np.ndim, etc.) on un-stripped FlopscopeArray
+    inside a wrapper should NOT raise the tripwire — they are zero-FLOP queries,
+    not real bugs."""
+
+    @_counted_wrapper
+    def wrapper_using_passthrough(a):
+        # np.shape goes through __array_function__ but is in PASSTHROUGH set
+        return np.shape(a)
+
+    a = fnp.asarray(np.zeros((4, 5)))
+    with BudgetContext(flop_budget=10**6):
+        result = wrapper_using_passthrough(a)
+    assert result == (4, 5)
+
+
 def test_polyval_works_on_flopscopearray_inputs():
     """Regression for issue #69: polyval used to TypeError on FlopscopeArray.
 

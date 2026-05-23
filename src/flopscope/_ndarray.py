@@ -517,7 +517,9 @@ class FlopscopeArray(_np.ndarray):
           ``FlopscopeArray`` before calling raw numpy, and numpy's NEP 18
           dispatch caught us. This is a flopscope bug (the polyval class from
           issue #69). Raise ``RuntimeError`` at the leak site so the bug is
-          impossible to miss.
+          impossible to miss.  PASSTHROUGH (zero-FLOP queries like np.shape,
+          np.ndim, np.size) is exempt — these are safe even inside a wrapper
+          and must not trigger the tripwire.
 
         - **Top-level call (depth == 0):** A user wrote ``np.<func>(whest)``
           directly. PASSTHROUGH set is checked first for zero-FLOP queries.
@@ -525,6 +527,15 @@ class FlopscopeArray(_np.ndarray):
           a ``UserWarning`` so the user knows to call ``fnp.<func>`` directly.
           Warning is de-duped per call site by Python's ``warnings`` module.
         """
+        # PASSTHROUGH first: zero-FLOP queries are always safe, even inside
+        # wrappers.  Reordering: putting this BEFORE the tripwire avoids false
+        # positives when a wrapper queries np.shape(a)/np.ndim(a) on a
+        # still-FlopscopeArray input.
+        if func in self._get_passthrough():
+            stripped_args = _to_base_ndarray_tree(args)
+            stripped_kwargs = {k: _to_base_ndarray_tree(v) for k, v in kwargs.items()}
+            return func(*stripped_args, **stripped_kwargs)
+
         from flopscope._budget import _called_from_wrapper
 
         if _called_from_wrapper():
@@ -533,12 +544,6 @@ class FlopscopeArray(_np.ndarray):
                 f"wrapper — missing _to_base_ndarray() strip. Check the "
                 f"calling fnp wrapper and add a strip before the numpy call."
             )
-
-        # PASSTHROUGH check first: zero-FLOP queries bypass dispatch.
-        if func in self._get_passthrough():
-            stripped_args = _to_base_ndarray_tree(args)
-            stripped_kwargs = {k: _to_base_ndarray_tree(v) for k, v in kwargs.items()}
-            return func(*stripped_args, **stripped_kwargs)
 
         dispatch = self._get_array_function_dispatch()
         we_func = dispatch.get(func)
