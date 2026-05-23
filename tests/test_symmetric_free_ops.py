@@ -519,3 +519,37 @@ class TestAutoInferenceSetsMarker:
         result = fnp.zeros_like(source)
         assert isinstance(result, SymmetricTensor)
         assert result._symmetry_inferred is False
+
+
+class TestMarkerNotPropagated:
+    """Marker is set only by wrap_with_inferred_symmetry; ops produce fresh arrays without it."""
+
+    def test_symmetrize_clears_marker(self):
+        import flopscope as flops
+        import flopscope.numpy as fnp
+
+        src = fnp.zeros((3, 3))
+        assert src._symmetry_inferred is True
+        out = flops.symmetrize(
+            src, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1))
+        )
+        assert getattr(out, "_symmetry_inferred", False) is False
+
+    def test_add_clears_marker(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        src = fnp.zeros((3, 3))
+        assert src._symmetry_inferred is True
+        out = np.add(src, src)
+        assert getattr(out, "_symmetry_inferred", False) is False
+
+    def test_asarray_strips_marker(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        src = fnp.zeros((3, 3))
+        plain = np.asarray(src)
+        assert not hasattr(plain, "_symmetry_inferred") or not plain._symmetry_inferred
