@@ -193,6 +193,24 @@ class FlopscopeArray(_np.ndarray):
         use the generic path. ``ufunc.at`` refuses on SymmetricTensor
         operands (the in-place fancy-index write would break symmetry).
         """
+        from flopscope._budget import _called_from_wrapper
+
+        if _called_from_wrapper():
+            raise RuntimeError(
+                f"WhestArray reached numpy.{ufunc.__name__} from inside an fnp "
+                f"wrapper — missing _to_base_ndarray() strip. Check the "
+                f"calling fnp wrapper and add a strip before the numpy call."
+            )
+
+        # Emit one-time auto-route warning (de-duped per call site).
+        import warnings as _warnings
+        _warnings.warn(
+            f"np.{ufunc.__name__}(WhestArray) auto-routed to fnp.{ufunc.__name__}; "
+            f"call fnp.{ufunc.__name__} directly to avoid this warning.",
+            UserWarning,
+            stacklevel=2,
+        )
+
         me = _me()
 
         np_target_name = None  # used to drive _filter_to_np_signature below

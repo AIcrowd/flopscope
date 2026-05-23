@@ -68,3 +68,31 @@ def test_inside_wrapper_array_function_leak_raises():
             match=r"WhestArray reached numpy\.diff from inside an fnp wrapper",
         ):
             buggy_wrapper(a)
+
+
+def test_top_level_np_ufunc_on_whestarray_warns_and_routes():
+    """np.add(whest, whest) at top level should emit UserWarning AND route."""
+    a = fnp.asarray(np.random.default_rng(0).random((10,)))
+    with BudgetContext(flop_budget=10**14):
+        with pytest.warns(UserWarning, match=r"np\.add.*auto-routed to fnp\.add"):
+            result = np.add(a, a)
+    from flopscope._ndarray import FlopscopeArray
+    assert isinstance(result, FlopscopeArray)
+
+
+def test_inside_wrapper_array_ufunc_leak_raises():
+    """An fnp wrapper that calls _np.<ufunc> on a WhestArray must raise."""
+    import numpy as _np
+
+    @_counted_wrapper
+    def buggy_ufunc_wrapper(a):
+        # Forget the strip; pass WhestArray to numpy ufunc.
+        return _np.add(a, a)
+
+    a = fnp.asarray(np.random.default_rng(0).random((10,)))
+    with BudgetContext(flop_budget=10**14):
+        with pytest.raises(
+            RuntimeError,
+            match=r"WhestArray reached numpy\.add from inside an fnp wrapper",
+        ):
+            buggy_ufunc_wrapper(a)
