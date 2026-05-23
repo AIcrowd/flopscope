@@ -189,6 +189,15 @@ def lstsq_cost(m: int, n: int, b_cols: int = 1, b_ndim: int = 1) -> int:
     k = min(m, n)
     c = b_cols
     svd = svd_cost(m, n)
+    # NOTE (#69): the 1D-b path uses `k*m*m` / `n*k*k` directly instead of
+    # `matmul_cost(k, m, 1)` / `matmul_cost(n, k, 1)` because `fnp.matmul`'s
+    # 2D×1D code path currently uses the einsum fallback (charging
+    # `a.size * b.size`) rather than the canonical FMA-1 formula. The
+    # parity test (`tests/test_issue_69_cost_parity.py::test_cost_parity[lstsq]`)
+    # would fail if we used `matmul_cost` here, because the oracle calls
+    # `fnp.matmul` and the wrapper would then disagree. When `fnp.matmul`'s
+    # 2D×1D charge is fixed in a separate issue, switch both branches to
+    # `matmul_cost` for symmetry.
     if b_ndim == 1:
         # 2D@1D matmul: (k, m) @ (m,) charges k * m * m
         ut_b = k * m * m
