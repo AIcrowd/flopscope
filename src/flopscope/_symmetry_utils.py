@@ -127,6 +127,33 @@ def _unique_elements_for_shape_cached(
     return result
 
 
+def _build_from_kind(kind: tuple) -> SymmetryGroup | None:
+    """Construct an interned SymmetryGroup from a ``_known_kind`` tag.
+
+    Routes through the public factory matching the kind name. Returns
+    ``None`` for trivial (identity) kinds, since callers expect ``None``
+    to represent "no non-trivial symmetry."
+    """
+    name = kind[0]
+    if name == "identity":
+        return None
+    if name == "symmetric":
+        return SymmetryGroup.symmetric(axes=kind[1])
+    if name == "cyclic":
+        return SymmetryGroup.cyclic(axes=kind[1])
+    if name == "dihedral":
+        return SymmetryGroup.dihedral(axes=kind[1])
+    if name == "direct_product":
+        children = [_build_from_kind(child) for child in kind[1]]
+        non_trivial = [c for c in children if c is not None]
+        if not non_trivial:
+            return None
+        if len(non_trivial) == 1:
+            return non_trivial[0]
+        return SymmetryGroup.direct_product(*non_trivial)
+    raise AssertionError(f"unknown kind {kind!r}")
+
+
 def embed_group(group: SymmetryGroup | None, ndim: int) -> SymmetryGroup | None:
     """Embed a group acting on selected tensor axes into full rank ``ndim``."""
     if group is None:
@@ -208,6 +235,62 @@ def _remap_kind(kind: tuple | None, axis_map: Mapping[Any, Any]) -> tuple | None
         if any(child is None for child in children):
             return None
         return ("direct_product", tuple(sorted(children, key=repr)))
+    return None
+
+
+def _reduced_kind(
+    kind: tuple | None,
+    *,
+    reduced_axes: set[int],
+    axis_map: Mapping[Any, Any],
+) -> tuple | None:
+    """Compute the reduced kind tag for a known-kind group.
+
+    ``reduced_axes`` is the set of tensor axes being reduced over (in the
+    parent group's axis space). ``axis_map`` is the surviving-axes mapping
+    from old tensor axes to new tensor positions (post-reduction layout).
+
+    Returns ``None`` if the result is trivial or can't be expressed in
+    closed form.
+    """
+    if kind is None:
+        return None
+    name = kind[0]
+    if name == "identity":
+        kept = tuple(axis_map[a] for a in kind[1] if a not in reduced_axes)
+        if not kept:
+            return None
+        return ("identity", kept)
+    if name == "symmetric":
+        kept = tuple(axis_map[a] for a in kind[1] if a not in reduced_axes)
+        if len(kept) < 2:
+            return None
+        return ("symmetric", kept)
+    if name == "cyclic":
+        # Cyclic only survives if NONE of its axes are reduced (the cycle
+        # would otherwise no longer be a closed orbit on the kept axes).
+        if any(a in reduced_axes for a in kind[1]):
+            return None
+        kept = tuple(axis_map[a] for a in kind[1])
+        return ("cyclic", kept)
+    if name == "dihedral":
+        if any(a in reduced_axes for a in kind[1]):
+            return None
+        kept = tuple(axis_map[a] for a in kind[1])
+        return ("dihedral", kept)
+    if name == "direct_product":
+        new_children = []
+        for child in kind[1]:
+            new_child = _reduced_kind(
+                child, reduced_axes=reduced_axes, axis_map=axis_map
+            )
+            if new_child is not None:
+                new_children.append(new_child)
+        if not new_children:
+            return None
+        if len(new_children) == 1:
+            return new_children[0]
+        return ("direct_product", tuple(sorted(new_children, key=repr)))
     return None
 
 
@@ -491,6 +574,18 @@ def reduce_group(
             if dim not in axes_set:
                 old_to_new[dim] = new_idx
                 new_idx += 1
+
+    # Fast path for known-kind groups: compute the reduced kind directly
+    # and route through the appropriate factory. Avoids _dimino entirely.
+    if group._known_kind is not None:
+        reduced_kind = _reduced_kind(
+            group._known_kind, reduced_axes=axes_set, axis_map=old_to_new
+        )
+        if reduced_kind is not None:
+            return _build_from_kind(reduced_kind)
+        # Fall through to the generic path if the kind can't be reduced
+        # in closed form (e.g. partial reduction of a direct_product child
+        # whose own kind doesn't survive).
 
     group_axes = group.axes
     if group_axes is None:

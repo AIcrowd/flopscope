@@ -8,6 +8,7 @@ from flopscope._perm_group import _GROUP_INTERN, SymmetryGroup
 from flopscope._symmetry_utils import (
     embed_group,
     intersect_groups,
+    reduce_group,
     remap_group_axes,
     restrict_group_to_axes,
 )
@@ -102,3 +103,37 @@ class TestIntersectGroupsProvenance:
         result = intersect_groups(s, c, ndim=3)
         assert result is not None
         assert result._known_kind is None  # conservative — no inference
+
+
+class TestReduceGroupProvenance:
+    def test_reduce_symmetric_produces_smaller_symmetric(self):
+        g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3, 4))
+        result = reduce_group(g, ndim=5, axis=(3, 4))
+        # |G \ R| = 3, axes (0,1,2) after reduction remap to (0,1,2)
+        assert result is not None
+        assert result._known_kind == ("symmetric", (0, 1, 2))
+
+    def test_reduce_symmetric_keepdims(self):
+        g = SymmetryGroup.symmetric(axes=(0, 1, 2, 3))
+        # With keepdims, reduced axes stay at their positions.
+        result = reduce_group(g, ndim=4, axis=(2, 3), keepdims=True)
+        assert result is not None
+        # The 2 surviving axes keep their tensor positions (0, 1)
+        assert result._known_kind == ("symmetric", (0, 1))
+
+    def test_reduce_all_axes_returns_none(self):
+        g = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        result = reduce_group(g, ndim=3, axis=(0, 1, 2))
+        assert result is None
+
+    def test_reduce_direct_product_recurses(self):
+        g = SymmetryGroup.direct_product(
+            SymmetryGroup.symmetric(axes=(0, 1)),
+            SymmetryGroup.cyclic(axes=(2, 3, 4)),
+        )
+        # Reduce one axis from the symmetric factor (drops it to trivial).
+        result = reduce_group(g, ndim=5, axis=(0,))
+        # Surviving: cyclic(2,3,4) only; symmetric(1) becomes trivial.
+        # After remap (axis 0 removed), cyclic axes shift to (1,2,3).
+        assert result is not None
+        assert result._known_kind == ("cyclic", (1, 2, 3))
