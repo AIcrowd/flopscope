@@ -138,6 +138,13 @@ REMOVED_IN_NUMPY = (
     "REMOVED_IN_NUMPY: numpy removed this symbol in 2.4; flopscope gates it "
     "off. The upstream test still references the removed symbol."
 )
+NEEDS_TRIAGE = (
+    "NEEDS_TRIAGE: failure surfaced by the 2026-05-23 compat-harness "
+    "restoration. Each case passes in isolation but fails when run in the "
+    "parametrize sweep — order-dependent state pollution somewhere in the "
+    "ufunc/SymmetricTensor pipeline. Not in scope for the issue-70 PR; "
+    "follow-up triage queued."
+)
 
 XFAIL_PATTERNS: dict[str, str] = {
     # ------------------------------------------------------------------ #
@@ -368,20 +375,20 @@ XFAIL_PATTERNS: dict[str, str] = {
         "is not in flopscope's __array_function__ allowlist"
     ),
     # ------------------------------------------------------------------ #
-    # BEHAVIORAL_SHIM — __array_ufunc__ activates symmetry validation     #
+    # NEEDS_TRIAGE — state-pollution surfaced by issue-70 fix             #
     # ------------------------------------------------------------------ #
-    # ``np.zeros_like(plain_3x3)`` returns a SymmetricTensor (flopscope auto-
-    # infers symmetry from constant-fill arrays of square shape, since
-    # all-zeros is symmetric in any axis order). On main, ``np.positive(
-    # plain_3x3, out=symmetric_zeros, where=mask)`` worked because numpy
-    # bypassed flopscope validation entirely (no __array_ufunc__). On v2,
-    # __array_ufunc__ activates ``_prepare_symmetric_out`` which refuses
-    # to write non-symmetric data into a SymmetricTensor — surfacing a
-    # latent semantic conflict the auto-inference creates.
-    "*TestUfunc::test_reduction_with_where*": (
-        "BEHAVIORAL_SHIM: np.zeros_like auto-infers SymmetryGroup on square "
-        "shapes; __array_ufunc__ then validates the write via "
-        "_prepare_symmetric_out and refuses non-symmetric assignments. Main "
-        "bypassed this path (no __array_ufunc__)."
-    ),
+    # After the issue-70 fix (silent downgrade of auto-inferred SymmetricTensor
+    # out= targets), 9 of 15 ``test_reduction_with_where*`` variants pass for
+    # real under flopscope. The remaining 6 below fail when run in the
+    # parametrize sweep but pass in isolation — a latent state-pollution bug
+    # in flopscope (caching / shared mutable state) that the harness fix
+    # exposed. Out of scope for the issue-70 PR; follow-up triage tracked
+    # separately. Each entry uses a specific parametrize ID rather than a
+    # wildcard so the 9 reliably-passing variants are NOT xfailed.
+    "TestUfunc::test_reduction_with_where[where0-1]": NEEDS_TRIAGE,
+    "TestUfunc::test_reduction_with_where[where1-0]": NEEDS_TRIAGE,
+    "TestUfunc::test_reduction_with_where[where1-None]": NEEDS_TRIAGE,
+    "TestUfunc::test_reduction_with_where[where2-1]": NEEDS_TRIAGE,
+    "TestUfunc::test_reduction_with_where_and_initial[-inf-0-where0]": NEEDS_TRIAGE,
+    "TestUfunc::test_reduction_with_where_and_initial[5.0-0-where0]": NEEDS_TRIAGE,
 }
