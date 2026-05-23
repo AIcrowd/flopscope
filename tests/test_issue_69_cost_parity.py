@@ -106,6 +106,60 @@ CASES.extend([
 ])
 
 
+def _setup_gradient_2d(rng):
+    f = fnp.asarray(rng.random((50, 50)))
+    return (f,), {}
+
+
+def _oracle_gradient_2d(f):
+    # Mirror numpy.gradient: for each axis, central diff (interior) +
+    # boundary forward/backward diff + divide by 2 (interior).
+    for axis in (0, 1):
+        slc1 = [slice(None)] * 2
+        slc2 = [slice(None)] * 2
+        slc_mid = [slice(None)] * 2
+        slc1[axis] = slice(2, None)
+        slc2[axis] = slice(None, -2)
+        slc_mid[axis] = slice(1, -1)
+        fnp.subtract(f[tuple(slc1)], f[tuple(slc2)])
+        fnp.divide(f[tuple(slc_mid)], 2.0)
+
+
+def _setup_gradient_3d(rng):
+    f = fnp.asarray(rng.random((20, 20, 20)))
+    return (f,), {}
+
+
+def _oracle_gradient_3d(f):
+    for axis in range(3):
+        slc1 = [slice(None)] * 3
+        slc2 = [slice(None)] * 3
+        slc_mid = [slice(None)] * 3
+        slc1[axis] = slice(2, None)
+        slc2[axis] = slice(None, -2)
+        slc_mid[axis] = slice(1, -1)
+        fnp.subtract(f[tuple(slc1)], f[tuple(slc2)])
+        fnp.divide(f[tuple(slc_mid)], 2.0)
+
+
+CASES.extend([
+    CostParityCase(
+        name="gradient_2d",
+        setup=_setup_gradient_2d,
+        wrapper=fnp.gradient,
+        oracle=_oracle_gradient_2d,
+        tolerance=0.05,
+    ),
+    CostParityCase(
+        name="gradient_3d",
+        setup=_setup_gradient_3d,
+        wrapper=fnp.gradient,
+        oracle=_oracle_gradient_3d,
+        tolerance=0.05,
+    ),
+])
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

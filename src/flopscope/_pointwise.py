@@ -2229,12 +2229,32 @@ diff.__signature__ = _inspect.signature(_np.diff)  # pyright: ignore[reportFunct
 def gradient(
     f: ArrayLike, *varargs: ArrayLike, **kwargs: Any
 ) -> FlopscopeArray | list[FlopscopeArray]:
-    """Counted version of np.gradient."""
+    """Counted version of np.gradient.
+
+    Cost model: numpy.gradient computes second-order central differences
+    along each axis (one subtract for the interior + one divide-by-2),
+    plus first-order forward/backward differences at the two boundaries.
+    Per axis i: interior elements = f.size * (shape[i] - 2) / shape[i];
+    two ops (subtract + divide) on those interior elements.
+    Total: sum over axes of 2 * f.size * (shape[i] - 2) / shape[i].
+    For large uniform arrays this ≈ 2 * ndim * f.size.
+    Issue #69 — old formula was `f.size` regardless of ndim.
+    """
     budget = require_budget()
     if not isinstance(f, _np.ndarray):
         f = _np.asarray(f)
+    if f.ndim == 0:
+        cost = 1
+    else:
+        cost = _builtins.max(
+            _builtins.sum(
+                2 * f.size * _builtins.max(f.shape[ax] - 2, 0) // f.shape[ax]
+                for ax in range(f.ndim)
+            ),
+            1,
+        )
     with budget.deduct(
-        "gradient", flop_cost=f.size, subscripts=None, shapes=(f.shape,)
+        "gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)
     ):
         result = _call_numpy(
             _np.gradient,
@@ -2245,7 +2265,7 @@ def gradient(
     return result  # type: ignore[return-value]  # wrapped at fnp.gradient import time
 
 
-attach_docstring(gradient, _np.gradient, "counted_custom", "numel(input) FLOPs")
+attach_docstring(gradient, _np.gradient, "counted_custom", "sum_axis(2 * f.size * (shape[ax]-2) / shape[ax]) FLOPs")
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 
 
