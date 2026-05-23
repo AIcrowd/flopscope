@@ -153,9 +153,7 @@ class TestBroadcastGroupProvenance:
         # Input shape (4, 4) broadcast to (3, 3, 4, 4):
         # two newly-broadcast leading axes of size 3 → symmetric factor on (0, 1)
         g = SymmetryGroup.symmetric(axes=(0, 1))
-        result = broadcast_group(
-            g, input_shape=(4, 4), output_shape=(3, 3, 4, 4)
-        )
+        result = broadcast_group(g, input_shape=(4, 4), output_shape=(3, 3, 4, 4))
         # Inner symmetric on input axes (0,1) remaps to output axes (2,3).
         # Plus a new symmetric on the two created (3,3) axes (0,1).
         assert result is not None

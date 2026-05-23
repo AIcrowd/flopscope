@@ -375,10 +375,7 @@ def intersect_groups(
     # Easy known-kind case — same group ∩ itself = itself. Preserve
     # provenance without enumeration. Skip trivial groups (order <= 1)
     # so the existing "None means no symmetry" convention holds.
-    if (
-        a._known_kind is not None
-        and a._known_kind == b._known_kind
-    ):
+    if a._known_kind is not None and a._known_kind == b._known_kind:
         if a.order() <= 1:
             return None
         return a

@@ -95,7 +95,9 @@ class TestDiminoBudgetExceededDoesNotEscape:
                 _warnings.simplefilter("always")
                 # Must not raise _DiminoBudgetExceeded.
                 np.multiply.outer(a, np.array([1.0]))
-        cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
+        cost_warnings = [
+            w for w in caught if issubclass(w.category, CostFallbackWarning)
+        ]
         assert len(cost_warnings) >= 1, "expected a CostFallbackWarning"
 
     def test_tensordot_does_not_raise_on_unknown_oversized_group(self):
@@ -116,5 +118,7 @@ class TestDiminoBudgetExceededDoesNotEscape:
             with _warnings.catch_warnings(record=True) as caught:
                 _warnings.simplefilter("always")
                 np.tensordot(a, b, axes=([0], [0]))
-        cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
+        cost_warnings = [
+            w for w in caught if issubclass(w.category, CostFallbackWarning)
+        ]
         assert len(cost_warnings) >= 1, "expected a CostFallbackWarning"
