@@ -600,9 +600,15 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # 33! ≈ 8.7e36 elements). The cost adjustment is irrelevant when
     # the output is trivially small anyway.
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
-        oversized_order = (
-            a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
-        )
+        try:
+            oversized_order = (
+                a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
+            )
+        except _DiminoBudgetExceeded:
+            # Unknown-kind group exceeds budget mid-enumeration; can't
+            # compute exact |G|. Use sentinel so all such groups share
+            # one dedup slot for the warning.
+            oversized_order = -1
         _warn_oversized_once(f"{ufunc.__name__}.outer", oversized_order)
         out_sym = None
         cost = dense
@@ -2070,9 +2076,15 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     a_sym = _symmetry_of(a)
     b_sym = _symmetry_of(b)
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
-        oversized_order = (
-            a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
-        )
+        try:
+            oversized_order = (
+                a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
+            )
+        except _DiminoBudgetExceeded:
+            # Unknown-kind group exceeds budget mid-enumeration; can't
+            # compute exact |G|. Use sentinel so all such groups share
+            # one dedup slot for the warning.
+            oversized_order = -1
         _warn_oversized_once("tensordot", oversized_order)
         out_sym = None
         cost = dense

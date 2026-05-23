@@ -47,3 +47,54 @@ class TestRemovedSymbols:
     def test_max_symmetry_degree_for_cost_no_longer_imports(self):
         with pytest.raises(ImportError):
             from flopscope._pointwise import _MAX_SYMMETRY_DEGREE_FOR_COST  # noqa: F401
+
+
+class TestDiminoBudgetExceededDoesNotEscape:
+    """Regression test: unknown-kind oversized groups must not leak the
+    internal :class:`_DiminoBudgetExceeded` exception to user code (issue
+    found in final review of the #71/#73 branch)."""
+
+    def test_outer_does_not_raise_on_unknown_oversized_group(self):
+        import warnings as _warnings
+
+        import numpy as np
+
+        from flopscope._symmetry_utils import wrap_with_symmetry
+        from flopscope.errors import CostFallbackWarning
+
+        flops.configure(dimino_budget=5)
+        # S_4 generators — |G| = 24 > 5, will exceed budget.
+        # from_generators produces an unknown-kind group, so order()
+        # routes through _dimino.
+        g = SymmetryGroup.from_generators(
+            [[1, 2, 3, 0], [1, 0, 2, 3]], axes=tuple(range(4))
+        )
+        a = wrap_with_symmetry(np.ones((2, 2, 2, 2)), g)
+        with flops.BudgetContext(flop_budget=int(1e10)):
+            with _warnings.catch_warnings(record=True) as caught:
+                _warnings.simplefilter("always")
+                # Must not raise _DiminoBudgetExceeded.
+                np.multiply.outer(a, np.array([1.0]))
+        cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
+        assert len(cost_warnings) >= 1, "expected a CostFallbackWarning"
+
+    def test_tensordot_does_not_raise_on_unknown_oversized_group(self):
+        import warnings as _warnings
+
+        import numpy as np
+
+        from flopscope._symmetry_utils import wrap_with_symmetry
+        from flopscope.errors import CostFallbackWarning
+
+        flops.configure(dimino_budget=5)
+        g = SymmetryGroup.from_generators(
+            [[1, 2, 3, 0], [1, 0, 2, 3]], axes=tuple(range(4))
+        )
+        a = wrap_with_symmetry(np.ones((2, 2, 2, 2)), g)
+        b = wrap_with_symmetry(np.ones((2, 2, 2, 2)), g)
+        with flops.BudgetContext(flop_budget=int(1e10)):
+            with _warnings.catch_warnings(record=True) as caught:
+                _warnings.simplefilter("always")
+                np.tensordot(a, b, axes=([0], [0]))
+        cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
+        assert len(cost_warnings) >= 1, "expected a CostFallbackWarning"
