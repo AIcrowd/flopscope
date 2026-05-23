@@ -28,10 +28,9 @@ from flopscope._ndarray import (
     _to_base_ndarray,
     _to_base_ndarray_tree,
 )
-from flopscope._symmetric import (
-    SymmetricTensor,
-    is_symmetric as _is_symmetric,
-)
+from flopscope._perm_group import SymmetryGroup
+from flopscope._symmetric import SymmetricTensor
+from flopscope._symmetric import is_symmetric as _is_symmetric
 from flopscope._symmetry_utils import (
     broadcast_group,
     direct_product_groups,
