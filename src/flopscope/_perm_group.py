@@ -230,6 +230,28 @@ def _normalize_generator_literal(
     return _Permutation(arr)
 
 
+def _closed_form_order(kind: tuple) -> int:
+    """Compute ``|G|`` for a known-kind structural fingerprint.
+
+    The tag layout is recursive: leaf kinds are ``(name, axes_tuple)``
+    where ``name`` is one of ``"identity" | "symmetric" | "cyclic" |
+    "dihedral"``; ``"direct_product"`` carries ``(name, children_tuple)``
+    where each child is itself a kind tuple.
+    """
+    name = kind[0]
+    if name == "identity":
+        return 1
+    if name == "symmetric":
+        return math.factorial(len(kind[1]))
+    if name == "cyclic":
+        return len(kind[1])
+    if name == "dihedral":
+        return 2 * len(kind[1])
+    if name == "direct_product":
+        return math.prod(_closed_form_order(child) for child in kind[1])
+    raise AssertionError(f"unknown kind {kind!r}")
+
+
 class SymmetryGroup:
     """A finite symmetry group defined by explicit generators."""
 
