@@ -999,40 +999,48 @@ class TestIssue70AutoInferredOutDowngrade:
 
     def test_inferred_out_downgrades_silently(self):
         import sys
+        import traceback
 
         import numpy as np
 
         import flopscope.numpy as fnp
         from flopscope._symmetric import SymmetricTensor
 
-        plain_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
-        mask_np = np.array(
-            [[True, False, True], [False, True, False], [True, False, True]]
-        )
-        # Wrap only `out` so the marker is set; keep inputs plain to avoid
-        # routing the `expected = np.where(...)` computation through
-        # flopscope's __array_function__ dispatch.
-        out = fnp.zeros_like(plain_np)
-        assert isinstance(out, SymmetricTensor), (
-            f"zeros_like(plain_3x3) should return SymmetricTensor, got {type(out).__name__}"
-        )
-        assert out._symmetry_inferred is True, (
-            f"out._symmetry_inferred should be True, got {out._symmetry_inferred!r}"
-        )
+        def _emit(msg):
+            # sys.__stderr__ bypasses pytest's capture and survives the xdist
+            # watchdog truncation that suppresses normal failure tracebacks.
+            print(f"[canary] {msg}", file=sys.__stderr__, flush=True)
 
-        np.positive(plain_np, out=out, where=mask_np)
-        # `out` must contain the masked write; we don't assert its type here
-        # because numpy's __array_ufunc__ flow may have replaced the wrapper.
-        expected = np.where(mask_np, plain_np, 0.0)
-        actual = np.asarray(out)
-        # Diagnostic via stderr in case xdist watchdog truncates the failure
-        # traceback at session-end (which it does under load).
-        if not np.array_equal(actual, expected):
-            sys.stderr.write(
-                f"\n[canary diagnostic] actual={actual!r} expected={expected!r}\n"
+        try:
+            plain_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+            mask_np = np.array(
+                [[True, False, True], [False, True, False], [True, False, True]]
             )
-            sys.stderr.flush()
-        np.testing.assert_array_equal(actual, expected)
+            out = fnp.zeros_like(plain_np)
+            _emit(f"out type={type(out).__name__}")
+            _emit(
+                f"out._symmetry_inferred={getattr(out, '_symmetry_inferred', 'MISSING')!r}"
+            )
+            _emit(f"out.symmetry={getattr(out, 'symmetry', 'MISSING')!r}")
+
+            assert isinstance(out, SymmetricTensor), (
+                f"zeros_like(plain_3x3) should return SymmetricTensor, "
+                f"got {type(out).__name__}"
+            )
+            assert out._symmetry_inferred is True, (
+                f"out._symmetry_inferred should be True, got {out._symmetry_inferred!r}"
+            )
+
+            np.positive(plain_np, out=out, where=mask_np)
+            expected = np.where(mask_np, plain_np, 0.0)
+            actual = np.asarray(out)
+            _emit(f"actual={actual.tolist()}")
+            _emit(f"expected={expected.tolist()}")
+            np.testing.assert_array_equal(actual, expected)
+        except BaseException as exc:
+            _emit(f"FAILED: {type(exc).__name__}: {exc}")
+            _emit("traceback:\n" + traceback.format_exc())
+            raise
 
     def test_explicit_symmetry_out_still_raises(self):
         import numpy as np
