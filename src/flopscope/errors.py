@@ -143,14 +143,15 @@ class CostFallbackWarning(FlopscopeWarning):
     """Warning issued when flopscope skips its symmetry-aware cost adjustment.
 
     The output's symmetry group is too large for the placeholder cost
-    model's Burnside enumeration (degree above the per-call threshold,
-    typically 12). The op runs correctly with the dense cost charged
+    model's Burnside enumeration — its order ``|G|`` exceeds the configured
+    ``dimino_budget``. The op runs correctly with the dense cost charged
     instead — only the FLOP accounting is conservative; the data is
     unaffected. Common trigger: ``np.ones((1,)*n)`` for large ``n`` or
     other auto-inferred ``S_n`` symmetries on degenerate shapes.
 
-    Suppress with ``flops.configure(symmetry_warnings=False)`` (shares the
-    flag with :class:`SymmetryLossWarning` since both are
+    Tune the threshold with ``flops.configure(dimino_budget=...)``. Suppress
+    the warning with ``flops.configure(symmetry_warnings=False)`` (shares
+    the flag with :class:`SymmetryLossWarning` since both are
     symmetry-related diagnostics).
     """
 

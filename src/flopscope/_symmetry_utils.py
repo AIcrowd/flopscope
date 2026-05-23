@@ -127,6 +127,33 @@ def _unique_elements_for_shape_cached(
     return result
 
 
+def _build_from_kind(kind: tuple) -> SymmetryGroup | None:
+    """Construct an interned SymmetryGroup from a ``_known_kind`` tag.
+
+    Routes through the public factory matching the kind name. Returns
+    ``None`` for trivial (identity) kinds, since callers expect ``None``
+    to represent "no non-trivial symmetry."
+    """
+    name = kind[0]
+    if name == "identity":
+        return None
+    if name == "symmetric":
+        return SymmetryGroup.symmetric(axes=kind[1])
+    if name == "cyclic":
+        return SymmetryGroup.cyclic(axes=kind[1])
+    if name == "dihedral":
+        return SymmetryGroup.dihedral(axes=kind[1])
+    if name == "direct_product":
+        children = [_build_from_kind(child) for child in kind[1]]
+        non_trivial = [c for c in children if c is not None]
+        if not non_trivial:
+            return None
+        if len(non_trivial) == 1:
+            return non_trivial[0]
+        return SymmetryGroup.direct_product(*non_trivial)
+    raise AssertionError(f"unknown kind {kind!r}")
+
+
 def embed_group(group: SymmetryGroup | None, ndim: int) -> SymmetryGroup | None:
     """Embed a group acting on selected tensor axes into full rank ``ndim``."""
     if group is None:
@@ -152,7 +179,15 @@ def restrict_group_to_axes(
     group: SymmetryGroup | None,
     axes: Iterable[int],
 ) -> SymmetryGroup | None:
-    """Restrict a group to a specific ordered subset of its tensor axes."""
+    """Restrict a group to a specific ordered subset of its tensor axes.
+
+    The helper composes :meth:`SymmetryGroup.setwise_stabilizer` and
+    :meth:`SymmetryGroup.restrict` so strict subsets of free-permuting groups
+    (e.g. ``symmetric(A)``) project cleanly to a sub-action. Provenance is
+    preserved only in the no-op case (``axes == group.axes``); strict-subset
+    results carry ``_known_kind=None`` — the "sub-symmetric is still symmetric"
+    rule lives in ``reduce_group``, not here.
+    """
     if group is None:
         return None
     validate_symmetry_group(group)
@@ -160,6 +195,9 @@ def restrict_group_to_axes(
     if group_axes is None:
         group_axes = tuple(range(group.degree))
     wanted_axes = _normalize_axis_tuple(axes, what="restricted axes")
+    if wanted_axes == group_axes:
+        # No-op: kind passes through via the interned original.
+        return group
     local_indices = []
     for axis in wanted_axes:
         if axis not in group_axes:
@@ -179,6 +217,84 @@ def restrict_group_to_axes(
     return restricted
 
 
+def _remap_kind(kind: tuple | None, axis_map: Mapping[Any, Any]) -> tuple | None:
+    """Apply ``axis_map`` to the axes inside a ``_known_kind`` tag.
+
+    Returns ``None`` if any leaf axis is missing from the map (caller's
+    responsibility to ensure full coverage).
+    """
+    if kind is None:
+        return None
+    name = kind[0]
+    if name in ("identity", "symmetric", "cyclic", "dihedral"):
+        try:
+            return (name, tuple(axis_map[a] for a in kind[1]))
+        except KeyError:
+            return None
+    if name == "direct_product":
+        children = tuple(_remap_kind(child, axis_map) for child in kind[1])
+        if any(child is None for child in children):
+            return None
+        return ("direct_product", tuple(sorted(children, key=repr)))
+    return None
+
+
+def _reduced_kind(
+    kind: tuple | None,
+    *,
+    reduced_axes: set[int],
+    axis_map: Mapping[Any, Any],
+) -> tuple | None:
+    """Compute the reduced kind tag for a known-kind group.
+
+    ``reduced_axes`` is the set of tensor axes being reduced over (in the
+    parent group's axis space). ``axis_map`` is the surviving-axes mapping
+    from old tensor axes to new tensor positions (post-reduction layout).
+
+    Returns ``None`` if the result is trivial or can't be expressed in
+    closed form.
+    """
+    if kind is None:
+        return None
+    name = kind[0]
+    if name == "identity":
+        kept = tuple(axis_map[a] for a in kind[1] if a not in reduced_axes)
+        if not kept:
+            return None
+        return ("identity", kept)
+    if name == "symmetric":
+        kept = tuple(axis_map[a] for a in kind[1] if a not in reduced_axes)
+        if len(kept) < 2:
+            return None
+        return ("symmetric", kept)
+    if name == "cyclic":
+        # Cyclic only survives if NONE of its axes are reduced (the cycle
+        # would otherwise no longer be a closed orbit on the kept axes).
+        if any(a in reduced_axes for a in kind[1]):
+            return None
+        kept = tuple(axis_map[a] for a in kind[1])
+        return ("cyclic", kept)
+    if name == "dihedral":
+        if any(a in reduced_axes for a in kind[1]):
+            return None
+        kept = tuple(axis_map[a] for a in kind[1])
+        return ("dihedral", kept)
+    if name == "direct_product":
+        new_children = []
+        for child in kind[1]:
+            new_child = _reduced_kind(
+                child, reduced_axes=reduced_axes, axis_map=axis_map
+            )
+            if new_child is not None:
+                new_children.append(new_child)
+        if not new_children:
+            return None
+        if len(new_children) == 1:
+            return new_children[0]
+        return ("direct_product", tuple(sorted(new_children, key=repr)))
+    return None
+
+
 def remap_group_axes(
     group: SymmetryGroup | None,
     axis_map: Mapping[int, int],
@@ -196,10 +312,15 @@ def remap_group_axes(
             raise ValueError(f"missing remap for axis {axis}")
         remapped_axes.append(axis_map[axis])
     _normalize_axis_tuple(remapped_axes, what="remapped axes")
-    return SymmetryGroup.from_generators(
+    remapped = SymmetryGroup.from_generators(
         group.generator_literals,  # pyright: ignore[reportArgumentType]
         axes=tuple(remapped_axes),  # type: ignore[arg-type]
     )
+    new_kind = _remap_kind(group._known_kind, axis_map)
+    if new_kind is not None:
+        remapped._known_kind = new_kind
+        remapped = SymmetryGroup._intern(remapped)
+    return remapped
 
 
 def remap_group_for_expand_dims(
@@ -252,6 +373,13 @@ def intersect_groups(
     """Intersect two groups after embedding them into the same tensor rank."""
     if a is None or b is None:
         return None
+    # Easy known-kind case — same group ∩ itself = itself. Preserve
+    # provenance without enumeration. Skip trivial groups (order <= 1)
+    # so the existing "None means no symmetry" convention holds.
+    if a._known_kind is not None and a._known_kind == b._known_kind:
+        if a.order() <= 1:
+            return None
+        return a
     if a.axes is not None and b.axes is not None and a.axes == b.axes:
         common = sorted(
             set(a.elements()) & set(b.elements()),
@@ -444,6 +572,18 @@ def reduce_group(
             if dim not in axes_set:
                 old_to_new[dim] = new_idx
                 new_idx += 1
+
+    # Fast path for known-kind groups: compute the reduced kind directly
+    # and route through the appropriate factory. Avoids _dimino entirely.
+    if group._known_kind is not None:
+        reduced_kind = _reduced_kind(
+            group._known_kind, reduced_axes=axes_set, axis_map=old_to_new
+        )
+        if reduced_kind is not None:
+            return _build_from_kind(reduced_kind)
+        # Fall through to the generic path if the kind can't be reduced
+        # in closed form (e.g. partial reduction of a direct_product child
+        # whose own kind doesn't survive).
 
     group_axes = group.axes
     if group_axes is None:

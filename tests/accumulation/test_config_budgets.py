@@ -9,8 +9,11 @@ def test_partition_budget_default_is_100k():
     assert get_setting("partition_budget") == 100_000
 
 
-def test_dimino_budget_default_is_500k():
-    assert get_setting("dimino_budget") == 500_000
+def test_dimino_budget_default_is_50k():
+    # Lowered from 500_000 to 50_000 alongside the order-based gate from #71.
+    # |S_8| = 40_320 fits with margin; |S_9| = 362_880 does not.
+    # See benchmarks/_perm_group_calibration.py for the empirical justification.
+    assert get_setting("dimino_budget") == 50_000
 
 
 def test_partition_budget_can_be_overridden():

@@ -504,21 +504,22 @@ frac, integer = fnp.modf(S)   # both SymmetricTensor with the same symmetry
 `out=(o1, o2)` works (per-slot identity is preserved), and `out=(o1, None)`
 lets numpy allocate just the second slot.
 
-### Cost model is a placeholder above degree 12
+### Cost model is a placeholder above the `dimino_budget` group order
 
 Flopscope charges `dense_cost × unique_output_elements / dense_output_elements` for
 `ufunc.outer` and `tensordot` as a coarse proxy for the savings a
 symmetry-aware implementation could realise. The underlying NumPy call still
 does dense work; only the budget reflects the savings.
 
-For a `SymmetryGroup` with degree above **12**, flopscope skips this adjustment and
-charges the full dense cost — `Burnside` enumeration on `S_n` for `n > 12`
-becomes infeasible (`13! ≈ 6.2 × 10⁹`). The skip is announced via
-`CostFallbackWarning`:
+For a `SymmetryGroup` whose order `|G|` exceeds the configured `dimino_budget`
+(default **50,000** — accepts up to `|S_8| = 40,320` with a small margin),
+flopscope skips this adjustment and charges the full dense cost. Burnside
+enumeration on the group would otherwise iterate every element. The skip is
+announced via `CostFallbackWarning`:
 
 ```python
 import warnings
-deep = fnp.ones((1,) * 33)   # auto-inferred S_33 symmetry
+deep = fnp.ones((1,) * 33)   # auto-inferred S_33 symmetry; |G| = 33! ≈ 8.7 × 10³⁶
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
     with flops.BudgetContext(flop_budget=int(1e10)):
@@ -528,11 +529,22 @@ with warnings.catch_warnings(record=True) as caught:
             pass   # ndim>64 — the warning still fires before numpy refuses
 ```
 
-This is rare in practice — common user tensors have degree ≤ 8 — but high-rank
-auto-inferred symmetries on degenerate shapes (`(1,)*N` for large `N`) trip
-the cap. The warning fires once per `(op_name, degree)` pair per process to
+This is rare in practice — common user tensors have small group orders — but
+high-rank auto-inferred symmetries on degenerate shapes (`(1,)*N` for large `N`)
+trip the cap. The warning fires once per `(op_name, |G|)` pair per process to
 avoid log flooding. Suppress with `flops.configure(symmetry_warnings=False)`,
 which shares the flag with `SymmetryLossWarning`.
+
+The gate keys on `|G|` rather than degree because `|G|` is the actual driver
+of enumeration cost. A high-degree but small-order group like
+`SymmetryGroup.cyclic(axes=tuple(range(50)))` (degree 50, `|G| = 50`) passes
+the gate easily, whereas `SymmetryGroup.symmetric(axes=tuple(range(9)))`
+(degree 9, `|G| = 362,880`) bails. For known group families
+(`symmetric`, `cyclic`, `dihedral`, `young`, `direct_product`) `order()` is
+closed-form O(1), so the check itself never enumerates. Tune the budget with
+`flops.configure(dimino_budget=...)`, or run
+`python -m benchmarks._perm_group_calibration` for a recommendation tied to
+your host machine.
 
 A proper algorithmic-cost model is a follow-up.
 

@@ -16,10 +16,15 @@ Core algorithms:
 from __future__ import annotations
 
 import math
+import weakref
 from functools import reduce
 from typing import Any
 
 __all__ = ["SymmetryGroup"]
+
+_GROUP_INTERN: weakref.WeakValueDictionary[tuple, SymmetryGroup] = (
+    weakref.WeakValueDictionary()
+)
 
 
 class _Cycle:
@@ -234,10 +239,33 @@ def _normalize_generator_literal(
     return _Permutation(arr)
 
 
+def _closed_form_order(kind: tuple) -> int:
+    """Compute ``|G|`` for a known-kind structural fingerprint.
+
+    The tag layout is recursive: leaf kinds are ``(name, axes_tuple)``
+    where ``name`` is one of ``"identity" | "symmetric" | "cyclic" |
+    "dihedral"``; ``"direct_product"`` carries ``(name, children_tuple)``
+    where each child is itself a kind tuple.
+    """
+    name = kind[0]
+    if name == "identity":
+        return 1
+    if name == "symmetric":
+        return math.factorial(len(kind[1]))
+    if name == "cyclic":
+        return len(kind[1])
+    if name == "dihedral":
+        return 2 * len(kind[1])
+    if name == "direct_product":
+        return math.prod(_closed_form_order(child) for child in kind[1])
+    raise AssertionError(f"unknown kind {kind!r}")
+
+
 class SymmetryGroup:
     """A finite symmetry group defined by explicit generators."""
 
     __slots__ = (
+        "__weakref__",
         "_generators",
         "_degree",
         "_axes",
@@ -245,6 +273,7 @@ class SymmetryGroup:
         "_order",
         "_labels",
         "_canonical_action_cache",
+        "_known_kind",
     )
 
     def __init__(
@@ -270,6 +299,7 @@ class SymmetryGroup:
         self._axes = axes
         self._elements: list[_Permutation] | None = None
         self._order: int | None = None
+        self._known_kind: tuple | None = None
         self._labels: tuple[str, ...] | None = None
         self._canonical_action_cache: (
             tuple[
@@ -330,6 +360,9 @@ class SymmetryGroup:
 
     def order(self) -> int:
         if self._order is not None:
+            return self._order
+        if self._known_kind is not None:
+            self._order = _closed_form_order(self._known_kind)
             return self._order
         self._order = len(self.elements())
         return self._order
@@ -493,22 +526,30 @@ class SymmetryGroup:
         norm_axes = _normalize_axes(axes)
         k = len(norm_axes)
         if k == 1:
-            return cls(_Permutation.identity(1), axes=norm_axes)
+            g = cls(_Permutation.identity(1), axes=norm_axes)
+            g._known_kind = ("identity", norm_axes)
+            return cls._intern(g)
         gens = []
         for i in range(k - 1):
             arr = list(range(k))
             arr[i], arr[i + 1] = arr[i + 1], arr[i]
             gens.append(_Permutation(arr))
-        return cls(*gens, axes=norm_axes)
+        g = cls(*gens, axes=norm_axes)
+        g._known_kind = ("symmetric", norm_axes)
+        return cls._intern(g)
 
     @classmethod
     def cyclic(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
         norm_axes = _normalize_axes(axes)
         k = len(norm_axes)
         if k == 1:
-            return cls(_Permutation.identity(1), axes=norm_axes)
+            g = cls(_Permutation.identity(1), axes=norm_axes)
+            g._known_kind = ("identity", norm_axes)
+            return cls._intern(g)
         gen = _Permutation(list(range(1, k)) + [0])
-        return cls(gen, axes=norm_axes)
+        g = cls(gen, axes=norm_axes)
+        g._known_kind = ("cyclic", norm_axes)
+        return cls._intern(g)
 
     @classmethod
     def dihedral(cls, *, axes: tuple[Any, ...] | list[Any]) -> SymmetryGroup:
@@ -518,7 +559,9 @@ class SymmetryGroup:
             return cls.symmetric(axes=norm_axes)
         rotation = _Permutation(list(range(1, k)) + [0])
         reflection = _Permutation([0] + list(range(k - 1, 0, -1)))
-        return cls(rotation, reflection, axes=norm_axes)
+        g = cls(rotation, reflection, axes=norm_axes)
+        g._known_kind = ("dihedral", norm_axes)
+        return cls._intern(g)
 
     @classmethod
     def young(
@@ -565,7 +608,31 @@ class SymmetryGroup:
 
         if not generators:
             generators.append(_Permutation.identity(total_degree))
-        return cls(*generators, axes=tuple(merged_axes))
+        g = cls(*generators, axes=tuple(merged_axes))
+        child_kinds = tuple(group._known_kind for group in groups)
+        if all(kind is not None for kind in child_kinds):
+            g._known_kind = ("direct_product", tuple(sorted(child_kinds, key=repr)))
+        return cls._intern(g)
+
+    @classmethod
+    def _intern(cls, group: SymmetryGroup) -> SymmetryGroup:
+        """Return the canonical instance for ``group``'s known kind.
+
+        Unknown-kind groups (``_known_kind is None``) are returned as-is
+        without registry interaction. Known-kind groups participate in
+        process-wide interning by ``_known_kind`` — the first construction
+        wins the registry slot; subsequent equivalent constructions return
+        the same Python object so caches (``_order``, ``_elements``,
+        ``_canonical_action_cache``) are shared across the equivalence
+        class.
+        """
+        if group._known_kind is None:
+            return group
+        existing = _GROUP_INTERN.get(group._known_kind)
+        if existing is not None:
+            return existing
+        _GROUP_INTERN[group._known_kind] = group
+        return group
 
     def as_sympy(self):
         try:
@@ -612,7 +679,7 @@ class _DiminoBudgetExceeded(Exception):
 def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
     """Enumerate all group elements via Dimino's algorithm.
 
-    Consults the configured ``dimino_budget`` setting (default 500_000); if the
+    Consults the configured ``dimino_budget`` setting (default 50_000); if the
     seen-set size exceeds the budget, raises :class:`_DiminoBudgetExceeded`
     instead of running indefinitely. Callers should catch and fall back to a
     dense (no-symmetry) cost via :class:`flopscope.errors.CostFallbackWarning`.

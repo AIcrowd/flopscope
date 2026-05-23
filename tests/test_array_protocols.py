@@ -350,7 +350,7 @@ def test_np_add_outer_warns_and_bails_on_oversized_symmetry():
     """High-degree symmetry groups (e.g. ``S_n`` from ``np.ones((1,)*n)``
     for large ``n``) would require Burnside enumeration on ``n!``
     elements, which is infeasible. The wrapper bails to dense cost and
-    emits :class:`CostFallbackWarning` once per ``(op, degree)``."""
+    emits :class:`CostFallbackWarning` once per ``(op, |G|)``."""
     import warnings as _warnings
 
     from flopscope.errors import CostFallbackWarning
@@ -367,7 +367,8 @@ def test_np_add_outer_warns_and_bails_on_oversized_symmetry():
                 np.add.outer(deep, deep)
     cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
     assert len(cost_warnings) == 1, [str(w.message) for w in caught]
-    assert "degree 33" in str(cost_warnings[0].message)
+    assert "order " in str(cost_warnings[0].message)
+    assert "budget " in str(cost_warnings[0].message)
 
 
 def test_cost_fallback_warning_suppressed_by_configure():
