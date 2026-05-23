@@ -58,8 +58,8 @@ _FORMULA_STRINGS: dict[str, str] = {
     "ediff1d": "n",
     "gradient": "n",
     "unwrap": "7 * n",
-    "convolve": "n * k",
-    "correlate": "n * k",
+    "convolve": "2*n*k - n - k",
+    "correlate": "2*n*k - n - k",
     "corrcoef": "f^2 * s",
     "cov": "f^2 * s",
     "cross": "6 * n",
@@ -109,10 +109,10 @@ def _analytical_cost(op: str, **kwargs: int) -> int:
     if op == "unwrap":
         return 7 * n
 
-    # --- Convolution/correlation (cost = n * k) ---
+    # --- Convolution/correlation (cost = 2*n*k - n - k, FMA=1, issue #69) ---
     if op in ("convolve", "correlate"):
         k = kwargs.get("k", 1000)
-        return n * k
+        return max(2 * n * k - n - k, 1)
 
     # --- Statistical ---
     if op in ("corrcoef", "cov"):

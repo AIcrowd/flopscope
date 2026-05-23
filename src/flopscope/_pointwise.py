@@ -2311,7 +2311,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(v, _np.ndarray):
         v = _np.asarray(v)
-    cost = _builtins.max(a.size * v.size, 1)
+    cost = _builtins.max(2 * a.size * v.size - a.size - v.size, 1)
     with budget.deduct(
         "convolve",
         flop_cost=cost,
@@ -2324,7 +2324,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
     return result  # type: ignore[return-value]  # wrapped at fnp.convolve import time
 
 
-attach_docstring(convolve, _np.convolve, "counted_custom", "n * m FLOPs")
+attach_docstring(convolve, _np.convolve, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)")
 
 
 @_counted_wrapper

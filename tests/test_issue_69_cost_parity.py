@@ -227,6 +227,33 @@ CASES.extend([
 ])
 
 
+def _setup_convolve(rng):
+    a = fnp.asarray(rng.random((200,)))
+    v = fnp.asarray(rng.random((50,)))
+    return (a, v), {}
+
+
+def _oracle_convolve(a, v):
+    # Convolution does 2*a*v - a - v FMA-1 ops.
+    # We synthesize an oracle by creating a plain numpy array of the equivalent
+    # size and firing one fnp.multiply that charges exactly that many ops.
+    # Use np.zeros (not fnp.asarray) to avoid charging extra asarray FLOPs.
+    s = 2 * a.size * v.size - a.size - v.size
+    probe = np.zeros(s)
+    fnp.multiply(probe, 1.0)
+
+
+CASES.append(
+    CostParityCase(
+        name="convolve",
+        setup=_setup_convolve,
+        wrapper=fnp.convolve,
+        oracle=_oracle_convolve,
+        tolerance=0.0,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""
