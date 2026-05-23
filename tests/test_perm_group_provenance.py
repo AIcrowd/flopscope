@@ -27,6 +27,7 @@ class TestEmbedGroupProvenance:
         embedded = embed_group(g, ndim=3)
         # No rank change → same instance via interning
         assert embedded is g
+        assert embedded is not None
         assert embedded._known_kind == ("symmetric", (0, 1, 2))
 
 
@@ -34,11 +35,13 @@ class TestRemapGroupAxesProvenance:
     def test_remap_leaf_kind_symmetric(self):
         g = SymmetryGroup.symmetric(axes=(0, 1, 2))
         remapped = remap_group_axes(g, {0: 3, 1: 4, 2: 5})
+        assert remapped is not None
         assert remapped._known_kind == ("symmetric", (3, 4, 5))
 
     def test_remap_leaf_kind_cyclic(self):
         g = SymmetryGroup.cyclic(axes=(0, 1, 2))
         remapped = remap_group_axes(g, {0: 3, 1: 4, 2: 5})
+        assert remapped is not None
         assert remapped._known_kind == ("cyclic", (3, 4, 5))
 
     def test_remap_direct_product_recurses(self):
@@ -47,6 +50,7 @@ class TestRemapGroupAxesProvenance:
             SymmetryGroup.cyclic(axes=(2, 3, 4)),
         )
         remapped = remap_group_axes(g, {0: 10, 1: 11, 2: 12, 3: 13, 4: 14})
+        assert remapped is not None
         # After sort: cyclic(12,13,14) < symmetric(10,11) lexicographically
         assert remapped._known_kind == (
             "direct_product",
@@ -60,6 +64,7 @@ class TestRestrictGroupToAxesProvenance:
         restricted = restrict_group_to_axes(g, axes=(0, 1, 2, 3))
         # Identity restriction → same instance via interning
         assert restricted is g
+        assert restricted is not None
         assert restricted._known_kind == ("symmetric", (0, 1, 2, 3))
 
     def test_restrict_to_full_axes_preserves_cyclic_kind(self):
@@ -84,6 +89,7 @@ class TestIntersectGroupsProvenance:
         assert a is b  # sanity: interning works
         result = intersect_groups(a, b, ndim=3)
         assert result is a
+        assert result is not None
         assert result._known_kind == ("symmetric", (0, 1, 2))
 
     def test_identity_kind_intersect_returns_none(self):

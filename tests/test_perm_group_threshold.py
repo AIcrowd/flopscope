@@ -65,8 +65,11 @@ class TestShippedDefaultBudget:
 
 class TestRemovedSymbols:
     def test_max_symmetry_degree_for_cost_no_longer_imports(self):
-        with pytest.raises(ImportError):
-            from flopscope._pointwise import _MAX_SYMMETRY_DEGREE_FOR_COST  # noqa: F401
+        import importlib
+
+        module = importlib.import_module("flopscope._pointwise")
+        with pytest.raises(AttributeError):
+            module._MAX_SYMMETRY_DEGREE_FOR_COST  # noqa: B018
 
 
 class TestDiminoBudgetExceededDoesNotEscape:

@@ -111,7 +111,7 @@ def _is_oversized_for_cost_model(group):
     """
     if group is None:
         return False
-    budget = int(_get_setting("dimino_budget"))
+    budget = int(_get_setting("dimino_budget"))  # type: ignore[arg-type]
     try:
         return group.order() > budget
     except _DiminoBudgetExceeded:
@@ -148,7 +148,7 @@ def _warn_oversized_once(op_name: str, group_order: int) -> None:
     _seen_oversized(op_name, group_order)
     if _seen_oversized.cache_info().hits > info_before.hits:
         return  # already warned for this (op, |G|) pair
-    budget = int(_get_setting("dimino_budget"))
+    budget = int(_get_setting("dimino_budget"))  # type: ignore[arg-type]
     _warnings.warn(
         f"{op_name}: skipping symmetry-aware cost adjustment for a "
         f"SymmetryGroup of order {group_order} (budget {budget}); "
