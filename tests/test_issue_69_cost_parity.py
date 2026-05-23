@@ -185,6 +185,48 @@ CASES.append(
 )
 
 
+def _setup_matrix_power_4(rng):
+    a = fnp.asarray(np.eye(20) + 0.001 * rng.random((20, 20)))
+    return (a, 4), {}
+
+
+def _oracle_matrix_power_4(a, n):
+    # Binary squaring for n=4: A^2 = A @ A; A^4 = A^2 @ A^2 -> 2 matmuls
+    a2 = fnp.matmul(a, a)
+    fnp.matmul(a2, a2)
+
+
+def _setup_matrix_power_16(rng):
+    a = fnp.asarray(np.eye(20) + 0.001 * rng.random((20, 20)))
+    return (a, 16), {}
+
+
+def _oracle_matrix_power_16(a, n):
+    # 16 = 2^4, 4 squarings
+    a2 = fnp.matmul(a, a)
+    a4 = fnp.matmul(a2, a2)
+    a8 = fnp.matmul(a4, a4)
+    fnp.matmul(a8, a8)
+
+
+CASES.extend([
+    CostParityCase(
+        name="matrix_power_4",
+        setup=_setup_matrix_power_4,
+        wrapper=fnp.linalg.matrix_power,
+        oracle=_oracle_matrix_power_4,
+        tolerance=0.01,
+    ),
+    CostParityCase(
+        name="matrix_power_16",
+        setup=_setup_matrix_power_16,
+        wrapper=fnp.linalg.matrix_power,
+        oracle=_oracle_matrix_power_16,
+        tolerance=0.01,
+    ),
+])
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

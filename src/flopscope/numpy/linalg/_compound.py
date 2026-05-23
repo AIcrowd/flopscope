@@ -100,7 +100,7 @@ attach_docstring(
 
 
 def matrix_power_cost(n: int, k: int) -> int:
-    """FLOP cost of matrix power A**k.
+    """FLOP cost of matrix power ``A**k``.
 
     Parameters
     ----------
@@ -116,15 +116,20 @@ def matrix_power_cost(n: int, k: int) -> int:
 
     Notes
     -----
-    Uses exponentiation by repeated squaring. For $k < 0$, adds $n^3$ for
-    the initial matrix inversion.
+    Uses exponentiation by repeated squaring. For ``k < 0``, adds ``n**3``
+    for the initial matrix inversion. Per-matmul cost is delegated to
+    ``matmul_cost(n, n, n)`` so this formula tracks ``fnp.matmul``'s
+    convention automatically (issue #69; the FMA=2 unification of
+    2026-05-20 previously left this wrapper undercounting by ~2x).
     """
+    from flopscope._flops import matmul_cost
+
     if k == 0 or k == 1:
         return 0
     if k < 0:
         return n**3 + matrix_power_cost(n, abs(k))
     num_ops = math.floor(math.log2(k)) + _popcount(k) - 1
-    return max(num_ops * n**3, 1)
+    return max(num_ops * matmul_cost(n, n, n), 1)
 
 
 @_counted_wrapper

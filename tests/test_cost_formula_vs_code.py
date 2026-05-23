@@ -574,8 +574,9 @@ class TestLinalgDelegates:
         )
 
     def test_matrix_power(self, we):
-        # k=4: ceil(log2(4))=2, popcount(4)=1, (2+1-1)*8^3 = 1024
-        assert _cost_of(we.linalg.matrix_power, numpy.random.rand(8, 8), 4) == 1024
+        # k=4: floor(log2(4))=2, popcount(4)=1, num_ops=(2+1-1)=2 matmuls
+        # matmul_cost(8,8,8) = 2*512 - 64 = 960; total = 2*960 = 1920
+        assert _cost_of(we.linalg.matrix_power, numpy.random.rand(8, 8), 4) == 1920
 
 
 # ---------------------------------------------------------------------------

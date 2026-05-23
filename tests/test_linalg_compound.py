@@ -54,8 +54,9 @@ class TestMatrixPower:
             from flopscope.numpy.linalg import matrix_power
 
             matrix_power(A, 3)
-            # k=3: floor(log2(3))=1, popcount(3)=2, cost = (1+2-1)*n^3 = 2*n^3
-            assert budget.flops_used == 2 * n**3
+            # k=3: floor(log2(3))=1, popcount(3)=2, num_ops=(1+2-1)=2 matmuls
+            # matmul_cost(4,4,4) = 2*64 - 16 = 112; total = 2*112 = 224
+            assert budget.flops_used == 2 * (2 * n**3 - n**2)
 
     def test_cost_power_0(self):
         n = 4
@@ -82,8 +83,9 @@ class TestMatrixPower:
             from flopscope.numpy.linalg import matrix_power
 
             matrix_power(A, -2)
-            # inv: n^3 + power k=2: (1+1-1)*n^3 = n^3, total = 2*n^3
-            assert budget.flops_used == 2 * n**3
+            # inv: n^3 + power k=2: num_ops=(1+1-1)=1 matmul
+            # matmul_cost(3,3,3) = 2*27 - 9 = 45; total = 27 + 45 = 72
+            assert budget.flops_used == n**3 + (2 * n**3 - n**2)
 
     def test_outside_context_uses_global_default(self):
         from flopscope.numpy.linalg import matrix_power
