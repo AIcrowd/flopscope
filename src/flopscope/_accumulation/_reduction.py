@@ -26,7 +26,11 @@ def _normalize_axis(
     - int → singleton, with negative-index wrapping
     - tuple/list → sorted unique, with negative-index wrapping
     """
-    if axis is None:
+    if axis is None or ndim == 0:
+        # 0-d input has no reducible axes. Numpy accepts ``axis=0`` on 0-d
+        # arrays as a no-op (matching ``ufunc.reduce``'s default) and raises
+        # for any other concrete axis before this cost path is reached, so
+        # we short-circuit instead of evaluating ``axis % 0``.
         return tuple(range(ndim))
     if isinstance(axis, int):
         return (axis % ndim,)

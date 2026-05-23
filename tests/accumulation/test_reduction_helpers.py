@@ -24,6 +24,26 @@ def test_normalize_axis_tuple_with_negatives():
     assert _normalize_axis((-1, 0), ndim=3) == (0, 2)
 
 
+def test_normalize_axis_zero_dim_array_with_none():
+    """A 0-d array has no axes; full reduction is a no-op."""
+    assert _normalize_axis(None, ndim=0) == ()
+
+
+def test_normalize_axis_zero_dim_array_with_default_axis():
+    """``ufunc.reduce`` passes ``axis=0`` by default; numpy treats this as a
+    no-op on 0-d input (and raises for axis>=1). Match that — return ``()``
+    instead of dividing by ``ndim=0``.
+    """
+    assert _normalize_axis(0, ndim=0) == ()
+
+
+def test_normalize_axis_zero_dim_array_with_tuple_axis():
+    """The tuple branch must also short-circuit on ``ndim=0`` to avoid
+    ``a % 0`` for each tuple element.
+    """
+    assert _normalize_axis((0,), ndim=0) == ()
+
+
 def test_num_output_orbits_no_symmetry_full_reduce_to_scalar():
     assert _num_output_orbits((4, 4), axes_summed=(0, 1), symmetry=None) == 1
 
