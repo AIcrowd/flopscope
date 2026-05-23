@@ -998,20 +998,41 @@ class TestIssue70AutoInferredOutDowngrade:
     """
 
     def test_inferred_out_downgrades_silently(self):
+        import sys
+
         import numpy as np
 
         import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
 
-        plain = fnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
-        out = fnp.zeros_like(plain)
-        mask = fnp.array(
+        plain_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        mask_np = np.array(
             [[True, False, True], [False, True, False], [True, False, True]]
         )
-        np.positive(plain, out=out, where=mask)
+        # Wrap only `out` so the marker is set; keep inputs plain to avoid
+        # routing the `expected = np.where(...)` computation through
+        # flopscope's __array_function__ dispatch.
+        out = fnp.zeros_like(plain_np)
+        assert isinstance(out, SymmetricTensor), (
+            f"zeros_like(plain_3x3) should return SymmetricTensor, got {type(out).__name__}"
+        )
+        assert out._symmetry_inferred is True, (
+            f"out._symmetry_inferred should be True, got {out._symmetry_inferred!r}"
+        )
+
+        np.positive(plain_np, out=out, where=mask_np)
         # `out` must contain the masked write; we don't assert its type here
         # because numpy's __array_ufunc__ flow may have replaced the wrapper.
-        expected = np.where(mask, plain, 0.0)
-        np.testing.assert_array_equal(np.asarray(out), expected)
+        expected = np.where(mask_np, plain_np, 0.0)
+        actual = np.asarray(out)
+        # Diagnostic via stderr in case xdist watchdog truncates the failure
+        # traceback at session-end (which it does under load).
+        if not np.array_equal(actual, expected):
+            sys.stderr.write(
+                f"\n[canary diagnostic] actual={actual!r} expected={expected!r}\n"
+            )
+            sys.stderr.flush()
+        np.testing.assert_array_equal(actual, expected)
 
     def test_explicit_symmetry_out_still_raises(self):
         import numpy as np
