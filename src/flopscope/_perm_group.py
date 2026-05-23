@@ -241,6 +241,7 @@ class SymmetryGroup:
         "_order",
         "_labels",
         "_canonical_action_cache",
+        "_known_kind",
     )
 
     def __init__(
@@ -266,6 +267,7 @@ class SymmetryGroup:
         self._axes = axes
         self._elements: list[_Permutation] | None = None
         self._order: int | None = None
+        self._known_kind: tuple | None = None
         self._labels: tuple[str, ...] | None = None
         self._canonical_action_cache: (
             tuple[
