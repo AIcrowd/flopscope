@@ -38,3 +38,33 @@ def test_called_from_wrapper_true_under_nested_calls():
 
     with BudgetContext(flop_budget=10**6):
         assert outer() is True
+
+
+def test_top_level_np_func_on_whestarray_warns_and_routes():
+    """np.diff(whest) at top level should emit UserWarning AND still auto-route to fnp.diff."""
+    a = fnp.asarray(np.random.default_rng(0).random((10,)))
+    with BudgetContext(flop_budget=10**14):
+        with pytest.warns(UserWarning, match=r"np\.diff.*auto-routed to fnp\.diff"):
+            result = np.diff(a)
+    # result should have correct shape (auto-routing called fnp.diff successfully)
+    assert result.shape == (9,)
+
+
+def test_inside_wrapper_array_function_leak_raises():
+    """An fnp wrapper that forgets to strip and calls _np.<func> on a WhestArray must raise."""
+    import numpy as _np
+
+    @_counted_wrapper
+    def buggy_wrapper(a):
+        # Intentionally forget _to_base_ndarray: pass WhestArray straight to numpy.
+        # numpy.diff goes through __array_function__ which detects we're inside
+        # an fnp wrapper (depth>0) and raises.
+        return _np.diff(a)
+
+    a = fnp.asarray(np.random.default_rng(0).random((10,)))
+    with BudgetContext(flop_budget=10**14):
+        with pytest.raises(
+            RuntimeError,
+            match=r"WhestArray reached numpy\.diff from inside an fnp wrapper",
+        ):
+            buggy_wrapper(a)

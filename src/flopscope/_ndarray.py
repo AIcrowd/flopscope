@@ -491,17 +491,31 @@ class FlopscopeArray(_np.ndarray):
         return cls._PASSTHROUGH
 
     def __array_function__(self, func, types, args, kwargs):
-        """Route ``np.<func>(flopscope, ...)`` calls through flopscope via an
-        explicit allowlist (see ``_get_array_function_dispatch``).
+        """Route ``np.<func>(flopscope, ...)`` calls through flopscope.
 
-        Functions in ``_PASSTHROUGH`` are zero-FLOP type/shape queries
-        that bypass tracking and call the underlying NumPy function
-        directly with stripped args.
+        Two distinct paths:
 
-        Functions not in either set return ``NotImplemented``. NumPy
-        will then raise ``TypeError`` rather than silently bypassing
-        tracking.
+        - **Inside an fnp wrapper (depth > 0):** A wrapper forgot to strip a
+          ``FlopscopeArray`` before calling raw numpy, and numpy's NEP 18
+          dispatch caught us. This is a flopscope bug (the polyval class from
+          issue #69). Raise ``RuntimeError`` at the leak site so the bug is
+          impossible to miss.
+
+        - **Top-level call (depth == 0):** A user wrote ``np.<func>(whest)``
+          directly. PASSTHROUGH set is checked first for zero-FLOP queries.
+          Otherwise we route through the allowlist to ``fnp.<func>`` AND emit
+          a ``UserWarning`` so the user knows to call ``fnp.<func>`` directly.
+          Warning is de-duped per call site by Python's ``warnings`` module.
         """
+        from flopscope._budget import _called_from_wrapper
+
+        if _called_from_wrapper():
+            raise RuntimeError(
+                f"WhestArray reached numpy.{func.__name__} from inside an fnp "
+                f"wrapper — missing _to_base_ndarray() strip. Check the "
+                f"calling fnp wrapper and add a strip before the numpy call."
+            )
+
         # PASSTHROUGH check first: zero-FLOP queries bypass dispatch.
         if func in self._get_passthrough():
             stripped_args = _to_base_ndarray_tree(args)
@@ -512,6 +526,14 @@ class FlopscopeArray(_np.ndarray):
         we_func = dispatch.get(func)
         if we_func is None:
             return NotImplemented
+
+        import warnings as _warnings
+        _warnings.warn(
+            f"np.{func.__name__}(WhestArray) auto-routed to fnp.{func.__name__}; "
+            f"call fnp.{func.__name__} directly to avoid this warning.",
+            UserWarning,
+            stacklevel=2,
+        )
         return we_func(*args, **kwargs)
 
     # ----- ndarray method overrides (route through me.* for budget parity) -----
