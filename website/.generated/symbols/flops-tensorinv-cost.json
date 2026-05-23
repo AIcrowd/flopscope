@@ -228,7 +228,7 @@
   ],
   "signature": "flops.flops.tensorinv_cost(a_shape: 'tuple', ind: 'int' = 2) -> 'int'",
   "slug": "flops-tensorinv-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L329",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L397",
   "status_note": "",
   "summary": "Weighted FLOP cost of tensor inverse.",
   "upstream_source_url": ""

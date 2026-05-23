@@ -80,7 +80,8 @@ class TestLstsq:
             from flopscope.numpy.linalg import lstsq
 
             lstsq(A, b, rcond=None)
-            assert budget.flops_used == m * n * min(m, n)
+            # lstsq_cost(6,4,b_cols=1,b_ndim=1): svd=96, ut_b=k*m*m=4*6*6=144, divide=4, recon=n*k*k=4*4*4=64 -> 308
+            assert budget.flops_used == 308
 
 
 class TestPinv:
@@ -99,7 +100,9 @@ class TestPinv:
             from flopscope.numpy.linalg import pinv
 
             pinv(A)
-            assert budget.flops_used == m * n * min(m, n)
+            assert (
+                budget.flops_used == 108
+            )  # svd(4,3) + threshold + diag_scale + matmul(3,3,4)
 
 
 class TestTensorsolve:

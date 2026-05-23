@@ -220,7 +220,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.matrix_transpose",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1609",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1966",
   "href": "/docs/api/numpy/matrix-transpose/",
   "legacy_href": "/docs/api/ops/matrix_transpose/",
   "module": "numpy",

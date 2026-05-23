@@ -608,7 +608,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.take",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1954",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2325",
   "href": "/docs/api/numpy/take/",
   "import_path": "flopscope.numpy.take",
   "is_operation_cost_leaf": true,

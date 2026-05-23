@@ -562,7 +562,7 @@
       "module": "flopscope.numpy.linalg._solvers",
       "namespace": "accounting",
       "slug": "flopscope-accounting-lstsq-cost",
-      "summary": "Weighted FLOP cost of least-squares solution."
+      "summary": "Weighted FLOP cost of least-squares via SVD."
     },
     {
       "callable": true,
@@ -586,7 +586,7 @@
       "module": "flopscope.numpy.linalg._compound",
       "namespace": "accounting",
       "slug": "flopscope-accounting-matrix-power-cost",
-      "summary": "Weighted FLOP cost of matrix power A**k."
+      "summary": "Weighted FLOP cost of matrix power ``A**k``."
     },
     {
       "callable": true,
@@ -634,7 +634,7 @@
       "module": "flopscope.numpy.linalg._solvers",
       "namespace": "accounting",
       "slug": "flopscope-accounting-pinv-cost",
-      "summary": "Weighted FLOP cost of pseudoinverse."
+      "summary": "Weighted FLOP cost of Moore-Penrose pseudoinverse."
     },
     {
       "callable": true,

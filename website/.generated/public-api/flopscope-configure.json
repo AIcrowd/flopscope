@@ -134,11 +134,43 @@
                     },
                     {
                       "kind": "code",
-                      "text": "500_000"
+                      "text": "50_000"
                     },
                     {
                       "kind": "text",
-                      "text": "."
+                      "text": " \u2014 accepts\ngroups up to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "|S_8| = 40_320"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " with a small margin; rejects "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "|S_9|"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "\nand larger.  Tune via "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "flops.configure(dimino_budget=...)"
+                    },
+                    {
+                      "kind": "text",
+                      "text": ";\n"
+                    },
+                    {
+                      "kind": "code",
+                      "text": "benchmarks/_perm_group_calibration.py"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " recommends a value for the\nhost machine."
                     }
                   ],
                   "type": "paragraph"
@@ -152,11 +184,43 @@
                 },
                 {
                   "kind": "code",
-                  "text": "500_000"
+                  "text": "50_000"
                 },
                 {
                   "kind": "text",
-                  "text": "."
+                  "text": " \u2014 accepts\ngroups up to "
+                },
+                {
+                  "kind": "code",
+                  "text": "|S_8| = 40_320"
+                },
+                {
+                  "kind": "text",
+                  "text": " with a small margin; rejects "
+                },
+                {
+                  "kind": "code",
+                  "text": "|S_9|"
+                },
+                {
+                  "kind": "text",
+                  "text": "\nand larger.  Tune via "
+                },
+                {
+                  "kind": "code",
+                  "text": "flops.configure(dimino_budget=...)"
+                },
+                {
+                  "kind": "text",
+                  "text": ";\n"
+                },
+                {
+                  "kind": "code",
+                  "text": "benchmarks/_perm_group_calibration.py"
+                },
+                {
+                  "kind": "text",
+                  "text": " recommends a value for the\nhost machine."
                 }
               ],
               "name": "dimino_budget",
@@ -481,7 +545,11 @@
       "body": [
         "Maximum number of group elements during whole-expression G_pt closure.",
         "Pathological declared-symmetry cases that exceed this budget fall back",
-        "to dense cost with a CostFallbackWarning.  Default ``500_000``."
+        "to dense cost with a CostFallbackWarning.  Default ``50_000`` \u2014 accepts",
+        "groups up to ``|S_8| = 40_320`` with a small margin; rejects ``|S_9|``",
+        "and larger.  Tune via ``flops.configure(dimino_budget=...)``;",
+        "``benchmarks/_perm_group_calibration.py`` recommends a value for the",
+        "host machine."
       ],
       "name": "dimino_budget",
       "type": "int"

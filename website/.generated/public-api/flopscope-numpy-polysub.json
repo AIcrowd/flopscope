@@ -323,7 +323,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.polysub",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L125",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L128",
   "href": "/docs/api/numpy/polysub/",
   "import_path": "flopscope.numpy.polysub",
   "is_operation_cost_leaf": true,

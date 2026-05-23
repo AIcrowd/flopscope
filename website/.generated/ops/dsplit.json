@@ -232,7 +232,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.dsplit",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1262",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1602",
   "href": "/docs/api/numpy/dsplit/",
   "legacy_href": "/docs/api/ops/dsplit/",
   "module": "numpy",

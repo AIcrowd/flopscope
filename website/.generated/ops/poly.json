@@ -568,7 +568,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.poly",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L236",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_polynomial.py#L239",
   "href": "/docs/api/numpy/poly/",
   "legacy_href": "/docs/api/ops/poly/",
   "module": "flopscope._polynomial",

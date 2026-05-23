@@ -543,7 +543,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.where",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L591",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L761",
   "href": "/docs/api/numpy/where/",
   "import_path": "flopscope.numpy.where",
   "is_operation_cost_leaf": true,

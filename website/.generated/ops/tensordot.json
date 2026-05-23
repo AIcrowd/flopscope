@@ -949,7 +949,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.tensordot",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2014",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2008",
   "href": "/docs/api/numpy/tensordot/",
   "legacy_href": "/docs/api/ops/tensordot/",
   "module": "numpy",

@@ -220,7 +220,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.diag_indices_from",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1232",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1572",
   "href": "/docs/api/numpy/diag-indices-from/",
   "legacy_href": "/docs/api/ops/diag_indices_from/",
   "module": "numpy",

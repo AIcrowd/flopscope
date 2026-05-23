@@ -10,7 +10,7 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Weighted FLOP cost of least-squares solution."
+              "text": "Weighted FLOP cost of least-squares via SVD."
             }
           ],
           "type": "paragraph"
@@ -64,6 +64,126 @@
                 }
               ],
               "name": "n",
+              "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Argument forwarded to the analytical "
+                    },
+                    {
+                      "external_url": "",
+                      "href": "/docs/api/numpy/linalg/lstsq/",
+                      "kind": "link",
+                      "target": "linalg.lstsq",
+                      "text": "linalg.lstsq"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " cost formula. Defaults to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "1"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "int, optional",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Argument forwarded to the analytical "
+                },
+                {
+                  "external_url": "",
+                  "href": "/docs/api/numpy/linalg/lstsq/",
+                  "kind": "link",
+                  "target": "linalg.lstsq",
+                  "text": "linalg.lstsq"
+                },
+                {
+                  "kind": "text",
+                  "text": " cost formula. Defaults to "
+                },
+                {
+                  "kind": "code",
+                  "text": "1"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "b_cols",
+              "type": "field_list"
+            },
+            {
+              "body_blocks": [
+                {
+                  "inline": [
+                    {
+                      "kind": "text",
+                      "text": "Argument forwarded to the analytical "
+                    },
+                    {
+                      "external_url": "",
+                      "href": "/docs/api/numpy/linalg/lstsq/",
+                      "kind": "link",
+                      "target": "linalg.lstsq",
+                      "text": "linalg.lstsq"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " cost formula. Defaults to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "1"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "."
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "data_type": "int, optional",
+              "inline": [
+                {
+                  "kind": "text",
+                  "text": "Argument forwarded to the analytical "
+                },
+                {
+                  "external_url": "",
+                  "href": "/docs/api/numpy/linalg/lstsq/",
+                  "kind": "link",
+                  "target": "linalg.lstsq",
+                  "text": "linalg.lstsq"
+                },
+                {
+                  "kind": "text",
+                  "text": " cost formula. Defaults to "
+                },
+                {
+                  "kind": "code",
+                  "text": "1"
+                },
+                {
+                  "kind": "text",
+                  "text": "."
+                }
+              ],
+              "name": "b_ndim",
               "type": "field_list"
             }
           ],
@@ -148,7 +268,121 @@
             },
             {
               "kind": "text",
-              "text": " (SVD-based) by default."
+              "text": " (SVD-based). Cost decomposition:\n"
+            },
+            {
+              "kind": "code",
+              "text": "svd(m,n) + ut_b + k*c + reconstruction"
+            },
+            {
+              "kind": "text",
+              "text": " where "
+            },
+            {
+              "kind": "code",
+              "text": "k = min(m, n)"
+            },
+            {
+              "kind": "text",
+              "text": "\nand "
+            },
+            {
+              "kind": "code",
+              "text": "c = b_cols"
+            },
+            {
+              "kind": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "When "
+            },
+            {
+              "kind": "code",
+              "text": "b_ndim == 1"
+            },
+            {
+              "kind": "text",
+              "text": " (1D RHS), the intermediate matmuls are 2D\u00d71D\n(NumPy dispatches "
+            },
+            {
+              "kind": "code",
+              "text": "(k,m)@(m,)"
+            },
+            {
+              "kind": "text",
+              "text": " differently from "
+            },
+            {
+              "kind": "code",
+              "text": "(k,m)@(m,c)"
+            },
+            {
+              "kind": "text",
+              "text": "):\n"
+            },
+            {
+              "kind": "code",
+              "text": "ut_b = k * m * m"
+            },
+            {
+              "kind": "text",
+              "text": " and "
+            },
+            {
+              "kind": "code",
+              "text": "reconstruction = n * k * k"
+            },
+            {
+              "kind": "text",
+              "text": ".\nWhen "
+            },
+            {
+              "kind": "code",
+              "text": "b_ndim == 2"
+            },
+            {
+              "kind": "text",
+              "text": " (2D RHS), both are standard 2D\u00d72D matmuls:\n"
+            },
+            {
+              "kind": "code",
+              "text": "ut_b = matmul_cost(k, m, c)"
+            },
+            {
+              "kind": "text",
+              "text": " and "
+            },
+            {
+              "kind": "code",
+              "text": "reconstruction = matmul_cost(n, k, c)"
+            },
+            {
+              "kind": "text",
+              "text": "."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inline": [
+            {
+              "kind": "text",
+              "text": "Issue #69 (was previously just "
+            },
+            {
+              "kind": "code",
+              "text": "svd_cost"
+            },
+            {
+              "kind": "text",
+              "text": " ignoring the\nback-substitution)."
             }
           ],
           "type": "paragraph"
@@ -182,7 +416,9 @@
   "notes": "",
   "notes_sections": [
     "This helper multiplies the analytical FLOP count by the active weight from ``flopscope._weights`` and then applies ``int(...)`` so public estimates match budget deductions.",
-    "NumPy uses LAPACK ``gelsd`` (SVD-based) by default."
+    "NumPy uses LAPACK ``gelsd`` (SVD-based). Cost decomposition: ``svd(m,n) + ut_b + k*c + reconstruction`` where ``k = min(m, n)`` and ``c = b_cols``.",
+    "When ``b_ndim == 1`` (1D RHS), the intermediate matmuls are 2D\u00d71D (NumPy dispatches ``(k,m)@(m,)`` differently from ``(k,m)@(m,c)``): ``ut_b = k * m * m`` and ``reconstruction = n * k * k``. When ``b_ndim == 2`` (2D RHS), both are standard 2D\u00d72D matmuls: ``ut_b = matmul_cost(k, m, c)`` and ``reconstruction = matmul_cost(n, k, c)``.",
+    "Issue #69 (was previously just ``svd_cost`` ignoring the back-substitution)."
   ],
   "numpy_ref": "",
   "operation": null,
@@ -200,6 +436,20 @@
       ],
       "name": "n",
       "type": "int"
+    },
+    {
+      "body": [
+        "Argument forwarded to the analytical ``linalg.lstsq`` cost formula. Defaults to ``1``."
+      ],
+      "name": "b_cols",
+      "type": "int, optional"
+    },
+    {
+      "body": [
+        "Argument forwarded to the analytical ``linalg.lstsq`` cost formula. Defaults to ``1``."
+      ],
+      "name": "b_ndim",
+      "type": "int, optional"
     }
   ],
   "previous": null,
@@ -214,9 +464,9 @@
   ],
   "schema_version": 1,
   "see_also": [],
-  "signature": "flopscope.accounting.lstsq_cost(m: 'int', n: 'int') -> 'int'",
+  "signature": "flopscope.accounting.lstsq_cost(m: 'int', n: 'int', b_cols: 'int' = 1, b_ndim: 'int' = 1) -> 'int'",
   "slug": "flopscope-accounting-lstsq-cost",
-  "summary": "Weighted FLOP cost of least-squares solution.",
+  "summary": "Weighted FLOP cost of least-squares via SVD.",
   "upstream_source_url": "",
   "weight": 1.0
 }

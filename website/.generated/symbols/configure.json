@@ -137,11 +137,43 @@
                     },
                     {
                       "kind": "code",
-                      "text": "500_000"
+                      "text": "50_000"
                     },
                     {
                       "kind": "text",
-                      "text": "."
+                      "text": " \u2014 accepts\ngroups up to "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "|S_8| = 40_320"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " with a small margin; rejects "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "|S_9|"
+                    },
+                    {
+                      "kind": "text",
+                      "text": "\nand larger.  Tune via "
+                    },
+                    {
+                      "kind": "code",
+                      "text": "flops.configure(dimino_budget=...)"
+                    },
+                    {
+                      "kind": "text",
+                      "text": ";\n"
+                    },
+                    {
+                      "kind": "code",
+                      "text": "benchmarks/_perm_group_calibration.py"
+                    },
+                    {
+                      "kind": "text",
+                      "text": " recommends a value for the\nhost machine."
                     }
                   ],
                   "type": "paragraph"
@@ -155,11 +187,43 @@
                 },
                 {
                   "kind": "code",
-                  "text": "500_000"
+                  "text": "50_000"
                 },
                 {
                   "kind": "text",
-                  "text": "."
+                  "text": " \u2014 accepts\ngroups up to "
+                },
+                {
+                  "kind": "code",
+                  "text": "|S_8| = 40_320"
+                },
+                {
+                  "kind": "text",
+                  "text": " with a small margin; rejects "
+                },
+                {
+                  "kind": "code",
+                  "text": "|S_9|"
+                },
+                {
+                  "kind": "text",
+                  "text": "\nand larger.  Tune via "
+                },
+                {
+                  "kind": "code",
+                  "text": "flops.configure(dimino_budget=...)"
+                },
+                {
+                  "kind": "text",
+                  "text": ";\n"
+                },
+                {
+                  "kind": "code",
+                  "text": "benchmarks/_perm_group_calibration.py"
+                },
+                {
+                  "kind": "text",
+                  "text": " recommends a value for the\nhost machine."
                 }
               ],
               "name": "dimino_budget",

@@ -500,7 +500,7 @@
   "schema_version": 1,
   "slug": "require",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1838",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2209",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/_asarray.py#L27"
   }
 }

@@ -459,7 +459,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.modf",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L390",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L378",
   "href": "/docs/api/numpy/modf/",
   "legacy_href": "/docs/api/ops/modf/",
   "module": "numpy",

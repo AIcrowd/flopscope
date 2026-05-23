@@ -149,26 +149,67 @@ attach_docstring(
 )
 
 
-def lstsq_cost(m: int, n: int) -> int:
-    """FLOP cost of least-squares solution.
+def lstsq_cost(m: int, n: int, b_cols: int = 1, b_ndim: int = 1) -> int:
+    """FLOP cost of least-squares via SVD.
 
     Parameters
     ----------
     m : int
-        Number of rows.
+        Number of rows in A.
     n : int
-        Number of columns.
+        Number of columns in A.
+    b_cols : int, default 1
+        Number of RHS columns (``b.shape[-1]`` if 2D, else 1).
+    b_ndim : int, default 1
+        Number of dimensions in b. Use 1 for a 1D RHS vector, 2 for a 2D
+        matrix of RHS vectors.
 
     Returns
     -------
     int
-        Estimated FLOP count: m * n * min(m, n).
+        Estimated FLOP count.
 
     Notes
     -----
-    NumPy uses LAPACK ``gelsd`` (SVD-based) by default.
+    NumPy uses LAPACK ``gelsd`` (SVD-based). Cost decomposition:
+    ``svd(m,n) + ut_b + k*c + reconstruction`` where ``k = min(m, n)``
+    and ``c = b_cols``.
+
+    When ``b_ndim == 1`` (1D RHS), the intermediate matmuls are 2D×1D
+    (NumPy dispatches ``(k,m)@(m,)`` differently from ``(k,m)@(m,c)``):
+    ``ut_b = k * m * m`` and ``reconstruction = n * k * k``.
+    When ``b_ndim == 2`` (2D RHS), both are standard 2D×2D matmuls:
+    ``ut_b = matmul_cost(k, m, c)`` and ``reconstruction = matmul_cost(n, k, c)``.
+
+    Issue #69 (was previously just ``svd_cost`` ignoring the
+    back-substitution).
     """
-    return max(m * n * min(m, n), 1)
+    from flopscope._flops import matmul_cost, svd_cost
+
+    k = min(m, n)
+    c = b_cols
+    svd = svd_cost(m, n)
+    # NOTE (#69): the 1D-b path uses `k*m*m` / `n*k*k` directly instead of
+    # `matmul_cost(k, m, 1)` / `matmul_cost(n, k, 1)` because `fnp.matmul`'s
+    # 2D×1D code path currently uses the einsum fallback (charging
+    # `a.size * b.size`) rather than the canonical FMA-1 formula. The
+    # parity test (`tests/test_issue_69_cost_parity.py::test_cost_parity[lstsq]`)
+    # would fail if we used `matmul_cost` here, because the oracle calls
+    # `fnp.matmul` and the wrapper would then disagree. When `fnp.matmul`'s
+    # 2D×1D charge is fixed in a separate issue, switch both branches to
+    # `matmul_cost` for symmetry.
+    if b_ndim == 1:
+        # 2D@1D matmul: (k, m) @ (m,) charges k * m * m
+        ut_b = k * m * m
+        # 2D@1D matmul: (n, k) @ (k,) charges n * k * k
+        reconstruction = n * k * k
+    else:
+        # 2D@2D matmul: (k, m) @ (m, c) -> matmul_cost(k, m, c)
+        ut_b = matmul_cost(k, m, c)
+        # 2D@2D matmul: (n, k) @ (k, c) -> matmul_cost(n, k, c)
+        reconstruction = matmul_cost(n, k, c)
+    divide_by_s = k * c
+    return max(svd + ut_b + divide_by_s + reconstruction, 1)
 
 
 @_counted_wrapper
@@ -193,7 +234,16 @@ def lstsq(
         a = _np.asarray(a)
     m, n = a.shape[-2], a.shape[-1]
     batch = _batch_size(a.shape)
-    cost = lstsq_cost(m, n) * batch if not _has_zero_dim(a.shape) else 0
+    if not isinstance(b, _np.ndarray):
+        b_arr = _np.asarray(b)
+    else:
+        b_arr = b
+    b_cols = b_arr.shape[-1] if b_arr.ndim > 1 else 1
+    cost = (
+        lstsq_cost(m, n, b_cols=b_cols, b_ndim=b_arr.ndim) * batch
+        if not _has_zero_dim(a.shape)
+        else 0
+    )
     with budget.deduct(
         "linalg.lstsq", flop_cost=cost, subscripts=None, shapes=(a.shape,)
     ):
@@ -208,12 +258,15 @@ def lstsq(
 
 
 attach_docstring(
-    lstsq, _np.linalg.lstsq, "linalg", r"$m \cdot n \cdot \min(m,n)$ FLOPs (SVD-based)"
+    lstsq,
+    _np.linalg.lstsq,
+    "linalg",
+    r"SVD + back-substitution FLOPs: ``svd(m,n) + matmul(k,m,c) + k*c + matmul(n,k,c)`` (issue #69)",
 )
 
 
 def pinv_cost(m: int, n: int) -> int:
-    """FLOP cost of pseudoinverse.
+    """FLOP cost of Moore-Penrose pseudoinverse.
 
     Parameters
     ----------
@@ -225,13 +278,28 @@ def pinv_cost(m: int, n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: m * n * min(m, n).
+        Estimated FLOP count.
 
     Notes
     -----
-    Computed via SVD.
+    NumPy implements ``pinv`` as: ``svd(A, full_matrices=False)`` →
+    threshold tiny singular values → multiply ``vt.T`` by ``s_inv``
+    broadcasted → matmul with ``u.T``. We compose the cost from
+    ``svd_cost`` and ``matmul_cost`` so this formula tracks those
+    helpers automatically (issue #69; was previously missing the
+    post-SVD reconstruction).
+
+    Total: ``svd(m,n) + threshold(min(m,n)) + diag_scale(n*min(m,n))
+    + matmul(n, min(m,n), m)``.
     """
-    return max(m * n * min(m, n), 1)
+    from flopscope._flops import matmul_cost, svd_cost
+
+    k = min(m, n)
+    svd = svd_cost(m, n)
+    threshold = k
+    diag_scale = n * k
+    reconstruction = matmul_cost(n, k, m)
+    return max(svd + threshold + diag_scale + reconstruction, 1)
 
 
 @_counted_wrapper

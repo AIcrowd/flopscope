@@ -860,7 +860,8 @@ class TestLinalgSolversExtended:
         b = numpy.random.rand(5)
         with BudgetContext(flop_budget=10**9) as budget:
             lstsq(a, b, rcond=None)
-        assert budget.flops_used == 5 * 3 * 3  # m * n * min(m, n)
+        # lstsq_cost(5,3,b_cols=1,b_ndim=1): svd=45, ut_b=k*m*m=3*5*5=75, divide=3, recon=n*k*k=3*3*3=27 -> 150
+        assert budget.flops_used == 150
 
     def test_pinv(self):
         from flopscope.numpy.linalg._solvers import pinv
@@ -868,7 +869,9 @@ class TestLinalgSolversExtended:
         a = numpy.random.rand(4, 6)
         with BudgetContext(flop_budget=10**9) as budget:
             pinv(a)
-        assert budget.flops_used == 4 * 6 * 4  # m * n * min(m, n)
+        assert (
+            budget.flops_used == 292
+        )  # svd(4,6) + threshold + diag_scale + matmul(6,4,4)
 
     def test_tensorsolve(self):
         from flopscope.numpy.linalg._solvers import tensorsolve

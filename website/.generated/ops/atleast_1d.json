@@ -238,7 +238,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.atleast_1d",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L955",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1197",
   "href": "/docs/api/numpy/atleast-1d/",
   "legacy_href": "/docs/api/ops/atleast_1d/",
   "module": "numpy",

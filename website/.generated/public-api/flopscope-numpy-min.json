@@ -795,7 +795,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.min",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L852",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L846",
   "href": "/docs/api/numpy/min/",
   "import_path": "flopscope.numpy.min",
   "is_operation_cost_leaf": true,

@@ -46,7 +46,7 @@ def cross(x1: ArrayLike, x2: ArrayLike, /, *, axis: int = -1) -> FlopscopeArray:
         out_size *= d
     with budget.deduct(
         "linalg.cross",
-        flop_cost=_builtins.max(out_size * 3, 1),
+        flop_cost=_builtins.max(out_size * 5, 1),
         subscripts=None,
         shapes=(x1_arr.shape, x2_arr.shape),
     ):

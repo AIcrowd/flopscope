@@ -609,7 +609,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.fill_diagonal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1319",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1674",
   "href": "/docs/api/numpy/fill-diagonal/",
   "legacy_href": "/docs/api/ops/fill_diagonal/",
   "module": "numpy",

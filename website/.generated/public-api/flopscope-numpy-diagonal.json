@@ -774,7 +774,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.diagonal",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L721",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L948",
   "href": "/docs/api/numpy/diagonal/",
   "import_path": "flopscope.numpy.diagonal",
   "is_operation_cost_leaf": true,

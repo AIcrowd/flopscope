@@ -932,7 +932,7 @@
   "schema_version": 1,
   "slug": "block",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1013",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1318",
     "numpy": "https://github.com/numpy/numpy/blob/v2.2.6/numpy/_core/shape_base.py#L784"
   }
 }

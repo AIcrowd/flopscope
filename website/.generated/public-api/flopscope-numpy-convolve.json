@@ -503,7 +503,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.convolve",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2281",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L2317",
   "href": "/docs/api/numpy/convolve/",
   "import_path": "flopscope.numpy.convolve",
   "is_operation_cost_leaf": true,

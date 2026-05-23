@@ -333,7 +333,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bmat",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1027",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1343",
   "href": "/docs/api/numpy/bmat/",
   "import_path": "flopscope.numpy.bmat",
   "is_operation_cost_leaf": true,

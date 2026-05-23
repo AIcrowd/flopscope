@@ -12,7 +12,15 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Weighted FLOP cost of matrix power A**k."
+              "text": "Weighted FLOP cost of matrix power "
+            },
+            {
+              "kind": "code",
+              "text": "A**k"
+            },
+            {
+              "kind": "text",
+              "text": "."
             }
           ],
           "type": "paragraph"
@@ -142,7 +150,42 @@
           "inline": [
             {
               "kind": "text",
-              "text": "Uses exponentiation by repeated squaring. For $k < 0$, adds $n^3$ for\nthe initial matrix inversion."
+              "text": "Uses exponentiation by repeated squaring. For "
+            },
+            {
+              "kind": "code",
+              "text": "k < 0"
+            },
+            {
+              "kind": "text",
+              "text": ", adds\n"
+            },
+            {
+              "kind": "code",
+              "text": "matmul_cost(n, n, n)"
+            },
+            {
+              "kind": "text",
+              "text": " for the initial matrix inversion (LU-based).\nPer-matmul cost is delegated to "
+            },
+            {
+              "kind": "code",
+              "text": "matmul_cost(n, n, n)"
+            },
+            {
+              "kind": "text",
+              "text": " so this formula\ntracks "
+            },
+            {
+              "external_url": "",
+              "href": "/docs/api/numpy/matmul/",
+              "kind": "link",
+              "target": "matmul",
+              "text": "fnp.matmul"
+            },
+            {
+              "kind": "text",
+              "text": "'s convention automatically (issue #69; the FMA=2\nunification of 2026-05-20 previously left this wrapper undercounting\nby ~2x)."
             }
           ],
           "type": "paragraph"
@@ -170,6 +213,6 @@
   "slug": "flops-matrix-power-cost",
   "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_compound.py#L102",
   "status_note": "",
-  "summary": "Weighted FLOP cost of matrix power A**k.",
+  "summary": "Weighted FLOP cost of matrix power ``A**k``.",
   "upstream_source_url": ""
 }

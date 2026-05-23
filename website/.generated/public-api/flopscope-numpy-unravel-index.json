@@ -281,7 +281,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.unravel_index",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2088",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2459",
   "href": "/docs/api/numpy/unravel-index/",
   "import_path": "flopscope.numpy.unravel_index",
   "is_operation_cost_leaf": true,

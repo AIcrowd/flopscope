@@ -73,7 +73,7 @@
   ],
   "signature": "flops.SymmetricTensor(input_array: 'np.ndarray', *, symmetry: 'SymmetryGroup') -> 'SymmetricTensor'",
   "slug": "symmetric-tensor",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L592",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L552",
   "status_note": "",
   "summary": "An ndarray that carries symmetry metadata.",
   "upstream_source_url": ""

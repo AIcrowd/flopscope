@@ -422,7 +422,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.eye",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L161",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L174",
   "href": "/docs/api/numpy/eye/",
   "import_path": "flopscope.numpy.eye",
   "is_operation_cost_leaf": true,

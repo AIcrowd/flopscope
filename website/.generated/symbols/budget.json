@@ -280,7 +280,7 @@
   "related_guides": [],
   "signature": "flops.budget(flop_budget: 'int', flop_multiplier: 'float' = 1.0, quiet: 'bool' = False, namespace: 'str | None' = None, wall_time_limit_s: 'float | None' = None) -> 'BudgetContext'",
   "slug": "budget",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L731",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_budget.py#L773",
   "status_note": "",
   "summary": "Create a ``BudgetContext`` usable as a context manager or decorator.",
   "upstream_source_url": ""

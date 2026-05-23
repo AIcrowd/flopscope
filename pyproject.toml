@@ -22,7 +22,7 @@ dev = [
     "scipy>=1.10",
 ]
 docs = [
-    "numpydoc>=1.8",
+    "numpydoc>=1.10",
 ]
 sympy = [
     "sympy>=1.11",

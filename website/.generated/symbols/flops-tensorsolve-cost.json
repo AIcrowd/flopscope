@@ -228,7 +228,7 @@
   ],
   "signature": "flops.flops.tensorsolve_cost(a_shape: 'tuple', ind: 'int | None' = None) -> 'int'",
   "slug": "flops-tensorsolve-cost",
-  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L272",
+  "source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/linalg/_solvers.py#L340",
   "status_note": "",
   "summary": "Weighted FLOP cost of tensor solve.",
   "upstream_source_url": ""

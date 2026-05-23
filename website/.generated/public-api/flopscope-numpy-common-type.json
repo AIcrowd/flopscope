@@ -195,7 +195,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.common_type",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1122",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1460",
   "href": "/docs/api/numpy/common-type/",
   "import_path": "flopscope.numpy.common_type",
   "is_operation_cost_leaf": true,

@@ -2171,27 +2171,38 @@ attach_docstring(kron, _np.kron, "counted_custom", "output size FLOPs")
 
 @_counted_wrapper
 def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.cross."""
+    """Counted version of np.cross.
+
+    Cost model: 5 ops per output element (3 mults + 1 mult + 1 sub per output
+    triple component, which is 5 element-wise ops per output scalar). Issue #69.
+    """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     # np.cross supports axisa/axisb/axisc kwargs that change output shape,
-    # so we compute the result first, then deduct based on actual output size.
-    result = _np.cross(_to_base_ndarray(a), _to_base_ndarray(b), **kwargs)
-    cost = _builtins.max(_np.asarray(result).size * 3, 1)
+    # so we need the output shape to compute the cost. For default-axis usage,
+    # the output has the same total size as a (cross(a[..., 3], b[..., 3])).
+    # Using a.size instead of a.shape[0]*3 correctly handles batched inputs
+    # of any shape (e.g. (B, N, 3) → cost = B*N*3*5, not B*3*5). Issue #69.
+    # Putting the numpy call inside `with budget.deduct(...)` ensures backend
+    # wall-time is attributed to this op (issue #69 — previously called
+    # outside the budget block).
+    stripped_a = _to_base_ndarray(a)
+    stripped_b = _to_base_ndarray(b)
+    cost_provisional = _builtins.max(a.size * 5, 1)
     with budget.deduct(
         "cross",
-        flop_cost=cost,
+        flop_cost=cost_provisional,
         subscripts=None,
         shapes=(a.shape, b.shape),
     ):
-        pass  # numpy call already done; timer records near-zero duration
-    return result  # type: ignore[return-value]  # wrapped at fnp.cross import time
+        result = _call_numpy(_np.cross, stripped_a, stripped_b, **kwargs)
+    return result  # type: ignore[return-value]
 
 
-attach_docstring(cross, _np.cross, "counted_custom", "output_size * 3 FLOPs")
+attach_docstring(cross, _np.cross, "counted_custom", "5 * output.size FLOPs")
 cross.__signature__ = _inspect.signature(_np.cross)  # pyright: ignore[reportFunctionMemberAccess]
 
 
@@ -2201,12 +2212,16 @@ def diff(a: ArrayLike, n: int = 1, axis: int = -1, **kwargs: Any) -> FlopscopeAr
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    # Pre-compute output size: along the diff axis, size decreases by n
+    # numpy.diff implements `for _ in range(n): a = subtract(a[1:], a[:-1])`,
+    # so the cost is the SUM over n iterations of (numel_along_axis - k) for
+    # k = 1..n. Closed form: n*L - n*(n+1)//2, scaled by the product of
+    # the other axes' sizes. Issue #69.
     ax = axis if axis >= 0 else axis + a.ndim
-    out_axis_len = a.shape[ax] - n
-    cost = _builtins.max(
-        int(_np.prod(a.shape[:ax])) * out_axis_len * int(_np.prod(a.shape[ax + 1 :])), 1
-    )
+    L = a.shape[ax]
+    prod_outside = int(_np.prod(a.shape[:ax]))
+    prod_inside = int(_np.prod(a.shape[ax + 1 :]))
+    per_iter_sum = n * L - n * (n + 1) // 2
+    cost = _builtins.max(prod_outside * per_iter_sum * prod_inside, 1)
     with budget.deduct(
         "diff",
         flop_cost=cost,
@@ -2217,7 +2232,9 @@ def diff(a: ArrayLike, n: int = 1, axis: int = -1, **kwargs: Any) -> FlopscopeAr
     return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
 
 
-attach_docstring(diff, _np.diff, "counted_custom", "numel(output) FLOPs")
+attach_docstring(
+    diff, _np.diff, "counted_custom", "n*L - n*(n+1)/2 FLOPs along the diff axis"
+)
 diff.__signature__ = _inspect.signature(_np.diff)  # pyright: ignore[reportFunctionMemberAccess]
 
 
@@ -2225,13 +2242,31 @@ diff.__signature__ = _inspect.signature(_np.diff)  # pyright: ignore[reportFunct
 def gradient(
     f: ArrayLike, *varargs: ArrayLike, **kwargs: Any
 ) -> FlopscopeArray | list[FlopscopeArray]:
-    """Counted version of np.gradient."""
+    """Counted version of np.gradient.
+
+    Cost model: numpy.gradient computes second-order central differences
+    along each axis (one subtract for the interior + one divide-by-2),
+    plus first-order forward/backward differences at the two boundaries.
+    Per axis i: interior elements = f.size * (shape[i] - 2) / shape[i];
+    two ops (subtract + divide) on those interior elements.
+    Total: sum over axes of 2 * f.size * (shape[i] - 2) / shape[i].
+    For large uniform arrays this ≈ 2 * ndim * f.size.
+    Issue #69 — old formula was `f.size` regardless of ndim.
+    """
     budget = require_budget()
     if not isinstance(f, _np.ndarray):
         f = _np.asarray(f)
-    with budget.deduct(
-        "gradient", flop_cost=f.size, subscripts=None, shapes=(f.shape,)
-    ):
+    if f.ndim == 0:
+        cost = 1
+    else:
+        cost = _builtins.max(
+            _builtins.sum(
+                2 * f.size * _builtins.max(f.shape[ax] - 2, 0) // f.shape[ax]
+                for ax in range(f.ndim)
+            ),
+            1,
+        )
+    with budget.deduct("gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)):
         result = _call_numpy(
             _np.gradient,
             _to_base_ndarray(f),
@@ -2241,7 +2276,12 @@ def gradient(
     return result  # type: ignore[return-value]  # wrapped at fnp.gradient import time
 
 
-attach_docstring(gradient, _np.gradient, "counted_custom", "numel(input) FLOPs")
+attach_docstring(
+    gradient,
+    _np.gradient,
+    "counted_custom",
+    "sum_axis(2 * f.size * (shape[ax]-2) / shape[ax]) FLOPs",
+)
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 
 
@@ -2287,7 +2327,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(v, _np.ndarray):
         v = _np.asarray(v)
-    cost = _builtins.max(a.size * v.size, 1)
+    cost = _builtins.max(2 * a.size * v.size - a.size - v.size, 1)
     with budget.deduct(
         "convolve",
         flop_cost=cost,
@@ -2300,7 +2340,9 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
     return result  # type: ignore[return-value]  # wrapped at fnp.convolve import time
 
 
-attach_docstring(convolve, _np.convolve, "counted_custom", "n * m FLOPs")
+attach_docstring(
+    convolve, _np.convolve, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)"
+)
 
 
 @_counted_wrapper
@@ -2311,7 +2353,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
         a = _np.asarray(a)
     if not isinstance(v, _np.ndarray):
         v = _np.asarray(v)
-    cost = _builtins.max(a.size * v.size, 1)
+    cost = _builtins.max(2 * a.size * v.size - a.size - v.size, 1)
     with budget.deduct(
         "correlate",
         flop_cost=cost,
@@ -2324,7 +2366,9 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
     return result  # type: ignore[return-value]  # wrapped at fnp.correlate import time
 
 
-attach_docstring(correlate, _np.correlate, "counted_custom", "n * m FLOPs")
+attach_docstring(
+    correlate, _np.correlate, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)"
+)
 
 
 def _cov_cost(x, y=None):

@@ -375,7 +375,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.rot90",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L1889",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L2260",
   "href": "/docs/api/numpy/rot90/",
   "import_path": "flopscope.numpy.rot90",
   "is_operation_cost_leaf": true,

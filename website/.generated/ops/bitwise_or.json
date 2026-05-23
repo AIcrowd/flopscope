@@ -601,7 +601,7 @@
   },
   "flopscope_examples_html": "",
   "flopscope_ref": "fnp.bitwise_or",
-  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L425",
+  "flopscope_source_url": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_pointwise.py#L413",
   "href": "/docs/api/numpy/bitwise-or/",
   "legacy_href": "/docs/api/ops/bitwise_or/",
   "module": "numpy",

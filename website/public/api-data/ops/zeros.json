@@ -457,7 +457,7 @@
   "schema_version": 1,
   "slug": "zeros",
   "source": {
-    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L118",
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_free_ops.py#L131",
     "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.zeros.html"
   }
 }

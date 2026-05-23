@@ -201,6 +201,31 @@ def svd_cost(m: int, n: int, k: int | None = None) -> int:
     return m * n * k
 
 
+def matmul_cost(m: int, k: int, n: int) -> int:
+    """FLOP cost of a single 2D matmul ``(m, k) @ (k, n) -> (m, n)``.
+
+    Formula: ``2 * m * k * n - m * n`` (FMA=1 convention with accumulator
+    off-by-one), matching what ``fnp.matmul`` charges per 2D call via the
+    einsum machinery (``_resolve_cost_and_output_symmetry`` on the
+    canonical subscripts ``ij,jk->ik``).
+
+    Used by ``pinv_cost``, ``lstsq_cost``, and ``matrix_power_cost``
+    so those compound formulas track ``fnp.matmul`` automatically if the
+    matmul accounting convention ever changes again.
+
+    Parameters
+    ----------
+    m, k, n : int
+        Matmul dimensions: ``(m, k) @ (k, n)``.
+
+    Returns
+    -------
+    int
+        Estimated FLOP count, clamped to at least 1.
+    """
+    return max(2 * m * k * n - m * n, 1)
+
+
 def _ceil_log2(n: int) -> int:
     """Return ceil(log2(n)), minimum 1.
 
