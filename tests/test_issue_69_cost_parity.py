@@ -254,6 +254,30 @@ CASES.append(
 )
 
 
+def _setup_correlate(rng):
+    a = fnp.asarray(rng.random((200,)))
+    v = fnp.asarray(rng.random((50,)))
+    return (a, v), {}
+
+
+def _oracle_correlate(a, v):
+    import numpy as _np
+    s = 2 * a.size * v.size - a.size - v.size
+    probe = _np.zeros(s)
+    fnp.multiply(probe, 1.0)
+
+
+CASES.append(
+    CostParityCase(
+        name="correlate",
+        setup=_setup_correlate,
+        wrapper=fnp.correlate,
+        oracle=_oracle_correlate,
+        tolerance=0.0,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

@@ -185,7 +185,7 @@ def test_correlate():
     v = numpy.array([1.0, 2.0])
     with BudgetContext(flop_budget=10**6) as budget:
         result = ops.correlate(a, v)
-        assert budget.flops_used == a.size * v.size
+        assert budget.flops_used == 2 * a.size * v.size - a.size - v.size
 
 
 def test_corrcoef():

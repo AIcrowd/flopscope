@@ -2335,7 +2335,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
         a = _np.asarray(a)
     if not isinstance(v, _np.ndarray):
         v = _np.asarray(v)
-    cost = _builtins.max(a.size * v.size, 1)
+    cost = _builtins.max(2 * a.size * v.size - a.size - v.size, 1)
     with budget.deduct(
         "correlate",
         flop_cost=cost,
@@ -2348,7 +2348,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
     return result  # type: ignore[return-value]  # wrapped at fnp.correlate import time
 
 
-attach_docstring(correlate, _np.correlate, "counted_custom", "n * m FLOPs")
+attach_docstring(correlate, _np.correlate, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)")
 
 
 def _cov_cost(x, y=None):
