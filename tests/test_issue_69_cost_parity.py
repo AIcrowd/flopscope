@@ -30,7 +30,9 @@ class CostParityCase:
     name: str
     setup: Callable[[np.random.Generator], tuple]  # returns (args, kwargs) for wrapper
     wrapper: Callable  # fnp.<func>
-    oracle: Callable  # manual fnp.<primitive> composition with same signature as wrapper
+    oracle: (
+        Callable  # manual fnp.<primitive> composition with same signature as wrapper
+    )
     tolerance: float = 0.0  # relative tolerance; 0.0 means exact equality required
 
 
@@ -44,6 +46,7 @@ def _charged(callable_, *args, **kwargs) -> int:
 # Test cases — populated by Tasks 7-15. Start with diff_n1 (already matches,
 # proves the harness works).
 # ---------------------------------------------------------------------------
+
 
 def _setup_diff_n1(rng):
     a = fnp.asarray(rng.random((1000,)))
@@ -88,22 +91,24 @@ CASES: list[CostParityCase] = [
     ),
 ]
 
-CASES.extend([
-    CostParityCase(
-        name="diff_n3",
-        setup=_setup_diff_n3,
-        wrapper=fnp.diff,
-        oracle=_oracle_diff_n3,
-        tolerance=0.0,
-    ),
-    CostParityCase(
-        name="diff_n10",
-        setup=_setup_diff_n10,
-        wrapper=fnp.diff,
-        oracle=_oracle_diff_n10,
-        tolerance=0.0,
-    ),
-])
+CASES.extend(
+    [
+        CostParityCase(
+            name="diff_n3",
+            setup=_setup_diff_n3,
+            wrapper=fnp.diff,
+            oracle=_oracle_diff_n3,
+            tolerance=0.0,
+        ),
+        CostParityCase(
+            name="diff_n10",
+            setup=_setup_diff_n10,
+            wrapper=fnp.diff,
+            oracle=_oracle_diff_n10,
+            tolerance=0.0,
+        ),
+    ]
+)
 
 
 def _setup_gradient_2d(rng):
@@ -142,22 +147,24 @@ def _oracle_gradient_3d(f):
         fnp.divide(f[tuple(slc_mid)], 2.0)
 
 
-CASES.extend([
-    CostParityCase(
-        name="gradient_2d",
-        setup=_setup_gradient_2d,
-        wrapper=fnp.gradient,
-        oracle=_oracle_gradient_2d,
-        tolerance=0.05,
-    ),
-    CostParityCase(
-        name="gradient_3d",
-        setup=_setup_gradient_3d,
-        wrapper=fnp.gradient,
-        oracle=_oracle_gradient_3d,
-        tolerance=0.05,
-    ),
-])
+CASES.extend(
+    [
+        CostParityCase(
+            name="gradient_2d",
+            setup=_setup_gradient_2d,
+            wrapper=fnp.gradient,
+            oracle=_oracle_gradient_2d,
+            tolerance=0.05,
+        ),
+        CostParityCase(
+            name="gradient_3d",
+            setup=_setup_gradient_3d,
+            wrapper=fnp.gradient,
+            oracle=_oracle_gradient_3d,
+            tolerance=0.05,
+        ),
+    ]
+)
 
 
 def _setup_unwrap(rng):
@@ -209,22 +216,24 @@ def _oracle_matrix_power_16(a, n):
     fnp.matmul(a8, a8)
 
 
-CASES.extend([
-    CostParityCase(
-        name="matrix_power_4",
-        setup=_setup_matrix_power_4,
-        wrapper=fnp.linalg.matrix_power,
-        oracle=_oracle_matrix_power_4,
-        tolerance=0.01,
-    ),
-    CostParityCase(
-        name="matrix_power_16",
-        setup=_setup_matrix_power_16,
-        wrapper=fnp.linalg.matrix_power,
-        oracle=_oracle_matrix_power_16,
-        tolerance=0.01,
-    ),
-])
+CASES.extend(
+    [
+        CostParityCase(
+            name="matrix_power_4",
+            setup=_setup_matrix_power_4,
+            wrapper=fnp.linalg.matrix_power,
+            oracle=_oracle_matrix_power_4,
+            tolerance=0.01,
+        ),
+        CostParityCase(
+            name="matrix_power_16",
+            setup=_setup_matrix_power_16,
+            wrapper=fnp.linalg.matrix_power,
+            oracle=_oracle_matrix_power_16,
+            tolerance=0.01,
+        ),
+    ]
+)
 
 
 def _setup_convolve(rng):
@@ -262,6 +271,7 @@ def _setup_correlate(rng):
 
 def _oracle_correlate(a, v):
     import numpy as _np
+
     s = 2 * a.size * v.size - a.size - v.size
     probe = _np.zeros(s)
     fnp.multiply(probe, 1.0)
@@ -288,6 +298,7 @@ def _oracle_cross(a, b):
     # 3-vec cross product per row: 6 mults + 3 subs per row = 9 ops/row.
     # We model 5 ops per output element (output is (100, 3) = 300 elements -> 1500 ops).
     import numpy as _np
+
     out_size = a.shape[0] * 3
     probe = _np.zeros(out_size * 5)
     fnp.multiply(probe, 1.0)
@@ -400,6 +411,6 @@ def test_cost_parity(case):
     else:
         assert wrapper_cost == pytest.approx(oracle_cost, rel=case.tolerance), (
             f"{case.name}: wrapper={wrapper_cost}, oracle={oracle_cost}, "
-            f"rel_diff={(wrapper_cost-oracle_cost)/oracle_cost:.4f}, "
+            f"rel_diff={(wrapper_cost - oracle_cost) / oracle_cost:.4f}, "
             f"tolerance={case.tolerance}"
         )

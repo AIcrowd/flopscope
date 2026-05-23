@@ -2232,7 +2232,9 @@ def diff(a: ArrayLike, n: int = 1, axis: int = -1, **kwargs: Any) -> FlopscopeAr
     return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
 
 
-attach_docstring(diff, _np.diff, "counted_custom", "n*L - n*(n+1)/2 FLOPs along the diff axis")
+attach_docstring(
+    diff, _np.diff, "counted_custom", "n*L - n*(n+1)/2 FLOPs along the diff axis"
+)
 diff.__signature__ = _inspect.signature(_np.diff)  # pyright: ignore[reportFunctionMemberAccess]
 
 
@@ -2264,9 +2266,7 @@ def gradient(
             ),
             1,
         )
-    with budget.deduct(
-        "gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)
-    ):
+    with budget.deduct("gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)):
         result = _call_numpy(
             _np.gradient,
             _to_base_ndarray(f),
@@ -2276,7 +2276,12 @@ def gradient(
     return result  # type: ignore[return-value]  # wrapped at fnp.gradient import time
 
 
-attach_docstring(gradient, _np.gradient, "counted_custom", "sum_axis(2 * f.size * (shape[ax]-2) / shape[ax]) FLOPs")
+attach_docstring(
+    gradient,
+    _np.gradient,
+    "counted_custom",
+    "sum_axis(2 * f.size * (shape[ax]-2) / shape[ax]) FLOPs",
+)
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 
 
@@ -2335,7 +2340,9 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
     return result  # type: ignore[return-value]  # wrapped at fnp.convolve import time
 
 
-attach_docstring(convolve, _np.convolve, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)")
+attach_docstring(
+    convolve, _np.convolve, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)"
+)
 
 
 @_counted_wrapper
@@ -2359,7 +2366,9 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
     return result  # type: ignore[return-value]  # wrapped at fnp.correlate import time
 
 
-attach_docstring(correlate, _np.correlate, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)")
+attach_docstring(
+    correlate, _np.correlate, "counted_custom", "2*n*m - n - m FLOPs (FMA=1)"
+)
 
 
 def _cov_cost(x, y=None):

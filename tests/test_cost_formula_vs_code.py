@@ -922,10 +922,10 @@ class TestStats:
 @pytest.mark.parametrize(
     "shape,n,expected",
     [
-        ((1000,), 1, 999),          # numel - 1
-        ((1000,), 3, 2994),         # 3*1000 - 3*4//2 = 2994
-        ((1000,), 10, 9945),        # 10*1000 - 10*11//2 = 9945
-        ((50, 50), 1, 2450),        # along last axis: 50 * (50-1) = 2450
+        ((1000,), 1, 999),  # numel - 1
+        ((1000,), 3, 2994),  # 3*1000 - 3*4//2 = 2994
+        ((1000,), 10, 9945),  # 10*1000 - 10*11//2 = 9945
+        ((50, 50), 1, 2450),  # along last axis: 50 * (50-1) = 2450
     ],
 )
 def test_diff_cost_pinned(shape, n, expected, we):
@@ -936,9 +936,9 @@ def test_diff_cost_pinned(shape, n, expected, we):
 @pytest.mark.parametrize(
     "shape,expected",
     [
-        ((10,), 16),                         # one axis: 2 * 10 * max(10-2, 0) // 10 = 2*10*8//10 = 16
-        ((50, 50), 9600),                    # per-axis: 2*2500*48//50 = 4800; two axes: 9600
-        ((20, 20, 20), 43200),              # per-axis: 2*8000*18//20 = 14400; three axes: 43200
+        ((10,), 16),  # one axis: 2 * 10 * max(10-2, 0) // 10 = 2*10*8//10 = 16
+        ((50, 50), 9600),  # per-axis: 2*2500*48//50 = 4800; two axes: 9600
+        ((20, 20, 20), 43200),  # per-axis: 2*8000*18//20 = 14400; three axes: 43200
     ],
 )
 def test_gradient_cost_pinned(shape, expected, we):

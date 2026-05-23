@@ -100,7 +100,9 @@ class TestPinv:
             from flopscope.numpy.linalg import pinv
 
             pinv(A)
-            assert budget.flops_used == 108  # svd(4,3) + threshold + diag_scale + matmul(3,3,4)
+            assert (
+                budget.flops_used == 108
+            )  # svd(4,3) + threshold + diag_scale + matmul(3,3,4)
 
 
 class TestTensorsolve:

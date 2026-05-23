@@ -88,14 +88,20 @@ class TestAnalyticalCost:
     # --- Convolution (cost = 2*n*k - n - k, FMA=1 convention, issue #69) ---
 
     def test_convolve_nk(self):
-        assert _analytical_cost("convolve", n=1000, k=100) == 2 * 1000 * 100 - 1000 - 100  # 198900
+        assert (
+            _analytical_cost("convolve", n=1000, k=100) == 2 * 1000 * 100 - 1000 - 100
+        )  # 198900
 
     def test_correlate_nk(self):
-        assert _analytical_cost("correlate", n=1000, k=100) == 2 * 1000 * 100 - 1000 - 100  # 198900
+        assert (
+            _analytical_cost("correlate", n=1000, k=100) == 2 * 1000 * 100 - 1000 - 100
+        )  # 198900
 
     def test_convolve_default_k(self):
         # Default k=1000
-        assert _analytical_cost("convolve", n=500) == 2 * 500 * 1000 - 500 - 1000  # 998500
+        assert (
+            _analytical_cost("convolve", n=500) == 2 * 500 * 1000 - 500 - 1000
+        )  # 998500
 
     # --- Statistical ---
 

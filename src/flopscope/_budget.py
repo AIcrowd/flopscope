@@ -204,11 +204,14 @@ def _counted_wrapper(fn):
 # protocol was triggered from inside an fnp wrapper (= a wrapper forgot to
 # strip a FlopscopeArray before calling raw numpy) — that's a bug, raise.
 
+
 def _capture_wrapped_code():
     """Capture the `code` object of `_counted_wrapper`'s inner `wrapped`."""
+
     @_counted_wrapper
     def _probe(*args, **kwargs):
         pass
+
     return _probe.__code__
 
 

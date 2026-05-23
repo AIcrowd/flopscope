@@ -1081,7 +1081,9 @@ class TestAdditionalCustomOps:
             result = convolve(a, v)
         expected = numpy.convolve(a, v)
         assert numpy.allclose(result, expected)
-        assert budget.flops_used == 2 * a.size * v.size - a.size - v.size  # FMA=1 convention (issue #69)
+        assert (
+            budget.flops_used == 2 * a.size * v.size - a.size - v.size
+        )  # FMA=1 convention (issue #69)
 
     def test_convolve_from_list(self):
         with BudgetContext(flop_budget=10**6):

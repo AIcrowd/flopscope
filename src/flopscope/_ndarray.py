@@ -204,6 +204,7 @@ class FlopscopeArray(_np.ndarray):
 
         # Emit one-time auto-route warning (de-duped per call site).
         import warnings as _warnings
+
         _warnings.warn(
             f"np.{ufunc.__name__}(WhestArray) auto-routed to fnp.{ufunc.__name__}; "
             f"call fnp.{ufunc.__name__} directly to avoid this warning.",
@@ -551,6 +552,7 @@ class FlopscopeArray(_np.ndarray):
             return NotImplemented
 
         import warnings as _warnings
+
         _warnings.warn(
             f"np.{func.__name__}(WhestArray) auto-routed to fnp.{func.__name__}; "
             f"call fnp.{func.__name__} directly to avoid this warning.",

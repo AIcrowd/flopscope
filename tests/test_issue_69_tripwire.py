@@ -33,7 +33,9 @@ def test_called_from_wrapper_true_under_nested_calls():
         def helper_1():
             def helper_2():
                 return _called_from_wrapper()
+
             return helper_2()
+
         return helper_1()
 
     with BudgetContext(flop_budget=10**6):
@@ -77,6 +79,7 @@ def test_top_level_np_ufunc_on_whestarray_warns_and_routes():
         with pytest.warns(UserWarning, match=r"np\.add.*auto-routed to fnp\.add"):
             result = np.add(a, a)
     from flopscope._ndarray import FlopscopeArray
+
     assert isinstance(result, FlopscopeArray)
 
 
