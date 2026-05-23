@@ -367,7 +367,8 @@ def test_np_add_outer_warns_and_bails_on_oversized_symmetry():
                 np.add.outer(deep, deep)
     cost_warnings = [w for w in caught if issubclass(w.category, CostFallbackWarning)]
     assert len(cost_warnings) == 1, [str(w.message) for w in caught]
-    assert "degree 33" in str(cost_warnings[0].message)
+    assert "order " in str(cost_warnings[0].message)
+    assert "budget " in str(cost_warnings[0].message)
 
 
 def test_cost_fallback_warning_suppressed_by_configure():

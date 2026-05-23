@@ -28,6 +28,7 @@ from flopscope._ndarray import (
     _to_base_ndarray,
     _to_base_ndarray_tree,
 )
+from flopscope._perm_group import _DiminoBudgetExceeded
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetric import is_symmetric as _is_symmetric
 from flopscope._symmetry_utils import (
@@ -99,47 +100,42 @@ def _validate_result_symmetry(result, symmetry):
         raise SymmetryError(axes=tuple(axes), max_deviation=float("inf"))
 
 
-# Permutation groups with degree above this threshold are skipped from
-# symmetry-aware cost adjustment. ``SymmetryGroup.order()`` enumerates
-# the group's elements; for ``S_n`` that's ``n!`` work, which already
-# blows past Python's recursion / memory limits at ``n ≈ 20``.
-# ``np.ones((1,)*33)`` produces an S_33 auto-inferred symmetry — the
-# cost adjustment is irrelevant for length-1 axes anyway. Above this
-# rank we bail out and charge dense cost.
-_MAX_SYMMETRY_DEGREE_FOR_COST = 12
-
-
 def _is_oversized_for_cost_model(group):
-    """``True`` if walking ``group``'s elements would be prohibitively slow."""
+    """``True`` if walking ``group``'s elements would be prohibitively slow.
+
+    Uses ``group.order()`` against the configured ``dimino_budget``.
+    For known-kind groups, ``order()`` is O(1) closed form (#71) — the
+    check is cheap. For unknown-kind groups, ``order()`` runs ``_dimino``;
+    if it exceeds the budget mid-enumeration, ``_DiminoBudgetExceeded``
+    raises and we treat the group as oversized.
+    """
     if group is None:
         return False
-    return group.degree > _MAX_SYMMETRY_DEGREE_FOR_COST
+    budget = int(_get_setting("dimino_budget"))
+    try:
+        return group.order() > budget
+    except _DiminoBudgetExceeded:
+        return True
 
 
 @_functools.cache
-def _seen_oversized(op_name: str, degree: int) -> bool:
-    """Return ``True`` once per ``(op, degree)`` pair, ``False`` thereafter.
+def _seen_oversized(op_name: str, group_order: int) -> bool:
+    """Return ``True`` once per ``(op, |G|)`` pair, ``False`` thereafter.
 
-    The ``lru_cache`` deduplicates: the first call for a given
-    ``(op_name, degree)`` returns ``True`` (and the cache stores it);
-    subsequent identical calls hit the cache and return the stored
-    ``True`` — but we use the *miss-vs-hit* discipline at the call
-    site (``if cache_clear() is None`` style) instead of relying on
-    the value. The simpler pattern is to just call the function and
-    let ``lru_cache`` track which keys we've already seen, then
-    actually emit the warning at the call site only when we know
-    we're on a fresh key. See :func:`_warn_oversized_once`.
+    Used by :func:`_warn_oversized_once` to dedup warnings per
+    process. The ``lru_cache`` does the deduplication; we use the
+    miss-vs-hit discipline at the call site (see that function).
     """
     return True
 
 
-def _warn_oversized_once(op_name: str, degree: int) -> None:
-    """Emit :class:`CostFallbackWarning` once per ``(op_name, degree)``.
+def _warn_oversized_once(op_name: str, group_order: int) -> None:
+    """Emit :class:`CostFallbackWarning` once per ``(op_name, |G|)``.
 
     Hot paths (e.g. numpy compat tests doing thousands of ufunc calls
     on the same auto-inferred ``S_n`` symmetry) would otherwise spam
     one warning per call. The warning fires once per process for each
-    ``(op, degree)`` pair so users get the diagnostic without log
+    ``(op, |G|)`` pair so users get the diagnostic without log
     flooding.
 
     Honours ``flops.configure(symmetry_warnings=False)`` — shares the
@@ -148,20 +144,16 @@ def _warn_oversized_once(op_name: str, degree: int) -> None:
     """
     if not _get_setting("symmetry_warnings"):
         return
-    # The miss-vs-hit trick: ``cache_info().hits`` increments only on
-    # a cache hit. We snapshot before, call the cached function (which
-    # is cheap — just returns True), and check whether ``hits`` rose.
-    # If it didn't, this is the first call for this key.
     info_before = _seen_oversized.cache_info()
-    _seen_oversized(op_name, degree)
+    _seen_oversized(op_name, group_order)
     if _seen_oversized.cache_info().hits > info_before.hits:
-        return  # already warned for this (op, degree) pair
+        return  # already warned for this (op, |G|) pair
+    budget = int(_get_setting("dimino_budget"))
     _warnings.warn(
         f"{op_name}: skipping symmetry-aware cost adjustment for a "
-        f"SymmetryGroup of degree {degree} (threshold "
-        f"{_MAX_SYMMETRY_DEGREE_FOR_COST}); charging dense cost. "
-        f"Burnside enumeration on |S_{degree}| = {degree}! is "
-        f"infeasible. Suppress with flops.configure(symmetry_warnings=False).",
+        f"SymmetryGroup of order {group_order} (budget {budget}); "
+        f"charging dense cost. Group enumeration would exceed the budget. "
+        f"Suppress with flops.configure(symmetry_warnings=False).",
         CostFallbackWarning,
         stacklevel=4,
     )
@@ -602,16 +594,16 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     b_sym = _symmetry_of(b)
     output_shape = tuple(a.shape) + tuple(b.shape)
     dense = _builtins.max(a.size * b.size, 1)
-    # Bail on the symmetry composition for high-degree groups: the
-    # direct-product call enumerates ``|a_sym| * |b_sym|`` group
-    # elements, which explodes for auto-inferred S_n on (1,)*n shapes
-    # (np.ones((1,)*33) → S_33 with 33! elements). The cost adjustment
-    # is irrelevant when the output is trivially small anyway.
+    # The cost-model branch below enumerates |output_symmetry| group
+    # elements; if either input group's |G| exceeds dimino_budget the
+    # enumeration would be infeasible (np.ones((1,)*33) → S_33 with
+    # 33! ≈ 8.7e36 elements). The cost adjustment is irrelevant when
+    # the output is trivially small anyway.
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
-        oversized_degree = (
-            a_sym.degree if _is_oversized_for_cost_model(a_sym) else b_sym.degree  # type: ignore[union-attr]
+        oversized_order = (
+            a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
         )
-        _warn_oversized_once(f"{ufunc.__name__}.outer", oversized_degree)
+        _warn_oversized_once(f"{ufunc.__name__}.outer", oversized_order)
         out_sym = None
         cost = dense
     else:
@@ -2072,15 +2064,16 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     dense = _builtins.max(a.size * b.size // contracted, 1) if contracted > 0 else 1
     # Compose output symmetry from each input's surviving symmetry, with
     # b's axes lifted past a's surviving count so they refer to their
-    # final slots in the combined output. Bail on the composition for
-    # high-degree groups (see ``_is_oversized_for_cost_model``).
+    # final slots in the combined output. Bail on the composition when
+    # either group's |G| exceeds dimino_budget (see
+    # ``_is_oversized_for_cost_model``).
     a_sym = _symmetry_of(a)
     b_sym = _symmetry_of(b)
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
-        oversized_degree = (
-            a_sym.degree if _is_oversized_for_cost_model(a_sym) else b_sym.degree  # type: ignore[union-attr]
+        oversized_order = (
+            a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
         )
-        _warn_oversized_once("tensordot", oversized_degree)
+        _warn_oversized_once("tensordot", oversized_order)
         out_sym = None
         cost = dense
     else:
