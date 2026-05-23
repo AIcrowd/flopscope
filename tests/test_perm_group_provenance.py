@@ -137,3 +137,29 @@ class TestReduceGroupProvenance:
         # After remap (axis 0 removed), cyclic axes shift to (1,2,3).
         assert result is not None
         assert result._known_kind == ("cyclic", (1, 2, 3))
+
+
+class TestBroadcastGroupProvenance:
+    def test_broadcast_no_op_preserves_kind(self):
+        from flopscope._symmetry_utils import broadcast_group
+
+        g = SymmetryGroup.symmetric(axes=(0, 1, 2))
+        broadcasted = broadcast_group(g, input_shape=(4, 4, 4), output_shape=(4, 4, 4))
+        assert broadcasted is g
+
+    def test_broadcast_adds_symmetric_factor_for_new_axes(self):
+        from flopscope._symmetry_utils import broadcast_group
+
+        # Input shape (4, 4) broadcast to (3, 3, 4, 4):
+        # two newly-broadcast leading axes of size 3 → symmetric factor on (0, 1)
+        g = SymmetryGroup.symmetric(axes=(0, 1))
+        result = broadcast_group(
+            g, input_shape=(4, 4), output_shape=(3, 3, 4, 4)
+        )
+        # Inner symmetric on input axes (0,1) remaps to output axes (2,3).
+        # Plus a new symmetric on the two created (3,3) axes (0,1).
+        assert result is not None
+        assert result._known_kind == (
+            "direct_product",
+            (("symmetric", (0, 1)), ("symmetric", (2, 3))),
+        )
