@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import os
-import sys
-import warnings
-
 import numpy as np
 
-from flopscope._config import get_setting
 from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
@@ -21,7 +16,7 @@ from flopscope._symmetry_utils import (
     restrict_group_to_axes,
     validate_symmetry_group,
 )
-from flopscope.errors import SymmetryError, SymmetryLossWarning
+from flopscope.errors import SymmetryError
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -247,44 +242,9 @@ def is_symmetric(
 # Symmetry-loss warning helper
 # ---------------------------------------------------------------------------
 
-
-_FLOPSCOPE_PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _user_stacklevel() -> int:
-    """Stacklevel for :func:`warnings.warn` that points to the first frame
-    outside the ``flopscope`` package — i.e. the user's call site.
-
-    Walks the active call stack starting from the caller of
-    :func:`_warn_symmetry_loss`. Robust to changes in the number of
-    decorator/wrapper layers between user code and the warn site.
-    """
-    frame = sys._getframe(2)
-    level = 2
-    while frame is not None:
-        if not frame.f_code.co_filename.startswith(_FLOPSCOPE_PKG_DIR):
-            return level
-        frame = frame.f_back
-        level += 1
-    return 3
-
-
-def _warn_symmetry_loss(
-    lost_dims: list[tuple[int, ...]],
-    reason: str,
-) -> None:
-    """Emit a :class:`SymmetryLossWarning` if warnings are enabled."""
-    if not get_setting("symmetry_warnings"):
-        return
-    dim_str = ", ".join(str(g) for g in lost_dims)
-    warnings.warn(
-        f"Symmetry lost along dims {dim_str}: {reason}. "
-        "Use as_symmetric() to re-tag if you know the result is symmetric. "
-        "Suppress with flops.configure(symmetry_warnings=False).",
-        SymmetryLossWarning,
-        stacklevel=_user_stacklevel(),
-    )
-
+from flopscope.errors import (  # noqa: E402
+    _warn_symmetry_loss,
+)  # re-exported for back-compat
 
 # ---------------------------------------------------------------------------
 # Symmetry propagation helpers
@@ -710,16 +670,36 @@ class SymmetricTensor(FlopscopeArray):
         return out
 
     def reshape(self, *shape, **kwargs):  # type: ignore[override]
-        return _asplainflopscope(np.reshape(np.asarray(self), *shape, **kwargs))
+        from flopscope._free_ops import reshape as _reshape
+
+        return _reshape(self, *shape, **kwargs)
 
     def ravel(self, order: str = "C"):  # type: ignore[override]
-        return _asplainflopscope(np.ravel(np.asarray(self), order=order))  # type: ignore[arg-type]
+        from flopscope._free_ops import ravel as _ravel
+
+        return _ravel(self, order=order)
 
     def flatten(self, order: str = "C"):  # type: ignore[override]
-        return _asplainflopscope(np.asarray(self).flatten(order))  # type: ignore[arg-type]
+        from flopscope._free_ops import ravel as _ravel
+        from flopscope._symmetry_transport import transport_ravel
+        from flopscope.errors import _warn_symmetry_loss
+
+        in_group = self._symmetry
+        if in_group is not None:
+            out_group = transport_ravel(in_group, input_shape=np.asarray(self).shape)
+            if out_group is None:
+                _warn_symmetry_loss(
+                    lost_dims=[in_group.axes or tuple(range(in_group.degree))],
+                    reason="flatten collapses to a single axis; block cannot fit",
+                )
+        # Pass the raw ndarray view so _ravel does not emit a second warning.
+        out = _ravel(np.asarray(self), order=order)
+        return np.array(out, copy=True)
 
     def squeeze(self, axis=None):  # type: ignore[override]
-        return _asplainflopscope(np.squeeze(np.asarray(self), axis=axis))
+        from flopscope._free_ops import squeeze as _squeeze
+
+        return _squeeze(self, axis=axis)  # type: ignore[arg-type]
 
     def astype(  # type: ignore[override]
         self,

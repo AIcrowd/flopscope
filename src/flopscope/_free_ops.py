@@ -15,21 +15,38 @@ from typing import Any
 import numpy as _np
 from numpy.typing import ArrayLike, DTypeLike
 
+from flopscope import _symmetry_transport as _st
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
-from flopscope._ndarray import FlopscopeArray, _to_base_ndarray, _to_base_ndarray_tree
+from flopscope._ndarray import (
+    FlopscopeArray,
+    _asplainflopscope,
+    _to_base_ndarray,
+    _to_base_ndarray_tree,
+)
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import (
     broadcast_group,
-    remap_group_axes,
-    remap_group_for_expand_dims,
     validate_symmetry_group,
     wrap_with_symmetry,
     wrap_with_trusted_symmetry,
 )
 from flopscope._validation import require_budget
-from flopscope.errors import SymmetryError, UnsupportedFunctionError
+from flopscope.errors import (
+    SymmetryError,
+    UnsupportedFunctionError,
+    _warn_symmetry_loss,
+)
+
+
+def _warn_if_symmetric(arr, op_name: str) -> None:
+    """Emit SymmetryLossWarning if `arr` is a SymmetricTensor with a group."""
+    if isinstance(arr, SymmetricTensor) and arr.symmetry is not None:
+        _warn_symmetry_loss(
+            lost_dims=[arr.symmetry.axes or tuple(range(arr.symmetry.degree))],
+            reason=f"op '{op_name}' is not symmetry-aware",
+        )
 
 
 @lru_cache(maxsize=1024)
@@ -65,10 +82,6 @@ def _compatible_symmetry_for_shape(symmetry, shape):
     except (SymmetryError, ValueError):
         return None
     return symmetry
-
-
-def _normalize_axis_order(axes, ndim):
-    return tuple(axis % ndim for axis in axes)
 
 
 def _infer_structural_constructor_symmetry(*, kind, N=None, M=None, k=0, v_ndim=None):
@@ -353,7 +366,26 @@ attach_docstring(identity, _np.identity, "free", "0 FLOPs")
 
 def reshape(a: ArrayLike, /, *args: Any, **kwargs: Any) -> FlopscopeArray:
     """Reshape an array. Wraps ``numpy.reshape``. Cost: 0 FLOPs."""
-    return _np.reshape(_np.asarray(a), *args, **kwargs)
+    a_arr = _np.asarray(a)
+    result = _np.reshape(a_arr, *args, **kwargs)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_reshape(
+        in_group,
+        input_shape=a_arr.shape,
+        output_shape=result.shape,
+    )
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="reshape merges or splits axes inside the symmetric block",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(reshape, _np.reshape, "free", "0 FLOPs")
@@ -364,15 +396,14 @@ def transpose(
     axes: Sequence[int] | None = None,
 ) -> FlopscopeArray:
     """Permute array dimensions. Wraps ``numpy.transpose``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.transpose(_to_base_ndarray(a), axes=axes)  # type: ignore[return-value]
-    result = _np.transpose(_np.asarray(a), axes=axes)
-    if axes is None:
-        order = tuple(reversed(range(a.ndim)))
-    else:
-        order = _normalize_axis_order(tuple(axes), a.ndim)
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.transpose(a_arr, axes=axes)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_transpose(in_group, ndim=a_arr.ndim, axes=axes)
+    # transpose never genuinely drops (axis perm always preserves S_n etc.).
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(transpose, _np.transpose, "free", "0 FLOPs")
@@ -380,15 +411,18 @@ attach_docstring(transpose, _np.transpose, "free", "0 FLOPs")
 
 def swapaxes(a: ArrayLike, axis1: int, axis2: int) -> FlopscopeArray:
     """Swap two axes. Wraps ``numpy.swapaxes``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.swapaxes(_to_base_ndarray(a), axis1, axis2)  # type: ignore[return-value]
-    result = _np.swapaxes(_np.asarray(a), axis1, axis2)
-    order = list(range(a.ndim))
-    axis1 %= a.ndim
-    axis2 %= a.ndim
-    order[axis1], order[axis2] = order[axis2], order[axis1]
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.swapaxes(a_arr, axis1, axis2)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_swapaxes(
+        in_group,
+        ndim=a_arr.ndim,
+        axis1=axis1,
+        axis2=axis2,
+    )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(swapaxes, _np.swapaxes, "free", "0 FLOPs")
@@ -396,28 +430,22 @@ attach_docstring(swapaxes, _np.swapaxes, "free", "0 FLOPs")
 
 def moveaxis(
     a: ArrayLike,
-    source: int | Sequence[int],
-    destination: int | Sequence[int],
+    source,
+    destination,
 ) -> FlopscopeArray:
     """Move axes to new positions. Wraps ``numpy.moveaxis``. Cost: 0 FLOPs."""
-    if not isinstance(a, SymmetricTensor):
-        return _np.moveaxis(_to_base_ndarray(a), source, destination)  # type: ignore[return-value]
-    result = _np.moveaxis(_np.asarray(a), source, destination)
-    if _np.ndim(source) == 0:
-        source_axes = (int(source),)  # type: ignore[arg-type, call-overload]
-    else:
-        source_axes = tuple(source)  # type: ignore[arg-type, call-overload]
-    if _np.ndim(destination) == 0:
-        destination_axes = (int(destination),)  # type: ignore[arg-type, call-overload]
-    else:
-        destination_axes = tuple(destination)  # type: ignore[arg-type, call-overload]
-    source_axes = _normalize_axis_order(source_axes, a.ndim)
-    destination_axes = _normalize_axis_order(destination_axes, a.ndim)
-    order = [axis for axis in range(a.ndim) if axis not in source_axes]
-    for dest, src in sorted(zip(destination_axes, source_axes, strict=True)):
-        order.insert(dest, src)
-    mapping = {old: new for new, old in enumerate(order)}
-    return wrap_with_symmetry(result, remap_group_axes(a.symmetry, mapping))  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.moveaxis(a_arr, source, destination)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_moveaxis(
+        in_group,
+        ndim=a_arr.ndim,
+        source=source,
+        destination=destination,
+    )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(moveaxis, _np.moveaxis, "free", "0 FLOPs")
@@ -431,12 +459,29 @@ def concatenate(
 ) -> FlopscopeArray:
     """Join arrays along an axis. Cost: numel(output)."""
     budget = require_budget()
-    cost = max(sum(_np.asarray(a).size for a in arrays), 1)
+    arr_list = [_np.asarray(a) for a in arrays]
+    cost = max(sum(a.size for a in arr_list), 1)
+    groups = [(a.symmetry if isinstance(a, SymmetricTensor) else None) for a in arrays]
+    raw_arrs = [_to_base_ndarray(a) for a in arrays]
     with budget.deduct("concatenate", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(
-            _np.concatenate, _to_base_ndarray_tree(arrays), axis=axis, **kwargs
-        )  # type: ignore[arg-type, call-overload]
-    return result  # type: ignore[return-value]
+        result = _call_numpy(_np.concatenate, raw_arrs, axis=axis, **kwargs)
+    out_group = _st.transport_concatenate(
+        groups,
+        output_ndim=result.ndim,
+        axis=axis,
+    )
+    if any(g is not None for g in groups) and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
+            reason="concatenate breaks block symmetry or mixes with plain inputs",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(concatenate, _np.concatenate, "counted_custom", "numel(output) FLOPs")
@@ -450,12 +495,26 @@ def stack(
 ) -> FlopscopeArray:
     """Stack arrays along a new axis. Cost: numel(output)."""
     budget = require_budget()
-    cost = max(sum(_np.asarray(a).size for a in arrays), 1)
+    arr_list = [_np.asarray(a) for a in arrays]
+    cost = max(sum(a.size for a in arr_list), 1)
+    groups = [a.symmetry if isinstance(a, SymmetricTensor) else None for a in arrays]
     with budget.deduct("stack", flop_cost=cost, subscripts=None, shapes=()):
         result = _call_numpy(
             _np.stack, _to_base_ndarray_tree(arrays), axis=axis, **kwargs
-        )  # type: ignore[arg-type, call-overload]
-    return result
+        )
+    out_group = _st.transport_stack(groups, output_ndim=result.ndim, axis=axis)
+    if any(g is not None for g in groups) and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
+            reason="stack inputs disagree or include plain arrays",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(stack, _np.stack, "free", "0 FLOPs")
@@ -465,10 +524,29 @@ attach_docstring(stack, _np.stack, "free", "0 FLOPs")
 def vstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     """Stack arrays vertically. Cost: numel(output)."""
     budget = require_budget()
-    cost = max(sum(_np.asarray(a).size for a in tup), 1)
+    arr_list = [_np.asarray(a) for a in tup]
+    cost = max(sum(a.size for a in arr_list), 1)
+    groups = [a.symmetry if isinstance(a, SymmetricTensor) else None for a in tup]
+    input_ndims = [a.ndim for a in arr_list]
     with budget.deduct("vstack", flop_cost=cost, subscripts=None, shapes=()):
         result = _call_numpy(_np.vstack, _to_base_ndarray_tree(tup))  # type: ignore[arg-type, call-overload]
-    return result
+    out_group = _st.transport_vstack(
+        groups,
+        output_ndim=result.ndim,
+        input_ndims=input_ndims,
+    )
+    if any(g is not None for g in groups) and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
+            reason="vstack breaks block symmetry",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(vstack, _np.vstack, "free", "0 FLOPs")
@@ -476,7 +554,27 @@ attach_docstring(vstack, _np.vstack, "free", "0 FLOPs")
 
 def hstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     """Stack arrays horizontally. Wraps ``numpy.hstack``. Cost: 0 FLOPs."""
-    return _np.hstack(_to_base_ndarray_tree(tup))  # type: ignore[arg-type, call-overload]
+    arr_list = [_np.asarray(a) for a in tup]
+    groups = [a.symmetry if isinstance(a, SymmetricTensor) else None for a in tup]
+    input_ndims = [a.ndim for a in arr_list]
+    result = _np.hstack(_to_base_ndarray_tree(tup))  # type: ignore[arg-type, call-overload]
+    out_group = _st.transport_hstack(
+        groups,
+        output_ndim=result.ndim,
+        input_ndims=input_ndims,
+    )
+    if any(g is not None for g in groups) and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
+            reason="hstack breaks block symmetry",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(hstack, _np.hstack, "free", "0 FLOPs")
@@ -492,13 +590,29 @@ def split(
     budget = require_budget()
     ary_arr = _np.asarray(ary)
     cost = ary_arr.size
+    in_group = ary.symmetry if isinstance(ary, SymmetricTensor) else None
+    out_group = _st.transport_split(in_group, input_shape=ary_arr.shape, axis=axis)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason=f"split along axis {axis} breaks block symmetry",
+        )
     with budget.deduct(
         "split", flop_cost=cost, subscripts=None, shapes=(ary_arr.shape,)
     ):
-        result = _call_numpy(
-            _np.split, _to_base_ndarray(ary), indices_or_sections, axis=axis
+        raw_pieces = _call_numpy(
+            _np.split,
+            ary_arr,
+            indices_or_sections,
+            axis=axis,
         )
-    return result  # type: ignore[return-value]
+    if out_group is not None:
+        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+    return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
 attach_docstring(split, _np.split, "free", "0 FLOPs")
@@ -509,7 +623,22 @@ def hsplit(
     indices_or_sections: int | Sequence[int],
 ) -> list[FlopscopeArray]:
     """Split array horizontally. Wraps ``numpy.hsplit``. Cost: 0 FLOPs."""
-    return _np.hsplit(_to_base_ndarray(ary), indices_or_sections)  # type: ignore[return-value]
+    ary_arr = _np.asarray(ary)
+    in_group = ary.symmetry if isinstance(ary, SymmetricTensor) else None
+    out_group = _st.transport_hsplit(in_group, input_shape=ary_arr.shape)
+    raw_pieces = _np.hsplit(ary_arr, indices_or_sections)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="hsplit breaks block symmetry",
+        )
+    if out_group is not None:
+        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+    return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
 attach_docstring(hsplit, _np.hsplit, "free", "0 FLOPs")
@@ -524,11 +653,24 @@ def vsplit(
     budget = require_budget()
     ary_arr = _np.asarray(ary)
     cost = ary_arr.size
+    in_group = ary.symmetry if isinstance(ary, SymmetricTensor) else None
+    out_group = _st.transport_vsplit(in_group, input_shape=ary_arr.shape)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="vsplit breaks block symmetry",
+        )
     with budget.deduct(
         "vsplit", flop_cost=cost, subscripts=None, shapes=(ary_arr.shape,)
     ):
-        result = _call_numpy(_np.vsplit, _to_base_ndarray(ary), indices_or_sections)
-    return result  # type: ignore[return-value]
+        raw_pieces = _call_numpy(_np.vsplit, ary_arr, indices_or_sections)
+    if out_group is not None:
+        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+    return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
 attach_docstring(vsplit, _np.vsplit, "free", "0 FLOPs")
@@ -539,25 +681,40 @@ def squeeze(
     axis: int | tuple[int, ...] | None = None,
 ) -> FlopscopeArray:
     """Remove length-1 axes. Wraps ``numpy.squeeze``. Cost: 0 FLOPs."""
-    return _np.squeeze(_to_base_ndarray(a), axis=axis)  # type: ignore[return-value]
+    a_arr = _np.asarray(a)
+    result = _np.squeeze(a_arr, axis=axis)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_squeeze(in_group, input_shape=a_arr.shape, axis=axis)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="squeeze removes an axis inside the symmetric block",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(squeeze, _np.squeeze, "free", "0 FLOPs")
 
 
-def expand_dims(
-    a: ArrayLike,
-    axis: int | tuple[int, ...],
-) -> FlopscopeArray:
+def expand_dims(a: ArrayLike, axis) -> FlopscopeArray:
     """Insert a new axis. Wraps ``numpy.expand_dims``. Cost: 0 FLOPs."""
     a_arr = _np.asarray(a)
-    result = _np.expand_dims(_np.asarray(a), axis=axis)
-    symmetry = remap_group_for_expand_dims(
-        a.symmetry if isinstance(a, SymmetricTensor) else None,
-        ndim=a_arr.ndim,
+    result = _np.expand_dims(a_arr, axis=axis)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_expand_dims(
+        in_group,
+        input_ndim=a_arr.ndim,
         axis=axis,
     )
-    return wrap_with_symmetry(result, symmetry) if symmetry is not None else result  # type: ignore[return-value]
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(expand_dims, _np.expand_dims, "free", "0 FLOPs")
@@ -569,9 +726,22 @@ def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     budget = require_budget()
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_ravel(in_group, input_shape=a_arr.shape)
     with budget.deduct("ravel", flop_cost=cost, subscripts=None, shapes=(a_arr.shape,)):
         result = _call_numpy(_np.ravel, a_arr, **kwargs)
-    return result  # type: ignore[return-value]
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="ravel collapses to a single axis; block cannot fit",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(ravel, _np.ravel, "free", "0 FLOPs")
@@ -621,12 +791,29 @@ def tile(A: ArrayLike, reps: int | Sequence[int]) -> FlopscopeArray:
     """Construct array by repeating. Cost: numel(output)."""
     budget = require_budget()
     a_arr = _np.asarray(A)
-    reps_tup = (reps,) if _np.ndim(reps) == 0 else tuple(reps)  # type: ignore[arg-type, call-overload]
-    # Output size = input size * product of reps
-    cost = max(a_arr.size * int(_np.prod(reps_tup)), 1)
+    result = _np.tile(a_arr, reps)
+    cost = max(result.size, 1)
+    in_group = A.symmetry if isinstance(A, SymmetricTensor) else None
+    out_group = _st.transport_tile(
+        in_group,
+        input_shape=a_arr.shape,
+        output_shape=result.shape,
+        reps=reps,
+    )
     with budget.deduct("tile", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(_np.tile, _to_base_ndarray(A), reps)
-    return result  # type: ignore[return-value]
+        pass  # cost deducted; result already computed
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="tile reps not constant on block orbit",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(tile, _np.tile, "free", "0 FLOPs")
@@ -641,17 +828,26 @@ def repeat(
     """Repeat elements. Cost: numel(output)."""
     budget = require_budget()
     a_arr = _np.asarray(a)
-    # Output size: each element repeated; total = sum of repeats or size * repeats
-    reps = _np.asarray(repeats)
-    if reps.ndim == 0:
-        cost = max(a_arr.size * int(reps), 1)
-    else:
-        cost = max(int(reps.sum()), 1)
-    with budget.deduct("repeat", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(
-            _np.repeat, _to_base_ndarray(a), _to_base_ndarray(repeats), axis=axis
-        )  # type: ignore[arg-type, call-overload]
-    return result
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_repeat(in_group, input_shape=a_arr.shape, axis=axis)
+    result = _np.repeat(a_arr, repeats, axis=axis)  # type: ignore[arg-type]
+    cost = max(result.size, 1)
+    with budget.deduct(
+        "repeat", flop_cost=cost, subscripts=None, shapes=(a_arr.shape,)
+    ):
+        pass  # cost deducted; result already computed
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="repeat along a block axis breaks block symmetry",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(repeat, _np.repeat, "free", "0 FLOPs")
@@ -662,25 +858,53 @@ def flip(
     axis: int | tuple[int, ...] | None = None,
 ) -> FlopscopeArray:
     """Reverse order of elements. Wraps ``numpy.flip``. Cost: 0 FLOPs."""
-    return _np.flip(_to_base_ndarray(m), axis=axis)  # type: ignore[return-value]
+    a_arr = _np.asarray(m)
+    result = _np.flip(a_arr, axis=axis)
+    in_group = m.symmetry if isinstance(m, SymmetricTensor) else None
+    out_group = _st.transport_flip(
+        in_group,
+        ndim=a_arr.ndim,
+        axes_flipped=axis,
+    )
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="flip on a proper subset of block axes breaks group action",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(flip, _np.flip, "free", "0 FLOPs")
 
 
-@_counted_wrapper
 def roll(
     a: ArrayLike,
     shift: int | Sequence[int],
     axis: int | Sequence[int] | None = None,
 ) -> FlopscopeArray:
-    """Roll array elements. Cost: numel(output)."""
-    budget = require_budget()
+    """Roll array elements along an axis. Wraps ``numpy.roll``. Cost: 0 FLOPs."""
     a_arr = _np.asarray(a)
-    cost = max(a_arr.size, 1)
-    with budget.deduct("roll", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(_np.roll, _to_base_ndarray(a), shift, axis=axis)
-    return result  # type: ignore[return-value]
+    result = _np.roll(a_arr, shift, axis=axis)
+    in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+    out_group = _st.transport_roll(in_group, input_shape=a_arr.shape, axis=axis)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="roll along a block axis breaks block symmetry",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(roll, _np.roll, "free", "0 FLOPs")
@@ -690,6 +914,7 @@ attach_docstring(roll, _np.roll, "free", "0 FLOPs")
 def pad(array: ArrayLike, pad_width: Any, **kwargs: Any) -> FlopscopeArray:
     """Pad an array. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(array, "pad")
     # cost depends on result; duration is post-hoc
     # pad_width parsing is complex (scalar, per-axis, per-side) — not worth replicating
     result = _np.pad(_to_base_ndarray(array), pad_width, **kwargs)
@@ -704,6 +929,7 @@ attach_docstring(pad, _np.pad, "free", "0 FLOPs")
 
 def triu(m: ArrayLike, k: int = 0) -> FlopscopeArray:
     """Upper triangle. Wraps ``numpy.triu``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(m, "triu")
     return _np.triu(_to_base_ndarray(m), k=k)  # type: ignore[return-value]
 
 
@@ -712,6 +938,7 @@ attach_docstring(triu, _np.triu, "free", "0 FLOPs")
 
 def tril(m: ArrayLike, k: int = 0) -> FlopscopeArray:
     """Lower triangle. Wraps ``numpy.tril``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(m, "tril")
     return _np.tril(_to_base_ndarray(m), k=k)  # type: ignore[return-value]
 
 
@@ -727,6 +954,7 @@ def diagonal(
 ) -> FlopscopeArray:
     """Return diagonal. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(a, "diagonal")
     a_arr = _np.asarray(a)
     # Diagonal length along axis1/axis2
     m, n = a_arr.shape[axis1], a_arr.shape[axis2]
@@ -754,17 +982,29 @@ def broadcast_to(
 ) -> FlopscopeArray:
     """Broadcast array to shape. Cost: numel(output)."""
     output_shape = (shape,) if isinstance(shape, int) else tuple(shape)
-    input_array = _np.asarray(array)
+    arr = _np.asarray(array)
     budget = require_budget()
     cost = max(int(_np.prod(output_shape)), 1)
     with budget.deduct("broadcast_to", flop_cost=cost, subscripts=None, shapes=()):
-        result = _call_numpy(_np.broadcast_to, input_array, output_shape)
-    symmetry = broadcast_group(
-        array.symmetry if isinstance(array, SymmetricTensor) else None,
-        input_shape=input_array.shape,
+        result = _call_numpy(_np.broadcast_to, arr, output_shape)
+    in_group = array.symmetry if isinstance(array, SymmetricTensor) else None
+    out_group = _st.transport_broadcast_to(
+        in_group,
+        input_shape=arr.shape,
         output_shape=output_shape,
     )
-    return wrap_with_symmetry(result, symmetry)  # type: ignore[return-value]
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="broadcast_to expands length-1 block axes",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(broadcast_to, _np.broadcast_to, "free", "0 FLOPs")
@@ -882,6 +1122,7 @@ def append(
 ) -> FlopscopeArray:
     """Append values. Cost: numel(appended values)."""
     budget = require_budget()
+    _warn_if_symmetric(arr, "append")
     values_arr = _np.asarray(values)
     cost = values_arr.size  # num appended
     with budget.deduct("append", flop_cost=cost, subscripts=None, shapes=()):
@@ -918,6 +1159,7 @@ attach_docstring(argwhere, _np.argwhere, "free", "0 FLOPs")
 def array_split(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
     """Split array into sub-arrays. Cost: numel(input)."""
     budget = require_budget()
+    _warn_if_symmetric(ary, "array_split")
     ary_arr = _np.asarray(ary)
     cost = ary_arr.size
     with budget.deduct(
@@ -953,30 +1195,93 @@ attach_docstring(asarray_chkfinite, _np.asarray_chkfinite, "free", "0 FLOPs")
 
 
 def atleast_1d(
-    *args: ArrayLike, **kwargs: Any
-) -> FlopscopeArray | list[FlopscopeArray]:
+    *arys: ArrayLike,
+) -> FlopscopeArray | tuple[FlopscopeArray, ...]:
     """Convert to 1-D or higher. Wraps ``numpy.atleast_1d``. Cost: 0 FLOPs."""
-    return _np.atleast_1d(*[_to_base_ndarray(a) for a in args], **kwargs)  # type: ignore[return-value]
+
+    def _one(a):
+        a_arr = _np.asarray(a)
+        result = _np.atleast_1d(a_arr)
+        in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+        out_group = _st.transport_atleast_1d(in_group, input_shape=a_arr.shape)
+        if in_group is not None and out_group is None:
+            _warn_symmetry_loss(
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
+                reason="atleast_1d incompatible with block structure",
+            )
+        if out_group is not None:
+            return wrap_with_symmetry(result, out_group)
+        return _asplainflopscope(result)
+
+    if len(arys) == 1:
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_1d, _np.atleast_1d, "free", "0 FLOPs")
 
 
 def atleast_2d(
-    *args: ArrayLike, **kwargs: Any
-) -> FlopscopeArray | list[FlopscopeArray]:
+    *arys: ArrayLike,
+) -> FlopscopeArray | tuple[FlopscopeArray, ...]:
     """Convert to 2-D or higher. Wraps ``numpy.atleast_2d``. Cost: 0 FLOPs."""
-    return _np.atleast_2d(*[_to_base_ndarray(a) for a in args], **kwargs)  # type: ignore[return-value]
+
+    def _one(a):
+        a_arr = _np.asarray(a)
+        result = _np.atleast_2d(a_arr)
+        in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+        out_group = _st.transport_atleast_2d(in_group, input_shape=a_arr.shape)
+        if in_group is not None and out_group is None:
+            _warn_symmetry_loss(
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
+                reason="atleast_2d incompatible with block structure",
+            )
+        if out_group is not None:
+            return wrap_with_symmetry(result, out_group)
+        return _asplainflopscope(result)
+
+    if len(arys) == 1:
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_2d, _np.atleast_2d, "free", "0 FLOPs")
 
 
 def atleast_3d(
-    *args: ArrayLike, **kwargs: Any
-) -> FlopscopeArray | list[FlopscopeArray]:
+    *arys: ArrayLike,
+) -> FlopscopeArray | tuple[FlopscopeArray, ...]:
     """Convert to 3-D or higher. Wraps ``numpy.atleast_3d``. Cost: 0 FLOPs."""
-    return _np.atleast_3d(*[_to_base_ndarray(a) for a in args], **kwargs)  # type: ignore[return-value]
+
+    def _one(a):
+        a_arr = _np.asarray(a)
+        result = _np.atleast_3d(a_arr)
+        in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
+        out_group = _st.transport_atleast_3d(in_group, input_shape=a_arr.shape)
+        if in_group is not None and out_group is None:
+            _warn_symmetry_loss(
+                lost_dims=[
+                    in_group.axes
+                    if in_group.axes is not None
+                    else tuple(range(in_group.degree))
+                ],
+                reason="atleast_3d incompatible with block structure",
+            )
+        if out_group is not None:
+            return wrap_with_symmetry(result, out_group)
+        return _asplainflopscope(result)
+
+    if len(arys) == 1:
+        return _one(arys[0])  # type: ignore[return-value]
+    return tuple(_one(a) for a in arys)  # type: ignore[return-value]
 
 
 attach_docstring(atleast_3d, _np.atleast_3d, "free", "0 FLOPs")
@@ -1014,6 +1319,17 @@ attach_docstring(binary_repr, _np.binary_repr, "free", "0 FLOPs")
 def block(*args, **kwargs):
     """Assemble array from nested lists. Cost: numel(output)."""
     budget = require_budget()
+
+    # Warn for any SymmetricTensor found in the nested structure.
+    def _walk_warn(obj):
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                _walk_warn(item)
+        else:
+            _warn_if_symmetric(obj, "block")
+
+    for a in args:
+        _walk_warn(a)
     result = _np.block(*[_to_base_ndarray_tree(a) for a in args], **kwargs)
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct("block", flop_cost=cost, subscripts=None, shapes=()):
@@ -1091,6 +1407,9 @@ attach_docstring(can_cast, _np.can_cast, "free", "0 FLOPs")
 def choose(*args, **kwargs):
     """Construct array from index array. Cost: numel(output)."""
     budget = require_budget()
+    # Warn if the first arg (index array) carries symmetry.
+    if args:
+        _warn_if_symmetric(args[0], "choose")
     # Args: (a, choices, ...) or just (a, choices) — strip arrays.
     stripped_args = []
     for arg in args:
@@ -1112,8 +1431,27 @@ attach_docstring(choose, _np.choose, "free", "0 FLOPs")
 
 def column_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     """Stack 1-D arrays as columns. Wraps ``numpy.column_stack``. Cost: 0 FLOPs."""
-    # First positional arg is sequence of arrays
-    return _np.column_stack(_to_base_ndarray_tree(tup))  # type: ignore[return-value]
+    arr_list = [_np.asarray(a) for a in tup]
+    groups = [a.symmetry if isinstance(a, SymmetricTensor) else None for a in tup]
+    input_ndims = [a.ndim for a in arr_list]
+    result = _np.column_stack(_to_base_ndarray_tree(tup))  # type: ignore[arg-type, call-overload]
+    out_group = _st.transport_column_stack(
+        groups,
+        output_ndim=result.ndim,
+        input_ndims=input_ndims,
+    )
+    if any(g is not None for g in groups) and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                g.axes if g.axes is not None else tuple(range(g.degree))
+                for g in groups
+                if g is not None
+            ],
+            reason="column_stack breaks block symmetry",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(column_stack, _np.column_stack, "free", "0 FLOPs")
@@ -1136,6 +1474,7 @@ def compress(
 ) -> FlopscopeArray:
     """Return selected slices along an axis. Cost: numel(output)."""
     budget = require_budget()
+    _warn_if_symmetric(a, "compress")
     result = _np.compress(
         _to_base_ndarray(condition),  # type: ignore[arg-type]
         _to_base_ndarray(a),
@@ -1210,6 +1549,7 @@ def delete(
 ) -> FlopscopeArray:
     """Return new array with sub-arrays deleted. Cost: num elements removed."""
     budget = require_budget()
+    _warn_if_symmetric(arr, "delete")
     arr_np = _np.asarray(arr)
     result = _np.delete(_to_base_ndarray(arr), obj, axis=axis, **kwargs)
     cost = max(arr_np.size - result.size, 0)  # num deleted
@@ -1265,11 +1605,24 @@ def dsplit(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
     budget = require_budget()
     ary_arr = _np.asarray(ary)
     cost = ary_arr.size
+    in_group = ary.symmetry if isinstance(ary, SymmetricTensor) else None
+    out_group = _st.transport_dsplit(in_group, input_shape=ary_arr.shape)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="dsplit breaks block symmetry",
+        )
     with budget.deduct(
         "dsplit", flop_cost=cost, subscripts=None, shapes=(ary_arr.shape,)
     ):
-        result = _call_numpy(_np.dsplit, _to_base_ndarray(ary), *args, **kwargs)
-    return result  # type: ignore[return-value]
+        raw_pieces = _call_numpy(_np.dsplit, ary_arr, *args, **kwargs)
+    if out_group is not None:
+        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+    return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
 attach_docstring(dsplit, _np.dsplit, "free", "0 FLOPs")
@@ -1279,6 +1632,8 @@ attach_docstring(dsplit, _np.dsplit, "free", "0 FLOPs")
 def dstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     """Stack arrays along third axis. Cost: numel(output)."""
     budget = require_budget()
+    for a in tup:
+        _warn_if_symmetric(a, "dstack")
     result = _np.dstack(_to_base_ndarray_tree(tup))  # type: ignore[arg-type]
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct("dstack", flop_cost=cost, subscripts=None, shapes=()):
@@ -1359,6 +1714,7 @@ attach_docstring(flatnonzero, _np.flatnonzero, "free", "0 FLOPs")
 
 def fliplr(*args, **kwargs):
     """Reverse elements along axis 1. Wraps ``numpy.fliplr``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(args[0], "fliplr")
     stripped_args = _to_base_ndarray_tree(args)
     return _np.fliplr(*stripped_args, **kwargs)
 
@@ -1368,6 +1724,7 @@ attach_docstring(fliplr, _np.fliplr, "free", "0 FLOPs")
 
 def flipud(*args, **kwargs):
     """Reverse elements along axis 0. Wraps ``numpy.flipud``. Cost: 0 FLOPs."""
+    _warn_if_symmetric(args[0], "flipud")
     stripped_args = _to_base_ndarray_tree(args)
     return _np.flipud(*stripped_args, **kwargs)
 
@@ -1606,10 +1963,24 @@ def mask_indices(*args, **kwargs):
 attach_docstring(mask_indices, _np.mask_indices, "free", "0 FLOPs")
 
 
-def matrix_transpose(*args, **kwargs):
-    """Transpose a matrix or stack of matrices. Wraps ``numpy.matrix_transpose``. Cost: 0 FLOPs."""
-    stripped_args = _to_base_ndarray_tree(args)
-    return _np.matrix_transpose(*stripped_args, **kwargs)
+def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
+    """Swap last two axes. Wraps ``numpy.matrix_transpose``. Cost: 0 FLOPs."""
+    x_arr = _np.asarray(x)
+    result = _np.matrix_transpose(x_arr)
+    in_group = x.symmetry if isinstance(x, SymmetricTensor) else None
+    out_group = _st.transport_matrix_transpose(in_group, ndim=x_arr.ndim)
+    if in_group is not None and out_group is None:
+        _warn_symmetry_loss(
+            lost_dims=[
+                in_group.axes
+                if in_group.axes is not None
+                else tuple(range(in_group.degree))
+            ],
+            reason="matrix_transpose: rank too low for sym",
+        )
+    if out_group is not None:
+        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+    return _asplainflopscope(result)  # type: ignore[return-value]
 
 
 attach_docstring(matrix_transpose, _np.matrix_transpose, "free", "0 FLOPs")

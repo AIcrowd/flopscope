@@ -28,13 +28,8 @@ from flopscope._ndarray import (
     _to_base_ndarray,
     _to_base_ndarray_tree,
 )
-from flopscope._symmetric import (
-    SymmetricTensor,
-    _warn_symmetry_loss,
-)
-from flopscope._symmetric import (
-    is_symmetric as _is_symmetric,
-)
+from flopscope._symmetric import SymmetricTensor
+from flopscope._symmetric import is_symmetric as _is_symmetric
 from flopscope._symmetry_utils import (
     broadcast_group,
     direct_product_groups,
@@ -49,6 +44,7 @@ from flopscope.errors import (
     CostFallbackWarning,
     SymmetryError,
     UnsupportedFunctionError,
+    _warn_symmetry_loss,
 )
 
 # ---------------------------------------------------------------------------

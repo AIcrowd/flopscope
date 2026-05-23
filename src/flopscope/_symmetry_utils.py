@@ -169,7 +169,11 @@ def restrict_group_to_axes(
         local_indices.append(group_axes.index(axis))
     if len(local_indices) < 2:
         return None
-    restricted = group.restrict(tuple(local_indices))
+    kept = tuple(local_indices)
+    # First compute the setwise stabilizer so that restrict() only sees
+    # permutations that map the kept set to itself.
+    stabilized = group.setwise_stabilizer(set(kept))
+    restricted = stabilized.restrict(kept)
     if restricted.order() <= 1:
         return None
     return restricted
@@ -284,6 +288,84 @@ def direct_product_groups(*groups: SymmetryGroup | None) -> SymmetryGroup | None
         return factors[0]
     product = SymmetryGroup.direct_product(*factors)
     return product if product.order() > 1 else None
+
+
+def setwise_stabilizer(
+    group: SymmetryGroup | None,
+    fixed_set: Iterable[int],
+) -> SymmetryGroup | None:
+    """Return the subgroup G' = {π ∈ G : π(fixed_set) = fixed_set}.
+
+    `fixed_set` is interpreted as tensor-axis indices; elements not in
+    ``group.axes`` are silently filtered out. Returns ``None`` if the
+    stabilizer is trivial (order ≤ 1).
+    """
+    if group is None:
+        return None
+    axes = group.axes
+    if axes is None:
+        axes = tuple(range(group.degree))
+    # Translate tensor-axis indices to internal degree indices.
+    internal = {axes.index(a) for a in fixed_set if a in axes}
+    result = group.setwise_stabilizer(internal)
+    return result if result.order() > 1 else None
+
+
+def group_orbits_on_axes(
+    group: SymmetryGroup,
+    axes: Sequence[int],
+) -> list[set[int]]:
+    """Return the orbits of `group`'s action on the given tensor `axes`.
+
+    Axes not acted on by `group` are returned as singleton orbits. Output
+    order is deterministic (axes appear in their first-encounter order).
+    """
+    axis_list = list(axes)
+    group_axes = group.axes
+    if group_axes is None:
+        group_axes = tuple(range(group.degree))
+    # Map: tensor-axis -> set of tensor-axes reachable by any generator.
+    # For axes outside group_axes, the orbit is just itself.
+    seen: set[int] = set()
+    orbits: list[set[int]] = []
+    for a in axis_list:
+        if a in seen:
+            continue
+        if a not in group_axes:
+            orbits.append({a})
+            seen.add(a)
+            continue
+        orbit: set[int] = set()
+        frontier = {a}
+        while frontier:
+            x = frontier.pop()
+            if x in orbit:
+                continue
+            orbit.add(x)
+            local_x = group_axes.index(x)
+            for generator in group.generators:
+                local_y = generator.array_form[local_x]
+                y = group_axes[local_y]
+                if y not in orbit:
+                    frontier.add(y)
+        orbits.append(orbit)
+        seen |= orbit
+    return orbits
+
+
+def _normalize_reps_for_output(reps, *, output_ndim: int) -> tuple[int, ...]:
+    """Normalize `reps` arg to a tuple of length `output_ndim`.
+
+    Matches NumPy.tile's right-alignment rule: if `reps` is shorter, it's
+    prepended with 1s. If `reps` is a scalar, treat as `(reps,)`.
+    """
+    if isinstance(reps, int):
+        reps_tup = (reps,)
+    else:
+        reps_tup = tuple(reps)
+    if len(reps_tup) < output_ndim:
+        reps_tup = (1,) * (output_ndim - len(reps_tup)) + reps_tup
+    return reps_tup
 
 
 def broadcast_group(

@@ -201,7 +201,8 @@ class TestBinarySymmetric:
         plain = numpy.ones((4, 4)) * numpy.arange(4)  # Not symmetric
         with BudgetContext(flop_budget=10**6):
             # intersect_symmetry gets called; one operand has no symmetry
-            result = multiply(st, plain)
+            with pytest.warns(SymmetryLossWarning):
+                result = multiply(st, plain)
         # intersect_symmetry returns None when one has no groups
         # so result should not be SymmetricTensor
         assert not isinstance(result, SymmetricTensor)

@@ -10,7 +10,7 @@ import flopscope.numpy as fnp
 from flopscope._budget import BudgetContext
 from flopscope._ndarray import FlopscopeArray
 from flopscope._symmetric import SymmetricTensor, as_symmetric, is_symmetric, symmetrize
-from flopscope.errors import SymmetryError
+from flopscope.errors import SymmetryError, SymmetryLossWarning
 
 
 def _s2(*axes):
@@ -31,10 +31,12 @@ def test_array_finalize_is_conservative():
     assert finalized.symmetry is None
 
 
-def test_copy_preserves_symmetry_but_shape_changing_views_drop_it():
+def test_copy_preserves_symmetry_and_shape_methods_now_transport(recwarn):
+    """After issue #68, shape methods either transport symmetry or warn on drop."""
     tensor = as_symmetric(np.eye(3), symmetry=_s2(0, 1))
 
     copied = tensor.copy()
+    # reshape((-1,)) collapses S_2 on (0,1) of (3,3) into a 1-D shape — drops with warning.
     reshaped = tensor.reshape(-1)
     raveled = tensor.ravel()
     flattened = tensor.flatten()
@@ -42,10 +44,28 @@ def test_copy_preserves_symmetry_but_shape_changing_views_drop_it():
 
     assert isinstance(copied, SymmetricTensor)
     assert copied.symmetry == tensor.symmetry
+    # reshape/ravel/flatten to 1-D drop the multi-axis group.
     assert not isinstance(reshaped, SymmetricTensor)
     assert not isinstance(raveled, SymmetricTensor)
     assert not isinstance(flattened, SymmetricTensor)
+    # astype is not in the shape-op transport scope; remains as-is.
     assert not isinstance(cast, SymmetricTensor)
+    # The three shape ops should have emitted SymmetryLossWarning.
+    from flopscope.errors import SymmetryLossWarning
+
+    sym_warnings = [
+        w for w in recwarn.list if issubclass(w.category, SymmetryLossWarning)
+    ]
+    assert len(sym_warnings) == 3  # reshape, ravel, flatten each warn once
+
+
+def test_symmetric_tensor_squeeze_preserves_block(recwarn):
+    """Squeezing an axis outside the block now preserves symmetry."""
+    data = np.eye(3).reshape(1, 3, 3)
+    tensor = as_symmetric(data, symmetry=_s2(1, 2))
+    squeezed = tensor.squeeze(axis=0)
+    assert isinstance(squeezed, SymmetricTensor)
+    assert set(squeezed.symmetry.axes or ()) == {0, 1}
 
 
 def test_transpose_remaps_symmetry():
@@ -64,10 +84,14 @@ def test_swapaxes_remaps_symmetry():
 
 def test_plain_slices_drop_symmetry():
     tensor = as_symmetric(np.eye(4), symmetry=_s2(0, 1))
-    assert isinstance(tensor[1:, 1:], FlopscopeArray)
-    assert not isinstance(tensor[1:, 1:], SymmetricTensor)
-    assert isinstance(tensor[::-1, ::-1], FlopscopeArray)
-    assert not isinstance(tensor[::-1, ::-1], SymmetricTensor)
+    with pytest.warns(SymmetryLossWarning):
+        sliced_fwd = tensor[1:, 1:]
+    assert isinstance(sliced_fwd, FlopscopeArray)
+    assert not isinstance(sliced_fwd, SymmetricTensor)
+    with pytest.warns(SymmetryLossWarning):
+        sliced_rev = tensor[::-1, ::-1]
+    assert isinstance(sliced_rev, FlopscopeArray)
+    assert not isinstance(sliced_rev, SymmetricTensor)
 
 
 def test_is_symmetric_checks_declared_group():
