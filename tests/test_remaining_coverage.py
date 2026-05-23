@@ -868,7 +868,7 @@ class TestLinalgSolversExtended:
         a = numpy.random.rand(4, 6)
         with BudgetContext(flop_budget=10**9) as budget:
             pinv(a)
-        assert budget.flops_used == 4 * 6 * 4  # m * n * min(m, n)
+        assert budget.flops_used == 292  # svd(4,6) + threshold + diag_scale + matmul(6,4,4)
 
     def test_tensorsolve(self):
         from flopscope.numpy.linalg._solvers import tensorsolve

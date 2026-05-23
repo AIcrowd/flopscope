@@ -304,6 +304,30 @@ CASES.append(
 )
 
 
+def _setup_pinv(rng):
+    a = fnp.asarray(rng.random((30, 20)))
+    return (a,), {}
+
+
+def _oracle_pinv(a):
+    # numpy.pinv: svd -> threshold -> (vt.T * s_inv) -> matmul with u.T
+    u, s, vt = fnp.linalg.svd(a, full_matrices=False)
+    cutoff = fnp.max(s) * max(a.shape) * np.finfo(s.dtype).eps
+    s_inv = fnp.where(s > cutoff, 1.0 / s, 0.0)
+    fnp.matmul(vt.T * s_inv, u.T)
+
+
+CASES.append(
+    CostParityCase(
+        name="pinv",
+        setup=_setup_pinv,
+        wrapper=fnp.linalg.pinv,
+        oracle=_oracle_pinv,
+        tolerance=0.05,
+    )
+)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_cost_parity(case):
     """Wrapper-charged FLOPs must equal sum-of-fnp-primitive FLOPs for the same algo."""

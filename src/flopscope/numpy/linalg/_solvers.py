@@ -213,7 +213,7 @@ attach_docstring(
 
 
 def pinv_cost(m: int, n: int) -> int:
-    """FLOP cost of pseudoinverse.
+    """FLOP cost of Moore-Penrose pseudoinverse.
 
     Parameters
     ----------
@@ -225,13 +225,28 @@ def pinv_cost(m: int, n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: m * n * min(m, n).
+        Estimated FLOP count.
 
     Notes
     -----
-    Computed via SVD.
+    NumPy implements ``pinv`` as: ``svd(A, full_matrices=False)`` →
+    threshold tiny singular values → multiply ``vt.T`` by ``s_inv``
+    broadcasted → matmul with ``u.T``. We compose the cost from
+    ``svd_cost`` and ``matmul_cost`` so this formula tracks those
+    helpers automatically (issue #69; was previously missing the
+    post-SVD reconstruction).
+
+    Total: ``svd(m,n) + threshold(min(m,n)) + diag_scale(n*min(m,n))
+    + matmul(n, min(m,n), m)``.
     """
-    return max(m * n * min(m, n), 1)
+    from flopscope._flops import matmul_cost, svd_cost
+
+    k = min(m, n)
+    svd = svd_cost(m, n)
+    threshold = k
+    diag_scale = n * k
+    reconstruction = matmul_cost(n, k, m)
+    return max(svd + threshold + diag_scale + reconstruction, 1)
 
 
 @_counted_wrapper

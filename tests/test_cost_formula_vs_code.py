@@ -486,7 +486,7 @@ class TestLinalgSolvers:
         )
 
     def test_pinv_mnk(self, we):
-        assert _cost_of(we.linalg.pinv, numpy.random.rand(10, 5)) == 250
+        assert _cost_of(we.linalg.pinv, numpy.random.rand(10, 5)) == 730
 
     def test_tensorsolve_n3(self, we):
         assert (
