@@ -384,3 +384,51 @@ class TestSymmetryInferredSlot:
             symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
         )
         assert arr._symmetry_inferred is False
+
+
+class TestSymmetryInferredSlotPickleRoundtrip:
+    """Pickle round-trip must not leave `_symmetry_inferred` uninitialized.
+
+    The spec says the marker's pickle-survival is unspecified — but the slot
+    must always be accessible after unpickling (defaulting to False if not
+    preserved is fine; AttributeError is not).
+    """
+
+    def test_pickle_roundtrip_does_not_raise_on_attribute_access(self):
+        import pickle
+
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        restored = pickle.loads(pickle.dumps(arr))
+        # The slot must exist and be readable. Either False or True is OK
+        # per spec; AttributeError is not.
+        value = restored._symmetry_inferred
+        assert value in (True, False)
+
+
+class TestSymmetryInferredSlotCopyDoesNotPropagate:
+    """copy() must not propagate the inferred marker (spec: marker is per-array)."""
+
+    def test_copy_of_inferred_array_clears_marker(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+
+        arr = SymmetricTensor(
+            np.zeros((3, 3)),
+            symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        # Manually flip the marker to simulate an inferred-symmetry array
+        # (the helper that does this is in Task 3 — here we set it directly
+        # so we can exercise the copy path in isolation).
+        arr._symmetry_inferred = True
+        copy = arr.copy()
+        assert copy._symmetry_inferred is False
