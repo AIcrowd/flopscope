@@ -987,3 +987,45 @@ def test_perf_warm_inplace_add_scalar_on_symmetric_is_fast():
         "warm in-place add lost symmetry object identity; "
         "_inplace_from_result is constructing a fresh group somewhere"
     )
+
+
+class TestIssue70AutoInferredOutDowngrade:
+    """Regression: issue #70 — auto-inferred symmetry on `out=` target.
+
+    np.zeros_like(plain_3x3) auto-infers S_n symmetry; using it as `out=`
+    for an asymmetric write used to raise. With the provenance marker,
+    inferred-symmetry out= targets silently downgrade to plain ndarray.
+    """
+
+    def test_inferred_out_downgrades_silently(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        plain = fnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        out = fnp.zeros_like(plain)
+        mask = fnp.array(
+            [[True, False, True], [False, True, False], [True, False, True]]
+        )
+        np.positive(plain, out=out, where=mask)
+        # `out` must contain the masked write; we don't assert its type here
+        # because numpy's __array_ufunc__ flow may have replaced the wrapper.
+        expected = np.where(mask, plain, 0.0)
+        np.testing.assert_array_equal(np.asarray(out), expected)
+
+    def test_explicit_symmetry_out_still_raises(self):
+        import numpy as np
+        import pytest
+
+        import flopscope as flops
+        import flopscope.numpy as fnp
+
+        plain = fnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        out = flops.as_symmetric(
+            np.zeros((3, 3)), symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1))
+        )
+        mask = fnp.array(
+            [[True, False, True], [False, True, False], [True, False, True]]
+        )
+        with pytest.raises(ValueError, match="out symmetry does not match"):
+            np.positive(plain, out=out, where=mask)
