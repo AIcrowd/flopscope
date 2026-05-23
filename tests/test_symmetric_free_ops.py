@@ -458,3 +458,64 @@ class TestWrapWithInferredSymmetry:
 
         result = wrap_with_inferred_symmetry(np.zeros((3, 4)), None)
         assert not isinstance(result, SymmetricTensor)
+
+
+class TestAutoInferenceSetsMarker:
+    """zeros / ones / full / *_like with auto-inferred symmetry mark the array."""
+
+    def test_zeros_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+
+        arr = fnp.zeros((3, 3))
+        assert arr._symmetry_inferred is True
+
+    def test_ones_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+
+        arr = fnp.ones((4, 4))
+        assert arr._symmetry_inferred is True
+
+    def test_full_square_marks_inferred(self):
+        import flopscope.numpy as fnp
+
+        arr = fnp.full((3, 3), 5.0)
+        assert arr._symmetry_inferred is True
+
+    def test_zeros_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        arr = fnp.zeros_like(np.empty((3, 3)))
+        assert arr._symmetry_inferred is True
+
+    def test_ones_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        arr = fnp.ones_like(np.empty((4, 4)))
+        assert arr._symmetry_inferred is True
+
+    def test_full_like_plain_square_marks_inferred(self):
+        import numpy as np
+
+        import flopscope.numpy as fnp
+
+        arr = fnp.full_like(np.empty((3, 3)), 7.0)
+        assert arr._symmetry_inferred is True
+
+    def test_zeros_like_symmetric_input_NOT_inferred(self):
+        """Propagated explicit symmetry must not be marked inferred."""
+        import numpy as np
+
+        import flopscope as flops
+        import flopscope.numpy as fnp
+        from flopscope._symmetric import SymmetricTensor
+
+        source = flops.as_symmetric(
+            np.eye(3), symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1))
+        )
+        result = fnp.zeros_like(source)
+        assert isinstance(result, SymmetricTensor)
+        assert result._symmetry_inferred is False

@@ -29,6 +29,7 @@ from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import (
     broadcast_group,
     validate_symmetry_group,
+    wrap_with_inferred_symmetry,
     wrap_with_symmetry,
     wrap_with_trusted_symmetry,
 )
@@ -70,7 +71,7 @@ def _wrap_constant_fill(result: _np.ndarray) -> FlopscopeArray:
     symmetry = _infer_constant_shape_symmetry(result.shape)
     if symmetry is None:
         return result  # type: ignore[return-value]
-    return wrap_with_trusted_symmetry(result, symmetry)  # type: ignore[return-value]
+    return wrap_with_inferred_symmetry(result, symmetry)  # type: ignore[return-value]
 
 
 def _compatible_symmetry_for_shape(symmetry, shape):
@@ -257,16 +258,17 @@ def zeros_like(
 ) -> FlopscopeArray:
     """Return array of zeros with same shape. Wraps ``numpy.zeros_like``. Cost: 0 FLOPs."""
     result = _np.zeros_like(_to_base_ndarray(a), dtype=dtype, **kwargs)
-    symmetry = None
+    propagated_symmetry = None
     if isinstance(a, SymmetricTensor):
-        symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
-    if symmetry is None:
-        symmetry = _infer_constant_shape_symmetry(result.shape)
-    if symmetry is None:
+        propagated_symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
+    if propagated_symmetry is not None:
+        return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
+    inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
+    if inferred_symmetry is None:
         if isinstance(a, SymmetricTensor):
             return _np.array(result, copy=False, subok=False)  # type: ignore[return-value]
         return result  # type: ignore[return-value]
-    return wrap_with_trusted_symmetry(result, symmetry)  # type: ignore[return-value]
+    return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
 
 
 attach_docstring(zeros_like, _np.zeros_like, "free", "0 FLOPs")
@@ -279,16 +281,17 @@ def ones_like(
 ) -> FlopscopeArray:
     """Return array of ones with same shape. Wraps ``numpy.ones_like``. Cost: 0 FLOPs."""
     result = _np.ones_like(_to_base_ndarray(a), dtype=dtype, **kwargs)
-    symmetry = None
+    propagated_symmetry = None
     if isinstance(a, SymmetricTensor):
-        symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
-    if symmetry is None:
-        symmetry = _infer_constant_shape_symmetry(result.shape)
-    if symmetry is None:
+        propagated_symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
+    if propagated_symmetry is not None:
+        return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
+    inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
+    if inferred_symmetry is None:
         if isinstance(a, SymmetricTensor):
             return _np.array(result, copy=False, subok=False)  # type: ignore[return-value]
         return result  # type: ignore[return-value]
-    return wrap_with_trusted_symmetry(result, symmetry)  # type: ignore[return-value]
+    return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
 
 
 attach_docstring(ones_like, _np.ones_like, "free", "0 FLOPs")
@@ -309,16 +312,17 @@ def full_like(
         result = _call_numpy(
             _np.full_like, _to_base_ndarray(a), fill_value, dtype=dtype, **kwargs
         )
-    symmetry = None
+    propagated_symmetry = None
     if isinstance(a, SymmetricTensor):
-        symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
-    if symmetry is None:
-        symmetry = _infer_constant_shape_symmetry(result.shape)
-    if symmetry is None:
+        propagated_symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
+    if propagated_symmetry is not None:
+        return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
+    inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
+    if inferred_symmetry is None:
         if isinstance(a, SymmetricTensor):
             return _np.array(result, copy=False, subok=False)  # type: ignore[return-value]
         return result  # type: ignore[return-value]
-    return wrap_with_trusted_symmetry(result, symmetry)  # type: ignore[return-value]
+    return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
 
 
 attach_docstring(full_like, _np.full_like, "free", "0 FLOPs")
