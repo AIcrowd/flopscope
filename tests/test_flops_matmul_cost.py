@@ -1,7 +1,6 @@
 """Tests for matmul_cost helper added for issue #69."""
 
 import numpy as np
-import pytest
 
 import flopscope.numpy as fnp
 from flopscope._budget import BudgetContext
@@ -35,6 +34,10 @@ def test_matmul_cost_formula():
 
 
 def test_matmul_cost_zero_dim_clamped_to_one():
-    """Empty matmul still charges at least 1 FLOP for the budget bookkeeping."""
+    """Helper clamps zero-dim inputs to 1; callers that handle zero-dim shapes
+    must gate separately. Note that ``fnp.matmul`` itself charges 0 for these
+    cases — the clamp here is purely a guard inside this helper to prevent
+    callers from accidentally passing 0 to ``budget.deduct(flop_cost=...)``.
+    """
     assert matmul_cost(0, 5, 5) >= 1
     assert matmul_cost(5, 0, 5) >= 1
