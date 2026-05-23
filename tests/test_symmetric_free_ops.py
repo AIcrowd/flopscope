@@ -432,3 +432,29 @@ class TestSymmetryInferredSlotCopyDoesNotPropagate:
         arr._symmetry_inferred = True
         copy = arr.copy()
         assert copy._symmetry_inferred is False
+
+
+class TestWrapWithInferredSymmetry:
+    def test_sets_marker(self):
+        import numpy as np
+
+        import flopscope as flops
+        from flopscope._symmetric import SymmetricTensor
+        from flopscope._symmetry_utils import wrap_with_inferred_symmetry
+
+        result = wrap_with_inferred_symmetry(
+            np.zeros((3, 3)),
+            flops.SymmetryGroup.symmetric(axes=(0, 1)),
+        )
+        assert isinstance(result, SymmetricTensor)
+        assert result._symmetry_inferred is True
+        assert result.symmetry == flops.SymmetryGroup.symmetric(axes=(0, 1))
+
+    def test_none_symmetry_returns_plain_ndarray(self):
+        import numpy as np
+
+        from flopscope._symmetric import SymmetricTensor
+        from flopscope._symmetry_utils import wrap_with_inferred_symmetry
+
+        result = wrap_with_inferred_symmetry(np.zeros((3, 4)), None)
+        assert not isinstance(result, SymmetricTensor)
