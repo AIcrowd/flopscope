@@ -4,8 +4,9 @@
 Run from the repo root:
     uv run python scripts/check_version_sync.py
 
-Exits 0 if all seven version locations agree, 1 otherwise:
+Exits 0 if all eight version locations agree, 1 otherwise:
   - pyproject.toml [project].version            (root)
+  - pyproject.toml [server] extra -> "flopscope-server==X.Y.Z"
   - src/flopscope/__init__.py __version__       (leading X.Y.Z only)
   - flopscope-server/pyproject.toml version
   - flopscope-server/src/flopscope_server/__init__.py __version__
@@ -23,6 +24,7 @@ from pathlib import Path
 
 _VERSION_RE = re.compile(r'__version__\s*=\s*f?"([0-9]+\.[0-9]+\.[0-9]+)')
 _CROSS_PIN_RE = re.compile(r'"flopscope==([0-9]+\.[0-9]+\.[0-9]+)"')
+_SERVER_EXTRA_RE = re.compile(r'"flopscope-server==([0-9]+\.[0-9]+\.[0-9]+)"')
 # Matches the `version = "X.Y.Z"` line under `[project]` in pyproject.toml.
 # Anchored at line start to skip the `requires-python = "..."` line and the
 # dependency lines below. The flopscope project keeps a single top-level
@@ -67,10 +69,25 @@ def _read_server_cross_pin(server_pyproject: Path) -> str:
     return m.group(1)
 
 
+def _read_server_extra_pin(root_pyproject: Path) -> str:
+    """Extract X.Y.Z from root's `[server]` extra `flopscope-server==X.Y.Z`."""
+    text = root_pyproject.read_text()
+    m = _SERVER_EXTRA_RE.search(text)
+    if m is None:
+        raise ValueError(
+            f"no 'flopscope-server==X.Y.Z' pin found in {root_pyproject}; "
+            "expected an exact pin in [project.optional-dependencies].server"
+        )
+    return m.group(1)
+
+
 def collect_versions(root: Path) -> dict[str, str]:
-    """Return a dict of {location label: version string} for all 7 spots."""
+    """Return a dict of {location label: version string} for all 8 spots."""
     return {
         "pyproject.toml [project].version": _read_pyproject_version(
+            root / "pyproject.toml"
+        ),
+        "pyproject.toml [server] extra flopscope-server== pin": _read_server_extra_pin(
             root / "pyproject.toml"
         ),
         "src/flopscope/__init__.py __version__": _read_init_version(
@@ -100,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     distinct = set(versions.values())
     if len(distinct) == 1:
         v = next(iter(distinct))
-        print(f"OK: all 7 version locations at {v}")
+        print(f"OK: all 8 version locations at {v}")
         return 0
 
     print("DRIFT DETECTED: package versions are not in lockstep.", file=sys.stderr)

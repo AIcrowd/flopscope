@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-server = ["flopscope-server==0.3.0"]
+server = ["flopscope-server==0.4.0"]
 dev = [
     "commitizen>=4.0",
     "gitlint>=0.19",
@@ -50,6 +50,7 @@ major_version_zero = true
 changelog_incremental = true
 version_files = [
     "src/flopscope/__init__.py:^__version__",
+    "pyproject.toml:flopscope-server==",
     "flopscope-server/pyproject.toml:^version",
     "flopscope-server/src/flopscope_server/__init__.py:^__version__",
     "flopscope-server/pyproject.toml:flopscope==",

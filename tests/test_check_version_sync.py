@@ -134,3 +134,24 @@ def test_client_pyproject_drift_detected(repo_copy: Path):
     )
     result = _run(repo_copy)
     assert result.returncode != 0
+
+
+def test_server_extra_pin_drift_detected(repo_copy: Path):
+    """Root [server] extra's flopscope-server== pin must match server version.
+
+    This is the trap that silently broke `pip install "flopscope[server]==0.4.0"`
+    between v0.3.0 and v0.4.0: the pin in the extra wasn't tracked by commitizen
+    so it stayed at the old version after `cz bump`. v0.4.1 fixes the tracking
+    via a `pyproject.toml:flopscope-server==` entry in `version_files`; this
+    test guards against regression.
+    """
+    current = _current_version(repo_copy)
+    other = _other_version(current)
+    pp = repo_copy / "pyproject.toml"
+    pp.write_text(
+        pp.read_text().replace(
+            f'"flopscope-server=={current}"', f'"flopscope-server=={other}"'
+        )
+    )
+    result = _run(repo_copy)
+    assert result.returncode != 0
