@@ -35,6 +35,9 @@ def _make_mock_conn(response: dict) -> MagicMock:
     """Return a mock Connection whose send_recv always returns *response*."""
     conn = MagicMock()
     conn.send_recv.return_value = response
+    # comms_tracker.total_round_trip_ns must be an int so __enter__/__exit__
+    # timing arithmetic works without TypeError from MagicMock comparison.
+    conn.comms_tracker.total_round_trip_ns = 0
     return conn
 
 
@@ -225,6 +228,7 @@ class TestBudgetContextManager:
         ]
         mock_conn = MagicMock()
         mock_conn.send_recv.side_effect = responses
+        mock_conn.comms_tracker.total_round_trip_ns = 0
 
         with patch("flopscope._budget.get_connection", return_value=mock_conn):
             with BudgetContext(flop_budget=1000) as ctx:

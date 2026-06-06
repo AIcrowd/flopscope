@@ -254,6 +254,10 @@ class BudgetContext:
             )
         self._previous_context = _active_context
         conn = get_connection()
+        # Snapshot wall + round-trip baseline BEFORE any send, so the whole
+        # context (including budget_open/close transport) is accounted for.
+        self._wall_start_ns = time.perf_counter_ns()
+        self._round_trip_baseline_ns = conn.comms_tracker.total_round_trip_ns
         response = conn.send_recv(
             encode_budget_open(self._flop_budget, self._flop_multiplier)
         )
@@ -263,12 +267,30 @@ class BudgetContext:
         return self
 
     def __exit__(self, *args: object) -> None:
-        """Close the budget on the server and store the close summary."""
+        """Close the budget on the server, compute the timing split, store summary."""
         global _active_context
         if self._is_open:
             conn = get_connection()
             response = conn.send_recv(encode_budget_close())
             self._update_budget(response)
+            # Timing split: wall + round-trip are client-measured; backend is the
+            # server's compute time from the close response's comms_summary.
+            start_ns = (
+                self._wall_start_ns
+                if self._wall_start_ns is not None
+                else time.perf_counter_ns()
+            )
+            wall_ns = time.perf_counter_ns() - start_ns
+            round_trip_ns = (
+                conn.comms_tracker.total_round_trip_ns - self._round_trip_baseline_ns
+            )
+            compute_ns = _extract_compute_ns(response)
+            (
+                self._wall_time_s,
+                self._flopscope_backend_time,
+                self._flopscope_overhead_time,
+                self._residual_wall_time,
+            ) = _decompose_timing(wall_ns, round_trip_ns, compute_ns)
             self._close_summary = (
                 f"BudgetContext closed: {self._flops_used}/{self._flop_budget} "
                 f"FLOPs used"
