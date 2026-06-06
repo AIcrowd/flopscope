@@ -401,14 +401,18 @@ def _get_global_default():
             quiet=True,
             namespace=None,
         )
-        # Open it on the server
+        # Open it on the server. Defensive: keep the round-trip inside a
+        # dispatch span so it counts as overhead (never billed residual) if this
+        # implicit global-default path is ever wired up. It is currently
+        # unreferenced, but the invariant is "every send_recv lives in a span".
         conn = get_connection()
-        response = conn.send_recv(
-            encode_budget_open(
-                _global_default._flop_budget, _global_default._flop_multiplier
+        with dispatch_span():
+            response = conn.send_recv(
+                encode_budget_open(
+                    _global_default._flop_budget, _global_default._flop_multiplier
+                )
             )
-        )
-        _global_default._update_budget(response)
+            _global_default._update_budget(response)
         _global_default._is_open = True
         _active_context = _global_default
     return _global_default

@@ -142,6 +142,36 @@ def test_worker_tolist_not_billed():
     assert ctx.residual_wall_time < 0.05
 
 
+def test_flops_cost_query_round_trip_is_overhead_not_residual():
+    """flops.einsum_cost / flops.svd_cost round-trip to the server; that round-trip
+    is framework work and must land in overhead, never the participant's billed
+    residual bucket.
+
+    Regression: these two helpers previously issued a bare send_recv outside any
+    dispatch span, so every advisory cost query leaked into residual. (The server
+    rejects the op, but the request still goes out and back, and the @timed_dispatch
+    span counts that round-trip regardless of the raise.)
+    """
+    import contextlib
+
+    import flopscope as fl
+    from flopscope import flops
+    from flopscope.errors import FlopscopeError
+
+    with fl.BudgetContext(flop_budget=10**12) as ctx:
+        for _ in range(30):
+            with contextlib.suppress(FlopscopeError):
+                flops.einsum_cost("ij,jk->ik", [(64, 64), (64, 64)])
+            with contextlib.suppress(FlopscopeError):
+                flops.svd_cost(64, 64)
+
+    # No participant compute ran inside the context, so residual must stay tiny;
+    # the 60 cost-query round-trips are all overhead.
+    assert ctx.flopscope_overhead_time > 0
+    assert ctx.residual_wall_time < 0.01
+    assert ctx.flopscope_overhead_time > ctx.residual_wall_time
+
+
 def test_backend_scales_with_compute():
     import flopscope as fl
 
@@ -199,7 +229,9 @@ def test_every_op_family_increments_dispatch():
         # in the server whitelist (flopscope._registry.REGISTRY has no "flops.*"
         # keys; cost helpers live under flopscope.accounting, not proxied).
         # Calling them always raises FlopscopeServerError; skip rather than
-        # assert a call that is guaranteed to fail.
+        # assert a call that is guaranteed to fail. Their overhead-not-residual
+        # behavior is covered by
+        # test_flops_cost_query_round_trip_is_overhead_not_residual.
         _grew(lambda: fl.stats.norm.cdf(fl.ones((4,))))  # stats.norm.cdf
         _grew(lambda: fl.stats.norm.ppf(fl.array([0.25, 0.5, 0.75])))  # stats.norm.ppf
 

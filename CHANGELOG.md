@@ -162,3 +162,7 @@ full API reference.
   the client times the full op dispatch (including result reconstruction). Fixes
   the prior all-zero (and the later round-trip-approximation) behavior on the
   server-backed path.
+- **flopscope cost queries**: `flops.einsum_cost` / `flops.svd_cost` now count their
+  server round-trip as `overhead` (via `@timed_dispatch`) instead of leaking it into
+  the billed `residual` bucket when a participant calls them inside a budget context.
+  The implicit global-default budget-open round-trip is likewise wrapped defensively.

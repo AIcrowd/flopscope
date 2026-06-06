@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
 from flopscope._weights import get_weight
 
@@ -80,6 +81,7 @@ def reduction_cost(
 # ---------------------------------------------------------------------------
 
 
+@timed_dispatch
 def einsum_cost(subscripts: str, shapes: Sequence[tuple[int, ...]]) -> int:
     """Query the server for the FLOP cost of an einsum operation.
 
@@ -109,6 +111,7 @@ def einsum_cost(subscripts: str, shapes: Sequence[tuple[int, ...]]) -> int:
     return int(result.get("value", 0))
 
 
+@timed_dispatch
 def svd_cost(m: int, n: int, k: int = 0) -> int:
     """Query the server for the FLOP cost of an SVD operation.
 
