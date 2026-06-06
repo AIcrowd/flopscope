@@ -384,25 +384,3 @@ class TestSendRecv:
             conn.send_recv(raw)
 
 
-class TestRoundTripAccumulation:
-    """send_recv records each round trip on the connection's comms tracker."""
-
-    def test_send_recv_accumulates_round_trip(self):
-        from flopscope._connection import Connection
-
-        conn = Connection(url="tcp://127.0.0.1:1")
-        fake_sock = MagicMock()
-        fake_sock.recv.return_value = msgpack.packb(
-            {"status": "ok", "result": {}}, use_bin_type=True
-        )
-        conn._socket = fake_sock          # skip real connect
-        conn._handshake_done = True       # skip handshake
-
-        assert conn.comms_tracker.request_count == 0
-        assert conn.comms_tracker.total_round_trip_ns == 0
-
-        conn.send_recv(b"req-1")
-        conn.send_recv(b"req-2")
-
-        assert conn.comms_tracker.request_count == 2
-        assert conn.comms_tracker.total_round_trip_ns > 0

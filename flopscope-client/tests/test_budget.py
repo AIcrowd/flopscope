@@ -22,6 +22,14 @@ def _reset_active_context():
     bmod._active_context = old
 
 
+@pytest.fixture(autouse=True)
+def _reset_dispatch():
+    import flopscope._dispatch as _d
+    _d.reset_dispatch()
+    yield
+    _d.reset_dispatch()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -35,9 +43,6 @@ def _make_mock_conn(response: dict) -> MagicMock:
     """Return a mock Connection whose send_recv always returns *response*."""
     conn = MagicMock()
     conn.send_recv.return_value = response
-    # comms_tracker.total_round_trip_ns must be an int so __enter__/__exit__
-    # timing arithmetic works without TypeError from MagicMock comparison.
-    conn.comms_tracker.total_round_trip_ns = 0
     return conn
 
 
@@ -228,7 +233,6 @@ class TestBudgetContextManager:
         ]
         mock_conn = MagicMock()
         mock_conn.send_recv.side_effect = responses
-        mock_conn.comms_tracker.total_round_trip_ns = 0
 
         with patch("flopscope._budget.get_connection", return_value=mock_conn):
             with BudgetContext(flop_budget=1000) as ctx:
@@ -307,61 +311,49 @@ class TestBudgetContextSummary:
 
 
 class TestDecomposeTiming:
-    """_decompose_timing splits wall into backend/overhead/residual (seconds)."""
+    """_decompose_timing splits wall into (wall, backend, overhead, residual)."""
 
     def test_identity_normal(self):
         from flopscope._budget import _decompose_timing
 
+        # wall=1.0s, dispatch=0.6s, backend(kernel)=0.4s
         wall, backend, overhead, residual = _decompose_timing(
-            wall_ns=1_000_000_000, round_trip_ns=600_000_000, compute_ns=400_000_000
+            wall_ns=1_000_000_000, dispatch_ns=600_000_000, kernel_ns=400_000_000
         )
         assert backend == pytest.approx(0.4)
         assert overhead == pytest.approx(0.2)   # 0.6 - 0.4
-        assert residual == pytest.approx(0.4)   # 1.0 - 0.4 - 0.2
+        assert residual == pytest.approx(0.4)   # 1.0 - 0.6
         assert wall == pytest.approx(backend + overhead + residual)
 
-    def test_clamps_overhead_on_clock_skew(self):
+    def test_clamps_overhead_when_kernel_exceeds_dispatch(self):
         from flopscope._budget import _decompose_timing
 
         wall, backend, overhead, residual = _decompose_timing(
-            wall_ns=1_000_000_000, round_trip_ns=300_000_000, compute_ns=500_000_000
+            wall_ns=1_000_000_000, dispatch_ns=300_000_000, kernel_ns=500_000_000
         )
         assert overhead == 0.0          # max(0, 0.3 - 0.5)
         assert backend == pytest.approx(0.5)
-        assert residual == pytest.approx(0.5)   # max(0, 1.0 - 0.5 - 0.0)
-        assert residual >= 0.0
+        assert residual == pytest.approx(0.7)   # max(0, 1.0 - 0.3)
 
-    def test_zero_compute(self):
+    def test_clamps_residual_when_dispatch_exceeds_wall(self):
         from flopscope._budget import _decompose_timing
 
         wall, backend, overhead, residual = _decompose_timing(
-            wall_ns=1_000_000_000, round_trip_ns=300_000_000, compute_ns=0
+            wall_ns=100_000_000, dispatch_ns=500_000_000, kernel_ns=300_000_000
         )
-        assert backend == 0.0
-        assert overhead == pytest.approx(0.3)
-        assert residual == pytest.approx(0.7)
+        assert residual == 0.0          # max(0, 0.1 - 0.5)
+        assert backend == pytest.approx(0.3)
+        assert overhead == pytest.approx(0.2)   # 0.5 - 0.3
 
     def test_empty_context(self):
         from flopscope._budget import _decompose_timing
 
         wall, backend, overhead, residual = _decompose_timing(
-            wall_ns=500_000_000, round_trip_ns=0, compute_ns=0
+            wall_ns=500_000_000, dispatch_ns=0, kernel_ns=0
         )
         assert backend == 0.0
         assert overhead == 0.0
         assert residual == pytest.approx(0.5)
-
-    def test_clamps_residual_when_wall_shorter_than_round_trip(self):
-        from flopscope._budget import _decompose_timing
-
-        # Clock skew: wall < round_trip → residual floors to 0. residual is the
-        # billed bucket, so its floor must hold.
-        wall, backend, overhead, residual = _decompose_timing(
-            wall_ns=100_000_000, round_trip_ns=500_000_000, compute_ns=300_000_000
-        )
-        assert backend == pytest.approx(0.3)
-        assert overhead == pytest.approx(0.2)   # 0.5 - 0.3
-        assert residual == 0.0                  # max(0, 0.1 - 0.3 - 0.2)
 
 
 class TestExtractComputeNs:

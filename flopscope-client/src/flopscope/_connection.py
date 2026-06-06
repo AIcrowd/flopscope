@@ -7,7 +7,6 @@ import time
 
 import zmq
 
-from flopscope._comms_tracker import ClientCommsTracker
 from flopscope._protocol import decode_response
 from flopscope.errors import raise_from_response
 
@@ -35,12 +34,6 @@ class Connection:
         self._context: zmq.Context | None = None
         self._socket: zmq.Socket | None = None
         self._handshake_done: bool = False
-        self._comms_tracker = ClientCommsTracker()
-
-    @property
-    def comms_tracker(self) -> ClientCommsTracker:
-        """Per-connection accumulator of round-trip timing and byte counts."""
-        return self._comms_tracker
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -147,12 +140,6 @@ class Connection:
         response["_round_trip_ns"] = t1 - t0
         response["_request_bytes"] = len(raw_request)
         response["_response_bytes"] = len(raw_response)
-
-        self._comms_tracker.record(
-            round_trip_ns=t1 - t0,
-            request_bytes=len(raw_request),
-            response_bytes=len(raw_response),
-        )
 
         if response.get("status") == "error":
             raise_from_response(
