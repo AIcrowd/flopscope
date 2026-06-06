@@ -253,6 +253,7 @@ def _generate_stats_init() -> str:
     )
     lines.append("from __future__ import annotations\n\n")
     lines.append("from flopscope._connection import get_connection\n")
+    lines.append("from flopscope._dispatch import timed_dispatch\n")
     lines.append("from flopscope._getattr import make_module_getattr\n")
     lines.append("from flopscope._protocol import encode_request\n")
     lines.append("from flopscope._remote_array import (\n")
@@ -269,6 +270,7 @@ def _generate_stats_init() -> str:
     lines.append('        return f"<flopscope.stats.{self._name}>"\n\n')
 
     for method in ("pdf", "cdf", "ppf"):
+        lines.append("    @timed_dispatch\n")
         lines.append(f"    def {method}(self, x, *args, **kwargs):\n")
         lines.append(
             f'        """Dispatch stats.{{self._name}}.{method} to the server."""\n'
@@ -316,6 +318,7 @@ def _generate_linalg_init() -> str:
     )
     lines.append("from __future__ import annotations\n\n")
     lines.append("from flopscope._connection import get_connection\n")
+    lines.append("from flopscope._dispatch import timed_dispatch\n")
     lines.append("from flopscope._getattr import make_module_getattr\n")
     lines.append("from flopscope._protocol import encode_request\n")
     lines.append("from flopscope._remote_array import (\n")
@@ -340,7 +343,7 @@ def _generate_linalg_init() -> str:
     lines.append("        return _result_from_response(resp)\n\n")
     lines.append("    proxy.__name__ = op_name\n")
     lines.append('    proxy.__qualname__ = f"linalg.{op_name}"\n')
-    lines.append("    return proxy\n\n\n")
+    lines.append("    return timed_dispatch(proxy)\n\n\n")
 
     for op in linalg_ops:
         lines.append(f"{op} = _make_linalg_proxy({op!r})\n")
