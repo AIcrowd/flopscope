@@ -262,7 +262,7 @@ class BudgetContext:
             response = conn.send_recv(
                 encode_budget_open(self._flop_budget, self._flop_multiplier)
             )
-        self._update_budget(response)
+            self._update_budget(response)
         self._is_open = True
         _active_context = self
         return self
@@ -274,7 +274,7 @@ class BudgetContext:
             conn = get_connection()
             with dispatch_span():
                 response = conn.send_recv(encode_budget_close())
-            self._update_budget(response)
+                self._update_budget(response)
             # _wall_start_ns is always set by __enter__ before _is_open=True; the
             # fallback only guards the never-exercised "exit without enter" path.
             start_ns = (
