@@ -17,6 +17,11 @@ def _pct(used: int, total: int) -> str:
     return f"{100 * used / total:.1f}%"
 
 
+def _format_seconds(s: float) -> str:
+    """Format a wall-time value (seconds) for the budget summary."""
+    return f"{s:.3f}s"
+
+
 def _usage_color(used: int, total: int) -> str:
     """Return a Rich color name based on usage percentage."""
     if total == 0:
@@ -42,6 +47,19 @@ def _plain_text_summary() -> str:
         f"  Used:            {_format_flops(data['flops_used']):>20}  ({_pct(data['flops_used'], data['flop_budget'])})",
         f"  Remaining:       {_format_flops(data['flops_remaining']):>20}  ({_pct(data['flops_remaining'], data['flop_budget'])})",
     ]
+
+    wall = data.get("wall_time_s") or 0.0
+    if wall > 0:
+        lines.append(f"  Wall time:       {_format_seconds(wall):>20}")
+        lines.append(
+            f"    backend  (compute):          {_format_seconds(data.get('flopscope_backend_time_s') or 0.0):>10}"
+        )
+        lines.append(
+            f"    overhead (flopscope):        {_format_seconds(data.get('flopscope_overhead_time_s') or 0.0):>10}"
+        )
+        lines.append(
+            f"    residual (your code, billed):{_format_seconds(data.get('residual_wall_time_s') or 0.0):>10}"
+        )
 
     by_ns = data.get("by_namespace", {})
     if by_ns:
@@ -183,6 +201,22 @@ def _rich_summary():
         totals.add_row(
             "Remaining",
             f"{_format_flops(display_remaining)}  ({_pct(display_remaining, display_budget)})",
+        )
+
+    wall = data.get("wall_time_s") or 0.0
+    if wall > 0:
+        totals.add_row("Wall time", _format_seconds(wall))
+        totals.add_row(
+            "  backend (compute)",
+            _format_seconds(data.get("flopscope_backend_time_s") or 0.0),
+        )
+        totals.add_row(
+            "  overhead (flopscope)",
+            _format_seconds(data.get("flopscope_overhead_time_s") or 0.0),
+        )
+        totals.add_row(
+            "  residual (your code, billed)",
+            _format_seconds(data.get("residual_wall_time_s") or 0.0),
         )
 
     renderables = [totals]

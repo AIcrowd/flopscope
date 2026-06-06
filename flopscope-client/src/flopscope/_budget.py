@@ -336,10 +336,23 @@ class BudgetContext:
 class NamespaceRecord:
     """Snapshot of a BudgetContext's state at close time."""
 
-    def __init__(self, namespace, flop_budget, flops_used):
+    def __init__(
+        self,
+        namespace,
+        flop_budget,
+        flops_used,
+        wall_time_s=0.0,
+        backend_time_s=0.0,
+        overhead_time_s=0.0,
+        residual_time_s=0.0,
+    ):
         self.namespace = namespace
         self.flop_budget = flop_budget
         self.flops_used = flops_used
+        self.wall_time_s = wall_time_s
+        self.backend_time_s = backend_time_s
+        self.overhead_time_s = overhead_time_s
+        self.residual_time_s = residual_time_s
 
 
 class BudgetAccumulator:
@@ -349,11 +362,17 @@ class BudgetAccumulator:
         self._records = []
 
     def record(self, ctx):
+        # `or 0.0` coerces the Optional timing fields (wall_time_s /
+        # residual_wall_time are None on a never-closed context) to 0.0.
         self._records.append(
             NamespaceRecord(
                 namespace=ctx.namespace,
                 flop_budget=ctx.flop_budget,
                 flops_used=ctx.flops_used,
+                wall_time_s=getattr(ctx, "wall_time_s", 0.0) or 0.0,
+                backend_time_s=getattr(ctx, "flopscope_backend_time", 0.0) or 0.0,
+                overhead_time_s=getattr(ctx, "flopscope_overhead_time", 0.0) or 0.0,
+                residual_time_s=getattr(ctx, "residual_wall_time", 0.0) or 0.0,
             )
         )
 
@@ -365,6 +384,10 @@ class BudgetAccumulator:
             "flops_used": total_used,
             "flops_remaining": total_budget - total_used,
             "operations": {},
+            "wall_time_s": sum(r.wall_time_s for r in self._records),
+            "flopscope_backend_time_s": sum(r.backend_time_s for r in self._records),
+            "flopscope_overhead_time_s": sum(r.overhead_time_s for r in self._records),
+            "residual_wall_time_s": sum(r.residual_time_s for r in self._records),
         }
         if by_namespace:
             by_ns = {}

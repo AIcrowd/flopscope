@@ -171,3 +171,9 @@ full API reference.
   `result.budget_breakdown`, one level deeper than `budget_status`). A plain `with`
   block now reports the authoritative server count — and `render_budget_summary()`
   shows it — without the prior `summary()`-call workaround.
+
+### Added
+
+- **budget summary timing**: `render_budget_summary()` now shows a session
+  wall-time breakdown (backend / overhead / residual) beneath FLOP usage, in both
+  the Rich and plain-text renderers, surfacing the per-context timing split.
