@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 import flopscope._dispatch as d
+import pytest
 
 
 def _fake_clock(values):
@@ -24,8 +23,8 @@ def test_nested_spans_count_wall_once(monkeypatch):
     # outer t0=0 ; inner t0=100,t1=400 (=300) ; outer t1=500 (=500 wall)
     monkeypatch.setattr(d, "_now_ns", _fake_clock([0, 100, 400, 500]))
     d.reset_dispatch()
-    with d.dispatch_span():        # outer reads now()->0
-        with d.dispatch_span():    # inner reads now()->100, exit now()->400
+    with d.dispatch_span():  # outer reads now()->0
+        with d.dispatch_span():  # inner reads now()->100, exit now()->400
             pass
         # outer exit reads now()->500
     # inner added 300; outer adds max(0, 500 - 300) = 200; total = 500 (counted once)

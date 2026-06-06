@@ -382,5 +382,3 @@ class TestSendRecv:
         raw = encode_request("dot")
         with pytest.raises(BudgetExhaustedError):
             conn.send_recv(raw)
-
-

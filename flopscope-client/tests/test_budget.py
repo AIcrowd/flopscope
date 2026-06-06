@@ -25,6 +25,7 @@ def _reset_active_context():
 @pytest.fixture(autouse=True)
 def _reset_dispatch():
     import flopscope._dispatch as _d
+
     _d.reset_dispatch()
     yield
     _d.reset_dispatch()
@@ -321,8 +322,8 @@ class TestDecomposeTiming:
             wall_ns=1_000_000_000, dispatch_ns=600_000_000, kernel_ns=400_000_000
         )
         assert backend == pytest.approx(0.4)
-        assert overhead == pytest.approx(0.2)   # 0.6 - 0.4
-        assert residual == pytest.approx(0.4)   # 1.0 - 0.6
+        assert overhead == pytest.approx(0.2)  # 0.6 - 0.4
+        assert residual == pytest.approx(0.4)  # 1.0 - 0.6
         assert wall == pytest.approx(backend + overhead + residual)
 
     def test_clamps_overhead_when_kernel_exceeds_dispatch(self):
@@ -331,9 +332,9 @@ class TestDecomposeTiming:
         wall, backend, overhead, residual = _decompose_timing(
             wall_ns=1_000_000_000, dispatch_ns=300_000_000, kernel_ns=500_000_000
         )
-        assert overhead == 0.0          # max(0, 0.3 - 0.5)
+        assert overhead == 0.0  # max(0, 0.3 - 0.5)
         assert backend == pytest.approx(0.5)
-        assert residual == pytest.approx(0.7)   # max(0, 1.0 - 0.3)
+        assert residual == pytest.approx(0.7)  # max(0, 1.0 - 0.3)
 
     def test_clamps_residual_when_dispatch_exceeds_wall(self):
         from flopscope._budget import _decompose_timing
@@ -341,9 +342,9 @@ class TestDecomposeTiming:
         wall, backend, overhead, residual = _decompose_timing(
             wall_ns=100_000_000, dispatch_ns=500_000_000, kernel_ns=300_000_000
         )
-        assert residual == 0.0          # max(0, 0.1 - 0.5)
+        assert residual == 0.0  # max(0, 0.1 - 0.5)
         assert backend == pytest.approx(0.3)
-        assert overhead == pytest.approx(0.2)   # 0.5 - 0.3
+        assert overhead == pytest.approx(0.2)  # 0.5 - 0.3
 
     def test_empty_context(self):
         from flopscope._budget import _decompose_timing

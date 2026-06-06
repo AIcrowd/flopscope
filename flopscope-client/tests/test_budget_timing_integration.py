@@ -78,8 +78,8 @@ def test_timing_nonzero_and_identity():
             a = fl.dot(a, a)
 
     assert ctx.wall_time_s > 0
-    assert ctx.flopscope_backend_time > 0      # pure kernel
-    assert ctx.flopscope_overhead_time > 0     # dispatch + wire
+    assert ctx.flopscope_backend_time > 0  # pure kernel
+    assert ctx.flopscope_overhead_time > 0  # dispatch + wire
     assert ctx.residual_wall_time >= 0
     total = (
         ctx.flopscope_backend_time
@@ -98,7 +98,7 @@ def test_tolist_is_overhead_not_residual():
         for _ in range(10):
             _ = a.tolist()
 
-    assert ctx.residual_wall_time < 0.01       # reconstruction is overhead now
+    assert ctx.residual_wall_time < 0.01  # reconstruction is overhead now
     assert ctx.flopscope_overhead_time > ctx.residual_wall_time
 
 
@@ -120,7 +120,7 @@ def test_residual_is_only_python():
     with fl.BudgetContext(flop_budget=10**12) as ctx:
         a = fl.ones((8, 8))
         _ = fl.dot(a, a)
-        time.sleep(0.2)            # the only non-flopscope wall
+        time.sleep(0.2)  # the only non-flopscope wall
         _ = fl.dot(a, a)
 
     assert ctx.residual_wall_time >= 0.15
@@ -137,7 +137,7 @@ def test_worker_tolist_not_billed():
         preds = fl.ones((256, 256))
         for _ in range(3):
             preds = fl.dot(preds, preds)
-        _ = preds.tolist()        # harness serialization of participant output
+        _ = preds.tolist()  # harness serialization of participant output
 
     assert ctx.residual_wall_time < 0.05
 
@@ -169,36 +169,39 @@ def test_getattr_end_to_end():
 
 
 def test_every_op_family_increments_dispatch():
-    import flopscope as fl
     import flopscope._dispatch as d
+
+    import flopscope as fl
 
     def _grew(fn):
         before = d.total_dispatch_ns()
         result = fn()
-        assert d.total_dispatch_ns() > before, "op did not increment dispatch accumulator"
+        assert d.total_dispatch_ns() > before, (
+            "op did not increment dispatch accumulator"
+        )
         return result
 
     with fl.BudgetContext(flop_budget=10**13):
-        a = _grew(lambda: fl.ones((8, 8)))             # module-level proxy
-        b = _grew(lambda: a + a)                       # _dispatch_op (arithmetic)
-        c = _grew(lambda: fl.dot(b, b))                # module-level proxy
-        _grew(lambda: c[0])                            # __getitem__
-        _grew(lambda: c.tolist())                      # _fetch_data + reconstruct
-        _grew(lambda: repr(c))                         # implicit fetch (repr→tolist→_fetch_data)
-        g = _grew(lambda: fl.random.default_rng(0))    # random submodule proxy
-        _grew(lambda: g.standard_normal((4, 4)))       # RemoteGenerator._call
-        _grew(lambda: fl.linalg.qr(fl.ones((4, 4))))   # linalg submodule proxy
+        a = _grew(lambda: fl.ones((8, 8)))  # module-level proxy
+        b = _grew(lambda: a + a)  # _dispatch_op (arithmetic)
+        c = _grew(lambda: fl.dot(b, b))  # module-level proxy
+        _grew(lambda: c[0])  # __getitem__
+        _grew(lambda: c.tolist())  # _fetch_data + reconstruct
+        _grew(lambda: repr(c))  # implicit fetch (repr→tolist→_fetch_data)
+        g = _grew(lambda: fl.random.default_rng(0))  # random submodule proxy
+        _grew(lambda: g.standard_normal((4, 4)))  # RemoteGenerator._call
+        _grew(lambda: fl.linalg.qr(fl.ones((4, 4))))  # linalg submodule proxy
         _grew(lambda: fl.stats.norm.pdf(fl.ones((4,))))  # stats _DistributionProxy.pdf
-        _grew(lambda: fl.array([1.0, 2.0, 3.0]))                              # array() special-case
-        _grew(lambda: fl.einsum("ij,jk->ik", a, b))                           # einsum() special-case
+        _grew(lambda: fl.array([1.0, 2.0, 3.0]))  # array() special-case
+        _grew(lambda: fl.einsum("ij,jk->ik", a, b))  # einsum() special-case
         # fl.flops.einsum_cost / fl.flops.svd_cost are @timed_dispatch but send
         # "flops.einsum_cost" / "flops.svd_cost" to the server — neither op is
         # in the server whitelist (flopscope._registry.REGISTRY has no "flops.*"
         # keys; cost helpers live under flopscope.accounting, not proxied).
         # Calling them always raises FlopscopeServerError; skip rather than
         # assert a call that is guaranteed to fail.
-        _grew(lambda: fl.stats.norm.cdf(fl.ones((4,))))                       # stats.norm.cdf
-        _grew(lambda: fl.stats.norm.ppf(fl.array([0.25, 0.5, 0.75])))         # stats.norm.ppf
+        _grew(lambda: fl.stats.norm.cdf(fl.ones((4,))))  # stats.norm.cdf
+        _grew(lambda: fl.stats.norm.ppf(fl.array([0.25, 0.5, 0.75])))  # stats.norm.ppf
 
 
 def test_empty_context_identity():
@@ -209,7 +212,7 @@ def test_empty_context_identity():
 
     assert ctx.wall_time_s is not None and ctx.wall_time_s > 0
     assert ctx.flopscope_backend_time >= 0
-    assert ctx.flopscope_overhead_time >= 0   # budget_open/close round-trips
+    assert ctx.flopscope_overhead_time >= 0  # budget_open/close round-trips
     assert ctx.residual_wall_time >= 0
     total = (
         ctx.flopscope_backend_time

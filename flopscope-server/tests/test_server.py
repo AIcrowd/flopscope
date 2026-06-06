@@ -318,9 +318,10 @@ def test_normalize_msg_kwargs_handle_dict():
 def test_compute_time_is_kernel_only():
     """A compute op records kernel time that does not exceed the full handle() wall."""
     import time
+
     import numpy as np
-    from flopscope_server._session import Session
     from flopscope_server._request_handler import RequestHandler
+    from flopscope_server._session import Session
 
     session = Session(flop_budget=10**12)
     handler = RequestHandler(session)
@@ -338,8 +339,8 @@ def test_compute_time_is_kernel_only():
 def test_fetch_contributes_no_kernel():
     """A fetch op is data movement, not a numpy kernel — kernel_ns stays 0."""
     import numpy as np
-    from flopscope_server._session import Session
     from flopscope_server._request_handler import RequestHandler
+    from flopscope_server._session import Session
 
     session = Session(flop_budget=10**12)
     handler = RequestHandler(session)
