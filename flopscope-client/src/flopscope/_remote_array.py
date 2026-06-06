@@ -380,11 +380,13 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         result = resp.get("result", {})
         return result["data"], tuple(result["shape"]), result["dtype"]
 
+    @timed_dispatch
     def tolist(self) -> Any:
         """Fetch data and convert to a nested Python list."""
         data, shape, dtype = self._fetch_data()
         return _bytes_to_list(data, shape, dtype)
 
+    @timed_dispatch
     def __repr__(self) -> str:
         try:
             values = self.tolist()
@@ -395,9 +397,11 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
                 f"shape={self._shape}, dtype={self._dtype!r})"
             )
 
+    @timed_dispatch
     def __str__(self) -> str:
         return self.__repr__()
 
+    @timed_dispatch
     def __float__(self) -> float:
         if self.size != 1:
             raise TypeError("only size-1 arrays can be converted to Python scalars")
@@ -408,6 +412,7 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             result = result[0]
         return float(result)
 
+    @timed_dispatch
     def __int__(self) -> int:
         if self.size != 1:
             raise TypeError("only size-1 arrays can be converted to Python scalars")
@@ -417,6 +422,7 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             result = result[0]
         return int(result)
 
+    @timed_dispatch
     def __bool__(self) -> bool:
         if self.size != 1:
             raise ValueError(

@@ -69,10 +69,6 @@ def _reset_client():
     reset_connection()
 
 
-import flopscope as flops  # noqa: E402
-import flopscope as fnp  # noqa: E402  (flopscope IS the numpy-like API; flopscope.numpy is not a submodule)
-
-
 def test_timing_nonzero_and_identity():
     import flopscope as fl
 
@@ -115,10 +111,10 @@ def test_implicit_fetch_is_overhead():
             _ = repr(a)
 
     assert ctx.residual_wall_time < 0.01
+    assert ctx.flopscope_overhead_time > ctx.residual_wall_time
 
 
 def test_residual_is_only_python():
-    import time
     import flopscope as fl
 
     with fl.BudgetContext(flop_budget=10**12) as ctx:
@@ -130,6 +126,7 @@ def test_residual_is_only_python():
     assert ctx.residual_wall_time >= 0.15
     assert ctx.flopscope_backend_time < 0.15
     assert ctx.flopscope_overhead_time < 0.15
+    assert ctx.flopscope_overhead_time > 0
 
 
 def test_worker_tolist_not_billed():
@@ -166,6 +163,7 @@ def test_getattr_end_to_end():
         a = fl.ones((32, 32))
         _ = fl.dot(a, a)
 
+    # exactly how whestbench-evaluator reads them
     assert float(getattr(ctx, "flopscope_backend_time", 0.0)) > 0
     assert float(getattr(ctx, "wall_time_s", 0.0) or 0.0) > 0
 
@@ -201,3 +199,21 @@ def test_every_op_family_increments_dispatch():
         # assert a call that is guaranteed to fail.
         _grew(lambda: fl.stats.norm.cdf(fl.ones((4,))))                       # stats.norm.cdf
         _grew(lambda: fl.stats.norm.ppf(fl.array([0.25, 0.5, 0.75])))         # stats.norm.ppf
+
+
+def test_empty_context_identity():
+    import flopscope as fl
+
+    with fl.BudgetContext(flop_budget=10**9) as ctx:
+        pass
+
+    assert ctx.wall_time_s is not None and ctx.wall_time_s > 0
+    assert ctx.flopscope_backend_time >= 0
+    assert ctx.flopscope_overhead_time >= 0   # budget_open/close round-trips
+    assert ctx.residual_wall_time >= 0
+    total = (
+        ctx.flopscope_backend_time
+        + ctx.flopscope_overhead_time
+        + ctx.residual_wall_time
+    )
+    assert abs(ctx.wall_time_s - total) < 0.05
