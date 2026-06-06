@@ -253,3 +253,21 @@ def test_budget_remaining_reflects_context():
     s = Session(flop_budget=100_000)
     assert s.budget_remaining == 100_000
     s.close()
+
+
+# ---------------------------------------------------------------------------
+# Server contract: close() surfaces recorded compute time
+# ---------------------------------------------------------------------------
+
+
+def test_close_surfaces_recorded_compute_time(session):
+    """close()'s comms_summary carries the compute time the client reads as backend."""
+    session.comms_tracker.record_request(
+        bytes_received=10,
+        bytes_sent=20,
+        comms_overhead_ns=100,
+        compute_time_ns=5000,
+        is_fetch=False,
+    )
+    summary = session.close()
+    assert summary["comms_summary"]["total_compute_time_ns"] == 5000
