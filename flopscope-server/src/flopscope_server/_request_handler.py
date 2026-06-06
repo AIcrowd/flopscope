@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from time import perf_counter_ns
 from typing import Any
 
 import numpy as np
@@ -86,6 +87,20 @@ class RequestHandler:
 
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._kernel_ns: int = 0
+
+    @property
+    def kernel_ns(self) -> int:
+        """Pure numpy-kernel nanoseconds accumulated during the last handle()."""
+        return self._kernel_ns
+
+    def _run_kernel(self, fn, *args, **kwargs):
+        """Invoke a numpy compute call, attributing only its wall to kernel time."""
+        t0 = perf_counter_ns()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            self._kernel_ns += perf_counter_ns() - t0
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -96,6 +111,7 @@ class RequestHandler:
 
         The ``request["op"]`` field determines which handler is invoked.
         """
+        self._kernel_ns = 0
         try:
             op = request["op"]
 
@@ -249,7 +265,7 @@ class RequestHandler:
             raise ValueError("__getitem__ requires [handle, key]")
         arr = self._resolve_arg(args[0])
         key = self._decode_index_key(args[1])
-        result = arr[key]
+        result = self._run_kernel(lambda: arr[key])
         return self._pack_result(result)
 
     # ------------------------------------------------------------------
@@ -267,7 +283,7 @@ class RequestHandler:
             dtype = raw_args[1] if len(raw_args) > 1 else kwargs.get("dtype")
             if isinstance(dtype, bytes):
                 dtype = dtype.decode("utf-8")
-            result = arr.astype(dtype)
+            result = self._run_kernel(arr.astype, dtype)
             return self._pack_result(result)
 
         # Generator method calls: op is "Generator.<method>" with the remote
@@ -285,14 +301,14 @@ class RequestHandler:
             gen = self._resolve_arg(raw_args[0])
             rest = [self._resolve_arg(a) for a in raw_args[1:]]
             resolved_kwargs = {k: self._resolve_arg(v) for k, v in kwargs.items()}
-            result = getattr(gen, method)(*rest, **resolved_kwargs)
+            result = self._run_kernel(getattr(gen, method), *rest, **resolved_kwargs)
             return self._pack_result(result)
 
         func = _get_flopscope_func(op)
         resolved_args = [self._resolve_arg(a) for a in raw_args]
         resolved_kwargs = {k: self._resolve_arg(v) for k, v in kwargs.items()}
 
-        result = func(*resolved_args, **resolved_kwargs)
+        result = self._run_kernel(func, *resolved_args, **resolved_kwargs)
 
         return self._pack_result(result)
 

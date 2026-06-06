@@ -172,7 +172,7 @@ class FlopscopeServer:
 
         # --- Record comms overhead ---
         comms_ns = (t1 - t0) + (t3 - t2)
-        compute_ns = t2 - t1
+        compute_ns = self._handler.kernel_ns
 
         self._session.comms_tracker.record_request(
             bytes_received=len(raw),
@@ -222,7 +222,7 @@ class FlopscopeServer:
         t3 = perf_counter_ns()
 
         comms_ns = (t1 - t0) + (t3 - t2)
-        compute_ns = t2 - t1
+        compute_ns = 0  # session creation is not a numpy kernel
         self._session.comms_tracker.record_request(
             bytes_received=0,
             bytes_sent=len(response_bytes),

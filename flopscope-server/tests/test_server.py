@@ -308,3 +308,43 @@ def test_normalize_msg_kwargs_handle_dict():
     assert isinstance(out_val, dict)
     assert "__handle__" in out_val
     assert out_val["__handle__"] == "a5"
+
+
+# ---------------------------------------------------------------------------
+# kernel_ns timing tests (pure numpy kernel attribution)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_time_is_kernel_only():
+    """A compute op records kernel time that does not exceed the full handle() wall."""
+    import time
+    import numpy as np
+    from flopscope_server._session import Session
+    from flopscope_server._request_handler import RequestHandler
+
+    session = Session(flop_budget=10**12)
+    handler = RequestHandler(session)
+    h = session.store_array(np.ones((256, 256)))
+
+    t0 = time.perf_counter_ns()
+    handler.handle({"op": "dot", "args": [h, h], "kwargs": None})
+    handle_ns = time.perf_counter_ns() - t0
+
+    assert handler.kernel_ns > 0
+    assert handler.kernel_ns <= handle_ns
+    session.close()
+
+
+def test_fetch_contributes_no_kernel():
+    """A fetch op is data movement, not a numpy kernel — kernel_ns stays 0."""
+    import numpy as np
+    from flopscope_server._session import Session
+    from flopscope_server._request_handler import RequestHandler
+
+    session = Session(flop_budget=10**12)
+    handler = RequestHandler(session)
+    h = session.store_array(np.ones((8, 8)))
+
+    handler.handle({"op": "fetch", "id": h})
+    assert handler.kernel_ns == 0
+    session.close()
