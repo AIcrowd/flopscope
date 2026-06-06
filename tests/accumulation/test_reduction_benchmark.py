@@ -26,13 +26,13 @@ CASES = [
 
 
 def test_cold_call_within_5ms():
-    # NOTE: s4-partial (4,4,4,4) with a 4-way symmetric group can exceed
-    # 15 ms under xdist worker contention on CI (observed 16-20 ms on
-    # GitHub Actions' 2-core runners). The budget is relaxed to 100 ms
-    # to catch only catastrophic regressions (single-threaded local cold
-    # calls are ~5-10 ms) while staying CI-safe. Symmetric-orbit
+    # NOTE: s4-partial (4,4,4,4) with a 4-way symmetric group is the slowest
+    # cold call. Single-threaded local cold calls are ~5-10 ms, but under xdist
+    # worker contention on GitHub Actions' 2-core runners it has spiked to
+    # ~163 ms (a prior 100 ms budget flaked). The budget is relaxed to 500 ms to
+    # catch only catastrophic regressions while staying CI-safe; symmetric-orbit
     # enumeration is optimized separately.
-    budget = 0.100  # 100 ms - catches catastrophic regressions; CI-safe
+    budget = 0.500  # 500 ms - catches catastrophic regressions; CI-safe
     for label, shape, axes, sym in CASES:
         _accumulation_cache.cache_clear()
         _reduction_cache.cache_clear()
@@ -44,7 +44,7 @@ def test_cold_call_within_5ms():
         )
         elapsed = time.perf_counter() - t0
         assert elapsed < budget, (
-            f"{label}: {elapsed * 100:.2f} ms (budget {budget * 100:.0f} ms)"
+            f"{label}: {elapsed * 1000:.2f} ms (budget {budget * 1000:.0f} ms)"
         )
 
 
