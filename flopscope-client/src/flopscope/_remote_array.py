@@ -10,6 +10,7 @@ from __future__ import annotations
 import struct
 from typing import Any
 
+from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
 
 # ---------------------------------------------------------------------------
@@ -363,6 +364,7 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
     # -- data access (auto-fetch from server) -------------------------------
 
+    @timed_dispatch
     def _fetch_data(self) -> tuple[bytes, tuple, str]:
         """Fetch the raw data from the server.
 
@@ -432,6 +434,7 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         for i in range(self._shape[0]):
             yield self[i]
 
+    @timed_dispatch
     def __getitem__(self, key):
         """Index into the array, dispatching to the server.
 
@@ -456,6 +459,7 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
     # -- operator overloads (dispatch to server) ----------------------------
 
+    @timed_dispatch
     def _dispatch_op(self, op_name: str, *args: Any, **kwargs: Any) -> Any:
         """Encode and send an operation to the server, return the result."""
         from flopscope._connection import get_connection
@@ -623,6 +627,7 @@ class RemoteGenerator:
     def __repr__(self) -> str:
         return f"RemoteGenerator(handle_id={self._handle_id!r})"
 
+    @timed_dispatch
     def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         from flopscope._connection import get_connection
         from flopscope._protocol import encode_request

@@ -33,6 +33,7 @@ from flopscope._budget import (  # noqa: E402
     budget,
     budget_summary_dict,
 )
+from flopscope._dispatch import timed_dispatch  # noqa: E402
 from flopscope._display import budget_live, budget_summary  # noqa: E402
 from flopscope._math_compat import e, inf, nan, pi  # noqa: E402
 from flopscope._perm_group import SymmetryGroup  # noqa: E402
@@ -136,7 +137,7 @@ def _make_proxy(op_name: str):
 
     proxy.__name__ = op_name
     proxy.__qualname__ = op_name
-    return proxy
+    return timed_dispatch(proxy)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +183,7 @@ def _infer_dtype(values):
     return "float64"  # mixed or float values
 
 
+@timed_dispatch
 def array(object, dtype=None, **kwargs):
     """Create a remote array from a Python list, tuple, or existing RemoteArray.
 
@@ -272,6 +274,7 @@ def array(object, dtype=None, **kwargs):
 # ---------------------------------------------------------------------------
 
 
+@timed_dispatch
 def einsum(subscripts, *operands, **kwargs):
     """Einstein summation on remote arrays.
 

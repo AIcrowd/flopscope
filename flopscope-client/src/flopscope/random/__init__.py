@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from flopscope._connection import get_connection
+from flopscope._dispatch import timed_dispatch
 from flopscope._getattr import make_module_getattr
 from flopscope._protocol import encode_request
 from flopscope._registry import iter_proxyable
@@ -29,7 +30,7 @@ def _make_random_proxy(op_name: str):
 
     proxy.__name__ = op_name
     proxy.__qualname__ = f"random.{op_name}"
-    return proxy
+    return timed_dispatch(proxy)
 
 
 # Auto-generate proxies for all non-blacklisted random.* functions

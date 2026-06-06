@@ -147,3 +147,36 @@ def test_getattr_end_to_end():
     # exactly how whestbench-evaluator reads them
     assert float(getattr(ctx, "flopscope_backend_time", 0.0)) > 0
     assert float(getattr(ctx, "wall_time_s", 0.0) or 0.0) > 0
+
+
+def test_every_op_family_increments_dispatch():
+    import flopscope as fl
+    import flopscope._dispatch as d
+
+    def _grew(fn):
+        before = d.total_dispatch_ns()
+        result = fn()
+        assert d.total_dispatch_ns() > before, "op did not increment dispatch accumulator"
+        return result
+
+    with fl.BudgetContext(flop_budget=10**13):
+        a = _grew(lambda: fl.ones((8, 8)))             # module-level proxy
+        b = _grew(lambda: a + a)                       # _dispatch_op (arithmetic)
+        c = _grew(lambda: fl.dot(b, b))                # module-level proxy
+        _grew(lambda: c[0])                            # __getitem__
+        _grew(lambda: c.tolist())                      # _fetch_data + reconstruct
+        _grew(lambda: repr(c))                         # implicit fetch (repr→tolist→_fetch_data)
+        g = _grew(lambda: fl.random.default_rng(0))    # random submodule proxy
+        _grew(lambda: g.standard_normal((4, 4)))       # RemoteGenerator._call
+        _grew(lambda: fl.linalg.qr(fl.ones((4, 4))))   # linalg submodule proxy
+        _grew(lambda: fl.stats.norm.pdf(fl.ones((4,))))  # stats _DistributionProxy.pdf
+        _grew(lambda: fl.array([1.0, 2.0, 3.0]))                              # array() special-case
+        _grew(lambda: fl.einsum("ij,jk->ik", a, b))                           # einsum() special-case
+        # fl.flops.einsum_cost / fl.flops.svd_cost are @timed_dispatch but send
+        # "flops.einsum_cost" / "flops.svd_cost" to the server — neither op is
+        # in the server whitelist (flopscope._registry.REGISTRY has no "flops.*"
+        # keys; cost helpers live under flopscope.accounting, not proxied).
+        # Calling them always raises FlopscopeServerError; skip rather than
+        # assert a call that is guaranteed to fail.
+        _grew(lambda: fl.stats.norm.cdf(fl.ones((4,))))                       # stats.norm.cdf
+        _grew(lambda: fl.stats.norm.ppf(fl.array([0.25, 0.5, 0.75])))         # stats.norm.ppf

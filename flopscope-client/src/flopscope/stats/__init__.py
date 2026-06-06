@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from flopscope._connection import get_connection
+from flopscope._dispatch import timed_dispatch
 from flopscope._getattr import make_module_getattr
 from flopscope._protocol import encode_request
 from flopscope._remote_array import (
@@ -23,6 +24,7 @@ class _DistributionProxy:
     def __repr__(self) -> str:
         return f"<flopscope.stats.{self._name}>"
 
+    @timed_dispatch
     def pdf(self, x, *args, **kwargs):
         """Dispatch stats.{self._name}.pdf to the server."""
         conn = get_connection()
@@ -34,6 +36,7 @@ class _DistributionProxy:
         )
         return _result_from_response(resp)
 
+    @timed_dispatch
     def cdf(self, x, *args, **kwargs):
         """Dispatch stats.{self._name}.cdf to the server."""
         conn = get_connection()
@@ -45,6 +48,7 @@ class _DistributionProxy:
         )
         return _result_from_response(resp)
 
+    @timed_dispatch
     def ppf(self, x, *args, **kwargs):
         """Dispatch stats.{self._name}.ppf to the server."""
         conn = get_connection()

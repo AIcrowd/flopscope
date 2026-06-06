@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from flopscope._connection import get_connection
+from flopscope._dispatch import timed_dispatch
 from flopscope._getattr import make_module_getattr
 from flopscope._protocol import encode_request
 from flopscope._remote_array import (
@@ -29,7 +30,7 @@ def _make_linalg_proxy(op_name: str):
 
     proxy.__name__ = op_name
     proxy.__qualname__ = f"linalg.{op_name}"
-    return proxy
+    return timed_dispatch(proxy)
 
 
 cholesky = _make_linalg_proxy("cholesky")
