@@ -383,3 +383,33 @@ class TestExtractComputeNs:
         from flopscope._budget import _extract_compute_ns
 
         assert _extract_compute_ns(None) == 0
+
+
+class TestBudgetContextTimingProperties:
+    """The proxy BudgetContext exposes the four timing properties.
+
+    ``test_properties_exist_with_defaults`` is the regression canary for the
+    production bug where the proxy had NO timing attributes: it uses direct
+    attribute access, which raises AttributeError if a property is missing.
+    ``test_evaluator_getattr_contract`` documents the evaluator's exact getattr
+    read pattern (it does not, on its own, catch a missing attribute).
+    """
+
+    def test_properties_exist_with_defaults(self):
+        from flopscope._budget import BudgetContext
+
+        ctx = BudgetContext(flop_budget=1000)  # not entered
+        assert ctx.wall_time_s is None
+        assert ctx.flopscope_backend_time == 0.0
+        assert ctx.flopscope_overhead_time == 0.0
+        assert ctx.residual_wall_time is None
+
+    def test_evaluator_getattr_contract(self):
+        from flopscope._budget import BudgetContext
+
+        ctx = BudgetContext(flop_budget=1000)
+        # exactly how whestbench-evaluator/_child_entry.py reads them
+        assert float(getattr(ctx, "flopscope_backend_time", 0.0)) == 0.0
+        assert float(getattr(ctx, "flopscope_overhead_time", 0.0)) == 0.0
+        assert getattr(ctx, "wall_time_s", None) is None
+        assert getattr(ctx, "residual_wall_time", None) is None

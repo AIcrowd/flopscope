@@ -120,6 +120,14 @@ class BudgetContext:
         self._close_summary: str | None = None
         self._is_open: bool = False
         self._previous_context = None
+        # Timing split — populated on __exit__. None until then for wall/residual,
+        # 0.0 for backend/overhead, mirroring the in-process flopscope contract.
+        self._wall_time_s: float | None = None
+        self._flopscope_backend_time: float = 0.0
+        self._flopscope_overhead_time: float = 0.0
+        self._residual_wall_time: float | None = None
+        self._wall_start_ns: int | None = None
+        self._round_trip_baseline_ns: int = 0
 
     # ------------------------------------------------------------------
     # Properties
@@ -154,6 +162,28 @@ class BudgetContext:
     def namespace(self) -> str | None:
         """Optional namespace label for this context."""
         return self._namespace
+
+    @property
+    def wall_time_s(self) -> float | None:
+        """Total wall-clock seconds spanned by the context (None until closed)."""
+        return self._wall_time_s
+
+    @property
+    def flopscope_backend_time(self) -> float:
+        """Seconds of real op compute on the server (0.0 until closed)."""
+        return self._flopscope_backend_time
+
+    @property
+    def flopscope_overhead_time(self) -> float:
+        """Seconds of flopscope transport overhead — serialization + network +
+        server-side comms (0.0 until closed). Not billed."""
+        return self._flopscope_overhead_time
+
+    @property
+    def residual_wall_time(self) -> float | None:
+        """Seconds of participant Python outside flopscope calls (None until
+        closed). The billed bucket: C_m = F_m + lambda * residual."""
+        return self._residual_wall_time
 
     # ------------------------------------------------------------------
     # Internal helpers
