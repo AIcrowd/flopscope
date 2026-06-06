@@ -155,9 +155,10 @@ full API reference.
 
 ### Fix
 
-- **flopscope-client**: `BudgetContext` now reports the real timing split
-  (`wall_time_s`, `flopscope_backend_time`, `flopscope_overhead_time`,
-  `residual_wall_time`) instead of all-zero in the server-backed execution
-  path. backend = server op compute; overhead = transport (serialization +
-  network + server comms); residual = participant Python. No server or
-  wire-protocol change.
+- **flopscope timing split**: `BudgetContext` now reports a precise client/server
+  decomposition — `backend` = pure server numpy kernel, `overhead` = all flopscope
+  machinery (client dispatch + wire + server marshaling), `residual` = the
+  participant's own Python only. The server reports `compute_time` as kernel-only;
+  the client times the full op dispatch (including result reconstruction). Fixes
+  the prior all-zero (and the later round-trip-approximation) behavior on the
+  server-backed path.
