@@ -300,3 +300,86 @@ class TestBudgetContextSummary:
             result = ctx.summary()
             # Should contain numbers related to budget usage
             assert "100" in result or "500" in result
+
+
+class TestDecomposeTiming:
+    """_decompose_timing splits wall into backend/overhead/residual (seconds)."""
+
+    def test_identity_normal(self):
+        from flopscope._budget import _decompose_timing
+
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns=1_000_000_000, round_trip_ns=600_000_000, compute_ns=400_000_000
+        )
+        assert backend == pytest.approx(0.4)
+        assert overhead == pytest.approx(0.2)   # 0.6 - 0.4
+        assert residual == pytest.approx(0.4)   # 1.0 - 0.4 - 0.2
+        assert wall == pytest.approx(backend + overhead + residual)
+
+    def test_clamps_overhead_on_clock_skew(self):
+        from flopscope._budget import _decompose_timing
+
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns=1_000_000_000, round_trip_ns=300_000_000, compute_ns=500_000_000
+        )
+        assert overhead == 0.0          # max(0, 0.3 - 0.5)
+        assert backend == pytest.approx(0.5)
+        assert residual == pytest.approx(0.5)   # max(0, 1.0 - 0.5 - 0.0)
+        assert residual >= 0.0
+
+    def test_zero_compute(self):
+        from flopscope._budget import _decompose_timing
+
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns=1_000_000_000, round_trip_ns=300_000_000, compute_ns=0
+        )
+        assert backend == 0.0
+        assert overhead == pytest.approx(0.3)
+        assert residual == pytest.approx(0.7)
+
+    def test_empty_context(self):
+        from flopscope._budget import _decompose_timing
+
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns=500_000_000, round_trip_ns=0, compute_ns=0
+        )
+        assert backend == 0.0
+        assert overhead == 0.0
+        assert residual == pytest.approx(0.5)
+
+    def test_clamps_residual_when_wall_shorter_than_round_trip(self):
+        from flopscope._budget import _decompose_timing
+
+        # Clock skew: wall < round_trip → residual floors to 0. residual is the
+        # billed bucket, so its floor must hold.
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns=100_000_000, round_trip_ns=500_000_000, compute_ns=300_000_000
+        )
+        assert backend == pytest.approx(0.3)
+        assert overhead == pytest.approx(0.2)   # 0.5 - 0.3
+        assert residual == 0.0                  # max(0, 0.1 - 0.3 - 0.2)
+
+
+class TestExtractComputeNs:
+    """_extract_compute_ns pulls server compute time out of a close response."""
+
+    def test_full_response(self):
+        from flopscope._budget import _extract_compute_ns
+
+        resp = {"result": {"comms_summary": {"total_compute_time_ns": 12345}}}
+        assert _extract_compute_ns(resp) == 12345
+
+    def test_missing_comms_summary(self):
+        from flopscope._budget import _extract_compute_ns
+
+        assert _extract_compute_ns({"result": {}}) == 0
+
+    def test_missing_result(self):
+        from flopscope._budget import _extract_compute_ns
+
+        assert _extract_compute_ns({"status": "ok"}) == 0
+
+    def test_non_dict(self):
+        from flopscope._budget import _extract_compute_ns
+
+        assert _extract_compute_ns(None) == 0

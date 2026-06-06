@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from flopscope._connection import get_connection
 from flopscope._protocol import (
     encode_budget_close,
@@ -11,6 +13,49 @@ from flopscope._protocol import (
 
 # Module-level guard: only one BudgetContext can be active at a time.
 _active_context = None
+
+
+def _extract_compute_ns(close_response: object) -> int:
+    """Pull total server compute (ns) out of a ``budget_close`` response.
+
+    Returns 0 if the ``result.comms_summary.total_compute_time_ns`` path is
+    absent or unparseable (defensive; the version handshake makes it present in
+    practice).
+    """
+    if not isinstance(close_response, dict):
+        return 0
+    result = close_response.get("result")
+    if not isinstance(result, dict):
+        return 0
+    comms = result.get("comms_summary")
+    if not isinstance(comms, dict):
+        return 0
+    try:
+        return int(comms.get("total_compute_time_ns", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _decompose_timing(
+    wall_ns: int, round_trip_ns: int, compute_ns: int
+) -> tuple[float, float, float, float]:
+    """Decompose context wall time into (wall, backend, overhead, residual) seconds.
+
+    - backend  = server op compute (``compute_ns``)
+    - overhead = round-trip minus backend — flopscope's transport machinery
+      (serialization + network + server-side comms); not billed
+    - residual = whatever wall is left — participant Python outside flopscope
+      calls; this is the billed bucket
+
+    Each is clamped to >= 0 for clock-skew safety. In the normal regime
+    (``compute <= round_trip <= wall``) no clamp fires and
+    ``wall == backend + overhead + residual`` exactly.
+    """
+    wall_s = wall_ns / 1e9
+    backend_s = max(0, compute_ns) / 1e9
+    overhead_s = max(0, round_trip_ns - compute_ns) / 1e9
+    residual_s = max(0.0, wall_s - backend_s - overhead_s)
+    return wall_s, backend_s, overhead_s, residual_s
 
 
 class OpRecord:
