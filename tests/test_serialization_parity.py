@@ -39,6 +39,7 @@ def _load_client_module(rel_path: str, module_name: str):
 _load_client_module("flopscope/_constants.py", "flopscope._constants")
 _load_client_module("flopscope/_math_compat.py", "flopscope._math_compat")
 _load_client_module("flopscope/_perm_group.py", "flopscope._perm_group")
+_load_client_module("flopscope/_dispatch.py", "flopscope._dispatch")
 _client_remote_array = _load_client_module(
     "flopscope/_remote_array.py", "flopscope._remote_array"
 )

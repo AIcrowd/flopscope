@@ -41,6 +41,7 @@ _load_client_module("flopscope/_math_compat.py", "flopscope._math_compat")
 _client_perm_group = _load_client_module(
     "flopscope/_perm_group.py", "flopscope._perm_group"
 )
+_load_client_module("flopscope/_dispatch.py", "flopscope._dispatch")
 _client_remote_array = _load_client_module(
     "flopscope/_remote_array.py", "flopscope._remote_array"
 )
