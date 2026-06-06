@@ -37,6 +37,24 @@ def _extract_compute_ns(close_response: object) -> int:
         return 0
 
 
+def _extract_close_budget(close_response: object) -> dict:
+    """Pull the ``budget_breakdown`` dict (which carries ``flops_used``) out of a
+    ``budget_close`` response.
+
+    The authoritative FLOP count is nested at ``result.budget_breakdown`` —
+    unlike ``budget_status``, which exposes ``flops_used`` directly under
+    ``result``. Returns ``{}`` if the path is absent (defensive; the version
+    handshake makes it present in practice).
+    """
+    if not isinstance(close_response, dict):
+        return {}
+    result = close_response.get("result")
+    if not isinstance(result, dict):
+        return {}
+    breakdown = result.get("budget_breakdown")
+    return breakdown if isinstance(breakdown, dict) else {}
+
+
 def _decompose_timing(
     wall_ns: int, dispatch_ns: int, kernel_ns: int
 ) -> tuple[float, float, float, float]:
@@ -274,7 +292,10 @@ class BudgetContext:
             conn = get_connection()
             with dispatch_span():
                 response = conn.send_recv(encode_budget_close())
-                self._update_budget(response)
+                # flops_used is nested at result.budget_breakdown in the close
+                # response; refresh the cache from there so a plain `with` block
+                # reports the server's count without a separate summary() call.
+                self._update_budget(_extract_close_budget(response))
             # _wall_start_ns is always set by __enter__ before _is_open=True; the
             # fallback only guards the never-exercised "exit without enter" path.
             start_ns = (

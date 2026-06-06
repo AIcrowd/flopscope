@@ -252,3 +252,23 @@ def test_empty_context_identity():
         + ctx.residual_wall_time
     )
     assert abs(ctx.wall_time_s - total) < 0.05
+
+
+def test_flops_used_refreshed_on_close_without_summary():
+    """A plain `with` block must report the server's authoritative flops_used on
+    exit — no `bctx.summary()` workaround required.
+
+    Regression: __exit__ called `_update_budget(response)` on the raw budget_close
+    response (top-level), but the server nests the count at
+    `result.budget_breakdown.flops_used`, so the cache stayed at 0. The downstream
+    worker papered over this with a best-effort `bctx.summary()` before close.
+    """
+    import flopscope as fl
+
+    with fl.BudgetContext(flop_budget=10**12) as ctx:
+        a = fl.ones((128, 128))
+        for _ in range(5):
+            a = fl.dot(a, a)  # ~10.5M FLOPs counted server-side
+
+    # ~2M FLOPs per 128³ matmul × 5 ⇒ ~10M server-side; was exactly 0 pre-fix.
+    assert ctx.flops_used > 1_000_000, "flops_used not refreshed from server on close"
