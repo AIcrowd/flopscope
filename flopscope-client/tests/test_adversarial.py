@@ -26,7 +26,15 @@ _WORKTREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 _CLIENT_SRC = os.path.join(_WORKTREE, "flopscope-client", "src")
 _SERVER_SRC = os.path.join(_WORKTREE, "flopscope-server", "src")
 _REAL_SRC = os.path.join(_WORKTREE, "src")
-_VENV_PYTHON = os.path.join(_WORKTREE, ".venv", "bin", "python")
+# Prefer the server's own venv (which has msgpack/pyzmq) for the server subprocess;
+# fall back to the worktree root venv if it doesn't exist.
+_SERVER_VENV_PYTHON = os.path.join(
+    _WORKTREE, "flopscope-server", ".venv", "bin", "python"
+)
+_ROOT_VENV_PYTHON = os.path.join(_WORKTREE, ".venv", "bin", "python")
+_VENV_PYTHON = (
+    _SERVER_VENV_PYTHON if os.path.exists(_SERVER_VENV_PYTHON) else _ROOT_VENV_PYTHON
+)
 
 for _p in (_CLIENT_SRC,):
     if _p not in sys.path:
