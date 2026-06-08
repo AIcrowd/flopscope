@@ -43,8 +43,10 @@ class TestHierarchy:
 
 
 class TestBudgetExhaustedError:
-    def test_message_contains_op_name(self):
-        err = BudgetExhaustedError(op_name="matmul", flop_cost=100, flops_remaining=50)
+    def test_message_preserved(self):
+        err = BudgetExhaustedError(
+            message="matmul over budget: cost 100 > 50 remaining"
+        )
         assert "matmul" in str(err)
 
     def test_explicit_message_used_verbatim(self):
@@ -55,18 +57,17 @@ class TestBudgetExhaustedError:
         err = BudgetExhaustedError()
         assert isinstance(err, FlopscopeError)
 
-    def test_formatted_message_includes_cost(self):
-        err = BudgetExhaustedError(op_name="svd", flop_cost=200, flops_remaining=10)
-        msg = str(err)
-        assert "200" in msg or "svd" in msg
+    def test_cost_in_message_preserved(self):
+        err = BudgetExhaustedError(message="svd cost 200 exceeds budget")
+        assert "200" in str(err)
 
     def test_can_be_raised_and_caught(self):
         with pytest.raises(BudgetExhaustedError):
-            raise BudgetExhaustedError(op_name="dot", flop_cost=1, flops_remaining=0)
+            raise BudgetExhaustedError(message="dot over budget")
 
     def test_can_be_caught_as_flopscope_error(self):
         with pytest.raises(FlopscopeError):
-            raise BudgetExhaustedError(op_name="dot")
+            raise BudgetExhaustedError(message="dot over budget")
 
 
 # ---------------------------------------------------------------------------
@@ -105,13 +106,16 @@ class TestSymmetryError:
         err = SymmetryError(message="not symmetric")
         assert "not symmetric" in str(err)
 
-    def test_dims_stored(self):
-        err = SymmetryError(dims=(3, 4), max_deviation=0.5)
+    def test_message_preserved(self):
+        err = SymmetryError(
+            message="symmetry violated on dims (3, 4): max deviation 0.5"
+        )
         assert isinstance(err, FlopscopeError)
+        assert "dims" in str(err)
 
     def test_can_be_raised(self):
         with pytest.raises(SymmetryError):
-            raise SymmetryError(dims=(2, 2), max_deviation=1e-6)
+            raise SymmetryError(message="symmetry violated on dims (2, 2)")
 
 
 # ---------------------------------------------------------------------------
