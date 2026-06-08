@@ -107,3 +107,9 @@ def test_read_npy_normalizes_malformed_header_to_valueerror():
     # normalize it to ValueError, never let it escape (DoS hardening).
     with pytest.raises(ValueError):
         _codec.read_npy(_npy_with_header("{'descr': '<f8', 'shape': (1,}"))
+
+
+def test_read_npz_rejects_non_zip():
+    # A non-zip blob must normalize to ValueError, not leak zipfile.BadZipFile.
+    with pytest.raises(ValueError, match="zip"):
+        _codec.read_npz(b"this is definitely not a zip archive")

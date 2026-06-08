@@ -118,7 +118,11 @@ def read_npz(blob: bytes, *, max_bytes: int = _DEFAULT_MAX_BYTES):
     arrays: dict[str, tuple] = {}
     meta = None
     total = 0
-    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(blob))
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"not a valid .npz (zip) file: {exc}") from exc
+    with zf:
         for info in zf.infolist():
             name = info.filename
             if not name.endswith(".npy"):
@@ -129,7 +133,10 @@ def read_npz(blob: bytes, *, max_bytes: int = _DEFAULT_MAX_BYTES):
                 raise ValueError(
                     f"archive too large: {total} bytes exceeds {max_bytes} limit"
                 )
-            member = zf.read(name)  # decompresses into memory
+            try:
+                member = zf.read(name)  # decompresses into memory
+            except zipfile.BadZipFile as exc:
+                raise ValueError(f"corrupt .npz member {name!r}: {exc}") from exc
             dtype, shape, data = read_npy(member)
             if key == _META_KEY:
                 try:
