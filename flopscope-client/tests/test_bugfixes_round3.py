@@ -485,6 +485,7 @@ class TestFix8ZmqSocketReset:
         mock_sock = MagicMock()
         mock_sock.send.side_effect = zmq.Again("timeout")
         conn._socket = mock_sock
+        conn._handshake_done = True  # skip handshake; exercise the send/recv reset path
 
         with pytest.raises(FlopscopeServerError, match="timeout"):
             conn.send_recv(b"test")
@@ -501,6 +502,7 @@ class TestFix8ZmqSocketReset:
         mock_sock.send.return_value = None
         mock_sock.recv.side_effect = zmq.Again("timeout")
         conn._socket = mock_sock
+        conn._handshake_done = True  # skip handshake; exercise the send/recv reset path
 
         with pytest.raises(FlopscopeServerError, match="timeout"):
             conn.send_recv(b"test")
