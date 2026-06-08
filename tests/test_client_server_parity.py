@@ -7,6 +7,7 @@ can be examined in the same process without namespace conflicts.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 import types
@@ -266,3 +267,60 @@ class TestPermGroupParity:
         assert not missing, (
             f"Classes in core _perm_group.py but absent from client: {sorted(missing)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestApiSurfaceParity
+# ---------------------------------------------------------------------------
+
+
+class TestApiSurfaceParity:
+    """Guard against client/core public-API drift for the submission surface.
+
+    Static checks only (file existence + AST), so no pyzmq/numpy import of the
+    full client is needed. The runtime exposure check (that ``import flopscope``
+    on the client actually surfaces these names) lives in the client-venv
+    ``flopscope-client/tests/test_api_contract.py``; this is its static
+    counterpart, runnable in the core venv.
+
+    Intentional, by-design divergences this guard does NOT flag (it checks
+    symbol *presence*, not signature equality):
+      * Client error classes are message-only (the proxy relays server-formatted
+        strings via ``raise_from_response(..., message=...)``); core has rich
+        constructors (``op_name=``/``flop_cost=``/``axes=``/...).
+      * The client ``BudgetContext`` omits the server-only ``wall_time_limit_s``
+        parameter (wall-clock limiting is enforced server-side).
+    """
+
+    def test_client_ships_flopscope_numpy(self):
+        # The client must provide flopscope.numpy natively (not rely on the
+        # evaluator's build-time shim): either a numpy.py module or numpy/ pkg.
+        base = CLIENT_SRC / "flopscope"
+        assert (base / "numpy.py").exists() or (
+            base / "numpy" / "__init__.py"
+        ).exists(), "client is missing flopscope.numpy (numpy.py or numpy/__init__.py)"
+
+    def test_client_defines_core_public_symbols(self):
+        # Each core public submission-API symbol must be DEFINED (top-level) in
+        # the named client module. AST-based: avoids importing the client (its
+        # _budget.py has top-level intra-package imports that don't resolve in
+        # the core venv).
+        expected = {
+            "_budget.py": "BudgetContext",
+            "_perm_group.py": "SymmetryGroup",
+            "_config.py": "configure",
+        }
+        for relative, name in expected.items():
+            path = CLIENT_SRC / "flopscope" / relative
+            assert path.exists(), f"client missing {relative} (core/client API drift)"
+            tree = ast.parse(path.read_text())
+            defined = {
+                node.name
+                for node in tree.body
+                if isinstance(
+                    node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                )
+            }
+            assert name in defined, (
+                f"client {relative} does not define {name} (core/client API drift)"
+            )
