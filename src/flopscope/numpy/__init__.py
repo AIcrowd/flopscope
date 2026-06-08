@@ -434,6 +434,14 @@ from flopscope._window import (  # noqa: F401
     kaiser,
 )
 
+# --- File I/O (pickle-free, 0 FLOPs) ---
+from flopscope._io import (  # noqa: F401,E402
+    load,
+    save,
+    savez,
+    savez_compressed,
+)
+
 # --- Numpy constants ---
 pi = _np.pi
 e = _np.e
@@ -684,6 +692,7 @@ __all__ = [
     "less_equal",
     "lexsort",
     "linspace",
+    "load",
     "log",
     "log10",
     "log1p",
@@ -792,6 +801,9 @@ __all__ = [
     "rot90",
     "round",
     "row_stack",
+    "save",
+    "savez",
+    "savez_compressed",
     "searchsorted",
     "select",
     "set_printoptions",

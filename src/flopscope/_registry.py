@@ -3021,14 +3021,14 @@ REGISTRY: dict[str, dict] = {
         "notes": "Load data from text file. Not supported.",
     },
     "load": {
-        "category": "blacklisted",
+        "category": "free",
         "module": "numpy",
-        "notes": "Load arrays from .npy/.npz files. Not supported.",
+        "notes": "Load arrays from .npy/.npz files (pickle-free). Cost: 0 FLOPs.",
     },
     "save": {
-        "category": "blacklisted",
+        "category": "free",
         "module": "numpy",
-        "notes": "Save array to .npy file. Not supported.",
+        "notes": "Save array to .npy file (pickle-free). Cost: 0 FLOPs.",
     },
     "savetxt": {
         "category": "blacklisted",
@@ -3036,14 +3036,14 @@ REGISTRY: dict[str, dict] = {
         "notes": "Save array to text file. Not supported.",
     },
     "savez": {
-        "category": "blacklisted",
+        "category": "free",
         "module": "numpy",
-        "notes": "Save multiple arrays to .npz file. Not supported.",
+        "notes": "Save multiple arrays to .npz (pickle-free). Cost: 0 FLOPs.",
     },
     "savez_compressed": {
-        "category": "blacklisted",
+        "category": "free",
         "module": "numpy",
-        "notes": "Save multiple arrays to compressed .npz file. Not supported.",
+        "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 0 FLOPs.",
     },
     # blacklisted — config / runtime
     "show_config": {
