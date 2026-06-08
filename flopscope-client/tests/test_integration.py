@@ -290,8 +290,10 @@ class TestErrors:
     def test_blacklisted_function(self):
         import flopscope as we
 
+        # save/load/savez are supported pickle-free I/O now; savetxt (text I/O)
+        # remains blacklisted.
         with pytest.raises(AttributeError, match="blacklisted"):
-            _ = we.save
+            _ = we.savetxt
 
     def test_unknown_function(self):
         import flopscope as we
