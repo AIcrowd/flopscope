@@ -1,4 +1,5 @@
 """Unit tests for the stdlib .npy/.npz codec (no server, no numpy required)."""
+
 import struct
 
 import pytest

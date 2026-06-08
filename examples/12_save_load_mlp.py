@@ -45,8 +45,8 @@ with flops.BudgetContext(flop_budget=10_000_000) as budget:
     x = fnp.random.randn(8)
     before = mlp(x)
 
-    mlp.save(path)                      # -> layers.0.W, layers.0.b, ... + __meta__
-    restored = MLP.from_file(path)      # class from code, weights+config from file
+    mlp.save(path)  # -> layers.0.W, layers.0.b, ... + __meta__
+    restored = MLP.from_file(path)  # class from code, weights+config from file
 
     after = restored(x)
     print("restored sizes:", restored.sizes)

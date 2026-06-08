@@ -1,4 +1,5 @@
 """Tests for flopscope.numpy file I/O (load/save/savez/savez_compressed)."""
+
 import struct
 
 import numpy as np

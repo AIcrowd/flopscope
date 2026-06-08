@@ -1,4 +1,5 @@
 """Client I/O integration tests — require a live subprocess server."""
+
 import glob
 import os
 import signal
@@ -45,7 +46,9 @@ def _start_server():
     os.environ["FLOPSCOPE_SERVER_URL"] = _SERVER_URL
     proc = subprocess.Popen(
         [_VENV_PYTHON, "-c", _SERVER_SCRIPT],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         env=_SUBPROCESS_ENV,
     )
     line = proc.stdout.readline()
@@ -61,6 +64,7 @@ def _reset_client():
     from flopscope._connection import reset_connection
 
     from flopscope._budget import _reset_global_default
+
     reset_connection()
     _reset_global_default()
     yield
@@ -70,6 +74,7 @@ def _reset_client():
 
 def test_savez_load_roundtrip(tmp_path):
     import flopscope as we
+
     with we.BudgetContext(flop_budget=1_000_000):
         a = we.array([[1.0, 2.0], [3.0, 4.0]])
         we.savez(str(tmp_path / "w.npz"), a=a, __meta__={"k": 1})
@@ -80,6 +85,7 @@ def test_savez_load_roundtrip(tmp_path):
 
 def test_save_load_single_npy(tmp_path):
     import flopscope as we
+
     with we.BudgetContext(flop_budget=1_000_000):
         a = we.array([1.5, 2.5, 3.5])
         we.save(str(tmp_path / "x.npy"), a)
@@ -88,6 +94,7 @@ def test_save_load_single_npy(tmp_path):
 
 def test_load_is_free(tmp_path):
     import flopscope as we
+
     with we.BudgetContext(flop_budget=1_000_000):
         a = we.array([1.0] * 50)
         we.savez(str(tmp_path / "f.npz"), a=a)
@@ -106,6 +113,7 @@ def _flops_used(budget):
 def test_load_numpy_authored_file(tmp_path):
     np = pytest.importorskip("numpy")
     import flopscope as we
+
     np.savez(str(tmp_path / "authored.npz"), W=np.array([5.0, 6.0, 7.0]))
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "authored.npz"))

@@ -1,6 +1,7 @@
 """Client file I/O — reads/writes locally via the stdlib codec, then moves only
 inert numeric buffers over the existing free `create_from_data` ingress and
 `_fetch_data` egress. The server never sees a path and never deserializes."""
+
 from __future__ import annotations
 
 import struct

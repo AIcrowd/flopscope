@@ -5,6 +5,7 @@ optional inert JSON `__meta__` block. `allow_pickle` is always False and object
 dtype is rejected, so loading a file can never execute code. These ops cost
 0 FLOPs (data ingress is free), matching the competition client.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,11 +17,20 @@ from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 
 _WHITELIST = frozenset(
     {
-        "float16", "float32", "float64",
-        "int8", "int16", "int32", "int64",
-        "uint8", "uint16", "uint32", "uint64",
+        "float16",
+        "float32",
+        "float64",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
         "bool",
-        "complex64", "complex128",
+        "complex64",
+        "complex128",
     }
 )
 _META_KEY = "__meta__"
@@ -78,8 +88,10 @@ def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
         converted[key] = base
     if meta is not None:
         if not isinstance(meta, dict):
-            raise ValueError(f"'{_META_KEY}' must be a JSON-serializable dict, got {type(meta).__name__!r}. "
-                             f"'{_META_KEY}' is reserved — pass a plain dict for metadata")
+            raise ValueError(
+                f"'{_META_KEY}' must be a JSON-serializable dict, got {type(meta).__name__!r}. "
+                f"'{_META_KEY}' is reserved — pass a plain dict for metadata"
+            )
         blob = json.dumps(meta).encode("utf-8")  # raises on non-JSON-safe values
         converted[_META_KEY] = _np.frombuffer(blob, dtype=_np.uint8).copy()
     return converted

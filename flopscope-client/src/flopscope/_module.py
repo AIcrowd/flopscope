@@ -4,6 +4,7 @@ The file ever stores only named numeric arrays + an inert JSON `config()` blob;
 the class itself comes from participant code. No pickle, ever. Mirrors the in-process
 Module (src/flopscope/_module.py) — keep the two in sync.
 """
+
 from __future__ import annotations
 
 from typing import Any, TypeVar

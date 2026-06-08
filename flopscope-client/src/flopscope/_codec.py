@@ -4,6 +4,7 @@ Converts between file bytes and (dtype_str, shape, raw_buffer) triples. Only
 numeric dtypes are accepted; object dtype is rejected, so there is no code path
 that can deserialize a Python object. The `.npy` v1.0 format is parsed by hand.
 """
+
 from __future__ import annotations
 
 import ast
@@ -14,17 +15,36 @@ import zipfile
 
 # flopscope dtype string  <->  numpy descr (byte-order normalized on read)
 _DTYPE_TO_DESCR = {
-    "float64": "<f8", "float32": "<f4", "float16": "<f2",
-    "int64": "<i8", "int32": "<i4", "int16": "<i2", "int8": "|i1",
-    "uint64": "<u8", "uint32": "<u4", "uint16": "<u2", "uint8": "|u1",
+    "float64": "<f8",
+    "float32": "<f4",
+    "float16": "<f2",
+    "int64": "<i8",
+    "int32": "<i4",
+    "int16": "<i2",
+    "int8": "|i1",
+    "uint64": "<u8",
+    "uint32": "<u4",
+    "uint16": "<u2",
+    "uint8": "|u1",
     "bool": "|b1",
-    "complex64": "<c8", "complex128": "<c16",
+    "complex64": "<c8",
+    "complex128": "<c16",
 }
 _ITEMSIZE = {
-    "float64": 8, "float32": 4, "float16": 2,
-    "int64": 8, "int32": 4, "int16": 2, "int8": 1,
-    "uint64": 8, "uint32": 4, "uint16": 2, "uint8": 1,
-    "bool": 1, "complex64": 8, "complex128": 16,
+    "float64": 8,
+    "float32": 4,
+    "float16": 2,
+    "int64": 8,
+    "int32": 4,
+    "int16": 2,
+    "int8": 1,
+    "uint64": 8,
+    "uint32": 4,
+    "uint16": 2,
+    "uint8": 1,
+    "bool": 1,
+    "complex64": 8,
+    "complex128": 16,
 }
 _MAGIC = b"\x93NUMPY"
 _META_KEY = "__meta__"

@@ -1,4 +1,5 @@
 """Client Module integration tests — require a live subprocess server."""
+
 import glob
 import os
 import signal
@@ -45,7 +46,9 @@ def _start_server():
     os.environ["FLOPSCOPE_SERVER_URL"] = _SERVER_URL
     proc = subprocess.Popen(
         [_VENV_PYTHON, "-c", _SERVER_SCRIPT],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         env=_SUBPROCESS_ENV,
     )
     line = proc.stdout.readline()
@@ -61,6 +64,7 @@ def _reset_client():
     from flopscope._connection import reset_connection
 
     from flopscope._budget import _reset_global_default
+
     reset_connection()
     _reset_global_default()
     yield
