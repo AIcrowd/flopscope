@@ -241,6 +241,21 @@ def _generate_perm_group() -> str:
     return _HEADER + "\n" + content
 
 
+def _generate_config() -> str:
+    """Copy _config.py from core (pure Python; the client needs it because the
+    copied _perm_group._dimino does `from flopscope._config import get_setting`).
+    The `configure(einsum_path_cache_size=...)` branch defers an import of
+    `flopscope._einsum` (absent on the client); it is never reached by client
+    code paths (the client does not cache einsum paths), so the verbatim copy is
+    safe and keeps the file in lockstep with core.
+    """
+    core_path = (
+        Path(__file__).resolve().parent.parent / "src" / "flopscope" / "_config.py"
+    )
+    content = core_path.read_text()
+    return _HEADER + "\n" + content
+
+
 def _generate_stats_init() -> str:
     """Generate stats/__init__.py with proxy distribution objects."""
     import flopscope.stats as core_stats
@@ -384,6 +399,14 @@ def main():
     _write_or_check(
         _CLIENT_SRC / "_perm_group.py",
         _generate_perm_group(),
+        args.check,
+        diffs,
+    )
+
+    print("Generating config...")
+    _write_or_check(
+        _CLIENT_SRC / "_config.py",
+        _generate_config(),
         args.check,
         diffs,
     )
