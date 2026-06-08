@@ -65,6 +65,9 @@ from flopscope._display import budget_live, budget_summary  # noqa: F401,E402
 # --- Array type (flopscope-specific) ---
 from flopscope._ndarray import FlopscopeArray  # noqa: F401,E402
 
+# --- Module base class ---
+from flopscope._module import Module  # noqa: F401,E402
+
 # --- Path optimization types ---
 from flopscope._opt_einsum import PathInfo, StepInfo  # noqa: F401,E402
 
@@ -217,6 +220,7 @@ __all__ = [
     "BudgetExhaustedError",
     "ComponentCost",
     "FlopscopeArray",
+    "Module",
     "FlopscopeError",
     "FlopscopeWarning",
     "NoBudgetContextError",
