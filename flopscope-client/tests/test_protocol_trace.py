@@ -20,6 +20,11 @@ import sys
 import types
 
 import msgpack
+import pytest
+
+# This wire-protocol test loads flopscope_server in-process, which transitively
+# imports the numpy-backed core. Skip entirely in the numpy-free client venv.
+pytest.importorskip("numpy")
 
 # =====================================================================
 # Module loading helpers — avoids namespace collision between
@@ -27,6 +32,10 @@ import msgpack
 # =====================================================================
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# The server modules loaded below do `from flopscope_server... import ...`; put
+# the server's src on sys.path so those intra-package imports resolve.
+sys.path.insert(0, os.path.join(_ROOT, "flopscope-server", "src"))
 
 
 def _load_module(name: str, path: str) -> types.ModuleType:
