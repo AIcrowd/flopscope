@@ -1,5 +1,4 @@
 """Tests for flopscope.numpy file I/O (load/save/savez/savez_compressed)."""
-import json
 import struct
 
 import numpy as np
@@ -61,7 +60,7 @@ def test_load_rejects_object_array_pickle(tmp_path):
     sentinel = tmp_path / "PWNED"
     payload = b"\x80\x04\x95\x2a\x00\x00\x00\x00\x00\x00\x00\x8c\x02os"
     descr = "|O"
-    header = "{'descr': %r, 'fortran_order': False, 'shape': (1,), }" % descr
+    header = f"{{'descr': {descr!r}, 'fortran_order': False, 'shape': (1,), }}"
     header_b = header.encode("latin1")
     total = 10 + len(header_b) + 1
     pad = (64 - total % 64) % 64
