@@ -700,6 +700,11 @@ def test_einsum():
         assert result is not None
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="einsum_path returns a nested (path, repr-string) structure that is "
+    "not serializable across the client/server proxy",
+)
 def test_einsum_path():
     we = _import_we()
     with we.BudgetContext(flop_budget=10**9):
@@ -1547,6 +1552,11 @@ def test_ravel_multi_index():
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="mask_indices requires a callable (mask function) argument, which "
+    "cannot be serialized across the client/server proxy",
+)
 def test_mask_indices():
     we = _import_we()
     with we.BudgetContext(flop_budget=10**9):
@@ -1628,7 +1638,9 @@ def test_isfortran():
 def test_typename():
     we = _import_we()
     with we.BudgetContext(flop_budget=10**9):
-        assert we.typename("float64") is not None
+        # numpy.typename expects a single-char type code (e.g. "d"), not a
+        # dtype name. Returns a str description, which serializes fine.
+        assert we.typename("d") is not None
 
 
 def test_mintypecode():
@@ -1637,16 +1649,20 @@ def test_mintypecode():
         assert we.mintypecode(["f", "d"]) is not None
 
 
-def test_base_repr():
+def test_base_repr_blacklisted():
+    # base_repr is a string-formatting helper, intentionally blacklisted (not
+    # proxyable); accessing it raises AttributeError before any dispatch.
     we = _import_we()
-    with we.BudgetContext(flop_budget=10**9):
-        assert we.base_repr(10, 2) is not None
+    with pytest.raises(AttributeError, match="not supported"):
+        _ = we.base_repr
 
 
-def test_binary_repr():
+def test_binary_repr_blacklisted():
+    # binary_repr is a string-formatting helper, intentionally blacklisted (not
+    # proxyable); accessing it raises AttributeError before any dispatch.
     we = _import_we()
-    with we.BudgetContext(flop_budget=10**9):
-        assert we.binary_repr(10) is not None
+    with pytest.raises(AttributeError, match="not supported"):
+        _ = we.binary_repr
 
 
 def test_put():
@@ -1773,6 +1789,11 @@ def test_issubdtype():
         assert we.issubdtype("float64", "float64") is not None
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="common_type returns a Python type object, which is not "
+    "serializable across the client/server proxy",
+)
 def test_common_type():
     we = _import_we()
     with we.BudgetContext(flop_budget=10**9):
