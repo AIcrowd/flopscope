@@ -273,9 +273,9 @@ jobs:
           uv sync --all-extras
           cd flopscope-server && uv sync
 
-      - name: Run integration tests
+      - name: Run full client test suite
         run: |
-          cd flopscope-client && uv run pytest tests/test_codec.py tests/test_api_surface.py tests/test_io_integration.py tests/test_module_integration.py tests/test_full_integration.py -v --tb=short
+          cd flopscope-client && uv run pytest tests/ -v --tb=short
 
   website-tests:
     runs-on: ubuntu-latest
