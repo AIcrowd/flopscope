@@ -173,8 +173,8 @@ def test_budget_context_flopscope_backend_time():
         _ = flopscope.numpy.add(
             flopscope.numpy.ones((1000,)), flopscope.numpy.ones((1000,))
         )
-    assert b.flopscope_backend_time >= 0
-    assert b.flopscope_backend_time <= b.wall_time_s  # pyright: ignore[reportOperatorIssue]
+    assert b.flopscope_backend_time_s >= 0
+    assert b.flopscope_backend_time_s <= b.wall_time_s  # pyright: ignore[reportOperatorIssue]
 
 
 def test_budget_context_residual_wall_time():
@@ -185,8 +185,8 @@ def test_budget_context_residual_wall_time():
             flopscope.numpy.ones((1000,)), flopscope.numpy.ones((1000,))
         )
         _time.sleep(0.01)
-    assert b.residual_wall_time is not None
-    assert b.residual_wall_time >= 0
+    assert b.residual_wall_time_s is not None
+    assert b.residual_wall_time_s >= 0
 
 
 def test_wall_time_limit_raises_time_exhausted():
@@ -650,10 +650,10 @@ def test_budget_context_flopscope_overhead_time_property():
     import flopscope
 
     b = flopscope.BudgetContext(flop_budget=int(1e9))
-    assert b.flopscope_overhead_time == 0.0
+    assert b.flopscope_overhead_time_s == 0.0
 
     b._total_flopscope_overhead_time = 1.5
-    assert b.flopscope_overhead_time == 1.5
+    assert b.flopscope_overhead_time_s == 1.5
 
 
 def test_timing_summary_subtracts_overhead():
@@ -731,7 +731,7 @@ def test_counted_wrapper_records_overhead():
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
         result = fake_wrapper(5)
     assert result == 6
-    assert b.flopscope_overhead_time >= 0.01
+    assert b.flopscope_overhead_time_s >= 0.01
 
 
 def test_counted_wrapper_handles_exceptions():
@@ -746,7 +746,7 @@ def test_counted_wrapper_handles_exceptions():
         with pytest.raises(ValueError):
             boom()
     # Overhead recorded despite the exception
-    assert b.flopscope_overhead_time > 0
+    assert b.flopscope_overhead_time_s > 0
 
 
 def test_optimer_splits_block_into_backend_and_overhead():
@@ -765,7 +765,7 @@ def test_optimer_splits_block_into_backend_and_overhead():
     # significantly, so use a generous upper bound.
     assert op.flopscope_backend_duration_s is not None
     assert op.flopscope_backend_duration_s >= 0.009
-    assert b.flopscope_backend_time == op.flopscope_backend_duration_s
+    assert b.flopscope_backend_time_s == op.flopscope_backend_duration_s
     # in-block overhead = block - backend, includes the two 0.005 sleeps
     assert op.flopscope_overhead_duration_s is not None
     assert op.flopscope_overhead_duration_s >= 0.008
@@ -775,11 +775,11 @@ def test_deduct_self_charges_body_to_overhead_and_oprecord():
     import flopscope
 
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
-        baseline = b.flopscope_overhead_time
+        baseline = b.flopscope_overhead_time_s
         # Call deduct directly without entering the timer
         timer = b.deduct("x", flop_cost=1, subscripts=None, shapes=())
         # The deduct body itself should have charged some overhead
-        assert b.flopscope_overhead_time > baseline
+        assert b.flopscope_overhead_time_s > baseline
         # And the OpRecord should reflect it
         assert b.op_log[-1].flopscope_overhead_duration_s is not None
         assert b.op_log[-1].flopscope_overhead_duration_s > 0
@@ -789,11 +789,11 @@ def test_namespace_scope_charges_push_pop_to_overhead():
     import flopscope
 
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
-        baseline = b.flopscope_overhead_time
+        baseline = b.flopscope_overhead_time_s
         with flopscope.namespace("ns"):
             pass
         # Push + pop are tiny but non-zero
-        assert b.flopscope_overhead_time > baseline
+        assert b.flopscope_overhead_time_s > baseline
 
 
 def test_per_namespace_summary_includes_flopscope_overhead():
@@ -834,7 +834,7 @@ def test_factory_wrapper_backend_time_is_numpy_only():
     with flopscope.BudgetContext(flop_budget=int(1e15), quiet=True) as b:
         for _ in range(1000):
             flopscope.numpy.add(fnp_a, fnp_b)
-    flopscope_tracked = b.flopscope_backend_time / 1000
+    flopscope_tracked = b.flopscope_backend_time_s / 1000
 
     # Generous bounds for noisy timing
     assert flopscope_tracked < pure_numpy_wall * 50.0
@@ -906,7 +906,7 @@ def test_per_op_overhead_sums_to_global_no_namespace():
     # counter without creating an OpRecord, so per_op_total <= global overhead.
     # We verify that the per-op sum is positive and does not exceed the global.
     assert per_op_total > 0
-    assert per_op_total <= b.flopscope_overhead_time + 1e-9
+    assert per_op_total <= b.flopscope_overhead_time_s + 1e-9
 
 
 def test_per_namespace_overhead_breakdown():
@@ -936,7 +936,7 @@ def test_overhead_recorded_on_budget_exhausted():
                 flopscope.numpy.ones((100, 100)),
                 flopscope.numpy.ones((100, 100)),
             )
-    assert b.flopscope_overhead_time > 0
+    assert b.flopscope_overhead_time_s > 0
 
 
 def test_overhead_recorded_on_numpy_call_exception():
@@ -950,7 +950,7 @@ def test_overhead_recorded_on_numpy_call_exception():
         with pytest.raises(np.linalg.LinAlgError):
             _ = flopscope.numpy.linalg.inv(singular)
     # Decorator's try/finally captured the wrapper time
-    assert b.flopscope_overhead_time > 0
+    assert b.flopscope_overhead_time_s > 0
 
 
 def test_nested_wrapper_no_double_count():
@@ -1013,8 +1013,8 @@ def test_check_nan_inf_opt_in_attributes_to_overhead():
     finally:
         flopscope.configure(check_nan_inf=False)
 
-    overhead_off = b_off.flopscope_overhead_time
-    overhead_on = b_on.flopscope_overhead_time
+    overhead_off = b_off.flopscope_overhead_time_s
+    overhead_on = b_on.flopscope_overhead_time_s
 
     # check_nan_inf=True must add measurable overhead. We verify per-call
     # overhead grew by at least 5 µs per call (a very conservative lower bound
@@ -1028,7 +1028,7 @@ def test_check_nan_inf_opt_in_attributes_to_overhead():
 
 
 def test_residual_wall_time_property_agrees_with_summary_dict():
-    """Regression: BudgetContext.residual_wall_time property must match
+    """Regression: BudgetContext.residual_wall_time_s property must match
     summary_dict()['residual_wall_time_s'].
     """
     import flopscope
@@ -1041,14 +1041,14 @@ def test_residual_wall_time_property_agrees_with_summary_dict():
         for _ in range(20):
             a = a @ a + a
 
-    prop_value = ctx.residual_wall_time
+    prop_value = ctx.residual_wall_time_s
     summary_value = ctx.summary_dict()["residual_wall_time_s"]
     assert prop_value is not None
     assert summary_value is not None
     assert prop_value == pytest.approx(summary_value, abs=1e-9)
     # Also verify both equal the documented identity.
     expected = (
-        ctx.wall_time_s - ctx.flopscope_backend_time - ctx.flopscope_overhead_time  # type: ignore[operator]
+        ctx.wall_time_s - ctx.flopscope_backend_time_s - ctx.flopscope_overhead_time_s  # type: ignore[operator]
     )
     assert prop_value == pytest.approx(max(expected, 0.0), abs=1e-9)
 
@@ -1069,25 +1069,25 @@ def test_budget_context_init_and_exit_billed_as_overhead():
 
     assert ctx.wall_time_s is not None
     assert ctx.wall_time_s > 0
-    assert ctx.flopscope_backend_time == 0.0
+    assert ctx.flopscope_backend_time_s == 0.0
     # Most of the wall should be overhead. Allow a few µs of residual wall time
     # for the Python ``with`` protocol's enter->exit gap.
-    assert ctx.flopscope_overhead_time > 0
-    assert ctx.flopscope_overhead_time >= ctx.residual_wall_time, (  # type: ignore[operator]
-        f"overhead ({ctx.flopscope_overhead_time}) "
-        f"should dominate residual wall time ({ctx.residual_wall_time})"
+    assert ctx.flopscope_overhead_time_s > 0
+    assert ctx.flopscope_overhead_time_s >= ctx.residual_wall_time_s, (  # type: ignore[operator]
+        f"overhead ({ctx.flopscope_overhead_time_s}) "
+        f"should dominate residual wall time ({ctx.residual_wall_time_s})"
     )
-    assert ctx.residual_wall_time < 5e-6, (  # type: ignore[operator]
+    assert ctx.residual_wall_time_s < 5e-6, (  # type: ignore[operator]
         f"empty BudgetContext leaked >5µs into residual wall time: "
-        f"{ctx.residual_wall_time}"
+        f"{ctx.residual_wall_time_s}"
     )
     # Decomposition invariant.
     assert (
         abs(
             ctx.wall_time_s
-            - ctx.flopscope_backend_time
-            - ctx.flopscope_overhead_time
-            - ctx.residual_wall_time  # type: ignore[operator]
+            - ctx.flopscope_backend_time_s
+            - ctx.flopscope_overhead_time_s
+            - ctx.residual_wall_time_s  # type: ignore[operator]
         )
         < 1e-9
     )
@@ -1101,11 +1101,11 @@ def test_namespace_scope_billed_as_overhead_amplified():
 
     ctx = flops.BudgetContext(flop_budget=int(1e12), quiet=True)
     with ctx:
-        overhead_before = ctx.flopscope_overhead_time
+        overhead_before = ctx.flopscope_overhead_time_s
         for _ in range(1000):
             with flops.namespace("foo"):
                 pass
-        overhead_after = ctx.flopscope_overhead_time
+        overhead_after = ctx.flopscope_overhead_time_s
 
     delta = overhead_after - overhead_before
     # 1000 pairs × O(100ns) each → at least 100 μs of overhead growth.
@@ -1114,9 +1114,9 @@ def test_namespace_scope_billed_as_overhead_amplified():
     assert (
         abs(
             ctx.wall_time_s  # type: ignore[operator]
-            - ctx.flopscope_backend_time
-            - ctx.flopscope_overhead_time
-            - ctx.residual_wall_time  # type: ignore[operator]
+            - ctx.flopscope_backend_time_s
+            - ctx.flopscope_overhead_time_s
+            - ctx.residual_wall_time_s  # type: ignore[operator]
         )
         < 1e-9
     )
@@ -1137,7 +1137,7 @@ def test_namespace_scope_exit_exception_still_charges_overhead(monkeypatch):
         raise RuntimeError("synthetic pop failure")
 
     with ctx:
-        overhead_before = ctx.flopscope_overhead_time
+        overhead_before = ctx.flopscope_overhead_time_s
         monkeypatch.setattr(type(ctx), "_pop_namespace", boom)
         with pytest.raises(RuntimeError, match="synthetic pop failure"):
             with flops.namespace("foo"):
@@ -1147,4 +1147,4 @@ def test_namespace_scope_exit_exception_still_charges_overhead(monkeypatch):
         monkeypatch.setattr(type(ctx), "_pop_namespace", original)
         ctx._namespace_stack.pop()
     assert raised["flag"]
-    assert ctx.flopscope_overhead_time > overhead_before
+    assert ctx.flopscope_overhead_time_s > overhead_before

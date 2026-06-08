@@ -59,7 +59,7 @@
                     },
                     {
                       "kind": "code",
-                      "text": "flopscope_overhead_time"
+                      "text": "flopscope_overhead_time_s"
                     },
                     {
                       "kind": "text",
@@ -109,7 +109,7 @@
                 },
                 {
                   "kind": "code",
-                  "text": "flopscope_overhead_time"
+                  "text": "flopscope_overhead_time_s"
                 },
                 {
                   "kind": "text",

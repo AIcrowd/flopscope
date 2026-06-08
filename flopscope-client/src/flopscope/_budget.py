@@ -188,18 +188,18 @@ class BudgetContext:
         return self._wall_time_s
 
     @property
-    def flopscope_backend_time(self) -> float:
+    def flopscope_backend_time_s(self) -> float:
         """Seconds of real op compute on the server (0.0 until closed)."""
         return self._flopscope_backend_time
 
     @property
-    def flopscope_overhead_time(self) -> float:
+    def flopscope_overhead_time_s(self) -> float:
         """Seconds of flopscope transport overhead — serialization + network +
         server-side comms (0.0 until closed). Not billed."""
         return self._flopscope_overhead_time
 
     @property
-    def residual_wall_time(self) -> float | None:
+    def residual_wall_time_s(self) -> float | None:
         """Seconds of participant Python outside flopscope calls (None until
         closed). The billed bucket: C_m = F_m + lambda * residual."""
         return self._residual_wall_time
@@ -363,16 +363,16 @@ class BudgetAccumulator:
 
     def record(self, ctx):
         # `or 0.0` coerces the Optional timing fields (wall_time_s /
-        # residual_wall_time are None on a never-closed context) to 0.0.
+        # residual_wall_time_s are None on a never-closed context) to 0.0.
         self._records.append(
             NamespaceRecord(
                 namespace=ctx.namespace,
                 flop_budget=ctx.flop_budget,
                 flops_used=ctx.flops_used,
                 wall_time_s=getattr(ctx, "wall_time_s", 0.0) or 0.0,
-                backend_time_s=getattr(ctx, "flopscope_backend_time", 0.0) or 0.0,
-                overhead_time_s=getattr(ctx, "flopscope_overhead_time", 0.0) or 0.0,
-                residual_time_s=getattr(ctx, "residual_wall_time", 0.0) or 0.0,
+                backend_time_s=getattr(ctx, "flopscope_backend_time_s", 0.0) or 0.0,
+                overhead_time_s=getattr(ctx, "flopscope_overhead_time_s", 0.0) or 0.0,
+                residual_time_s=getattr(ctx, "residual_wall_time_s", 0.0) or 0.0,
             )
         )
 

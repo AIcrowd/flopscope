@@ -37,7 +37,7 @@ def configure(**kwargs: object) -> None:
         If ``True``, scan every counted op's output for NaN/Inf values and
         emit a :class:`~flopscope.errors.FlopscopeWarning` if any are found.
         The scan is two full O(n) sweeps over the result and is attributed
-        to ``flopscope_overhead_time``, so it is off by default for
+        to ``flopscope_overhead_time_s``, so it is off by default for
         production scoring.  Opt in when debugging an estimator that
         produces NaN/Inf to identify the introducing op.  Default ``False``.
     dimino_budget : int

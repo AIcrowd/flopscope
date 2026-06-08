@@ -84,14 +84,14 @@ def _format_budget_summary_text(
     wall_time = data.get("wall_time_s")
     backend_time = data.get("flopscope_backend_time_s", 0.0)
     overhead_time = data.get("flopscope_overhead_time_s", 0.0)
-    residual_wall_time = data.get("residual_wall_time_s")
-    if wall_time is not None and residual_wall_time is not None:
+    residual_wall_time_s = data.get("residual_wall_time_s")
+    if wall_time is not None and residual_wall_time_s is not None:
         lines += [
             "",
             f"  Total Wall Time:     {wall_time:.3f}s",
             f"  Flopscope Backend:   {backend_time:.3f}s  ({_pct(backend_time, wall_time)})",
             f"  Flopscope Overhead:  {overhead_time:.3f}s  ({_pct(overhead_time, wall_time)})",
-            f"  Residual Wall Time:  {residual_wall_time:.3f}s  ({_pct(residual_wall_time, wall_time)})",
+            f"  Residual Wall Time:  {residual_wall_time_s:.3f}s  ({_pct(residual_wall_time_s, wall_time)})",
         ]
 
     op_backend_times = {
@@ -247,8 +247,8 @@ def _rich_totals_table(data: dict):
     wall_time = data.get("wall_time_s")
     backend_time = data.get("flopscope_backend_time_s", 0.0)
     overhead_time = data.get("flopscope_overhead_time_s", 0.0)
-    residual_wall_time = data.get("residual_wall_time_s")
-    if wall_time is not None and residual_wall_time is not None:
+    residual_wall_time_s = data.get("residual_wall_time_s")
+    if wall_time is not None and residual_wall_time_s is not None:
         table.add_section()
         table.add_row("Total Wall Time", f"{wall_time:.3f}s")
         table.add_row(
@@ -268,7 +268,7 @@ def _rich_totals_table(data: dict):
         table.add_row(
             "Residual Wall Time",
             Text(
-                f"{residual_wall_time:.3f}s  ({_pct(residual_wall_time, wall_time)})",
+                f"{residual_wall_time_s:.3f}s  ({_pct(residual_wall_time_s, wall_time)})",
                 style="dim",
             ),
         )

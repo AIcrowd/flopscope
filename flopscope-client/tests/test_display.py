@@ -28,9 +28,9 @@ class _FakeCtx:
         self.flop_budget = flop_budget
         self.flops_used = flops_used
         self.wall_time_s = wall_time_s
-        self.flopscope_backend_time = backend
-        self.flopscope_overhead_time = overhead
-        self.residual_wall_time = residual
+        self.flopscope_backend_time_s = backend
+        self.flopscope_overhead_time_s = overhead
+        self.residual_wall_time_s = residual
 
 
 def test_accumulator_aggregates_timing():
@@ -52,7 +52,7 @@ def test_accumulator_aggregates_timing():
 
 
 def test_accumulator_coerces_none_timing():
-    """wall_time_s / residual_wall_time can be None on a never-closed context."""
+    """wall_time_s / residual_wall_time_s can be None on a never-closed context."""
     from flopscope._budget import BudgetAccumulator
 
     acc = BudgetAccumulator()

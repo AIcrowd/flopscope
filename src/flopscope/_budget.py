@@ -153,7 +153,7 @@ def _call_numpy(fn: Any, *args: Any, **kwargs: Any) -> Any:
 
 def _counted_wrapper(fn):
     """Decorator that brackets a flopscope wrapper and bills its non-numpy,
-    non-nested-overhead time to flopscope_overhead_time.
+    non-nested-overhead time to flopscope_overhead_time_s.
 
     Formula: wall - backend_delta - overhead_delta. Handles nesting naturally
     (outer attributes only its own remainder), so no re-entrancy guard.
@@ -429,7 +429,7 @@ class BudgetContext:
     ):
         # Capture creation time as the very first thing so any work done in
         # __init__ (validation, list/dict allocation) is included in the
-        # eventual wall_time_s span, billed to flopscope_overhead_time. See
+        # eventual wall_time_s span, billed to flopscope_overhead_time_s. See
         # issue #82.
         self._creation_time = time.perf_counter()
         if flop_budget <= 0:
@@ -498,12 +498,12 @@ class BudgetContext:
         accumulator-record and active-budget restoration work). ``None`` until
         ``__exit__`` has run.
 
-        The decomposition ``wall_time_s == flopscope_backend_time
-        + flopscope_overhead_time + residual_wall_time`` holds within numerical
+        The decomposition ``wall_time_s == flopscope_backend_time_s
+        + flopscope_overhead_time_s + residual_wall_time_s`` holds within numerical
         tolerance. The pre-``__enter__`` slice (``__init__`` body + banner print)
         and the post-``__exit__`` body slice (accumulator-record,
         active-budget restore) are both attributed to
-        ``flopscope_overhead_time``.
+        ``flopscope_overhead_time_s``.
         """
         return self._wall_time_s
 
@@ -514,11 +514,11 @@ class BudgetContext:
         return time.perf_counter() - self._start_time
 
     @property
-    def flopscope_backend_time(self) -> float:
+    def flopscope_backend_time_s(self) -> float:
         return self._total_flopscope_backend_time
 
     @property
-    def flopscope_overhead_time(self) -> float:
+    def flopscope_overhead_time_s(self) -> float:
         """Wall-clock seconds spent inside flopscope's own dispatch code.
 
         Includes wrapper preambles, BudgetContext.deduct() body, _OpTimer
@@ -532,7 +532,7 @@ class BudgetContext:
         return self._total_flopscope_overhead_time
 
     @property
-    def residual_wall_time(self) -> float | None:
+    def residual_wall_time_s(self) -> float | None:
         """Wall time minus flopscope backend and overhead time.
 
         This is the measured wall-clock remainder outside the backend calls and
@@ -626,7 +626,7 @@ class BudgetContext:
         wall_time = self._wall_time_s
         if wall_time is None and self._start_time is not None:
             wall_time = self.elapsed_s
-        wall_time, backend_time, overhead_time, residual_wall_time = _timing_summary(
+        wall_time, backend_time, overhead_time, residual_wall_time_s = _timing_summary(
             wall_time,
             self._total_flopscope_backend_time,
             self._total_flopscope_overhead_time,
@@ -640,7 +640,7 @@ class BudgetContext:
             "wall_time_s": wall_time,
             "flopscope_backend_time_s": backend_time,
             "flopscope_overhead_time_s": overhead_time,
-            "residual_wall_time_s": residual_wall_time,
+            "residual_wall_time_s": residual_wall_time_s,
         }
         if by_namespace:
             result["by_namespace"] = _summarize_by_namespace(self._op_log)
@@ -736,7 +736,7 @@ class BudgetContext:
             print(banner, file=sys.stderr)
         # Mark wall start AFTER all enter setup (including the banner print).
         # The slice from _creation_time → _start_time is pre-enter overhead;
-        # __exit__ adds it to flopscope_overhead_time. See issue #82.
+        # __exit__ adds it to flopscope_overhead_time_s. See issue #82.
         self._start_time = time.perf_counter()
         self._pre_enter_overhead = self._start_time - self._creation_time
         if self._wall_time_limit_s is not None:
@@ -747,7 +747,7 @@ class BudgetContext:
         # body_end snapshots the user-code window (start_time → here). Then
         # we do the post-exit accumulator work and snapshot post_exit_end.
         # wall_time_s spans creation → post_exit_end, and the pre-enter +
-        # post-exit slices are billed to flopscope_overhead_time. See #82.
+        # post-exit slices are billed to flopscope_overhead_time_s. See #82.
         body_end = time.perf_counter()
         if self._start_time is not None:
             _accumulator.record(self)
@@ -916,7 +916,7 @@ class BudgetAccumulator:
                     total_overhead or 0.0
                 ) + rec.total_flopscope_overhead_time
 
-        wall_time, backend_time, overhead_time, residual_wall_time = _timing_summary(
+        wall_time, backend_time, overhead_time, residual_wall_time_s = _timing_summary(
             total_wall_time, total_backend, total_overhead
         )
 
@@ -928,7 +928,7 @@ class BudgetAccumulator:
             "wall_time_s": wall_time,
             "flopscope_backend_time_s": backend_time,
             "flopscope_overhead_time_s": overhead_time,
-            "residual_wall_time_s": residual_wall_time,
+            "residual_wall_time_s": residual_wall_time_s,
         }
 
         if by_namespace:

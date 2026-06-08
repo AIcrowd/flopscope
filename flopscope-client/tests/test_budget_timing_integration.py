@@ -4,8 +4,8 @@ Option-3: backend = pure server numpy kernel; overhead = all flopscope machinery
 (client dispatch + wire + server marshaling, including .tolist() and implicit
 fetches such as repr/bool); residual = participant's own Python only.
 
-The production bug: the client proxy reported flopscope_backend_time /
-flopscope_overhead_time / residual_wall_time as 0 for every MLP. These tests run
+The production bug: the client proxy reported flopscope_backend_time_s /
+flopscope_overhead_time_s / residual_wall_time_s as 0 for every MLP. These tests run
 a real FlopscopeServer in a subprocess and assert the split is non-zero,
 decomposes wall, and correctly isolates participant Python in residual.
 """
@@ -78,13 +78,13 @@ def test_timing_nonzero_and_identity():
             a = fl.dot(a, a)
 
     assert ctx.wall_time_s > 0
-    assert ctx.flopscope_backend_time > 0  # pure kernel
-    assert ctx.flopscope_overhead_time > 0  # dispatch + wire
-    assert ctx.residual_wall_time >= 0
+    assert ctx.flopscope_backend_time_s > 0  # pure kernel
+    assert ctx.flopscope_overhead_time_s > 0  # dispatch + wire
+    assert ctx.residual_wall_time_s >= 0
     total = (
-        ctx.flopscope_backend_time
-        + ctx.flopscope_overhead_time
-        + ctx.residual_wall_time
+        ctx.flopscope_backend_time_s
+        + ctx.flopscope_overhead_time_s
+        + ctx.residual_wall_time_s
     )
     assert abs(ctx.wall_time_s - total) < 0.05
 
@@ -98,8 +98,8 @@ def test_tolist_is_overhead_not_residual():
         for _ in range(10):
             _ = a.tolist()
 
-    assert ctx.residual_wall_time < 0.01  # reconstruction is overhead now
-    assert ctx.flopscope_overhead_time > ctx.residual_wall_time
+    assert ctx.residual_wall_time_s < 0.01  # reconstruction is overhead now
+    assert ctx.flopscope_overhead_time_s > ctx.residual_wall_time_s
 
 
 def test_implicit_fetch_is_overhead():
@@ -110,8 +110,8 @@ def test_implicit_fetch_is_overhead():
         for _ in range(5):
             _ = repr(a)
 
-    assert ctx.residual_wall_time < 0.01
-    assert ctx.flopscope_overhead_time > ctx.residual_wall_time
+    assert ctx.residual_wall_time_s < 0.01
+    assert ctx.flopscope_overhead_time_s > ctx.residual_wall_time_s
 
 
 def test_residual_is_only_python():
@@ -123,10 +123,10 @@ def test_residual_is_only_python():
         time.sleep(0.2)  # the only non-flopscope wall
         _ = fl.dot(a, a)
 
-    assert ctx.residual_wall_time >= 0.15
-    assert ctx.flopscope_backend_time < 0.15
-    assert ctx.flopscope_overhead_time < 0.15
-    assert ctx.flopscope_overhead_time > 0
+    assert ctx.residual_wall_time_s >= 0.15
+    assert ctx.flopscope_backend_time_s < 0.15
+    assert ctx.flopscope_overhead_time_s < 0.15
+    assert ctx.flopscope_overhead_time_s > 0
 
 
 def test_worker_tolist_not_billed():
@@ -139,7 +139,7 @@ def test_worker_tolist_not_billed():
             preds = fl.dot(preds, preds)
         _ = preds.tolist()  # harness serialization of participant output
 
-    assert ctx.residual_wall_time < 0.05
+    assert ctx.residual_wall_time_s < 0.05
 
 
 def test_flops_cost_query_round_trip_is_overhead_not_residual():
@@ -167,9 +167,9 @@ def test_flops_cost_query_round_trip_is_overhead_not_residual():
 
     # No participant compute ran inside the context, so residual must stay tiny;
     # the 60 cost-query round-trips are all overhead.
-    assert ctx.flopscope_overhead_time > 0
-    assert ctx.residual_wall_time < 0.01
-    assert ctx.flopscope_overhead_time > ctx.residual_wall_time
+    assert ctx.flopscope_overhead_time_s > 0
+    assert ctx.residual_wall_time_s < 0.01
+    assert ctx.flopscope_overhead_time_s > ctx.residual_wall_time_s
 
 
 def test_backend_scales_with_compute():
@@ -183,7 +183,7 @@ def test_backend_scales_with_compute():
         for _ in range(5):
             b = fl.dot(b, b)
 
-    assert big.flopscope_backend_time > small.flopscope_backend_time
+    assert big.flopscope_backend_time_s > small.flopscope_backend_time_s
 
 
 def test_getattr_end_to_end():
@@ -194,7 +194,7 @@ def test_getattr_end_to_end():
         _ = fl.dot(a, a)
 
     # exactly how whestbench-evaluator reads them
-    assert float(getattr(ctx, "flopscope_backend_time", 0.0)) > 0
+    assert float(getattr(ctx, "flopscope_backend_time_s", 0.0)) > 0
     assert float(getattr(ctx, "wall_time_s", 0.0) or 0.0) > 0
 
 
@@ -243,13 +243,13 @@ def test_empty_context_identity():
         pass
 
     assert ctx.wall_time_s is not None and ctx.wall_time_s > 0
-    assert ctx.flopscope_backend_time >= 0
-    assert ctx.flopscope_overhead_time >= 0  # budget_open/close round-trips
-    assert ctx.residual_wall_time >= 0
+    assert ctx.flopscope_backend_time_s >= 0
+    assert ctx.flopscope_overhead_time_s >= 0  # budget_open/close round-trips
+    assert ctx.residual_wall_time_s >= 0
     total = (
-        ctx.flopscope_backend_time
-        + ctx.flopscope_overhead_time
-        + ctx.residual_wall_time
+        ctx.flopscope_backend_time_s
+        + ctx.flopscope_overhead_time_s
+        + ctx.residual_wall_time_s
     )
     assert abs(ctx.wall_time_s - total) < 0.05
 
