@@ -305,8 +305,17 @@ def einsum(subscripts, *operands, **kwargs):
 # Auto-generate proxy functions for all non-blacklisted top-level ops
 # ---------------------------------------------------------------------------
 
+from flopscope._io import (  # noqa: E402
+    load,
+    save,
+    savez,
+    savez_compressed,
+)
+
 # Functions that are special-cased above and should not be overwritten.
-_SPECIAL_CASED = frozenset({"array", "einsum"})
+_SPECIAL_CASED = frozenset(
+    {"array", "einsum", "load", "save", "savez", "savez_compressed"}
+)
 
 # Functions that belong to submodules (contain a dot) are handled by the
 # submodule packages themselves.
