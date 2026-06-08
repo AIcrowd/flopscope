@@ -311,6 +311,7 @@ from flopscope._io import (  # noqa: E402
     savez,
     savez_compressed,
 )
+from flopscope._module import Module  # noqa: E402
 
 # Functions that are special-cased above and should not be overwritten.
 _SPECIAL_CASED = frozenset(
