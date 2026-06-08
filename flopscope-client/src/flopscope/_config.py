@@ -41,7 +41,7 @@ def configure(**kwargs: object) -> None:
         If ``True``, scan every counted op's output for NaN/Inf values and
         emit a :class:`~flopscope.errors.FlopscopeWarning` if any are found.
         The scan is two full O(n) sweeps over the result and is attributed
-        to ``flopscope_overhead_time``, so it is off by default for
+        to ``flopscope_overhead_time_s``, so it is off by default for
         production scoring.  Opt in when debugging an estimator that
         produces NaN/Inf to identify the introducing op.  Default ``False``.
     dimino_budget : int
@@ -89,9 +89,17 @@ def configure(**kwargs: object) -> None:
         _SETTINGS[key] = value
 
     if "einsum_path_cache_size" in kwargs:
-        from flopscope._einsum import _rebuild_einsum_cache
-
-        _rebuild_einsum_cache()
+        # The lightweight client ships this module verbatim (see
+        # scripts/sync_client.py) but has no ``flopscope._einsum`` — einsum-path
+        # caching is a server-side concern. Guard the import so a client-side
+        # ``configure(einsum_path_cache_size=...)`` records the setting without
+        # crashing; there is simply no local cache to rebuild.
+        try:
+            from flopscope._einsum import _rebuild_einsum_cache
+        except ModuleNotFoundError:
+            pass
+        else:
+            _rebuild_einsum_cache()
 
 
 def get_setting(key: str) -> object:
