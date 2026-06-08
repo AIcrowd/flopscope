@@ -7,6 +7,7 @@
     "linalg",
     "fft",
     "random",
-    "budget-planning"
+    "budget-planning",
+    "save-load"
   ]
 }

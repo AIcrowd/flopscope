@@ -1,0 +1,181 @@
+---
+title: "Saving & Loading Models"
+---
+
+*Store weights in a portable, pickle-free file and load them back in zero FLOPs.*
+
+**You will learn:**
+- What a flopscope file contains and why it is safe to load
+- How to save and load individual arrays with `fnp.save`/`fnp.savez`/`fnp.load`
+- How to build a custom model with `flops.Module` and round-trip it through a file
+- How to prepare weight files offline with plain NumPy and load them during the challenge run
+
+## The mental model
+
+A flopscope file stores exactly two things:
+
+1. **Named numeric arrays** — floating-point, integer, bool, or complex; no object dtype.
+2. **An inert JSON `__meta__` block** — plain key/value data, never executed.
+
+Your *class* always lives in *your code*, never in the file. flopscope reads the numeric payload and hands the values to the object you construct — no pickle, no `eval`, no `exec`. That boundary is the entire security model: loading a file can never execute code.
+
+Loading is also **free**: `fnp.load` charges 0 FLOPs regardless of file size.
+
+## Saving and loading arrays
+
+Use `fnp.savez` to write multiple named arrays into a single `.npz` file:
+
+```python
+import flopscope.numpy as fnp
+
+W = fnp.random.randn(64, 32)
+b = fnp.zeros(64)
+
+fnp.savez("layer.npz", W=W, b=b)
+```
+
+Load them back with `fnp.load`, which returns a plain `dict`:
+
+```python
+arrays = fnp.load("layer.npz")
+W = arrays["W"]   # shape (64, 32)
+b = arrays["b"]   # shape (64,)
+```
+
+For a single array, use the `.npy` variants:
+
+```python
+fnp.save("weights.npy", W)
+W = fnp.load("weights.npy")   # returns the array directly
+```
+
+Use `fnp.savez_compressed` when file size matters — it writes the same format as
+`fnp.savez` but with lossless compression:
+
+```python
+fnp.savez_compressed("layer_compressed.npz", W=W, b=b)
+```
+
+> **Note:** object-dtype arrays (`dtype=object`) are rejected at save time.
+> Only numeric dtypes (float, int, bool, complex) are accepted.
+
+## Custom models with flops.Module
+
+For whole models, `flops.Module` auto-discovers every array attribute and
+nested sub-module, so you never write a manual save loop.
+
+```python
+import flopscope as flops
+import flopscope.numpy as fnp
+
+
+class Linear(flops.Module):
+    def __init__(self, n_in, n_out):
+        self.W = fnp.random.randn(n_out, n_in) * fnp.sqrt(2.0 / n_in)
+        self.b = fnp.zeros(n_out)
+
+    def __call__(self, x):
+        return fnp.maximum(fnp.einsum("oi,i->o", self.W, x) + self.b, 0.0)
+
+
+class MLP(flops.Module):
+    def __init__(self, sizes):
+        self.sizes = list(sizes)
+        self.layers = [Linear(a, b) for a, b in zip(sizes, sizes[1:], strict=False)]
+
+    def config(self):
+        return {"sizes": self.sizes}
+
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+with flops.BudgetContext(flop_budget=10_000_000) as budget:
+    mlp = MLP([8, 16, 4])
+    x = fnp.random.randn(8)
+    before = mlp(x)
+
+    mlp.save("mlp.npz")                 # writes layers.0.W, layers.0.b, … + __meta__
+    restored = MLP.from_file("mlp.npz") # class from code, weights+config from file
+
+    after = restored(x)
+    print("outputs identical:", before.tolist() == after.tolist())  # True
+```
+
+### How `state_dict` auto-discovery works
+
+`flops.Module.state_dict()` walks `vars(self)` and collects:
+
+| Attribute type | How it is collected |
+|----------------|---------------------|
+| `FlopscopeArray` | stored directly under the attribute name |
+| Nested `flops.Module` | recursed with a dotted prefix (`layers.0.W`) |
+| `list` / `tuple` of the above | indexed as `layers.0`, `layers.1`, … |
+| `dict` of the above | keyed as `config.key` |
+| Attributes starting with `_` | **skipped** |
+| Everything else (scalars, strings, …) | **skipped** |
+
+### `config()` and reconstruction
+
+Override `config()` to return the keyword arguments that `__init__` needs to
+reconstruct your model with the right shapes. `from_file` passes them verbatim:
+
+```python
+# equivalent to:
+meta = {"sizes": [8, 16, 4]}     # what config() returned at save time
+mlp = MLP(**meta)                # constructs empty-weight model
+mlp.load_state_dict(arrays)      # fills weights from file
+```
+
+### In-place loading with `load`
+
+If you already have a model with the right architecture, call `load` to update
+its weights in place:
+
+```python
+mlp.load("mlp.npz")   # overwrites self.layers[*].W and .b; returns self
+```
+
+## Authoring weight files offline
+
+You can prepare weight files in your regular development environment (real NumPy,
+GPU frameworks, etc.) and load them inside the budgeted competition run:
+
+```python
+# --- offline, in your dev environment (plain numpy) ---
+import numpy as np
+
+W = np.load("my_trained_weights.npy")
+np.savez("weights.npz", W=W, b=np.zeros(64))
+```
+
+```python
+# --- inside the challenge run (flopscope, 0 FLOPs) ---
+import flopscope.numpy as fnp
+
+arrays = fnp.load("weights.npz")   # 0 FLOPs
+W = arrays["W"]
+b = arrays["b"]
+```
+
+`fnp.load` reads files written by plain `numpy.save`/`numpy.savez` without any
+format conversion. The only constraint is that the arrays must be numeric dtype.
+
+## FAQ: why can't `load` return my model object directly?
+
+Returning a live model object from a file would require encoding the *class* into
+the file. The only general way to do that is pickle — and pickle can execute
+arbitrary code at load time. flopscope deliberately avoids this.
+
+Instead, the class always comes from *your code*:
+
+```python
+# safe: class is from your code, data is from the file
+mlp = MLP.from_file("mlp.npz")
+```
+
+`from_file` is a class method: you call it on `MLP`, so Python already knows
+the class. The file only supplies the weights (numeric arrays) and the
+JSON config. No code ever travels through the file.
