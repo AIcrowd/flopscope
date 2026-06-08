@@ -100,7 +100,7 @@ flops.budget_summary()  # 6,231,041 FLOPs
 | `fnp.random` | 51 | `numel(output)` per sample; shuffle: `n*ceil(log2(n))` | Supported |
 | `flops.stats` | 24 | Per-distribution CDF/PDF/PPF formulas | Supported |
 | `fnp.polynomial` | 10 | Per-operation formulas | Supported |
-| **Total** | **473 supported** | | **35 blocked** |
+| **Total** | **477 supported** | | **31 blocked** |
 
 Blocked operations (I/O, config, and system calls) raise a helpful `AttributeError` with a link to the docs.
 
@@ -251,7 +251,7 @@ including triple products and block symmetries.
 
 **Budget is always active.** A global default budget (1e15 FLOPs, configurable via `FLOPSCOPE_DEFAULT_BUDGET` env var) activates automatically. Use an explicit `BudgetContext` to set a custom limit.
 
-**35 operations are blocked.** I/O, config, and system-level functions (`save`, `load`, `set_printoptions`, etc.) raise `AttributeError` by design. These have no meaningful FLOP cost and are not part of the competition API.
+**31 operations are blocked.** Config and system-level functions (`set_printoptions`, `geterr`, and text/legacy I/O like `savetxt`/`loadtxt`) raise `AttributeError` by design. **Weight I/O is supported:** use `fnp.savez`/`fnp.load` (and the `flops.Module` base class) to persist numeric state safely — see the [Saving & Loading guide](website/content/docs/guides/save-load.mdx). Loading data is free (0 FLOPs) and never unpickles.
 
 **sort, argsort, trace, and random sampling all have analytical FLOP costs** based on their algorithmic complexity.
 

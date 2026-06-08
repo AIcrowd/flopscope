@@ -22,7 +22,7 @@ counting. Every arithmetic operation is charged against a budget. Code that
 works with NumPy may fail or behave differently with flopscope:
 
 - All counted operations require an active `BudgetContext`
-- 35 operations are blocked entirely (I/O, config, state)
+- 31 operations are blocked entirely (config, state, text/legacy I/O); weight I/O (`save`/`load`/`savez`/`savez_compressed`) is **supported** and pickle-free
 - `sort`, `argsort`, `trace`, `random.*` sampling ops are now **counted** (not free)
 - Costs are analytical (from tensor shapes), not measured at runtime
 
@@ -153,8 +153,9 @@ Counted: `einsum`, `dot`, `matmul`, `exp`, `log`, `add`, `multiply`, `sum`,
 `mean`, all `linalg.*`, all `fft.*`, `sort`, `argsort`, `trace`,
 `unique`, set ops (`in1d`, `isin`, etc.), `histogram`, `random.*` sampling.
 
-Blocked: `save`, `load`, `geterr`, `seterr`, and 28 others. These raise
-`AttributeError`.
+Blocked: `geterr`, `seterr`, `savetxt`, `loadtxt`, and 27 others. These raise
+`AttributeError`. (`save`/`load`/`savez`/`savez_compressed` are supported and
+pickle-free — see the Saving & Loading guide.)
 
 When in doubt, check `ops.json`, the relevant `/api-data/ops/<slug>.json`, or the [API Reference](/docs/api/).
 
