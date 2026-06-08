@@ -73,12 +73,13 @@ class TestRegistry:
     def test_get_category_unknown(self):
         assert get_category("totally_fake_xyz") is None
 
-    @pytest.mark.parametrize("op", ["save", "load", "savetxt", "savez"])
+    @pytest.mark.parametrize("op", ["savetxt", "loadtxt"])
     def test_blacklisted_category(self, op):
         assert get_category(op) == BLACKLISTED
 
     def test_is_blacklisted(self):
-        assert is_blacklisted("save") is True
+        assert is_blacklisted("savetxt") is True
+        assert is_blacklisted("save") is False  # now a supported pickle-free I/O op
         assert is_blacklisted("add") is False
         assert is_blacklisted("unknown_xyz") is False
 
@@ -251,13 +252,16 @@ class TestProxyFunctions:
 class TestGetattr:
     """Tests for __getattr__ error handling on blacklisted/unknown names."""
 
-    def test_blacklisted_top_level(self):
-        with pytest.raises(AttributeError, match="intentionally not supported"):
-            _ = we.save
+    def test_io_ops_are_callable(self):
+        # save/load/savez/savez_compressed are now supported (pickle-free I/O).
+        assert callable(we.save)
+        assert callable(we.load)
+        assert callable(we.savez)
+        assert callable(we.savez_compressed)
 
-    def test_blacklisted_top_level_load(self):
+    def test_blacklisted_top_level_still_raises(self):
         with pytest.raises(AttributeError, match="intentionally not supported"):
-            _ = we.load
+            _ = we.savetxt
 
     def test_unknown_top_level(self):
         with pytest.raises(AttributeError, match="has no attribute"):
