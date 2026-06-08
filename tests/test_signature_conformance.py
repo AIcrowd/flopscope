@@ -18,6 +18,13 @@ ALLOWED_EXTRA_PARAMS = {
 # Functions where flopscope intentionally differs (with reason)
 SKIP_FUNCTIONS = {
     "einsum_path",
+    # File I/O deliberately omits numpy's allow_pickle/mmap_mode/fix_imports/
+    # encoding params: flopscope never unpickles (that is the security boundary),
+    # so these signatures intentionally diverge from numpy's.
+    "load",
+    "save",
+    "savez",
+    "savez_compressed",
 }
 
 _NUMPY_GE_2_4 = tuple(int(x) for x in np.__version__.split(".")[:2]) >= (2, 4)

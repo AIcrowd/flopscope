@@ -339,6 +339,7 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "linalg.tensorsolve",
         "linalg.vecdot",
         "linalg.vector_norm",
+        "load",  # file I/O: exercised by tests/test_io.py, not this array harness
         "mask_indices",
         "matrix_transpose",
         "may_share_memory",
@@ -418,6 +419,9 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "roots",
         "rot90",
         "row_stack",
+        "save",  # file I/O: exercised by tests/test_io.py, not this array harness
+        "savez",
+        "savez_compressed",
         "searchsorted",
         "select",
         "setdiff1d",
