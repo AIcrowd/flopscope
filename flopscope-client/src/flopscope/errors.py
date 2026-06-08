@@ -27,7 +27,10 @@ class TimeExhaustedError(FlopscopeError):
 class NoBudgetContextError(FlopscopeError):
     """Raised when a counted operation is called outside a BudgetContext."""
 
-    def __init__(self, message: str = "") -> None:
+    def __init__(
+        self,
+        message: str = "No active BudgetContext. Wrap your code in `with flopscope.BudgetContext(...):`.",
+    ) -> None:
         super().__init__(message)
 
 

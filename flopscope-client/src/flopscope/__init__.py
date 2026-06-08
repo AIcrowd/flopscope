@@ -33,6 +33,7 @@ from flopscope._budget import (  # noqa: E402
     budget,
     budget_summary_dict,
 )
+from flopscope._config import configure  # noqa: E402,F401
 from flopscope._dispatch import timed_dispatch  # noqa: E402
 from flopscope._display import budget_live, budget_summary  # noqa: E402
 from flopscope._math_compat import e, inf, nan, pi  # noqa: E402

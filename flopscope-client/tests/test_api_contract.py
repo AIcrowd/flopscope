@@ -48,3 +48,13 @@ def test_numpy_mirrors_top_level_proxyable_surface():
     assert not missing, (
         f"flopscope.numpy missing names present at top level: {sorted(missing)}"
     )
+
+
+def test_top_level_submission_api_present():
+    # The origin/main client submission API. (load/save/savez/Module are PR #116
+    # features, intentionally NOT part of this rehab.) `configure` is added in
+    # this phase; this test guards that the top-level surface stays intact.
+    import flopscope as flops
+
+    for name in ("BudgetContext", "SymmetryGroup", "array", "einsum", "configure"):
+        assert hasattr(flops, name), f"top-level flopscope missing: {name}"
