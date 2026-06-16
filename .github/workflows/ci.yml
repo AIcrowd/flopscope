@@ -331,6 +331,9 @@ jobs:
       - name: Generate API data
         run: uv run python scripts/generate_api_docs.py
 
+      - name: Verify generated API data (coverage + doc contract)
+        run: uv run python scripts/generate_api_docs.py --verify
+
       - name: Run website regression tests
         run: cd website && npm test
 
