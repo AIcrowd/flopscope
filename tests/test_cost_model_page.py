@@ -41,3 +41,20 @@ def test_mdx_safe_no_bare_angle_or_brace_outside_code():
 def test_not_stale_no_flop_multiplier():
     out = gen.render_cost_model_page(SRC)
     assert "flop_multiplier" not in out
+
+
+def test_no_internal_links_to_removed_calibration_page():
+    content = ROOT / "website" / "content" / "docs"
+    offenders = []
+    for mdx in content.rglob("*.mdx"):
+        if "/api/" in str(mdx):   # generated API pages are not committed
+            continue
+        if "/docs/development/calibration/" in mdx.read_text():
+            offenders.append(str(mdx.relative_to(ROOT)))
+    assert not offenders, f"links to removed calibration page: {offenders}"
+
+
+def test_calibration_page_removed_from_nav():
+    import json
+    meta = json.loads((ROOT / "website/content/docs/development/meta.json").read_text())
+    assert "calibration" not in meta.get("pages", [])

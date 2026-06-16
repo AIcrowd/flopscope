@@ -104,7 +104,7 @@ The categories determine how costs are calculated:
 
 **Blocked operations** include I/O (`save`, `load`), error state management (`geterr`, `seterr`), and other operations that do not make sense in a FLOP-counted context. Calling a blocked operation raises `AttributeError`.
 
-When per-operation [weights](/docs/development/calibration/) are loaded, the analytical cost is multiplied by the operation's weight before deduction. This allows the cost model to reflect that `exp` is more expensive than `abs` in terms of actual hardware instructions, while keeping the base formulas simple and deterministic.
+When per-operation [weights](/docs/understanding/flop-counting-model/) are loaded, the analytical cost is multiplied by the operation's weight before deduction. This allows the cost model to reflect that `exp` is more expensive than `abs` in terms of actual hardware instructions, while keeping the base formulas simple and deterministic.
 
 ## Related pages
 
