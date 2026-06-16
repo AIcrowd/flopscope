@@ -45,9 +45,11 @@ def test_guard_b_generated_paths_untracked_and_ignored():
         rel = p.relative_to(ROOT)
         tracked = _git("ls-files", "--", str(rel)).strip()
         assert not tracked, f"generated path still tracked: {rel}\n{tracked[:300]}"
-        rc = subprocess.run(
-            ["git", "check-ignore", "-q", str(rel)], cwd=ROOT
-        ).returncode
+        # `git check-ignore` on a bare directory only matches a `dir/` rule when the
+        # directory exists; probe a path UNDER directory outputs so the check is
+        # robust in a fresh checkout (CI) where the dir has not been generated yet.
+        probe = str(rel / "_probe") if p.suffix == "" else str(rel)
+        rc = subprocess.run(["git", "check-ignore", "-q", probe], cwd=ROOT).returncode
         assert rc == 0, f"generated path not gitignored: {rel}"
 
 

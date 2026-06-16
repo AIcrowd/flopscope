@@ -46,7 +46,8 @@ typecheck:  ## Pyright (standard mode) over src/ and tests/
 # Test  (mirrors: CI → test job)
 # ---------------------------------------------------------------------------
 .PHONY: test
-test:  ## Run pytest with coverage (fails if < 90%)
+test:  ## Run pytest with coverage (fails if < 90%); generates API docs first if missing
+	@test -f website/.generated/op-doc-imports.ts || $(UV) python scripts/generate_api_docs.py
 	$(UV) pytest --cov=flopscope --cov-fail-under=90
 
 .PHONY: test-numpy-compat

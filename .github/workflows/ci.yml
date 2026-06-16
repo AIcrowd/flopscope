@@ -192,6 +192,9 @@ jobs:
       - name: Pin NumPy ${{ matrix.numpy-version }}
         run: uv pip install 'numpy~=${{ matrix.numpy-version }}.0'
 
+      - name: Generate API docs (untracked; tests validate them)
+        run: uv run python scripts/generate_api_docs.py
+
       - name: Run tests with coverage
         run: uv run pytest --cov=flopscope --cov-fail-under=85
 
@@ -226,6 +229,9 @@ jobs:
 
       - name: Pin NumPy ${{ matrix.numpy-version }}
         run: uv pip install 'numpy~=${{ matrix.numpy-version }}.0'
+
+      - name: Generate API docs (untracked; tests validate them)
+        run: uv run python scripts/generate_api_docs.py
 
       - name: Run tests with coverage
         run: uv run pytest --cov=flopscope --cov-fail-under=85
