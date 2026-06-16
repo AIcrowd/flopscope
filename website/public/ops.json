@@ -564,7 +564,7 @@
       "numpy_ref": "np.as_symmetric",
       "slug": "as_symmetric",
       "status": "supported",
-      "summary": "The type of the None singleton.",
+      "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
       "weight": 1.0
     },
     {
@@ -3420,7 +3420,7 @@
       "numpy_ref": "np.is_symmetric",
       "slug": "is_symmetric",
       "status": "supported",
-      "summary": "The type of the None singleton.",
+      "summary": "Check whether *data* is invariant under the given symmetry.",
       "weight": 1.0
     },
     {
@@ -9153,7 +9153,7 @@
       "numpy_ref": "np.random.symmetric",
       "slug": "random-symmetric",
       "status": "supported",
-      "summary": "The type of the None singleton.",
+      "summary": "Sample random data and project it to a symmetry group.",
       "weight": 1.0
     },
     {
@@ -10728,7 +10728,7 @@
       "numpy_ref": "np.symmetrize",
       "slug": "symmetrize",
       "status": "supported",
-      "summary": "The type of the None singleton.",
+      "summary": "Project an array onto the invariant subspace of a permutation group.",
       "weight": 1.0
     },
     {

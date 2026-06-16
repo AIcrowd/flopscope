@@ -2772,6 +2772,20 @@ def resolve_doc_link(
     )
 
 
+def _docstring_of(obj: object | None) -> str:
+    """Return ``obj``'s docstring, or ``""`` when ``obj`` is missing.
+
+    ``inspect.getdoc(None)`` resolves ``None`` to ``type(None)`` and returns the
+    ``NoneType`` docstring ("The type of the None singleton."). That string is
+    truthy, so passing a missing upstream object straight into ``inspect.getdoc``
+    would shadow the real flopscope docstring for flopscope-only ops. Treating a
+    ``None`` object as having no docstring keeps the ``or`` fall-through honest.
+    """
+    if obj is None:
+        return ""
+    return inspect.getdoc(obj) or ""
+
+
 def build_structured_doc(
     name: str,
     module: str,
@@ -2788,9 +2802,14 @@ def build_structured_doc(
     alias_map = alias_map or {}
     supported_ops = supported_ops or set()
     if module == "flopscope.stats":
-        raw_doc = inspect.getdoc(flopscope_obj) or inspect.getdoc(upstream_obj) or ""
+        raw_doc = _docstring_of(flopscope_obj) or _docstring_of(upstream_obj) or ""
     else:
-        raw_doc = inspect.getdoc(upstream_obj) or inspect.getdoc(flopscope_obj) or ""
+        # Prefer the upstream docstring, but fall through to the flopscope
+        # callable for flopscope-only ops (e.g. ``random.symmetric``) where the
+        # upstream object is ``None``. ``inspect.getdoc(None)`` returns the
+        # ``NoneType`` docstring ("The type of the None singleton."), which is
+        # truthy and would otherwise shadow the real docstring (see issue #50).
+        raw_doc = _docstring_of(upstream_obj) or _docstring_of(flopscope_obj) or ""
     parsed = _rewrite_parsed_doc(
         parse_numpy_docstring(raw_doc),
         alias_map=alias_map,
