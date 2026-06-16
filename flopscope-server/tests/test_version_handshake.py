@@ -90,3 +90,35 @@ def test_hello_works_before_budget_open():
     assert decoded["server_version"] == client_version
     # And no session was opened as a side effect.
     assert server._session is None
+
+
+def test_handle_hello_prerelease_version_uses_string_compare(monkeypatch):
+    """A prerelease server version (e.g. 0.8.0rc0) is matched by full public version.
+
+    Guards that the handshake string-compares the +local-stripped version and
+    never int-parses X.Y.Z (which would raise on the `rc` suffix), and that the
+    full prerelease is significant: rc0 vs rc1 (and rc0 vs the final release) is
+    a genuine mismatch, not a same-core match.
+    """
+    monkeypatch.setattr(flopscope, "__version__", "0.8.0rc0+np9.9")
+    server = FlopscopeServer.__new__(FlopscopeServer)
+    server._session = None
+    server._handler = None
+    server._last_activity = 0.0
+
+    # Same public prerelease → ok; the +np9.9 local segment is stripped server-side.
+    ok = msgpack.unpackb(
+        server._handle_hello({"op": "hello", "kwargs": {"client_version": "0.8.0rc0"}}),
+        raw=False,
+    )
+    assert ok["status"] == "ok"
+    assert ok["server_version"] == "0.8.0rc0"
+
+    # rc0 vs rc1 and rc0 vs the final release must both be VersionMismatch.
+    for other in ("0.8.0rc1", "0.8.0"):
+        err = msgpack.unpackb(
+            server._handle_hello({"op": "hello", "kwargs": {"client_version": other}}),
+            raw=False,
+        )
+        assert err["status"] == "error", other
+        assert err["error_type"] == "VersionMismatch", other

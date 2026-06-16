@@ -305,6 +305,10 @@ jobs:
           uv sync --all-extras
           cd flopscope-server && uv sync
 
+      - name: Run server version-handshake tests
+        run: |
+          cd flopscope-server && uv run pytest tests/test_version_handshake.py -v --tb=short
+
       - name: Run full client test suite
         run: |
           cd flopscope-client && uv run pytest tests/ -v --tb=short

@@ -104,3 +104,25 @@ def test_send_recv_triggers_handshake_first():
     # Order matters: hello first, then the real op.
     assert msgpack.unpackb(sock.sent[0], raw=False)["op"] == "hello"
     assert msgpack.unpackb(sock.sent[1], raw=False)["op"] == "budget_status"
+
+
+def test_handshake_sends_stripped_prerelease_version(monkeypatch):
+    """The client sends its +local-stripped PUBLIC version (rc kept) in the hello.
+
+    A prerelease like 0.8.0rc0 carrying a dynamic +local build tag must be sent
+    as "0.8.0rc0" so it string-matches the server's stripped version — the rc
+    suffix is preserved, only the +local segment is dropped.
+    """
+    import flopscope
+
+    monkeypatch.setattr(flopscope, "__version__", "0.8.0rc0+np9.9")
+    server_ok = msgpack.packb(
+        {"status": "ok", "server_version": "0.8.0rc0"}, use_bin_type=True
+    )
+    sock = _FakeSocket([server_ok])
+    conn = _make_connection(sock)
+
+    conn._ensure_handshaked()
+    assert conn._handshake_done is True
+    hello = msgpack.unpackb(sock.sent[0], raw=False)
+    assert hello["kwargs"]["client_version"] == "0.8.0rc0"
