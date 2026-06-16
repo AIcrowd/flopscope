@@ -72,7 +72,8 @@ docs-build:  ## Generate API data and build website
 	cd website && npm run check:gh-pages
 
 .PHONY: docs-serve
-docs-serve:  ## Serve docs locally with live reload
+docs-serve:  ## Generate API data, then serve docs locally with live reload
+	$(UV) python scripts/generate_api_docs.py
 	cd website && npm run dev
 
 .PHONY: docs-deploy
