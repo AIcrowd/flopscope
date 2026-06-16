@@ -62,7 +62,71 @@ def generated_output_paths() -> list[Path]:
     return [
         GENERATED_DIR,            # website/.generated/
         PUBLIC_DIR / "api-data",  # website/public/api-data/ (ops/ + public-api/)
+        # The published FLOP-counting-model page is generated from the single
+        # source docs/reference/cost-model.md (so it can't go stale) and is
+        # gitignored — it is regenerated on every build.
+        WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Cost-model page (generated from docs/reference/cost-model.md)
+# ---------------------------------------------------------------------------
+
+_GITHUB_EMPIRICAL = (
+    "https://github.com/AIcrowd/flopscope/blob/main/docs/reference/empirical-weights.md"
+)
+
+
+def render_cost_model_page(source_md: str) -> str:
+    """Convert docs/reference/cost-model.md into an MDX-safe fumadocs page.
+
+    - rewrites relative .md links to GitHub blob URLs (empirical-weights.md -> GitHub);
+    - escapes MDX-hostile chars (< and {) in prose, leaving code spans/fences intact;
+    - prepends front-matter + a generated-source note.
+    """
+
+    def _rewrite_link(m: "re.Match[str]") -> str:
+        text, target = m.group(1), m.group(2)
+        if target.endswith("empirical-weights.md"):
+            return f"[{text}]({_GITHUB_EMPIRICAL})"
+        if target.startswith("#") or target.startswith("http"):
+            return m.group(0)
+        if target.endswith(".md"):
+            name = target.rsplit("/", 1)[-1]
+            return f"[{text}](https://github.com/AIcrowd/flopscope/blob/main/docs/reference/{name})"
+        return m.group(0)
+
+    body = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _rewrite_link, source_md)
+
+    out_lines: list[str] = []
+    in_fence = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            out_lines.append(line)
+            continue
+        if in_fence:
+            out_lines.append(line)
+            continue
+        parts = line.split("`")
+        for i in range(0, len(parts), 2):  # even indices = outside backticks
+            parts[i] = parts[i].replace("<", "&lt;").replace("{", "&#123;")
+        out_lines.append("`".join(parts))
+    safe_body = "\n".join(out_lines)
+
+    # The provenance note lives INSIDE the front-matter as a YAML comment: it
+    # documents that the page is generated (edit the source, not this file)
+    # without emitting a bare-brace JSX comment into the MDX body — keeping the
+    # rendered region free of MDX-hostile tokens.
+    front = (
+        "---\n"
+        "# GENERATED from docs/reference/cost-model.md - edit that file, not this page.\n"
+        'title: "FLOP Counting Model"\n'
+        'description: "How Flopscope bills compute: the cost model, by family rule."\n'
+        "---\n\n"
+    )
+    return front + safe_body
 
 
 # ---------------------------------------------------------------------------
@@ -4915,6 +4979,11 @@ def main():
     write_op_doc_coverage_artifact(records, WEBSITE)
     example_coverage = build_example_coverage(records, API_EXAMPLES_DIR)
     write_example_coverage_artifact(example_coverage, WEBSITE)
+
+    cost_model_src = (ROOT / "docs" / "reference" / "cost-model.md").read_text()
+    cost_model_out = WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx"
+    cost_model_out.write_text(render_cost_model_page(cost_model_src))
+    print(f"  Generated {cost_model_out.relative_to(WEBSITE)}")
 
     print("\nDone. Run with --verify to check coverage.")
 
