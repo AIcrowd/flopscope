@@ -42,7 +42,17 @@ def test_guard_b_generated_paths_untracked_and_ignored():
 
 
 def test_guard_a_generation_leaves_git_clean():
-    """Regenerating must not dirty any TRACKED file (all outputs are ignored)."""
+    """Regenerating must not dirty any TRACKED file EXCEPT website/public/ops.json.
+
+    ops.json is the only tracked file the generator writes; its `summary` fields
+    come from the installed numpy's docstrings and so vary across the numpy
+    version matrix (guarded separately by `generate_api_docs.py --check`, which
+    excludes summary). Every other generator output is gitignored, so regeneration
+    must leave the rest of the tracked tree byte-clean.
+    """
     subprocess.run(["uv", "run", "python", "scripts/generate_api_docs.py"], cwd=ROOT, check=True)
-    dirty = _git("status", "--porcelain").strip()
-    assert dirty == "", f"generation dirtied tracked files:\n{dirty}"
+    dirty = [
+        ln for ln in _git("status", "--porcelain").splitlines()
+        if ln.strip() and not ln.rstrip().endswith("website/public/ops.json")
+    ]
+    assert not dirty, "generation dirtied tracked files:\n" + "\n".join(dirty)
