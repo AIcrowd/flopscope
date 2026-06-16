@@ -22,3 +22,27 @@ def test_generated_output_paths_lists_live_write_set():
     # Hand-written pages must NOT be in the generated set (else we'd untrack them).
     assert not any(p.endswith("content/docs/api/index.mdx") for p in paths)
     assert not any(p.endswith("content/docs/api/numpy.mdx") for p in paths)
+
+
+import subprocess
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout
+
+
+def test_guard_b_generated_paths_untracked_and_ignored():
+    """No generator output may be tracked; each declared path must be gitignored."""
+    for p in gen.generated_output_paths():
+        rel = p.relative_to(ROOT)
+        tracked = _git("ls-files", "--", str(rel)).strip()
+        assert not tracked, f"generated path still tracked: {rel}\n{tracked[:300]}"
+        rc = subprocess.run(["git", "check-ignore", "-q", str(rel)], cwd=ROOT).returncode
+        assert rc == 0, f"generated path not gitignored: {rel}"
+
+
+def test_guard_a_generation_leaves_git_clean():
+    """Regenerating must not dirty any TRACKED file (all outputs are ignored)."""
+    subprocess.run(["uv", "run", "python", "scripts/generate_api_docs.py"], cwd=ROOT, check=True)
+    dirty = _git("status", "--porcelain").strip()
+    assert dirty == "", f"generation dirtied tracked files:\n{dirty}"
