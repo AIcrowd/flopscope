@@ -6,6 +6,7 @@
 
 <div align="center">
 
+[![ARC Challenge](https://img.shields.io/badge/AIcrowd-ARC%20Challenge-F0524D.svg)](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026)
 [![PyPI version](https://img.shields.io/pypi/v/flopscope.svg)](https://pypi.org/project/flopscope/)
 [![CI](https://github.com/AIcrowd/flopscope/actions/workflows/ci.yml/badge.svg)](https://github.com/AIcrowd/flopscope/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://aicrowd.github.io/flopscope/)
@@ -14,7 +15,7 @@
 
 </div>
 
-*Built for the [ARC Whitebox Estimation Challenge](https://aicrowd.com) by [AIcrowd](https://aicrowd.com)*
+*Built for the [ARC Whitebox Estimation Challenge](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026) by [AIcrowd](https://aicrowd.com)*
 
 ---
 
