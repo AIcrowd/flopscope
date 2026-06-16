@@ -56,7 +56,6 @@ const SECTIONS = {
   },
   'Development': {
     'development/contributing': 'Repository layout, local workflows, and test suite',
-    'development/calibration': 'Empirical weight calibration methodology',
   },
   'Changelog': {
     'changelog': 'Release history and breaking changes',

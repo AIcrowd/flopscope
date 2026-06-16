@@ -1,12 +1,18 @@
 # tests/test_docs_generation_hygiene.py
 from __future__ import annotations
-import importlib.util, sys
+
+import importlib.util
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-_spec = importlib.util.spec_from_file_location("gen_api_docs", ROOT / "scripts" / "generate_api_docs.py")
-assert _spec is not None and _spec.loader is not None  # keep pyright happy (CI checks tests/)
+_spec = importlib.util.spec_from_file_location(
+    "gen_api_docs", ROOT / "scripts" / "generate_api_docs.py"
+)
+assert (
+    _spec is not None and _spec.loader is not None
+)  # keep pyright happy (CI checks tests/)
 gen = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = gen
 _spec.loader.exec_module(gen)
@@ -28,7 +34,9 @@ import subprocess
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, text=True
+    ).stdout
 
 
 def test_guard_b_generated_paths_untracked_and_ignored():
@@ -37,7 +45,9 @@ def test_guard_b_generated_paths_untracked_and_ignored():
         rel = p.relative_to(ROOT)
         tracked = _git("ls-files", "--", str(rel)).strip()
         assert not tracked, f"generated path still tracked: {rel}\n{tracked[:300]}"
-        rc = subprocess.run(["git", "check-ignore", "-q", str(rel)], cwd=ROOT).returncode
+        rc = subprocess.run(
+            ["git", "check-ignore", "-q", str(rel)], cwd=ROOT
+        ).returncode
         assert rc == 0, f"generated path not gitignored: {rel}"
 
 
@@ -50,9 +60,12 @@ def test_guard_a_generation_leaves_git_clean():
     excludes summary). Every other generator output is gitignored, so regeneration
     must leave the rest of the tracked tree byte-clean.
     """
-    subprocess.run(["uv", "run", "python", "scripts/generate_api_docs.py"], cwd=ROOT, check=True)
+    subprocess.run(
+        ["uv", "run", "python", "scripts/generate_api_docs.py"], cwd=ROOT, check=True
+    )
     dirty = [
-        ln for ln in _git("status", "--porcelain").splitlines()
+        ln
+        for ln in _git("status", "--porcelain").splitlines()
         if ln.strip() and not ln.rstrip().endswith("website/public/ops.json")
     ]
     assert not dirty, "generation dirtied tracked files:\n" + "\n".join(dirty)

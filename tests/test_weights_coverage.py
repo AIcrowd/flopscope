@@ -26,7 +26,7 @@ from flopscope._registry import REGISTRY
 ROOT = Path(__file__).resolve().parent.parent
 WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "weights.json"
 DEFAULT_WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
-DOCS_PATH = ROOT / "website" / "content" / "docs" / "development" / "calibration.mdx"
+DOCS_PATH = ROOT / "docs" / "reference" / "empirical-weights.md"
 OPS_INDEX_PATH = ROOT / "website" / "public" / "ops.json"
 
 # Ensure benchmarks package is importable.
@@ -181,8 +181,8 @@ def weights() -> dict[str, float]:
 
 @pytest.fixture(scope="module")
 def docs_text() -> str:
-    """Load the calibration guide."""
-    assert DOCS_PATH.exists(), f"calibration guide not found at {DOCS_PATH}"
+    """Load the empirical-weights reference (the authoritative calibration doc)."""
+    assert DOCS_PATH.exists(), f"empirical-weights reference not found at {DOCS_PATH}"
     return DOCS_PATH.read_text()
 
 

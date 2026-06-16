@@ -39,7 +39,10 @@ test('global CSS keeps Fumadocs defaults and only scopes the homepage seam fix l
   assert.doesNotMatch(source, /\.prose\s+code:not\(pre code\)/);
 });
 
-test('calibration page is only served from development docs', async () => {
+test('calibration page is retired and absent from all docs nav', async () => {
+  // The standalone calibration page was removed; its content was consolidated
+  // into docs/reference/empirical-weights.md (linked from the cost-model page).
+  // Guard that neither location serves it and neither nav lists it.
   const understandingCalibration = path.join(
     websiteRoot,
     'content',
@@ -58,10 +61,10 @@ test('calibration page is only served from development docs', async () => {
   const developmentMeta = await readSource('content/docs/development/meta.json');
 
   await assert.rejects(access(understandingCalibration));
-  await access(developmentCalibration);
+  await assert.rejects(access(developmentCalibration));
 
   assert.doesNotMatch(understandingMeta, /"calibration"/);
-  assert.match(developmentMeta, /"calibration"/);
+  assert.doesNotMatch(developmentMeta, /"calibration"/);
 });
 
 test('machine-readable links use plain anchors instead of framework navigation', async () => {

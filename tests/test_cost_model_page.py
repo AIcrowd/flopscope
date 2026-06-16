@@ -1,15 +1,25 @@
 from __future__ import annotations
-import importlib.util, sys
+
+import importlib.util
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-_spec = importlib.util.spec_from_file_location("gen_cmp", ROOT / "scripts" / "generate_api_docs.py")
-assert _spec is not None and _spec.loader is not None  # keep pyright happy (CI checks tests/)
-gen = importlib.util.module_from_spec(_spec); sys.modules[_spec.name] = gen; _spec.loader.exec_module(gen)
+_spec = importlib.util.spec_from_file_location(
+    "gen_cmp", ROOT / "scripts" / "generate_api_docs.py"
+)
+assert (
+    _spec is not None and _spec.loader is not None
+)  # keep pyright happy (CI checks tests/)
+gen = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = gen
+_spec.loader.exec_module(gen)
 
 SRC = (ROOT / "docs" / "reference" / "cost-model.md").read_text()
-GITHUB = "https://github.com/AIcrowd/flopscope/blob/main/docs/reference/empirical-weights.md"
+GITHUB = (
+    "https://github.com/AIcrowd/flopscope/blob/main/docs/reference/empirical-weights.md"
+)
 
 
 def test_frontmatter_and_source_content():
@@ -47,7 +57,7 @@ def test_no_internal_links_to_removed_calibration_page():
     content = ROOT / "website" / "content" / "docs"
     offenders = []
     for mdx in content.rglob("*.mdx"):
-        if "/api/" in str(mdx):   # generated API pages are not committed
+        if "/api/" in str(mdx):  # generated API pages are not committed
             continue
         if "/docs/development/calibration/" in mdx.read_text():
             offenders.append(str(mdx.relative_to(ROOT)))
@@ -56,5 +66,6 @@ def test_no_internal_links_to_removed_calibration_page():
 
 def test_calibration_page_removed_from_nav():
     import json
+
     meta = json.loads((ROOT / "website/content/docs/development/meta.json").read_text())
     assert "calibration" not in meta.get("pages", [])

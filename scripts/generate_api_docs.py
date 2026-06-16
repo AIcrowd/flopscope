@@ -47,6 +47,10 @@ API_DIR = DOCS / "api"
 REF_DIR = DOCS / "reference"
 WEIGHTS_CSV_PATH = ROOT / "src" / "flopscope" / "data" / "weights.csv"
 DEFAULT_WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
+# Published FLOP-counting-model page, generated from docs/reference/cost-model.md.
+COST_MODEL_PAGE = (
+    WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx"
+)
 
 
 def generated_output_paths() -> list[Path]:
@@ -60,12 +64,12 @@ def generated_output_paths() -> list[Path]:
     generator emits it.
     """
     return [
-        GENERATED_DIR,            # website/.generated/
+        GENERATED_DIR,  # website/.generated/
         PUBLIC_DIR / "api-data",  # website/public/api-data/ (ops/ + public-api/)
         # The published FLOP-counting-model page is generated from the single
         # source docs/reference/cost-model.md (so it can't go stale) and is
         # gitignored — it is regenerated on every build.
-        WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx",
+        COST_MODEL_PAGE,
     ]
 
 
@@ -86,7 +90,7 @@ def render_cost_model_page(source_md: str) -> str:
     - prepends front-matter + a generated-source note.
     """
 
-    def _rewrite_link(m: "re.Match[str]") -> str:
+    def _rewrite_link(m: re.Match[str]) -> str:
         text, target = m.group(1), m.group(2)
         if target.endswith("empirical-weights.md"):
             return f"[{text}]({_GITHUB_EMPIRICAL})"
@@ -4981,7 +4985,7 @@ def main():
     write_example_coverage_artifact(example_coverage, WEBSITE)
 
     cost_model_src = (ROOT / "docs" / "reference" / "cost-model.md").read_text()
-    cost_model_out = WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx"
+    cost_model_out = COST_MODEL_PAGE
     cost_model_out.write_text(render_cost_model_page(cost_model_src))
     print(f"  Generated {cost_model_out.relative_to(WEBSITE)}")
 
