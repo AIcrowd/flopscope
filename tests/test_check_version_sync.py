@@ -155,3 +155,57 @@ def test_server_extra_pin_drift_detected(repo_copy: Path):
     )
     result = _run(repo_copy)
     assert result.returncode != 0
+
+
+_ALL_VERSION_FILES = [
+    "pyproject.toml",
+    "src/flopscope/__init__.py",
+    "flopscope-server/pyproject.toml",
+    "flopscope-server/src/flopscope_server/__init__.py",
+    "flopscope-client/pyproject.toml",
+    "flopscope-client/src/flopscope/__init__.py",
+]
+
+
+def _rewrite_all_versions(repo: Path, old: str, new: str) -> None:
+    """Replace every occurrence of `old` with `new` across all version files."""
+    for rel in _ALL_VERSION_FILES:
+        p = repo / rel
+        p.write_text(p.read_text().replace(old, new))
+
+
+def _prerelease(version: str) -> str:
+    """A realistic next-minor release candidate, e.g. 0.7.0 -> 0.8.0rc0."""
+    major, minor = version.split(".")[:2]
+    return f"{major}.{int(minor) + 1}.0rc0"
+
+
+def test_prerelease_in_sync_passes(repo_copy: Path):
+    """All eight locations at the same PEP 440 prerelease (e.g. 0.8.0rc0) is in sync.
+
+    The pre-generalization regexes required `X.Y.Z` immediately followed by `"`,
+    so a prerelease suffix made the pyproject/cross-pin reads raise. This guards
+    that `cz bump --prerelease rc` versions validate cleanly.
+    """
+    current = _current_version(repo_copy)
+    pre = _prerelease(current)
+    _rewrite_all_versions(repo_copy, current, pre)
+    result = _run(repo_copy)
+    assert result.returncode == 0, (
+        f"prerelease version {pre} should validate in sync.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert pre in result.stdout
+
+
+def test_prerelease_drift_detected(repo_copy: Path):
+    """rc0 vs rc1 must be caught — the check compares the full prerelease, not the X.Y.Z core."""
+    current = _current_version(repo_copy)
+    pre = _prerelease(current)  # e.g. 0.8.0rc0
+    _rewrite_all_versions(repo_copy, current, pre)
+    init = repo_copy / "flopscope-client" / "src" / "flopscope" / "__init__.py"
+    init.write_text(init.read_text().replace(pre, pre[:-1] + "1"))  # rc0 -> rc1
+    result = _run(repo_copy)
+    assert result.returncode != 0, (
+        f"rc0 vs rc1 drift should be detected.\nstdout:\n{result.stdout}"
+    )

@@ -7,7 +7,7 @@ Run from the repo root:
 Exits 0 if all eight version locations agree, 1 otherwise:
   - pyproject.toml [project].version            (root)
   - pyproject.toml [server] extra -> "flopscope-server==X.Y.Z"
-  - src/flopscope/__init__.py __version__       (leading X.Y.Z only)
+  - src/flopscope/__init__.py __version__       (full version)
   - flopscope-server/pyproject.toml version
   - flopscope-server/src/flopscope_server/__init__.py __version__
   - flopscope-server/pyproject.toml dependencies -> "flopscope==X.Y.Z"
@@ -22,16 +22,24 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-_VERSION_RE = re.compile(r'__version__\s*=\s*f?"([0-9]+\.[0-9]+\.[0-9]+)')
-_CROSS_PIN_RE = re.compile(r'"flopscope==([0-9]+\.[0-9]+\.[0-9]+)"')
-_SERVER_EXTRA_RE = re.compile(r'"flopscope-server==([0-9]+\.[0-9]+\.[0-9]+)"')
-# Matches the `version = "X.Y.Z"` line under `[project]` in pyproject.toml.
+# The PEP 440 *public* version: core X.Y.Z plus an optional prerelease/post/dev
+# segment, e.g. "0.8.0", "0.8.0rc0", "0.8.0rc1", "0.8.0.post1". The trailing
+# class deliberately EXCLUDES `+`, so a local segment is ignored: src/flopscope/
+# __init__.py carries a dynamic `f"0.7.0+np{_np.__version__}"` local version, and
+# lockstep is about the public version, not the per-environment numpy build.
+# `cz bump --prerelease rc` writes the same public version to every location, so
+# we capture and compare the full public version (incl. the rc suffix): rc0 vs
+# rc1 across packages is real drift, but `0.7.0` vs `0.7.0+np2.2` is not.
+_VER = r"[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.]*"
+
+_VERSION_RE = re.compile(rf'__version__\s*=\s*f?"({_VER})')
+_CROSS_PIN_RE = re.compile(rf'"flopscope==({_VER})"')
+_SERVER_EXTRA_RE = re.compile(rf'"flopscope-server==({_VER})"')
+# Matches the `version = "X.Y.Z[suffix]"` line under `[project]` in pyproject.toml.
 # Anchored at line start to skip the `requires-python = "..."` line and the
 # dependency lines below. The flopscope project keeps a single top-level
 # `version = ...` in each pyproject.toml; we don't try to be a full TOML parser.
-_PYPROJECT_VERSION_RE = re.compile(
-    r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', re.MULTILINE
-)
+_PYPROJECT_VERSION_RE = re.compile(rf'^version\s*=\s*"({_VER})"', re.MULTILINE)
 
 
 def _read_pyproject_version(path: Path) -> str:
@@ -49,7 +57,7 @@ def _read_pyproject_version(path: Path) -> str:
 
 
 def _read_init_version(path: Path) -> str:
-    """Extract leading X.Y.Z from an __version__ assignment, ignoring +suffix."""
+    """Extract the full version (incl. any PEP 440 prerelease suffix) from __version__."""
     text = path.read_text()
     m = _VERSION_RE.search(text)
     if m is None:
