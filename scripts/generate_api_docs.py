@@ -48,6 +48,23 @@ REF_DIR = DOCS / "reference"
 WEIGHTS_CSV_PATH = ROOT / "src" / "flopscope" / "data" / "weights.csv"
 DEFAULT_WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
 
+
+def generated_output_paths() -> list[Path]:
+    """Every directory the live generator writes into, EXCEPT the tracked
+    cost-model snapshot website/public/ops.json (which stays tracked + guarded
+    by --check). Directories imply their entire contents. Used to build
+    .gitignore and to enforce the hygiene guards.
+
+    The cost-model-page task appends
+    website/content/docs/understanding/flop-counting-model.mdx here once the
+    generator emits it.
+    """
+    return [
+        GENERATED_DIR,            # website/.generated/
+        PUBLIC_DIR / "api-data",  # website/public/api-data/ (ops/ + public-api/)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Signature helpers
 # ---------------------------------------------------------------------------
@@ -4815,7 +4832,17 @@ def main():
         default=1,
         help="Use multiple processes to build operation docs (default: 1)",
     )
+    parser.add_argument(
+        "--list-outputs",
+        action="store_true",
+        help="Print every generated output path (one per line) and exit.",
+    )
     args = parser.parse_args()
+
+    if args.list_outputs:
+        for p in generated_output_paths():
+            print(p)
+        sys.exit(0)
 
     assert_supported_docs_env()
     registry = load_registry()
