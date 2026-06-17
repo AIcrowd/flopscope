@@ -396,6 +396,26 @@ jobs:
       - name: Run GH Pages compatibility checks
         run: cd website && npm run check:gh-pages
 
+      - name: Run deploy-only internal link audit
+        run: cd website && npm run check:deploy-links
+
+      - name: Verify deploy artifact contents
+        run: |
+          test -f website/out/.nojekyll
+          test -f website/out/llms.txt
+          test -f website/out/llms-full.txt
+          test -f website/out/ops.json
+          test -f website/out/api-data/ops/einsum.json
+          test -f website/out/docs/understanding/flop-counting-model/index.html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: website/out
+          force_orphan: true
+          enable_jekyll: false
+
   ci-cost-report:
     name: CI cost estimate
     if: always()
