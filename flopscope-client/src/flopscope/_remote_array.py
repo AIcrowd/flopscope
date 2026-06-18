@@ -905,6 +905,11 @@ def _encode_arg(arg):
         return {"__rs__": arg.handle_id}
     if isinstance(arg, RemoteSeedSequence):
         return {"__seq__": arg.handle_id}
+    # Dtype objects (_DtypeLabel / _DType) serialize to their wire name.
+    # Duck-typed to avoid importing flopscope._dtypes (circular).
+    _dtype_name = getattr(arg, "_flopscope_dtype_name", None)
+    if isinstance(_dtype_name, str):
+        return _dtype_name
     from flopscope._perm_group import SymmetryGroup
 
     if isinstance(arg, SymmetryGroup):

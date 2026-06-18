@@ -129,40 +129,25 @@ class TestConstants:
 
 
 class TestDtypes:
-    """Tests for dtype string exports."""
+    """Dtype names are dual-purpose objects, not strings (matches numpy)."""
 
-    def test_float64(self):
-        assert we.float64 == "float64"
+    def test_float32_is_not_a_string(self):
+        assert not isinstance(we.float32, str)
+        assert (we.float32 == "float32") is False
 
-    def test_float32(self):
-        assert we.float32 == "float32"
+    def test_float32_is_callable(self):
+        assert callable(we.float32)
 
-    def test_float16(self):
-        assert we.float16 == "float16"
+    def test_dtype_object_equals_string(self):
+        assert we.dtype("float32") == "float32"
 
-    def test_int64(self):
-        assert we.int64 == "int64"
+    def test_uint16_uint32_uint64_present(self):
+        for n in ("uint16", "uint32", "uint64"):
+            assert callable(getattr(we, n))
 
-    def test_int32(self):
-        assert we.int32 == "int32"
-
-    def test_int16(self):
-        assert we.int16 == "int16"
-
-    def test_int8(self):
-        assert we.int8 == "int8"
-
-    def test_uint8(self):
-        assert we.uint8 == "uint8"
-
-    def test_bool_(self):
-        assert we.bool_ == "bool"
-
-    def test_complex64(self):
-        assert we.complex64 == "complex64"
-
-    def test_complex128(self):
-        assert we.complex128 == "complex128"
+    def test_str_of_label_is_wire_name(self):
+        assert str(we.bool_) == "bool"
+        assert str(we.float64) == "float64"
 
 
 # ===================================================================

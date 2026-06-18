@@ -112,20 +112,28 @@ nan: float = nan
 newaxis = None
 
 # ---------------------------------------------------------------------------
-# Dtype strings (mirror numpy dtype names as plain strings)
+# Dtypes (numpy-free dual-purpose objects: callable constructor + dtype label)
 # ---------------------------------------------------------------------------
 
-float16: str = "float16"
-float32: str = "float32"
-float64: str = "float64"
-int8: str = "int8"
-int16: str = "int16"
-int32: str = "int32"
-int64: str = "int64"
-uint8: str = "uint8"
-bool_: str = "bool"
-complex64: str = "complex64"
-complex128: str = "complex128"
+from flopscope._dtypes import (  # noqa: E402
+    _DTYPE_LABELS,
+    _normalize_dtype,
+    bool_,
+    complex64,
+    complex128,
+    dtype,
+    float16,
+    float32,
+    float64,
+    int8,
+    int16,
+    int32,
+    int64,
+    uint8,
+    uint16,
+    uint32,
+    uint64,
+)
 
 # ---------------------------------------------------------------------------
 # Proxy factory
@@ -264,7 +272,10 @@ def array(object, dtype=None, **kwargs):
         # dtype cast: dispatch to server
         conn = get_connection()
         resp = conn.send_recv(
-            encode_request("astype", args=[{"__handle__": object.handle_id}, dtype])
+            encode_request(
+                "astype",
+                args=[{"__handle__": object.handle_id}, _normalize_dtype(dtype)],
+            )
         )
         return _result_from_response(resp)
 
@@ -272,12 +283,12 @@ def array(object, dtype=None, **kwargs):
         flat, shape = _flatten(object)
         if not flat:
             # Empty array
-            dtype_str = dtype if isinstance(dtype, str) else "float64"
+            dtype_str = "float64" if dtype is None else _normalize_dtype(dtype)
             conn = get_connection()
             resp = conn.send_recv(encode_create_from_data(b"", list(shape), dtype_str))
             return _result_from_response(resp)
 
-        dtype_str = dtype if isinstance(dtype, str) else (dtype or _infer_dtype(flat))
+        dtype_str = _infer_dtype(flat) if dtype is None else _normalize_dtype(dtype)
         info = _DTYPE_INFO.get(dtype_str)
         if info is None:
             raise TypeError(f"Unsupported dtype: {dtype_str!r}")
@@ -304,7 +315,7 @@ def array(object, dtype=None, **kwargs):
         if isinstance(object, complex) and dtype is None:
             dtype_str = "complex128"
         else:
-            dtype_str = dtype if isinstance(dtype, str) else "float64"
+            dtype_str = "float64" if dtype is None else _normalize_dtype(dtype)
         info = _DTYPE_INFO.get(dtype_str)
         if info is None:
             raise TypeError(f"Unsupported dtype: {dtype_str!r}")
