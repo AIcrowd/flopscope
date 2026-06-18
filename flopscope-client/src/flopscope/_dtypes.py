@@ -67,10 +67,9 @@ class _DtypeLabel:
         return self.name
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _DtypeLabel) and other.name == self.name
-
-    def __ne__(self, other: object) -> bool:
-        return not self.__eq__(other)
+        if isinstance(other, _DtypeLabel):
+            return other.name == self.name
+        return NotImplemented
 
     def __hash__(self) -> int:
         return hash(("_DtypeLabel", self.name))

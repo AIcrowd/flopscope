@@ -33,6 +33,15 @@ class TestDtypeLabel:
         assert _dtypes.float32 == _DTYPE_LABELS["float32"]
         assert _dtypes.float32 != _dtypes.float64
 
+    def test_label_dtype_equality_is_symmetric(self):
+        # Both directions of label == dtype("...") must be True.
+        assert _dtypes.float32 == dtype("float32")
+        assert dtype("float32") == _dtypes.float32
+        # label != string (NotImplemented falls back to identity, so False).
+        assert (_dtypes.float32 == "float32") is False
+        # label != different label.
+        assert _dtypes.float32 != _dtypes.float64
+
     def test_bool_label_wire_name_is_bool(self):
         assert _dtypes.bool_.name == "bool"
 

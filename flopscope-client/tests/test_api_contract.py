@@ -8,7 +8,6 @@ here breaks every submission before participant code runs.
 """
 
 import importlib
-import types
 
 
 def test_flopscope_numpy_importable():
