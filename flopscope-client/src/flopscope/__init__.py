@@ -416,3 +416,23 @@ _module_getattr = _make_module_getattr("", "flopscope")
 
 def __getattr__(name: str):
     return _module_getattr(name)
+
+
+# ---------------------------------------------------------------------------
+# Public surface (controls ``from flopscope import *`` and dir hygiene)
+# ---------------------------------------------------------------------------
+
+# Implementation details that must NOT leak into the public ``fnp`` namespace.
+_INTERNAL_NAMES = frozenset({
+    "Any", "annotations", "builtins", "struct",
+    "get_connection", "encode_request", "encode_create_from_data",
+    "iter_proxyable", "is_valid_op", "get_category",
+    "BLACKLISTED", "FUNCTION_CATEGORIES", "LOCAL_CALLBACK_OPS",
+    "timed_dispatch", "Module",
+})
+
+__all__ = sorted(
+    name
+    for name in list(globals())
+    if not name.startswith("_") and name not in _INTERNAL_NAMES
+)

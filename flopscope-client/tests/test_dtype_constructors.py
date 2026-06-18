@@ -179,3 +179,30 @@ class TestFinfoIinfo:
     def test_iinfo_rejects_float(self):
         with pytest.raises(ValueError):
             fnp.iinfo(fnp.float32)
+
+
+class TestNamespaceHygiene:
+    _LEAKS = ["builtins", "struct", "get_connection", "encode_request",
+              "iter_proxyable", "timed_dispatch", "BLACKLISTED"]
+    _PUBLIC = ["array", "zeros", "float32", "dtype", "linalg", "random",
+               "BudgetContext"]
+
+    def test_internal_names_not_in_all(self):
+        for n in self._LEAKS:
+            assert n not in fnp.__all__, n
+
+    def test_public_names_in_all(self):
+        for n in self._PUBLIC:
+            assert n in fnp.__all__, n
+
+    def test_star_import_is_clean(self):
+        ns: dict = {}
+        exec("from flopscope import *", ns)
+        for n in self._LEAKS:
+            assert n not in ns, n
+        assert "float32" in ns
+
+    def test_numpy_module_all_matches(self):
+        import flopscope.numpy as _np_mod
+
+        assert set(_np_mod.__all__) == set(fnp.__all__)

@@ -26,24 +26,15 @@ def test_runner_contract_names_present():
 
 
 def test_numpy_mirrors_top_level_proxyable_surface():
-    # Self-consistency: flopscope.numpy must expose every public proxyable name
-    # the top-level module does (catches numpy.py drifting from the top level).
-    # Submodule attributes (numpy, fft, linalg, random, stats, ...) are excluded:
-    # `numpy` is a self-referential import-machinery artifact (the parent package
-    # sets `flopscope.numpy` only after this module finishes importing, so a plain
-    # `from flopscope import *` cannot mirror it), and the rest are re-exported as
-    # submodules rather than proxyable ops. Comparing only non-module names keeps
-    # the check order-independent and matches the evaluator's `from flopscope
-    # import *` shim byte-for-byte.
+    # Self-consistency: flopscope.numpy must expose every name declared in
+    # flopscope.__all__ (catches numpy.py drifting from the top level).
+    # We use __all__ (the explicit public surface) rather than dir(), which
+    # also exposes implementation-internal names like builtins/struct/BLACKLISTED
+    # that must NOT leak into the participant namespace.
     import flopscope as flops
 
     fnp = importlib.import_module("flopscope.numpy")
-    public_top = {
-        n
-        for n in dir(flops)
-        if not n.startswith("_")
-        and not isinstance(getattr(flops, n, None), types.ModuleType)
-    }
+    public_top = set(flops.__all__)
     missing = {n for n in public_top if not hasattr(fnp, n)}
     assert not missing, (
         f"flopscope.numpy missing names present at top level: {sorted(missing)}"
