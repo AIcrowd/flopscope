@@ -15,10 +15,20 @@ except ImportError:  # pragma: no cover - pre-sync safety
     SERVER_ONLY = frozenset()
 
 # numpy abstract scalar types: have no meaning in the numpy-free remote client.
-_ABSTRACT_SCALAR_TYPES = frozenset({
-    "generic", "number", "integer", "signedinteger", "unsignedinteger",
-    "inexact", "floating", "complexfloating", "flexible", "character",
-})
+_ABSTRACT_SCALAR_TYPES = frozenset(
+    {
+        "generic",
+        "number",
+        "integer",
+        "signedinteger",
+        "unsignedinteger",
+        "inexact",
+        "floating",
+        "complexfloating",
+        "flexible",
+        "character",
+    }
+)
 
 
 def make_module_getattr(module_prefix: str, module_label: str):

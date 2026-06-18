@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
 
+import flopscope._remote_array as ra_mod
+import pytest
+
+import flopscope as fnp
 from flopscope import _dtypes
 from flopscope._dtypes import (
     _DTYPE_LABELS,
@@ -12,9 +15,6 @@ from flopscope._dtypes import (
     _normalize_dtype,
     dtype,
 )
-
-import flopscope as fnp
-import flopscope._remote_array as ra_mod
 
 
 class TestDtypeLabel:
@@ -38,10 +38,20 @@ class TestDtypeLabel:
 
     def test_all_fourteen_labels_present(self):
         for name in [
-            "float16", "float32", "float64",
-            "int8", "int16", "int32", "int64",
-            "uint8", "uint16", "uint32", "uint64",
-            "bool_", "complex64", "complex128",
+            "float16",
+            "float32",
+            "float64",
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+            "bool_",
+            "complex64",
+            "complex128",
         ]:
             label = getattr(_dtypes, name)
             assert isinstance(label, _DtypeLabel)
@@ -153,7 +163,7 @@ class TestFinfoIinfo:
         fi = fnp.finfo(fnp.float32)
         assert fi.eps == 1.1920928955078125e-07
         assert fi.bits == 32
-        assert fi.max == 3.4028234663852886e+38
+        assert fi.max == 3.4028234663852886e38
 
     def test_finfo_float64_eps(self):
         assert fnp.finfo(fnp.float64).eps == 2.220446049250313e-16
@@ -182,10 +192,24 @@ class TestFinfoIinfo:
 
 
 class TestNamespaceHygiene:
-    _LEAKS = ["builtins", "struct", "get_connection", "encode_request",
-              "iter_proxyable", "timed_dispatch", "BLACKLISTED"]
-    _PUBLIC = ["array", "zeros", "float32", "dtype", "linalg", "random",
-               "BudgetContext"]
+    _LEAKS = [
+        "builtins",
+        "struct",
+        "get_connection",
+        "encode_request",
+        "iter_proxyable",
+        "timed_dispatch",
+        "BLACKLISTED",
+    ]
+    _PUBLIC = [
+        "array",
+        "zeros",
+        "float32",
+        "dtype",
+        "linalg",
+        "random",
+        "BudgetContext",
+    ]
 
     def test_internal_names_not_in_all(self):
         for n in self._LEAKS:

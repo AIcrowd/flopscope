@@ -251,7 +251,7 @@ def _infer_dtype(values):
 
 
 @timed_dispatch
-def array(object, dtype=None, **kwargs):
+def array(object, dtype=None, **kwargs):  # noqa: F811
     """Create a remote array from a Python list, tuple, or existing RemoteArray.
 
     Parameters
@@ -423,13 +423,25 @@ def __getattr__(name: str):
 # ---------------------------------------------------------------------------
 
 # Implementation details that must NOT leak into the public ``fnp`` namespace.
-_INTERNAL_NAMES = frozenset({
-    "Any", "annotations", "builtins", "struct",
-    "get_connection", "encode_request", "encode_create_from_data",
-    "iter_proxyable", "is_valid_op", "get_category",
-    "BLACKLISTED", "FUNCTION_CATEGORIES", "LOCAL_CALLBACK_OPS",
-    "timed_dispatch", "Module",
-})
+_INTERNAL_NAMES = frozenset(
+    {
+        "Any",
+        "annotations",
+        "builtins",
+        "struct",
+        "get_connection",
+        "encode_request",
+        "encode_create_from_data",
+        "iter_proxyable",
+        "is_valid_op",
+        "get_category",
+        "BLACKLISTED",
+        "FUNCTION_CATEGORIES",
+        "LOCAL_CALLBACK_OPS",
+        "timed_dispatch",
+        "Module",
+    }
+)
 
 __all__ = sorted(
     name

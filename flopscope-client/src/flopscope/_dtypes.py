@@ -21,11 +21,20 @@ from flopscope._remote_array import _DTYPE_INFO
 
 # Public attribute name -> canonical wire name (keys of _DTYPE_INFO).
 _PUBLIC_TO_WIRE = {
-    "float16": "float16", "float32": "float32", "float64": "float64",
-    "int8": "int8", "int16": "int16", "int32": "int32", "int64": "int64",
-    "uint8": "uint8", "uint16": "uint16", "uint32": "uint32", "uint64": "uint64",
+    "float16": "float16",
+    "float32": "float32",
+    "float64": "float64",
+    "int8": "int8",
+    "int16": "int16",
+    "int32": "int32",
+    "int64": "int64",
+    "uint8": "uint8",
+    "uint16": "uint16",
+    "uint32": "uint32",
+    "uint64": "uint64",
     "bool_": "bool",
-    "complex64": "complex64", "complex128": "complex128",
+    "complex64": "complex64",
+    "complex128": "complex128",
 }
 
 # Accepted string spellings -> canonical wire name.
@@ -125,15 +134,30 @@ def dtype(spec: Any) -> _DType:
 # Machine-limits constants (values copied from numpy at authoring time;
 # the client has no numpy to compute them live).
 _FINFO: dict[str, dict[str, float]] = {
-    "float16": {"eps": 0.0009765625, "tiny": 6.103515625e-05,
-                "max": 65504.0, "min": -65504.0,
-                "resolution": 0.0010004043579101562, "bits": 16},
-    "float32": {"eps": 1.1920928955078125e-07, "tiny": 1.1754943508222875e-38,
-                "max": 3.4028234663852886e+38, "min": -3.4028234663852886e+38,
-                "resolution": 9.999999974752427e-07, "bits": 32},
-    "float64": {"eps": 2.220446049250313e-16, "tiny": 2.2250738585072014e-308,
-                "max": 1.7976931348623157e+308, "min": -1.7976931348623157e+308,
-                "resolution": 1e-15, "bits": 64},
+    "float16": {
+        "eps": 0.0009765625,
+        "tiny": 6.103515625e-05,
+        "max": 65504.0,
+        "min": -65504.0,
+        "resolution": 0.0010004043579101562,
+        "bits": 16,
+    },
+    "float32": {
+        "eps": 1.1920928955078125e-07,
+        "tiny": 1.1754943508222875e-38,
+        "max": 3.4028234663852886e38,
+        "min": -3.4028234663852886e38,
+        "resolution": 9.999999974752427e-07,
+        "bits": 32,
+    },
+    "float64": {
+        "eps": 2.220446049250313e-16,
+        "tiny": 2.2250738585072014e-308,
+        "max": 1.7976931348623157e308,
+        "min": -1.7976931348623157e308,
+        "resolution": 1e-15,
+        "bits": 64,
+    },
 }
 
 _IINFO: dict[str, dict[str, int]] = {

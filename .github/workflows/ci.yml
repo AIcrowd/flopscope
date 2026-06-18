@@ -281,6 +281,9 @@ jobs:
       - name: Check ops.json is in sync with the registry
         run: uv run python scripts/generate_api_docs.py --check
 
+      - name: Check full_numpy_surface.json snapshot is in sync
+        run: uv run python scripts/generate_client_surface_snapshot.py --check
+
       - name: Check package versions are in lockstep
         run: uv run python scripts/check_version_sync.py
 
