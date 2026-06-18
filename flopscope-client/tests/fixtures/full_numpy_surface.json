@@ -1,0 +1,1610 @@
+{
+  "abs": {
+    "callable": true,
+    "is_type": false
+  },
+  "absolute": {
+    "callable": true,
+    "is_type": false
+  },
+  "acos": {
+    "callable": true,
+    "is_type": false
+  },
+  "acosh": {
+    "callable": true,
+    "is_type": false
+  },
+  "add": {
+    "callable": true,
+    "is_type": false
+  },
+  "all": {
+    "callable": true,
+    "is_type": false
+  },
+  "allclose": {
+    "callable": true,
+    "is_type": false
+  },
+  "amax": {
+    "callable": true,
+    "is_type": false
+  },
+  "amin": {
+    "callable": true,
+    "is_type": false
+  },
+  "angle": {
+    "callable": true,
+    "is_type": false
+  },
+  "any": {
+    "callable": true,
+    "is_type": false
+  },
+  "append": {
+    "callable": true,
+    "is_type": false
+  },
+  "apply_along_axis": {
+    "callable": true,
+    "is_type": false
+  },
+  "apply_over_axes": {
+    "callable": true,
+    "is_type": false
+  },
+  "arange": {
+    "callable": true,
+    "is_type": false
+  },
+  "arccos": {
+    "callable": true,
+    "is_type": false
+  },
+  "arccosh": {
+    "callable": true,
+    "is_type": false
+  },
+  "arcsin": {
+    "callable": true,
+    "is_type": false
+  },
+  "arcsinh": {
+    "callable": true,
+    "is_type": false
+  },
+  "arctan": {
+    "callable": true,
+    "is_type": false
+  },
+  "arctan2": {
+    "callable": true,
+    "is_type": false
+  },
+  "arctanh": {
+    "callable": true,
+    "is_type": false
+  },
+  "argmax": {
+    "callable": true,
+    "is_type": false
+  },
+  "argmin": {
+    "callable": true,
+    "is_type": false
+  },
+  "argpartition": {
+    "callable": true,
+    "is_type": false
+  },
+  "argsort": {
+    "callable": true,
+    "is_type": false
+  },
+  "argwhere": {
+    "callable": true,
+    "is_type": false
+  },
+  "around": {
+    "callable": true,
+    "is_type": false
+  },
+  "array": {
+    "callable": true,
+    "is_type": false
+  },
+  "array_equal": {
+    "callable": true,
+    "is_type": false
+  },
+  "array_equiv": {
+    "callable": true,
+    "is_type": false
+  },
+  "array_split": {
+    "callable": true,
+    "is_type": false
+  },
+  "asarray": {
+    "callable": true,
+    "is_type": false
+  },
+  "asarray_chkfinite": {
+    "callable": true,
+    "is_type": false
+  },
+  "asin": {
+    "callable": true,
+    "is_type": false
+  },
+  "asinh": {
+    "callable": true,
+    "is_type": false
+  },
+  "astype": {
+    "callable": true,
+    "is_type": false
+  },
+  "atan": {
+    "callable": true,
+    "is_type": false
+  },
+  "atan2": {
+    "callable": true,
+    "is_type": false
+  },
+  "atanh": {
+    "callable": true,
+    "is_type": false
+  },
+  "atleast_1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "atleast_2d": {
+    "callable": true,
+    "is_type": false
+  },
+  "atleast_3d": {
+    "callable": true,
+    "is_type": false
+  },
+  "average": {
+    "callable": true,
+    "is_type": false
+  },
+  "bartlett": {
+    "callable": true,
+    "is_type": false
+  },
+  "base_repr": {
+    "callable": true,
+    "is_type": false
+  },
+  "binary_repr": {
+    "callable": true,
+    "is_type": false
+  },
+  "bincount": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_and": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_count": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_invert": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_left_shift": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_not": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_or": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_right_shift": {
+    "callable": true,
+    "is_type": false
+  },
+  "bitwise_xor": {
+    "callable": true,
+    "is_type": false
+  },
+  "blackman": {
+    "callable": true,
+    "is_type": false
+  },
+  "block": {
+    "callable": true,
+    "is_type": false
+  },
+  "bmat": {
+    "callable": true,
+    "is_type": false
+  },
+  "bool_": {
+    "callable": true,
+    "is_type": true
+  },
+  "broadcast": {
+    "callable": true,
+    "is_type": true
+  },
+  "broadcast_arrays": {
+    "callable": true,
+    "is_type": false
+  },
+  "broadcast_shapes": {
+    "callable": true,
+    "is_type": false
+  },
+  "broadcast_to": {
+    "callable": true,
+    "is_type": false
+  },
+  "can_cast": {
+    "callable": true,
+    "is_type": false
+  },
+  "cbrt": {
+    "callable": true,
+    "is_type": false
+  },
+  "ceil": {
+    "callable": true,
+    "is_type": false
+  },
+  "choose": {
+    "callable": true,
+    "is_type": false
+  },
+  "clear_einsum_cache": {
+    "callable": true,
+    "is_type": false
+  },
+  "clip": {
+    "callable": true,
+    "is_type": false
+  },
+  "column_stack": {
+    "callable": true,
+    "is_type": false
+  },
+  "common_type": {
+    "callable": true,
+    "is_type": false
+  },
+  "complex128": {
+    "callable": true,
+    "is_type": true
+  },
+  "complex64": {
+    "callable": true,
+    "is_type": true
+  },
+  "compress": {
+    "callable": true,
+    "is_type": false
+  },
+  "concat": {
+    "callable": true,
+    "is_type": false
+  },
+  "concatenate": {
+    "callable": true,
+    "is_type": false
+  },
+  "conj": {
+    "callable": true,
+    "is_type": false
+  },
+  "conjugate": {
+    "callable": true,
+    "is_type": false
+  },
+  "convolve": {
+    "callable": true,
+    "is_type": false
+  },
+  "copy": {
+    "callable": true,
+    "is_type": false
+  },
+  "copysign": {
+    "callable": true,
+    "is_type": false
+  },
+  "copyto": {
+    "callable": true,
+    "is_type": false
+  },
+  "corrcoef": {
+    "callable": true,
+    "is_type": false
+  },
+  "correlate": {
+    "callable": true,
+    "is_type": false
+  },
+  "cos": {
+    "callable": true,
+    "is_type": false
+  },
+  "cosh": {
+    "callable": true,
+    "is_type": false
+  },
+  "count_nonzero": {
+    "callable": true,
+    "is_type": false
+  },
+  "cov": {
+    "callable": true,
+    "is_type": false
+  },
+  "cross": {
+    "callable": true,
+    "is_type": false
+  },
+  "cumprod": {
+    "callable": true,
+    "is_type": false
+  },
+  "cumsum": {
+    "callable": true,
+    "is_type": false
+  },
+  "cumulative_prod": {
+    "callable": true,
+    "is_type": false
+  },
+  "cumulative_sum": {
+    "callable": true,
+    "is_type": false
+  },
+  "deg2rad": {
+    "callable": true,
+    "is_type": false
+  },
+  "degrees": {
+    "callable": true,
+    "is_type": false
+  },
+  "delete": {
+    "callable": true,
+    "is_type": false
+  },
+  "diag": {
+    "callable": true,
+    "is_type": false
+  },
+  "diag_indices": {
+    "callable": true,
+    "is_type": false
+  },
+  "diag_indices_from": {
+    "callable": true,
+    "is_type": false
+  },
+  "diagflat": {
+    "callable": true,
+    "is_type": false
+  },
+  "diagonal": {
+    "callable": true,
+    "is_type": false
+  },
+  "diff": {
+    "callable": true,
+    "is_type": false
+  },
+  "digitize": {
+    "callable": true,
+    "is_type": false
+  },
+  "divide": {
+    "callable": true,
+    "is_type": false
+  },
+  "divmod": {
+    "callable": true,
+    "is_type": false
+  },
+  "dot": {
+    "callable": true,
+    "is_type": false
+  },
+  "dsplit": {
+    "callable": true,
+    "is_type": false
+  },
+  "dstack": {
+    "callable": true,
+    "is_type": false
+  },
+  "dtype": {
+    "callable": true,
+    "is_type": true
+  },
+  "e": {
+    "callable": false,
+    "is_type": false
+  },
+  "ediff1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "einsum": {
+    "callable": true,
+    "is_type": false
+  },
+  "einsum_cache_info": {
+    "callable": true,
+    "is_type": false
+  },
+  "einsum_path": {
+    "callable": true,
+    "is_type": false
+  },
+  "empty": {
+    "callable": true,
+    "is_type": false
+  },
+  "empty_like": {
+    "callable": true,
+    "is_type": false
+  },
+  "equal": {
+    "callable": true,
+    "is_type": false
+  },
+  "errstate": {
+    "callable": true,
+    "is_type": true
+  },
+  "exp": {
+    "callable": true,
+    "is_type": false
+  },
+  "exp2": {
+    "callable": true,
+    "is_type": false
+  },
+  "expand_dims": {
+    "callable": true,
+    "is_type": false
+  },
+  "expm1": {
+    "callable": true,
+    "is_type": false
+  },
+  "extract": {
+    "callable": true,
+    "is_type": false
+  },
+  "eye": {
+    "callable": true,
+    "is_type": false
+  },
+  "fabs": {
+    "callable": true,
+    "is_type": false
+  },
+  "fft": {
+    "callable": false,
+    "is_type": false
+  },
+  "fill_diagonal": {
+    "callable": true,
+    "is_type": false
+  },
+  "finfo": {
+    "callable": true,
+    "is_type": true
+  },
+  "fix": {
+    "callable": true,
+    "is_type": false
+  },
+  "flatnonzero": {
+    "callable": true,
+    "is_type": false
+  },
+  "flip": {
+    "callable": true,
+    "is_type": false
+  },
+  "fliplr": {
+    "callable": true,
+    "is_type": false
+  },
+  "flipud": {
+    "callable": true,
+    "is_type": false
+  },
+  "float16": {
+    "callable": true,
+    "is_type": true
+  },
+  "float32": {
+    "callable": true,
+    "is_type": true
+  },
+  "float64": {
+    "callable": true,
+    "is_type": true
+  },
+  "float_power": {
+    "callable": true,
+    "is_type": false
+  },
+  "floating": {
+    "callable": true,
+    "is_type": true
+  },
+  "floor": {
+    "callable": true,
+    "is_type": false
+  },
+  "floor_divide": {
+    "callable": true,
+    "is_type": false
+  },
+  "fmax": {
+    "callable": true,
+    "is_type": false
+  },
+  "fmin": {
+    "callable": true,
+    "is_type": false
+  },
+  "fmod": {
+    "callable": true,
+    "is_type": false
+  },
+  "frexp": {
+    "callable": true,
+    "is_type": false
+  },
+  "from_dlpack": {
+    "callable": true,
+    "is_type": false
+  },
+  "frombuffer": {
+    "callable": true,
+    "is_type": false
+  },
+  "fromfile": {
+    "callable": true,
+    "is_type": false
+  },
+  "fromfunction": {
+    "callable": true,
+    "is_type": false
+  },
+  "fromiter": {
+    "callable": true,
+    "is_type": false
+  },
+  "fromregex": {
+    "callable": true,
+    "is_type": false
+  },
+  "fromstring": {
+    "callable": true,
+    "is_type": false
+  },
+  "full": {
+    "callable": true,
+    "is_type": false
+  },
+  "full_like": {
+    "callable": true,
+    "is_type": false
+  },
+  "gcd": {
+    "callable": true,
+    "is_type": false
+  },
+  "geomspace": {
+    "callable": true,
+    "is_type": false
+  },
+  "get_printoptions": {
+    "callable": true,
+    "is_type": false
+  },
+  "geterr": {
+    "callable": true,
+    "is_type": false
+  },
+  "gradient": {
+    "callable": true,
+    "is_type": false
+  },
+  "greater": {
+    "callable": true,
+    "is_type": false
+  },
+  "greater_equal": {
+    "callable": true,
+    "is_type": false
+  },
+  "hamming": {
+    "callable": true,
+    "is_type": false
+  },
+  "hanning": {
+    "callable": true,
+    "is_type": false
+  },
+  "heaviside": {
+    "callable": true,
+    "is_type": false
+  },
+  "histogram": {
+    "callable": true,
+    "is_type": false
+  },
+  "histogram2d": {
+    "callable": true,
+    "is_type": false
+  },
+  "histogram_bin_edges": {
+    "callable": true,
+    "is_type": false
+  },
+  "histogramdd": {
+    "callable": true,
+    "is_type": false
+  },
+  "hsplit": {
+    "callable": true,
+    "is_type": false
+  },
+  "hstack": {
+    "callable": true,
+    "is_type": false
+  },
+  "hypot": {
+    "callable": true,
+    "is_type": false
+  },
+  "i0": {
+    "callable": true,
+    "is_type": false
+  },
+  "identity": {
+    "callable": true,
+    "is_type": false
+  },
+  "iinfo": {
+    "callable": true,
+    "is_type": true
+  },
+  "imag": {
+    "callable": true,
+    "is_type": false
+  },
+  "in1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "indices": {
+    "callable": true,
+    "is_type": false
+  },
+  "inf": {
+    "callable": false,
+    "is_type": false
+  },
+  "inner": {
+    "callable": true,
+    "is_type": false
+  },
+  "insert": {
+    "callable": true,
+    "is_type": false
+  },
+  "int16": {
+    "callable": true,
+    "is_type": true
+  },
+  "int32": {
+    "callable": true,
+    "is_type": true
+  },
+  "int64": {
+    "callable": true,
+    "is_type": true
+  },
+  "int8": {
+    "callable": true,
+    "is_type": true
+  },
+  "integer": {
+    "callable": true,
+    "is_type": true
+  },
+  "interp": {
+    "callable": true,
+    "is_type": false
+  },
+  "intersect1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "invert": {
+    "callable": true,
+    "is_type": false
+  },
+  "isclose": {
+    "callable": true,
+    "is_type": false
+  },
+  "iscomplex": {
+    "callable": true,
+    "is_type": false
+  },
+  "iscomplexobj": {
+    "callable": true,
+    "is_type": false
+  },
+  "isdtype": {
+    "callable": true,
+    "is_type": false
+  },
+  "isfinite": {
+    "callable": true,
+    "is_type": false
+  },
+  "isfortran": {
+    "callable": true,
+    "is_type": false
+  },
+  "isin": {
+    "callable": true,
+    "is_type": false
+  },
+  "isinf": {
+    "callable": true,
+    "is_type": false
+  },
+  "isnan": {
+    "callable": true,
+    "is_type": false
+  },
+  "isnat": {
+    "callable": true,
+    "is_type": false
+  },
+  "isneginf": {
+    "callable": true,
+    "is_type": false
+  },
+  "isposinf": {
+    "callable": true,
+    "is_type": false
+  },
+  "isreal": {
+    "callable": true,
+    "is_type": false
+  },
+  "isrealobj": {
+    "callable": true,
+    "is_type": false
+  },
+  "isscalar": {
+    "callable": true,
+    "is_type": false
+  },
+  "issubdtype": {
+    "callable": true,
+    "is_type": false
+  },
+  "iterable": {
+    "callable": true,
+    "is_type": false
+  },
+  "ix_": {
+    "callable": true,
+    "is_type": false
+  },
+  "kaiser": {
+    "callable": true,
+    "is_type": false
+  },
+  "kron": {
+    "callable": true,
+    "is_type": false
+  },
+  "lcm": {
+    "callable": true,
+    "is_type": false
+  },
+  "ldexp": {
+    "callable": true,
+    "is_type": false
+  },
+  "left_shift": {
+    "callable": true,
+    "is_type": false
+  },
+  "less": {
+    "callable": true,
+    "is_type": false
+  },
+  "less_equal": {
+    "callable": true,
+    "is_type": false
+  },
+  "lexsort": {
+    "callable": true,
+    "is_type": false
+  },
+  "linalg": {
+    "callable": false,
+    "is_type": false
+  },
+  "linspace": {
+    "callable": true,
+    "is_type": false
+  },
+  "load": {
+    "callable": true,
+    "is_type": false
+  },
+  "log": {
+    "callable": true,
+    "is_type": false
+  },
+  "log10": {
+    "callable": true,
+    "is_type": false
+  },
+  "log1p": {
+    "callable": true,
+    "is_type": false
+  },
+  "log2": {
+    "callable": true,
+    "is_type": false
+  },
+  "logaddexp": {
+    "callable": true,
+    "is_type": false
+  },
+  "logaddexp2": {
+    "callable": true,
+    "is_type": false
+  },
+  "logical_and": {
+    "callable": true,
+    "is_type": false
+  },
+  "logical_not": {
+    "callable": true,
+    "is_type": false
+  },
+  "logical_or": {
+    "callable": true,
+    "is_type": false
+  },
+  "logical_xor": {
+    "callable": true,
+    "is_type": false
+  },
+  "logspace": {
+    "callable": true,
+    "is_type": false
+  },
+  "mask_indices": {
+    "callable": true,
+    "is_type": false
+  },
+  "matmul": {
+    "callable": true,
+    "is_type": false
+  },
+  "matrix_transpose": {
+    "callable": true,
+    "is_type": false
+  },
+  "matvec": {
+    "callable": true,
+    "is_type": false
+  },
+  "max": {
+    "callable": true,
+    "is_type": false
+  },
+  "maximum": {
+    "callable": true,
+    "is_type": false
+  },
+  "may_share_memory": {
+    "callable": true,
+    "is_type": false
+  },
+  "mean": {
+    "callable": true,
+    "is_type": false
+  },
+  "median": {
+    "callable": true,
+    "is_type": false
+  },
+  "meshgrid": {
+    "callable": true,
+    "is_type": false
+  },
+  "min": {
+    "callable": true,
+    "is_type": false
+  },
+  "min_scalar_type": {
+    "callable": true,
+    "is_type": false
+  },
+  "minimum": {
+    "callable": true,
+    "is_type": false
+  },
+  "mintypecode": {
+    "callable": true,
+    "is_type": false
+  },
+  "mod": {
+    "callable": true,
+    "is_type": false
+  },
+  "modf": {
+    "callable": true,
+    "is_type": false
+  },
+  "moveaxis": {
+    "callable": true,
+    "is_type": false
+  },
+  "multiply": {
+    "callable": true,
+    "is_type": false
+  },
+  "nan": {
+    "callable": false,
+    "is_type": false
+  },
+  "nan_to_num": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanargmax": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanargmin": {
+    "callable": true,
+    "is_type": false
+  },
+  "nancumprod": {
+    "callable": true,
+    "is_type": false
+  },
+  "nancumsum": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanmax": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanmean": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanmedian": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanmin": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanpercentile": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanprod": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanquantile": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanstd": {
+    "callable": true,
+    "is_type": false
+  },
+  "nansum": {
+    "callable": true,
+    "is_type": false
+  },
+  "nanvar": {
+    "callable": true,
+    "is_type": false
+  },
+  "ndarray": {
+    "callable": true,
+    "is_type": true
+  },
+  "ndenumerate": {
+    "callable": true,
+    "is_type": true
+  },
+  "ndim": {
+    "callable": true,
+    "is_type": false
+  },
+  "ndindex": {
+    "callable": true,
+    "is_type": true
+  },
+  "nditer": {
+    "callable": true,
+    "is_type": true
+  },
+  "negative": {
+    "callable": true,
+    "is_type": false
+  },
+  "newaxis": {
+    "callable": false,
+    "is_type": false
+  },
+  "nextafter": {
+    "callable": true,
+    "is_type": false
+  },
+  "nonzero": {
+    "callable": true,
+    "is_type": false
+  },
+  "not_equal": {
+    "callable": true,
+    "is_type": false
+  },
+  "number": {
+    "callable": true,
+    "is_type": true
+  },
+  "ones": {
+    "callable": true,
+    "is_type": false
+  },
+  "ones_like": {
+    "callable": true,
+    "is_type": false
+  },
+  "outer": {
+    "callable": true,
+    "is_type": false
+  },
+  "packbits": {
+    "callable": true,
+    "is_type": false
+  },
+  "pad": {
+    "callable": true,
+    "is_type": false
+  },
+  "partition": {
+    "callable": true,
+    "is_type": false
+  },
+  "percentile": {
+    "callable": true,
+    "is_type": false
+  },
+  "permute_dims": {
+    "callable": true,
+    "is_type": false
+  },
+  "pi": {
+    "callable": false,
+    "is_type": false
+  },
+  "piecewise": {
+    "callable": true,
+    "is_type": false
+  },
+  "place": {
+    "callable": true,
+    "is_type": false
+  },
+  "poly": {
+    "callable": true,
+    "is_type": false
+  },
+  "polyadd": {
+    "callable": true,
+    "is_type": false
+  },
+  "polyder": {
+    "callable": true,
+    "is_type": false
+  },
+  "polydiv": {
+    "callable": true,
+    "is_type": false
+  },
+  "polyfit": {
+    "callable": true,
+    "is_type": false
+  },
+  "polyint": {
+    "callable": true,
+    "is_type": false
+  },
+  "polymul": {
+    "callable": true,
+    "is_type": false
+  },
+  "polysub": {
+    "callable": true,
+    "is_type": false
+  },
+  "polyval": {
+    "callable": true,
+    "is_type": false
+  },
+  "positive": {
+    "callable": true,
+    "is_type": false
+  },
+  "pow": {
+    "callable": true,
+    "is_type": false
+  },
+  "power": {
+    "callable": true,
+    "is_type": false
+  },
+  "printoptions": {
+    "callable": true,
+    "is_type": false
+  },
+  "prod": {
+    "callable": true,
+    "is_type": false
+  },
+  "promote_types": {
+    "callable": true,
+    "is_type": false
+  },
+  "ptp": {
+    "callable": true,
+    "is_type": false
+  },
+  "put": {
+    "callable": true,
+    "is_type": false
+  },
+  "put_along_axis": {
+    "callable": true,
+    "is_type": false
+  },
+  "putmask": {
+    "callable": true,
+    "is_type": false
+  },
+  "quantile": {
+    "callable": true,
+    "is_type": false
+  },
+  "rad2deg": {
+    "callable": true,
+    "is_type": false
+  },
+  "radians": {
+    "callable": true,
+    "is_type": false
+  },
+  "random": {
+    "callable": false,
+    "is_type": false
+  },
+  "ravel": {
+    "callable": true,
+    "is_type": false
+  },
+  "ravel_multi_index": {
+    "callable": true,
+    "is_type": false
+  },
+  "real": {
+    "callable": true,
+    "is_type": false
+  },
+  "real_if_close": {
+    "callable": true,
+    "is_type": false
+  },
+  "reciprocal": {
+    "callable": true,
+    "is_type": false
+  },
+  "remainder": {
+    "callable": true,
+    "is_type": false
+  },
+  "repeat": {
+    "callable": true,
+    "is_type": false
+  },
+  "require": {
+    "callable": true,
+    "is_type": false
+  },
+  "reshape": {
+    "callable": true,
+    "is_type": false
+  },
+  "resize": {
+    "callable": true,
+    "is_type": false
+  },
+  "result_type": {
+    "callable": true,
+    "is_type": false
+  },
+  "right_shift": {
+    "callable": true,
+    "is_type": false
+  },
+  "rint": {
+    "callable": true,
+    "is_type": false
+  },
+  "roll": {
+    "callable": true,
+    "is_type": false
+  },
+  "rollaxis": {
+    "callable": true,
+    "is_type": false
+  },
+  "roots": {
+    "callable": true,
+    "is_type": false
+  },
+  "rot90": {
+    "callable": true,
+    "is_type": false
+  },
+  "round": {
+    "callable": true,
+    "is_type": false
+  },
+  "row_stack": {
+    "callable": true,
+    "is_type": false
+  },
+  "save": {
+    "callable": true,
+    "is_type": false
+  },
+  "savez": {
+    "callable": true,
+    "is_type": false
+  },
+  "savez_compressed": {
+    "callable": true,
+    "is_type": false
+  },
+  "searchsorted": {
+    "callable": true,
+    "is_type": false
+  },
+  "select": {
+    "callable": true,
+    "is_type": false
+  },
+  "set_printoptions": {
+    "callable": true,
+    "is_type": false
+  },
+  "setdiff1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "seterr": {
+    "callable": true,
+    "is_type": false
+  },
+  "setxor1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "shape": {
+    "callable": true,
+    "is_type": false
+  },
+  "shares_memory": {
+    "callable": true,
+    "is_type": false
+  },
+  "sign": {
+    "callable": true,
+    "is_type": false
+  },
+  "signbit": {
+    "callable": true,
+    "is_type": false
+  },
+  "sin": {
+    "callable": true,
+    "is_type": false
+  },
+  "sinc": {
+    "callable": true,
+    "is_type": false
+  },
+  "sinh": {
+    "callable": true,
+    "is_type": false
+  },
+  "size": {
+    "callable": true,
+    "is_type": false
+  },
+  "sort": {
+    "callable": true,
+    "is_type": false
+  },
+  "sort_complex": {
+    "callable": true,
+    "is_type": false
+  },
+  "spacing": {
+    "callable": true,
+    "is_type": false
+  },
+  "split": {
+    "callable": true,
+    "is_type": false
+  },
+  "sqrt": {
+    "callable": true,
+    "is_type": false
+  },
+  "square": {
+    "callable": true,
+    "is_type": false
+  },
+  "squeeze": {
+    "callable": true,
+    "is_type": false
+  },
+  "stack": {
+    "callable": true,
+    "is_type": false
+  },
+  "std": {
+    "callable": true,
+    "is_type": false
+  },
+  "subtract": {
+    "callable": true,
+    "is_type": false
+  },
+  "sum": {
+    "callable": true,
+    "is_type": false
+  },
+  "swapaxes": {
+    "callable": true,
+    "is_type": false
+  },
+  "take": {
+    "callable": true,
+    "is_type": false
+  },
+  "take_along_axis": {
+    "callable": true,
+    "is_type": false
+  },
+  "tan": {
+    "callable": true,
+    "is_type": false
+  },
+  "tanh": {
+    "callable": true,
+    "is_type": false
+  },
+  "tensordot": {
+    "callable": true,
+    "is_type": false
+  },
+  "testing": {
+    "callable": false,
+    "is_type": false
+  },
+  "tile": {
+    "callable": true,
+    "is_type": false
+  },
+  "trace": {
+    "callable": true,
+    "is_type": false
+  },
+  "transpose": {
+    "callable": true,
+    "is_type": false
+  },
+  "trapezoid": {
+    "callable": true,
+    "is_type": false
+  },
+  "trapz": {
+    "callable": true,
+    "is_type": false
+  },
+  "tri": {
+    "callable": true,
+    "is_type": false
+  },
+  "tril": {
+    "callable": true,
+    "is_type": false
+  },
+  "tril_indices": {
+    "callable": true,
+    "is_type": false
+  },
+  "tril_indices_from": {
+    "callable": true,
+    "is_type": false
+  },
+  "trim_zeros": {
+    "callable": true,
+    "is_type": false
+  },
+  "triu": {
+    "callable": true,
+    "is_type": false
+  },
+  "triu_indices": {
+    "callable": true,
+    "is_type": false
+  },
+  "triu_indices_from": {
+    "callable": true,
+    "is_type": false
+  },
+  "true_divide": {
+    "callable": true,
+    "is_type": false
+  },
+  "trunc": {
+    "callable": true,
+    "is_type": false
+  },
+  "typename": {
+    "callable": true,
+    "is_type": false
+  },
+  "typing": {
+    "callable": false,
+    "is_type": false
+  },
+  "uint16": {
+    "callable": true,
+    "is_type": true
+  },
+  "uint32": {
+    "callable": true,
+    "is_type": true
+  },
+  "uint64": {
+    "callable": true,
+    "is_type": true
+  },
+  "uint8": {
+    "callable": true,
+    "is_type": true
+  },
+  "union1d": {
+    "callable": true,
+    "is_type": false
+  },
+  "unique": {
+    "callable": true,
+    "is_type": false
+  },
+  "unique_all": {
+    "callable": true,
+    "is_type": false
+  },
+  "unique_counts": {
+    "callable": true,
+    "is_type": false
+  },
+  "unique_inverse": {
+    "callable": true,
+    "is_type": false
+  },
+  "unique_values": {
+    "callable": true,
+    "is_type": false
+  },
+  "unpackbits": {
+    "callable": true,
+    "is_type": false
+  },
+  "unravel_index": {
+    "callable": true,
+    "is_type": false
+  },
+  "unstack": {
+    "callable": true,
+    "is_type": false
+  },
+  "unwrap": {
+    "callable": true,
+    "is_type": false
+  },
+  "vander": {
+    "callable": true,
+    "is_type": false
+  },
+  "var": {
+    "callable": true,
+    "is_type": false
+  },
+  "vdot": {
+    "callable": true,
+    "is_type": false
+  },
+  "vecdot": {
+    "callable": true,
+    "is_type": false
+  },
+  "vecmat": {
+    "callable": true,
+    "is_type": false
+  },
+  "vsplit": {
+    "callable": true,
+    "is_type": false
+  },
+  "vstack": {
+    "callable": true,
+    "is_type": false
+  },
+  "where": {
+    "callable": true,
+    "is_type": false
+  },
+  "zeros": {
+    "callable": true,
+    "is_type": false
+  },
+  "zeros_like": {
+    "callable": true,
+    "is_type": false
+  }
+}
