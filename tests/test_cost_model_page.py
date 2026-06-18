@@ -17,9 +17,6 @@ sys.modules[_spec.name] = gen
 _spec.loader.exec_module(gen)
 
 SRC = (ROOT / "docs" / "reference" / "cost-model.md").read_text()
-GITHUB = (
-    "https://github.com/AIcrowd/flopscope/blob/main/docs/reference/empirical-weights.md"
-)
 
 
 def test_frontmatter_and_source_content():
@@ -27,12 +24,6 @@ def test_frontmatter_and_source_content():
     assert out.startswith("---\n")
     assert 'title: "FLOP Counting Model"' in out
     assert "Cost model reference" in out  # carried the real content
-
-
-def test_empirical_weights_links_rewritten_to_github():
-    out = gen.render_cost_model_page(SRC)
-    assert "(empirical-weights.md)" not in out
-    assert GITHUB in out
 
 
 def test_mdx_safe_no_bare_angle_or_brace_outside_code():

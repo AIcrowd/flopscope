@@ -77,23 +77,17 @@ def generated_output_paths() -> list[Path]:
 # Cost-model page (generated from docs/reference/cost-model.md)
 # ---------------------------------------------------------------------------
 
-_GITHUB_EMPIRICAL = (
-    "https://github.com/AIcrowd/flopscope/blob/main/docs/reference/empirical-weights.md"
-)
-
 
 def render_cost_model_page(source_md: str) -> str:
     """Convert docs/reference/cost-model.md into an MDX-safe fumadocs page.
 
-    - rewrites relative .md links to GitHub blob URLs (empirical-weights.md -> GitHub);
+    - rewrites relative .md links to GitHub blob URLs (docs/reference/<name>.md);
     - escapes MDX-hostile chars (< and {) in prose, leaving code spans/fences intact;
     - prepends front-matter + a generated-source note.
     """
 
     def _rewrite_link(m: re.Match[str]) -> str:
         text, target = m.group(1), m.group(2)
-        if target.endswith("empirical-weights.md"):
-            return f"[{text}]({_GITHUB_EMPIRICAL})"
         if target.startswith("#") or target.startswith("http"):
             return m.group(0)
         if target.endswith(".md"):

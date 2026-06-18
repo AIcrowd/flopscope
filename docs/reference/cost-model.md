@@ -13,9 +13,6 @@ flopscope bills compute as:
 charged = int(flop_cost × weight)
 ```
 
-For hardware calibration — how weights are measured and where empirical values
-differ from the declared tier — see [empirical-weights.md](empirical-weights.md).
-
 ## How to read this
 
 1. **[Billing model & design principles](#billing-model--design-principles)** — the one equation and *why* it is split into `flop_cost` and `weight`.
@@ -34,12 +31,17 @@ rule below. So nothing billed is undocumented, even where this doc summarizes by
 
 Every operation is charged `charged = int(flop_cost × weight)`.
 
-**Two layers, on purpose.** `flop_cost` carries *all* shape- and algorithm-dependent
-cost (the operation count); `weight` is only a per-element hardware **tier**
-(calibrated — see [empirical-weights.md](empirical-weights.md)). The
-discipline that makes the model composable and non-gameable: **an algorithm constant
-never hides in a weight** — if a cost depends on a matrix dimension or a loop length it
-lives in `flop_cost`, never in the weight. (Enforced by `tests/test_weight_tier_policy.py`.)
+**Two layers, on purpose.** `flop_cost` is the operation count: every shape- and
+algorithm-dependent term lives here, so anyone — us or a participant — can read it off
+the formula and audit it function by function. `weight` is a separate per-element factor
+that captures how much more one element of an operation costs on real hardware: a plain
+add is `1`, while a transcendental element (`sin`, `exp`, …) does many times more
+floating-point work. Rather than bill each op its exact measured ratio — noisy,
+machine-specific, and hard to audit — we group operations into a small fixed ladder of
+tiers (`{0, 1, 8, 16}`); that grouping is a deliberate competition-design choice. The
+rule that keeps the split honest — and the model non-gameable — is that **a shape or
+algorithm constant never lives in a weight**: anything depending on a matrix dimension
+or loop length belongs in `flop_cost`. (Enforced by `tests/test_weight_tier_policy.py`.)
 
 **We bill the textbook standard-algorithm cost, not literal BLAS/LAPACK.**
 `linalg.inv` is billed `2n³` (the standard LU-based `dgetrf`+`dgetri` operation
@@ -71,8 +73,8 @@ arccosh, arctanh, power, and their NumPy 2.x aliases) are billed at weight
 factor is supplied entirely by the weight.
 
 A subset of moderate-cost binary ops (floor_divide, mod/remainder, fmod,
-arctan2, hypot, logaddexp, logaddexp2) is calibrated into the same tier
-(weight 16.0).  See [empirical-weights.md](empirical-weights.md) for measured values.
+arctan2, hypot, logaddexp, logaddexp2) is grouped into the same tier
+(weight 16.0).
 
 ### Half-tier transcendentals (weight 8.0)
 
@@ -544,7 +546,7 @@ Stats ops are composite (weight 1.0; all per-element factors in `flop_cost`).
 |---|---|---|
 | `stats.norm.pdf` | 27 | DERIVED: exp(17) + affine normalization(10); composite, weight 1.0 |
 | `stats.norm.cdf` | 48 | DERIVED: erf rational approx(45) + affine(3); composite, weight 1.0 |
-| `stats.norm.ppf` | 83 | DERIVED composite: degree-5 rational approximation + Newton step (erf + pdf + correction) + affine; [empirical-weights.md](empirical-weights.md) 83.05 FP-instr/elem |
+| `stats.norm.ppf` | 83 | DERIVED composite: degree-5 rational approximation + Newton step (erf + pdf + correction) + affine |
 | `stats.expon.pdf` | 22 | DERIVED: z=(x−loc)/scale(2) + exp(−z)(17) + /scale(1) + where(2); weight 1.0 |
 | `stats.expon.cdf` | 22 | DERIVED: z(2) + exp(−z)(17) + 1−exp(1) + where(2); weight 1.0 |
 | `stats.expon.ppf` | 27 | DERIVED: loc−scale·log1p(−q)(19) + 3 where/cmp/and(8); weight 1.0 |

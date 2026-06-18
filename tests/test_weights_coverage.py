@@ -7,9 +7,8 @@ registry either:
   3. Is listed in a benchmark module's ops list (weights pending generation), OR
   4. Falls into a documented exclusion category (bitwise, complex, etc.)
 
-It also validates that:
-  1. The development calibration guide still documents the measurement methodology, and
-  2. The generated API reference data still exposes every weighted operation.
+It also validates that the generated API reference data still exposes every
+weighted operation.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from flopscope._registry import REGISTRY
 ROOT = Path(__file__).resolve().parent.parent
 WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "weights.json"
 DEFAULT_WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
-DOCS_PATH = ROOT / "docs" / "reference" / "empirical-weights.md"
 OPS_INDEX_PATH = ROOT / "website" / "public" / "ops.json"
 
 # Ensure benchmarks package is importable.
@@ -180,13 +178,6 @@ def weights() -> dict[str, float]:
 
 
 @pytest.fixture(scope="module")
-def docs_text() -> str:
-    """Load the empirical-weights reference (the authoritative calibration doc)."""
-    assert DOCS_PATH.exists(), f"empirical-weights reference not found at {DOCS_PATH}"
-    return DOCS_PATH.read_text()
-
-
-@pytest.fixture(scope="module")
 def api_operations() -> dict[str, dict]:
     """Load the generated API reference operation index."""
     assert OPS_INDEX_PATH.exists(), f"ops.json not found at {OPS_INDEX_PATH}"
@@ -321,7 +312,7 @@ class TestWeightsJsonCoverage:
 
 
 class TestDocsWeightCoverage:
-    """Verify calibration docs and API reference expose weighted operations."""
+    """Verify the API reference exposes weighted operations."""
 
     def test_all_weighted_ops_appear_in_api_reference(
         self,
@@ -352,14 +343,4 @@ class TestDocsWeightCoverage:
                 f"  {name}: default_weights.json={expected}, ops.json={actual}"
                 for name, (expected, actual) in sorted(mismatched.items())[:20]
             )
-        )
-
-    def test_docs_mentions_measurement_mode(self, docs_text: str):
-        """Docs should mention the measurement mode."""
-        assert "perf" in docs_text, "Docs should mention perf measurement mode"
-
-    def test_docs_mentions_baseline(self, docs_text: str):
-        """Docs should explain that add is the normalization baseline."""
-        assert ("np.add" in docs_text or "`add`" in docs_text) and (
-            "baseline" in docs_text.lower() or "normalized" in docs_text.lower()
         )

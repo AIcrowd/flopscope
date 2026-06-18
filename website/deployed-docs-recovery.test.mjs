@@ -40,8 +40,8 @@ test('global CSS keeps Fumadocs defaults and only scopes the homepage seam fix l
 });
 
 test('calibration page is retired and absent from all docs nav', async () => {
-  // The standalone calibration page was removed; its content was consolidated
-  // into docs/reference/empirical-weights.md (linked from the cost-model page).
+  // The standalone calibration page was removed; the cost model's design
+  // rationale now lives in the FLOP-counting-model page (from cost-model.md).
   // Guard that neither location serves it and neither nav lists it.
   const understandingCalibration = path.join(
     websiteRoot,

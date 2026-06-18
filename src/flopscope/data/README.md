@@ -10,7 +10,8 @@ calibrated tier set `{0, 1, 4, 8, 16}` (enforced by `test_weight_tier_policy`).
 ## `weights.json` — frozen calibration evidence (do NOT bill from this)
 Raw benchmark results + per-op measurement details (`meta.per_op_details`) from
 the one-time hardware calibration that kick-started the tiers. **Not loaded at
-runtime, not the billing source.** Used only to generate `empirical-weights.md`.
+runtime, not the billing source** — retained as historical evidence (read by
+`benchmarks/` and the weights metadata checks).
 
 ## `weights.csv` — human calibration spreadsheet (evidence)
 The reviewable export of the calibration (empirical vs reviewer vs applied),
