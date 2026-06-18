@@ -20,7 +20,10 @@ import flopscope.numpy as fnp
 
 SNAPSHOT = (
     Path(__file__).resolve().parent.parent
-    / "flopscope-client" / "tests" / "fixtures" / "full_numpy_surface.json"
+    / "flopscope-client"
+    / "tests"
+    / "fixtures"
+    / "full_numpy_surface.json"
 )
 
 
@@ -39,8 +42,9 @@ def build_surface() -> dict[str, dict[str, bool]]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--check", action="store_true",
-                    help="fail if the committed snapshot is stale")
+    ap.add_argument(
+        "--check", action="store_true", help="fail if the committed snapshot is stale"
+    )
     args = ap.parse_args()
 
     payload = json.dumps(build_surface(), indent=2, sort_keys=True) + "\n"
