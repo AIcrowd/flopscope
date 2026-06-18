@@ -14,6 +14,12 @@ try:
 except ImportError:  # pragma: no cover - pre-sync safety
     SERVER_ONLY = frozenset()
 
+# numpy abstract scalar types: have no meaning in the numpy-free remote client.
+_ABSTRACT_SCALAR_TYPES = frozenset({
+    "generic", "number", "integer", "signedinteger", "unsignedinteger",
+    "inexact", "floating", "complexfloating", "flexible", "character",
+})
+
 
 def make_module_getattr(module_prefix: str, module_label: str):
     """Return a ``__getattr__`` suitable for assignment at module scope.
@@ -58,6 +64,13 @@ def make_module_getattr(module_prefix: str, module_label: str):
                     f"analysis API and is not available in the flopscope client. "
                     f"It is only usable when running flopscope in-process (the "
                     f"starter kit), not on the remote grader."
+                )
+            if name in _ABSTRACT_SCALAR_TYPES:
+                raise AttributeError(
+                    f"'{module_label}.{name}' is a numpy abstract scalar type, "
+                    f"which isn't available in the numpy-free flopscope client. "
+                    f"Inspect 'array.dtype' (a string) instead of using "
+                    f"isinstance against scalar types."
                 )
             raise AttributeError(f"module '{module_label}' has no attribute '{name}'")
 

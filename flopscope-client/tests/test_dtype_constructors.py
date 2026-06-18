@@ -135,6 +135,19 @@ class TestConstructorDispatch:
         assert result.dtype == "float32"
 
 
+class TestAbstractScalarErrors:
+    @pytest.mark.parametrize("name", ["floating", "integer", "number"])
+    def test_clear_error(self, name):
+        with pytest.raises(AttributeError) as exc:
+            getattr(fnp, name)
+        assert "abstract scalar type" in str(exc.value)
+
+    def test_error_is_not_opaque(self, name="floating"):
+        with pytest.raises(AttributeError) as exc:
+            getattr(fnp, name)
+        assert "has no attribute" not in str(exc.value)
+
+
 class TestFinfoIinfo:
     def test_finfo_float32(self):
         fi = fnp.finfo(fnp.float32)
