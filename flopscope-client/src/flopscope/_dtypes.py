@@ -122,6 +122,80 @@ def dtype(spec: Any) -> _DType:
     return _DType(_normalize_dtype(spec))
 
 
+# Machine-limits constants (values copied from numpy at authoring time;
+# the client has no numpy to compute them live).
+_FINFO: dict[str, dict[str, float]] = {
+    "float16": {"eps": 0.0009765625, "tiny": 6.103515625e-05,
+                "max": 65504.0, "min": -65504.0,
+                "resolution": 0.0010004043579101562, "bits": 16},
+    "float32": {"eps": 1.1920928955078125e-07, "tiny": 1.1754943508222875e-38,
+                "max": 3.4028234663852886e+38, "min": -3.4028234663852886e+38,
+                "resolution": 9.999999974752427e-07, "bits": 32},
+    "float64": {"eps": 2.220446049250313e-16, "tiny": 2.2250738585072014e-308,
+                "max": 1.7976931348623157e+308, "min": -1.7976931348623157e+308,
+                "resolution": 1e-15, "bits": 64},
+}
+
+_IINFO: dict[str, dict[str, int]] = {
+    "int8": {"min": -128, "max": 127, "bits": 8},
+    "int16": {"min": -32768, "max": 32767, "bits": 16},
+    "int32": {"min": -2147483648, "max": 2147483647, "bits": 32},
+    "int64": {"min": -9223372036854775808, "max": 9223372036854775807, "bits": 64},
+    "uint8": {"min": 0, "max": 255, "bits": 8},
+    "uint16": {"min": 0, "max": 65535, "bits": 16},
+    "uint32": {"min": 0, "max": 4294967295, "bits": 32},
+    "uint64": {"min": 0, "max": 18446744073709551615, "bits": 64},
+}
+
+
+class finfo:
+    """numpy-free ``np.finfo`` analog for float dtypes."""
+
+    __slots__ = ("dtype", "eps", "tiny", "max", "min", "resolution", "bits")
+
+    def __init__(self, dt: Any) -> None:
+        name = _normalize_dtype(dt)
+        if name not in _FINFO:
+            raise ValueError(f"data type {name!r} not inexact")
+        d = _FINFO[name]
+        self.dtype = _DType(name)
+        self.eps = d["eps"]
+        self.tiny = d["tiny"]
+        self.max = d["max"]
+        self.min = d["min"]
+        self.resolution = d["resolution"]
+        self.bits = d["bits"]
+
+    @property
+    def smallest_normal(self) -> float:
+        return self.tiny
+
+    def __repr__(self) -> str:
+        return (
+            f"finfo(resolution={self.resolution}, min={self.min}, "
+            f"max={self.max}, dtype={self.dtype.name})"
+        )
+
+
+class iinfo:
+    """numpy-free ``np.iinfo`` analog for integer dtypes."""
+
+    __slots__ = ("dtype", "min", "max", "bits")
+
+    def __init__(self, dt: Any) -> None:
+        name = _normalize_dtype(dt)
+        if name not in _IINFO:
+            raise ValueError(f"Invalid integer data type {name!r}.")
+        d = _IINFO[name]
+        self.dtype = _DType(name)
+        self.min = d["min"]
+        self.max = d["max"]
+        self.bits = d["bits"]
+
+    def __repr__(self) -> str:
+        return f"iinfo(min={self.min}, max={self.max}, dtype={self.dtype.name})"
+
+
 # --- The 14 dtype label instances ---
 float16 = _DtypeLabel("float16")
 float32 = _DtypeLabel("float32")

@@ -133,3 +133,36 @@ class TestConstructorDispatch:
             scaled = fnp.float32(0.5)
             result = fnp.multiply(arr, scaled)
         assert result.dtype == "float32"
+
+
+class TestFinfoIinfo:
+    def test_finfo_float32(self):
+        fi = fnp.finfo(fnp.float32)
+        assert fi.eps == 1.1920928955078125e-07
+        assert fi.bits == 32
+        assert fi.max == 3.4028234663852886e+38
+
+    def test_finfo_float64_eps(self):
+        assert fnp.finfo(fnp.float64).eps == 2.220446049250313e-16
+
+    def test_finfo_accepts_string(self):
+        assert fnp.finfo("float32").bits == 32
+
+    def test_finfo_rejects_int(self):
+        with pytest.raises(ValueError):
+            fnp.finfo(fnp.int32)
+
+    def test_iinfo_int32(self):
+        ii = fnp.iinfo(fnp.int32)
+        assert ii.min == -2147483648
+        assert ii.max == 2147483647
+        assert ii.bits == 32
+
+    def test_iinfo_uint8(self):
+        ii = fnp.iinfo(fnp.uint8)
+        assert ii.min == 0
+        assert ii.max == 255
+
+    def test_iinfo_rejects_float(self):
+        with pytest.raises(ValueError):
+            fnp.iinfo(fnp.float32)
