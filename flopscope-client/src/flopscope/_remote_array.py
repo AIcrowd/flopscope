@@ -8,9 +8,11 @@ operations are dispatched to the server transparently.
 from __future__ import annotations
 
 import struct
+import weakref
 from typing import Any
 
 from flopscope._dispatch import timed_dispatch
+from flopscope._handles import enqueue_free
 from flopscope._math_compat import prod as _prod
 
 # ---------------------------------------------------------------------------
@@ -312,13 +314,19 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         Element data-type string (e.g. ``"float64"``).
     """
 
-    __slots__ = ("_handle_id", "_shape", "_dtype", "_symmetry")
+    # __weakref__ makes instances weak-referenceable (required for the
+    # weakref.finalize below that releases the server handle on GC).
+    __slots__ = ("_handle_id", "_shape", "_dtype", "_symmetry", "__weakref__")
 
     def __init__(self, handle_id: str, shape: tuple, dtype: str, symmetry=None) -> None:
         self._handle_id = handle_id
         self._shape = tuple(shape)
         self._dtype = dtype
         self._symmetry = symmetry
+        if handle_id is not None:
+            # Release the server handle when this proxy is GC'd. The callback
+            # takes handle_id (NOT self), so it never resurrects the instance.
+            weakref.finalize(self, enqueue_free, handle_id)
 
     # -- cached metadata (no round-trip) ------------------------------------
 
