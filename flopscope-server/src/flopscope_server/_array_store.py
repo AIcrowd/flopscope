@@ -5,23 +5,44 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import numpy as np
-
 #: Maximum number of arrays allowed in a single store (configurable via env var).
 MAX_ARRAY_COUNT = int(os.environ.get("FLOPSCOPE_MAX_ARRAY_COUNT", "100000"))
+
+# Handle ids are allocated from a PROCESS-GLOBAL monotonic counter (not reset
+# per ArrayStore/session). This guarantees ids are never reused across sessions,
+# so a stale free for a handle from a closed session can never alias a live
+# handle in a new session (ArrayStore.free silently ignores unknown ids). The
+# client frees handles on GC, and GC of a prior-session proxy can fire during a
+# later session — global ids make that safe. The counter is unbounded, but a
+# server process serves one submission, so it stays far below any int limit.
+_next_handle_id = 0
+
+
+def _alloc_handle() -> str:
+    """Allocate the next unique handle id from the process-global counter."""
+    global _next_handle_id
+    # Single-threaded server (one ZMQ REP loop), so no lock is needed.
+    handle = f"a{_next_handle_id}"
+    _next_handle_id += 1
+    return handle
+
+
+def _reset_handle_counter() -> None:
+    """Reset the global handle counter. TEST-ONLY (production never resets)."""
+    global _next_handle_id
+    _next_handle_id = 0
 
 
 class ArrayStore:
     """Simple store that maps string handle IDs to numpy arrays.
 
-    Handle IDs are monotonically increasing strings of the form "a0", "a1",
-    "a2", … The counter never resets, so IDs remain unique across put/free
-    cycles.
+    Handle IDs are allocated from a process-global monotonic counter (see
+    :func:`_alloc_handle`), so IDs remain unique across all ArrayStore instances
+    and sessions for the lifetime of the server process.
     """
 
     def __init__(self) -> None:
         self._arrays: dict[str, Any] = {}
-        self._counter: int = 0
 
     # ------------------------------------------------------------------
     # Core operations
@@ -37,9 +58,8 @@ class ArrayStore:
         """
         if len(self._arrays) >= MAX_ARRAY_COUNT:
             raise MemoryError(f"array store limit reached: {MAX_ARRAY_COUNT} arrays")
-        handle = f"a{self._counter}"
+        handle = _alloc_handle()
         self._arrays[handle] = arr
-        self._counter += 1
         return handle
 
     def get(self, handle: str) -> Any:

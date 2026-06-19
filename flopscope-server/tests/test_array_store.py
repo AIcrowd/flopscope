@@ -219,3 +219,22 @@ def test_metadata_0d_shape(store):
 def test_metadata_missing_raises_keyerror(store):
     with pytest.raises(KeyError):
         store.metadata("a999")
+
+
+# ---------------------------------------------------------------------------
+# Cross-session handle uniqueness (Fix B regression test)
+# ---------------------------------------------------------------------------
+
+
+def test_handles_unique_across_stores():
+    """Handle ids must NOT reset per ArrayStore/session — two stores (simulating
+    two sessions) must mint distinct ids, so a stale free can't alias a live
+    handle in a new session."""
+    import flopscope_server._array_store as mod
+
+    mod._reset_handle_counter()
+    s1 = ArrayStore()
+    h1 = s1.put(np.array([1.0]))
+    s2 = ArrayStore()
+    h2 = s2.put(np.array([2.0]))
+    assert h1 != h2, f"handle reuse across stores: {h1!r} == {h2!r}"
