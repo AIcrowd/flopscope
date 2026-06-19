@@ -21,3 +21,15 @@ def _reset_weights():
     yield
     reset_weights()
     weights_module._WARNED_MESSAGES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_pending_handles():
+    """Isolate the module-global free queue: RemoteArray GC enqueues handle ids
+    into flopscope._handles, and tests asserting exact send sequences must start
+    from an empty queue. Drains before AND after each test."""
+    from flopscope import _handles
+
+    _handles.drain_pending()
+    yield
+    _handles.drain_pending()

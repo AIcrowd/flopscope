@@ -43,3 +43,63 @@ def test_remote_scalar_does_not_enqueue():
     del s
     gc.collect()
     assert _handles.pending_count() == 0  # no server handle -> nothing to free
+
+
+class _FakeSocket:
+    """Records sends, replays scripted recvs (mirrors test_version_handshake)."""
+
+    def __init__(self, recv_payloads):
+        self.sent = []
+        self._recv_payloads = list(recv_payloads)
+
+    def send(self, payload):
+        self.sent.append(payload)
+
+    def recv(self):
+        return self._recv_payloads.pop(0)
+
+
+def test_send_recv_flushes_pending_frees_first():
+    from flopscope import _handles
+    from flopscope._connection import Connection
+    from flopscope._protocol import encode_request
+
+    _handles.drain_pending()
+    _handles.enqueue_free("a0")
+    _handles.enqueue_free("a1")
+
+    sock = _FakeSocket(
+        [
+            msgpack.packb({"status": "ok"}, use_bin_type=True),  # reply to free
+            msgpack.packb({"status": "ok", "result": 7}, use_bin_type=True),  # reply to op
+        ]
+    )
+    conn = Connection()
+    conn._socket = sock
+    conn._handshake_done = True  # bypass the lazy hello
+
+    resp = conn.send_recv(encode_request("some_op"))
+    assert resp["status"] == "ok"
+
+    first = msgpack.unpackb(sock.sent[0], raw=False)
+    assert first["op"] == "free"
+    assert set(first["kwargs"]["handles"]) == {"a0", "a1"}
+    second = msgpack.unpackb(sock.sent[1], raw=False)
+    assert second["op"] == "some_op"
+    assert _handles.pending_count() == 0
+
+
+def test_send_recv_no_frees_sends_only_the_op():
+    from flopscope import _handles
+    from flopscope._connection import Connection
+    from flopscope._protocol import encode_request
+
+    _handles.drain_pending()
+    sock = _FakeSocket([msgpack.packb({"status": "ok", "result": 1}, use_bin_type=True)])
+    conn = Connection()
+    conn._socket = sock
+    conn._handshake_done = True
+
+    conn.send_recv(encode_request("op2"))
+    assert len(sock.sent) == 1
+    assert msgpack.unpackb(sock.sent[0], raw=False)["op"] == "op2"

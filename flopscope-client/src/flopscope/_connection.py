@@ -8,7 +8,8 @@ import time
 import zmq
 
 from flopscope._dispatch import dispatch_span
-from flopscope._protocol import decode_response
+from flopscope._handles import drain_pending
+from flopscope._protocol import decode_response, encode_free
 from flopscope.errors import raise_from_response
 
 _DEFAULT_URL = "ipc:///tmp/flopscope.sock"
@@ -35,6 +36,7 @@ class Connection:
         self._context: zmq.Context | None = None
         self._socket: zmq.Socket | None = None
         self._handshake_done: bool = False
+        self._flushing_frees: bool = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -104,6 +106,37 @@ class Connection:
             )
         self._handshake_done = True
 
+    def _flush_pending_frees(self) -> None:
+        """Release GC'd server handles, batched onto the current round-trip.
+
+        Enqueued handle ids (from RemoteArray finalizers) are sent as a single
+        ``free`` op before the real request. Called from inside send_recv's
+        ``dispatch_span`` so the tiny round-trip bills as flopscope overhead,
+        not participant residual. Best-effort: on ANY error the socket is reset
+        so the REQ/REP state machine is clean for the request that follows.
+
+        Lost-on-error: drain_pending() clears the queue BEFORE the send, so if
+        the free send/recv fails, those handle ids are discarded (never
+        re-enqueued). The server handles then linger until the session closes.
+        Intentional — a missed free is a slow memory reclaim, not a correctness
+        bug, and re-enqueuing risks unbounded growth on a persistently bad socket.
+        """
+        if self._flushing_frees:
+            return
+        handles = drain_pending()
+        if not handles:
+            return
+        self._flushing_frees = True
+        try:
+            sock = self._ensure_connected()
+            self._ensure_handshaked()
+            sock.send(encode_free(handles))
+            sock.recv()  # consume {status:ok}; content ignored
+        except Exception:
+            self._reset_socket()
+        finally:
+            self._flushing_frees = False
+
     def send_recv(self, raw_request: bytes) -> dict:
         """Send *raw_request* and return the decoded response dict.
 
@@ -123,6 +156,7 @@ class Connection:
         from flopscope.errors import FlopscopeServerError
 
         with dispatch_span():
+            self._flush_pending_frees()
             sock = self._ensure_connected()
             self._ensure_handshaked()
 
