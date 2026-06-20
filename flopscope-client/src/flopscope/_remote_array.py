@@ -12,7 +12,6 @@ import weakref
 from typing import Any
 
 from flopscope._dispatch import timed_dispatch
-from flopscope._handles import enqueue_free
 from flopscope._math_compat import prod as _prod
 
 # ---------------------------------------------------------------------------
@@ -326,7 +325,18 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         if handle_id is not None:
             # Release the server handle when this proxy is GC'd. The callback
             # takes handle_id (NOT self), so it never resurrects the instance.
-            weakref.finalize(self, enqueue_free, handle_id)
+            # The import is deferred AND guarded: cross-package parity/integration
+            # tests exec this module by file path with `flopscope` resolving to
+            # the full package (which has no `_handles`). There the GC-free is not
+            # needed, so we skip the finalizer rather than fail construction. In
+            # the real client venv `_handles` always resolves, so the leak fix is
+            # active. (ModuleNotFoundError only — a broken `_handles` still raises.)
+            try:
+                from flopscope._handles import enqueue_free
+            except ModuleNotFoundError:
+                pass
+            else:
+                weakref.finalize(self, enqueue_free, handle_id)
 
     # -- cached metadata (no round-trip) ------------------------------------
 

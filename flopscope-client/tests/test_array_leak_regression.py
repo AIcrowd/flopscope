@@ -5,6 +5,7 @@ intermediates than the cap. With the free-on-GC fix the live count stays bounded
 and the loop completes; without it the server raises MemoryError well before the
 loop ends.
 """
+
 from __future__ import annotations
 
 import os
@@ -19,9 +20,13 @@ _WORKTREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 _CLIENT_SRC = os.path.join(_WORKTREE, "flopscope-client", "src")
 _SERVER_SRC = os.path.join(_WORKTREE, "flopscope-server", "src")
 _REAL_SRC = os.path.join(_WORKTREE, "src")
-_SERVER_VENV_PYTHON = os.path.join(_WORKTREE, "flopscope-server", ".venv", "bin", "python")
+_SERVER_VENV_PYTHON = os.path.join(
+    _WORKTREE, "flopscope-server", ".venv", "bin", "python"
+)
 _ROOT_VENV_PYTHON = os.path.join(_WORKTREE, ".venv", "bin", "python")
-_VENV_PYTHON = _SERVER_VENV_PYTHON if os.path.exists(_SERVER_VENV_PYTHON) else _ROOT_VENV_PYTHON
+_VENV_PYTHON = (
+    _SERVER_VENV_PYTHON if os.path.exists(_SERVER_VENV_PYTHON) else _ROOT_VENV_PYTHON
+)
 
 for _p in (_CLIENT_SRC,):
     if _p not in sys.path:
@@ -41,7 +46,11 @@ server.run()
 
 @pytest.fixture(scope="module", autouse=True)
 def _low_cap_server():
-    env = {**os.environ, "FLOPSCOPE_SERVER_URL": _SERVER_URL, "FLOPSCOPE_MAX_ARRAY_COUNT": "2000"}
+    env = {
+        **os.environ,
+        "FLOPSCOPE_SERVER_URL": _SERVER_URL,
+        "FLOPSCOPE_MAX_ARRAY_COUNT": "2000",
+    }
     os.environ["FLOPSCOPE_SERVER_URL"] = _SERVER_URL
     proc = subprocess.Popen(
         [_VENV_PYTHON, "-c", _SERVER_SCRIPT],
@@ -69,8 +78,9 @@ def _low_cap_server():
 
 @pytest.fixture(autouse=True)
 def _reset_client():
-    from flopscope._budget import _reset_global_default
     from flopscope._connection import reset_connection
+
+    from flopscope._budget import _reset_global_default
 
     reset_connection()
     _reset_global_default()

@@ -23,8 +23,9 @@ def test_enqueue_drain_count_roundtrip():
 
 
 def test_remote_array_enqueues_handle_on_gc():
-    from flopscope import _handles
     from flopscope._remote_array import RemoteArray
+
+    from flopscope import _handles
 
     _handles.drain_pending()
     arr = RemoteArray(handle_id="a7", shape=(2, 2), dtype="float32")
@@ -35,8 +36,9 @@ def test_remote_array_enqueues_handle_on_gc():
 
 
 def test_remote_scalar_does_not_enqueue():
-    from flopscope import _handles
     from flopscope._remote_array import RemoteScalar
+
+    from flopscope import _handles
 
     _handles.drain_pending()
     s = RemoteScalar(value=1.5, dtype="float64")
@@ -60,9 +62,10 @@ class _FakeSocket:
 
 
 def test_send_recv_flushes_pending_frees_first():
-    from flopscope import _handles
     from flopscope._connection import Connection
     from flopscope._protocol import encode_request
+
+    from flopscope import _handles
 
     _handles.drain_pending()
     _handles.enqueue_free("a0")
@@ -71,7 +74,9 @@ def test_send_recv_flushes_pending_frees_first():
     sock = _FakeSocket(
         [
             msgpack.packb({"status": "ok"}, use_bin_type=True),  # reply to free
-            msgpack.packb({"status": "ok", "result": 7}, use_bin_type=True),  # reply to op
+            msgpack.packb(
+                {"status": "ok", "result": 7}, use_bin_type=True
+            ),  # reply to op
         ]
     )
     conn = Connection()
@@ -90,12 +95,15 @@ def test_send_recv_flushes_pending_frees_first():
 
 
 def test_send_recv_no_frees_sends_only_the_op():
-    from flopscope import _handles
     from flopscope._connection import Connection
     from flopscope._protocol import encode_request
 
+    from flopscope import _handles
+
     _handles.drain_pending()
-    sock = _FakeSocket([msgpack.packb({"status": "ok", "result": 1}, use_bin_type=True)])
+    sock = _FakeSocket(
+        [msgpack.packb({"status": "ok", "result": 1}, use_bin_type=True)]
+    )
     conn = Connection()
     conn._socket = sock
     conn._handshake_done = True

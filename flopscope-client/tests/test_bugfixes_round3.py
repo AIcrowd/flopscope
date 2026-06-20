@@ -505,6 +505,17 @@ class TestFix8ZmqSocketReset:
         conn._socket = mock_sock
         conn._handshake_done = True  # skip handshake; exercise the send/recv reset path
 
+        # send_recv flushes pending frees FIRST; a handle GC-enqueued by an earlier
+        # test would make the flush send on this mock (zmq.Again) and reset the
+        # socket, surfacing a handshake ConnectionError instead of the expected
+        # FlopscopeServerError. Force any deferred finalizer + drain so the queue is
+        # empty and the mock's zmq.Again hits the real op, not the free flush.
+        import gc
+
+        from flopscope import _handles
+
+        gc.collect()
+        _handles.drain_pending()
         with pytest.raises(FlopscopeServerError, match="timeout"):
             conn.send_recv(b"test")
         # Socket should be reset
@@ -522,6 +533,14 @@ class TestFix8ZmqSocketReset:
         conn._socket = mock_sock
         conn._handshake_done = True  # skip handshake; exercise the send/recv reset path
 
+        # See test_send_recv_resets_on_timeout: drain any GC-enqueued frees so the
+        # send_recv flush is a no-op and the mock's zmq.Again hits the real op.
+        import gc
+
+        from flopscope import _handles
+
+        gc.collect()
+        _handles.drain_pending()
         with pytest.raises(FlopscopeServerError, match="timeout"):
             conn.send_recv(b"test")
         assert conn._socket is None

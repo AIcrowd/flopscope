@@ -5,6 +5,7 @@ GC time and during interpreter shutdown). Connection.send_recv drains the queue
 onto the next op's round-trip (see _connection.py), so frees ride existing
 traffic and the strict REQ/REP socket is never used mid-op.
 """
+
 from __future__ import annotations
 
 _pending: set[str] = set()

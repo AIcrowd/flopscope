@@ -96,6 +96,14 @@ def test_send_recv_triggers_handshake_first():
     sock = _FakeSocket([server_ok_hello, server_ok_op])
     conn = _make_connection(sock)
 
+    # Drain any GC-enqueued frees so send_recv's flush is a no-op; otherwise it
+    # would consume a scripted recv (and an extra send) before the real op.
+    import gc
+
+    from flopscope import _handles
+
+    gc.collect()
+    _handles.drain_pending()
     # An arbitrary "op" request — not a hello — should still get handshaked first.
     op_request = msgpack.packb({"op": "budget_status"}, use_bin_type=True)
     response = conn.send_recv(op_request)

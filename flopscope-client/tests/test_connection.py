@@ -320,6 +320,14 @@ class TestSendRecv:
         conn._socket = mock_socket
         conn._handshake_done = True  # bypass the lazy version handshake
 
+        # Drain any GC-enqueued frees so send_recv's flush is a no-op; otherwise it
+        # would call mock_socket.send an extra time and break assert_called_once.
+        import gc
+
+        from flopscope import _handles
+
+        gc.collect()
+        _handles.drain_pending()
         raw = encode_request("test_op")
         result = conn.send_recv(raw)
         assert result["status"] == "ok"
