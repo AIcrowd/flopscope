@@ -382,11 +382,24 @@ def test_handle_persists_across_budget_sessions(server_and_client):
     assert resp["status"] == "ok"
     floor_id = resp["result"]["id"]
     assert resp["result"]["shape"] == []
+
+    # Burn FLOPs in MLP #1 so the per-MLP budget reset is observable in MLP #2.
+    ones_resp = _send(client, {"op": "ones", "args": [(8,)], "kwargs": {}})
+    _send(client, {"op": "exp", "args": [ones_resp["result"]["id"]], "kwargs": {}})
+    mlp1_status = _send(client, {"op": "budget_status"})
+    assert mlp1_status["result"]["flops_used"] > 0
     _send(client, {"op": "budget_close"})
 
     # MLP #2 on the same connection: a new array must NOT reuse floor's id, and
     # the floor handle must still resolve to its original 0-d array.
     _send(client, {"op": "budget_open", "flop_budget": 1_000_000})
+
+    # Per-MLP budget integrity: each budget_open starts a FRESH FLOP counter —
+    # MLP #1's spend must NOT carry over (only the handle store persists, not
+    # the budget). This is the dual of the persistence invariant below.
+    mlp2_status = _send(client, {"op": "budget_status"})
+    assert mlp2_status["result"]["flops_used"] == 0
+    assert mlp2_status["result"]["flops_remaining"] == 1_000_000
 
     weights_arr = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype="float32")
     resp = _send(

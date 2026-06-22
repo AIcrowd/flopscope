@@ -215,15 +215,15 @@ def test_close_marks_session_closed():
     assert s.is_open is False
 
 
-def test_close_frees_arrays():
+def test_close_does_not_clear_bare_session_store():
+    # A bare Session owns a private ConnectionStore. close() exits the budget
+    # but does NOT clear the store — handles are connection-lifetime, not
+    # session-lifetime (issue #107). The array remains resolvable afterward.
     s = Session(flop_budget=1000)
     handle = s.store_array(np.array([1, 2, 3]))
     s.close()
-    # After close, the store should be cleared — getting the array should fail
-    # We verify indirectly: re-opening the store would reset it.
-    # Since session is closed, get_array is undefined behavior, but we can
-    # verify is_open is False and the internal store was cleared.
     assert s.is_open is False
+    np.testing.assert_array_equal(s._conn.arrays.get(handle), np.array([1, 2, 3]))
 
 
 def test_close_twice_raises_runtime_error():
