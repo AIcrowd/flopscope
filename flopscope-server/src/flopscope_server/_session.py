@@ -1,4 +1,4 @@
-"""Session — ties together ArrayStore, BudgetContext, and CommsTracker for a single participant session."""
+"""Session — ties together ConnectionStore, BudgetContext, and CommsTracker for a single participant session."""
 
 from __future__ import annotations
 
@@ -7,23 +7,35 @@ from typing import Any
 import numpy as np
 
 import flopscope as flops
-from flopscope_server._array_store import ArrayStore
 from flopscope_server._comms_tracker import CommsTracker
+from flopscope_server._connection_store import ConnectionStore
 
 
 class Session:
-    """A single participant session combining ArrayStore, BudgetContext, and CommsTracker.
+    """A single participant session combining ConnectionStore, BudgetContext, and CommsTracker.
 
     Parameters
     ----------
     flop_budget : int
         Maximum number of FLOPs allowed for this session.
+    conn_store : ConnectionStore | None
+        Connection-lifetime store (arrays + generators). When provided the
+        server shares ONE store across all per-MLP sessions so that
+        module-level / ``setup()``-time handles survive across MLPs
+        (issue #107). When ``None`` (standalone / unit-test use) a private
+        ``ConnectionStore`` is created so a bare ``Session`` still works in
+        isolation.
     """
 
-    def __init__(self, flop_budget: int) -> None:
-        self._store = ArrayStore()
-        self._generators: dict[str, Any] = {}
-        self._gen_counter: int = 0
+    def __init__(
+        self, flop_budget: int, conn_store: ConnectionStore | None = None
+    ) -> None:
+        # The array + generator stores live for the CONNECTION, not the budget
+        # session. The server injects one shared ConnectionStore across all MLPs
+        # so module-level / setup()-time handles survive (issue #107). When none
+        # is injected (standalone / unit-test use) a private one is created so a
+        # bare Session still works in isolation.
+        self._conn = conn_store if conn_store is not None else ConnectionStore()
         self._comms_tracker = CommsTracker()
         self._budget_ctx = flops.BudgetContext(
             flop_budget=flop_budget,
@@ -67,46 +79,24 @@ class Session:
         return self._comms_tracker
 
     # ------------------------------------------------------------------
-    # Array operations (delegate to ArrayStore)
+    # Array operations (delegate to the connection store)
     # ------------------------------------------------------------------
 
     def store_array(self, arr: Any) -> str:
-        """Store *arr* and return its handle ID.
-
-        Delegates to :meth:`ArrayStore.put`.
-        """
-        return self._store.put(arr)
+        """Store *arr* and return its handle ID. Delegates to the connection store."""
+        return self._conn.arrays.put(arr)
 
     def get_array(self, handle: str) -> Any:
-        """Return the array for *handle*.
-
-        Delegates to :meth:`ArrayStore.get`.
-
-        Raises
-        ------
-        KeyError
-            If *handle* is not in the store.
-        """
-        return self._store.get(handle)
+        """Return the array for *handle*. Delegates to the connection store."""
+        return self._conn.arrays.get(handle)
 
     def array_metadata(self, handle: str) -> dict:
-        """Return metadata dict for *handle*.
-
-        Delegates to :meth:`ArrayStore.metadata`.
-
-        Raises
-        ------
-        KeyError
-            If *handle* is not in the store.
-        """
-        return self._store.metadata(handle)
+        """Return metadata dict for *handle*. Delegates to the connection store."""
+        return self._conn.arrays.metadata(handle)
 
     def free_arrays(self, handles: list) -> None:
-        """Remove arrays by handle; silently ignore unknown handles.
-
-        Delegates to :meth:`ArrayStore.free`.
-        """
-        self._store.free(handles)
+        """Remove arrays by handle; silently ignore unknown handles."""
+        self._conn.arrays.free(handles)
 
     # ------------------------------------------------------------------
     # Generator operations (server-side RNG handles)
@@ -114,10 +104,7 @@ class Session:
 
     def store_generator(self, gen: Any) -> str:
         """Store an RNG ``Generator`` and return its handle ID (``g0``, ``g1`` …)."""
-        handle = f"g{self._gen_counter}"
-        self._generators[handle] = gen
-        self._gen_counter += 1
-        return handle
+        return self._conn.generators.put(gen)
 
     def get_generator(self, handle: str) -> Any:
         """Return the ``Generator`` for *handle*.
@@ -127,9 +114,7 @@ class Session:
         KeyError
             If *handle* is not a known generator handle.
         """
-        if handle not in self._generators:
-            raise KeyError(f"Generator handle {handle!r} not found in store")
-        return self._generators[handle]
+        return self._conn.generators.get(handle)
 
     # ------------------------------------------------------------------
     # Budget
@@ -156,7 +141,7 @@ class Session:
     # ------------------------------------------------------------------
 
     def close(self) -> dict:
-        """Close the session, exiting the BudgetContext and clearing the ArrayStore.
+        """Close the session, exiting the BudgetContext.
 
         Returns
         -------
@@ -183,8 +168,10 @@ class Session:
         )
         budget_summary = self._budget_ctx.summary(by_namespace=show_namespaces)
         comms_summary = self._comms_tracker.summary()
-        self._store.clear()
-        self._generators.clear()
+        # The array + generator stores are owned by the connection, not the
+        # session, so they are intentionally NOT cleared here — module-level
+        # handles must survive across MLPs (issue #107). Memory is bounded by
+        # client GC-frees + ArrayStore.MAX_ARRAY_COUNT.
         self._is_open = False
 
         return {

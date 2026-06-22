@@ -185,14 +185,14 @@ def test_handle_fetch_slice(handler, session):
 def test_handle_fetch_slice_does_not_allocate_new_handle(handler, session):
     arr = np.arange(10, dtype=np.float64)
     handle = session.store_array(arr)
-    initial_count = session._store.count
+    initial_count = session._conn.arrays.count
 
     first = handler.handle({"op": "fetch_slice", "id": handle, "slices": [[2, 5]]})
     second = handler.handle({"op": "fetch_slice", "id": handle, "slices": [[4, 7]]})
 
     assert first["status"] == "ok"
     assert second["status"] == "ok"
-    assert session._store.count == initial_count
+    assert session._conn.arrays.count == initial_count
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from flopscope_server._connection_store import ConnectionStore
 from flopscope_server._session import Session
 
 import flopscope as flops
@@ -271,3 +272,51 @@ def test_close_surfaces_recorded_compute_time(session):
     )
     summary = session.close()
     assert summary["comms_summary"]["total_compute_time_ns"] == 5000
+
+
+# ---------------------------------------------------------------------------
+# Connection-lifetime store (fix #1, issue #107)
+# ---------------------------------------------------------------------------
+
+
+def test_close_does_not_clear_injected_store():
+    """A handle stored in session 1 survives close() when a ConnectionStore is shared."""
+    conn = ConnectionStore()
+    s1 = Session(flop_budget=100_000, conn_store=conn)
+    handle = s1.store_array(np.array([1.0, 2.0, 3.0]))
+    s1.close()
+    # The store is owned by the connection, not the session — handle still resolves.
+    np.testing.assert_array_equal(conn.arrays.get(handle), np.array([1.0, 2.0, 3.0]))
+
+
+def test_handle_resolves_in_a_later_session_sharing_the_store():
+    """The warm-child shape: session 2 (same ConnectionStore) can read session 1's handle."""
+    conn = ConnectionStore()
+    s1 = Session(flop_budget=100_000, conn_store=conn)
+    floor = s1.store_array(np.float32(1e-12))
+    s1.close()
+
+    s2 = Session(flop_budget=100_000, conn_store=conn)
+    later = s2.store_array(np.arange(5))
+    assert later != floor  # process-global monotonic id, never reused
+    np.testing.assert_array_equal(s2.get_array(floor), np.float32(1e-12))
+    s2.close()
+
+
+def test_generator_handle_survives_across_sessions_sharing_the_store():
+    conn = ConnectionStore()
+    s1 = Session(flop_budget=100_000, conn_store=conn)
+    g = s1.store_generator(np.random.default_rng(0))
+    s1.close()
+
+    s2 = Session(flop_budget=100_000, conn_store=conn)
+    assert s2.get_generator(g) is not None
+    s2.close()
+
+
+def test_bare_session_still_works_with_private_store():
+    """No injected store -> Session makes its own ConnectionStore (standalone use)."""
+    s = Session(flop_budget=100_000)
+    h = s.store_array(np.array([1]))
+    np.testing.assert_array_equal(s.get_array(h), np.array([1]))
+    s.close()
