@@ -10,6 +10,7 @@ import msgpack
 import zmq
 
 import flopscope
+from flopscope_server._connection_store import ConnectionStore
 from flopscope_server._protocol import (
     InvalidRequestError,
     decode_request,
@@ -46,6 +47,10 @@ class FlopscopeServer:
         self._session: Session | None = None
         self._handler: RequestHandler | None = None
         self._last_activity: float = 0.0
+        # Array + generator handle storage lives for the whole connection
+        # (process), not the per-MLP budget session, so module-level handles
+        # survive across MLPs (issue #107). Injected into every Session below.
+        self._conn_store = ConnectionStore()
 
     # ------------------------------------------------------------------
     # Public API
@@ -239,7 +244,7 @@ class FlopscopeServer:
         if flop_budget is None:
             kwargs = msg.get("kwargs") or {}
             flop_budget = kwargs.get("flop_budget", 1_000_000)
-        self._session = Session(flop_budget=flop_budget)
+        self._session = Session(flop_budget=flop_budget, conn_store=self._conn_store)
         self._handler = RequestHandler(self._session)
         self._last_activity = monotonic()
 

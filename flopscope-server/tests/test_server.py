@@ -356,3 +356,77 @@ def test_fetch_contributes_no_kernel():
     handler.handle({"op": "fetch", "id": h})
     assert handler.kernel_ns == 0
     session.close()
+
+
+def test_handle_persists_across_budget_sessions(server_and_client):
+    """A handle minted in MLP #1's budget session resolves in MLP #2's session.
+
+    Mirrors PR #108's tests/integration/test_flopscope_session_handle_lifetime.py
+    assertion (c): the warm child holds a module-level handle across a
+    budget_close/budget_open, and maximum(var_c, floor) must succeed.
+    """
+    _server, client = server_and_client
+
+    # MLP #1: create a 0-d "floor" array (scalar 0.0), capture its handle, close.
+    _send(client, {"op": "budget_open", "flop_budget": 1_000_000})
+    floor_arr = np.array(0.0, dtype="float32")
+    resp = _send(
+        client,
+        {
+            "op": "create_from_data",
+            "data": floor_arr.tobytes(),
+            "dtype": "float32",
+            "shape": [],
+        },
+    )
+    assert resp["status"] == "ok"
+    floor_id = resp["result"]["id"]
+    assert resp["result"]["shape"] == []
+    _send(client, {"op": "budget_close"})
+
+    # MLP #2 on the same connection: a new array must NOT reuse floor's id, and
+    # the floor handle must still resolve to its original 0-d array.
+    _send(client, {"op": "budget_open", "flop_budget": 1_000_000})
+
+    weights_arr = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype="float32")
+    resp = _send(
+        client,
+        {
+            "op": "create_from_data",
+            "data": weights_arr.tobytes(),
+            "dtype": "float32",
+            "shape": [5],
+        },
+    )
+    assert resp["status"] == "ok"
+    weights_id = resp["result"]["id"]
+    assert weights_id != floor_id  # monotonic id, never reused
+
+    # floor_id must still resolve to its original 0-d array
+    fetched = _send(client, {"op": "fetch", "id": floor_id})
+    assert fetched["status"] == "ok", fetched
+    assert fetched["shape"] == []  # still the original 0-d floor, not aliased
+    assert fetched["dtype"] == "float32"
+
+    # maximum(var_c, floor) across the budget boundary must succeed
+    var_c_arr = np.array([-1.0, 0.5, 2.0], dtype="float32")
+    resp = _send(
+        client,
+        {
+            "op": "create_from_data",
+            "data": var_c_arr.tobytes(),
+            "dtype": "float32",
+            "shape": [3],
+        },
+    )
+    assert resp["status"] == "ok"
+    var_c_id = resp["result"]["id"]
+
+    result = _send(
+        client,
+        {"op": "maximum", "args": [var_c_id, floor_id], "kwargs": {}},
+    )
+    assert result["status"] == "ok", result
+    assert result["result"]["shape"] == [3]
+
+    _send(client, {"op": "budget_close"})
