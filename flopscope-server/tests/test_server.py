@@ -19,10 +19,17 @@ SERVER_URL = "tcp://127.0.0.1:15555"
 
 
 def _send(sock: zmq.Socket, msg: dict) -> dict:
-    """Send a msgpack request and return the decoded response."""
+    """Send a msgpack request and return the decoded response.
+
+    Decode with ``strict_map_key=False`` to match how the real consumers decode
+    server responses — the flopscope-client (``_protocol.py``) and the whestbench
+    worker both pass ``strict_map_key=False``. The ``budget_close`` summary's
+    ``by_namespace`` breakdown legitimately uses a ``None`` key for unlabeled ops,
+    which the strict default rejects.
+    """
     sock.send(msgpack.packb(msg, use_bin_type=True))
     raw = sock.recv()
-    return msgpack.unpackb(raw, raw=False)
+    return msgpack.unpackb(raw, raw=False, strict_map_key=False)
 
 
 # ---------------------------------------------------------------------------
