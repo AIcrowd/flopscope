@@ -693,6 +693,28 @@ class FlopscopeArray(_np.ndarray):
             "immutable. Use fnp.partition(arr, kth) to create a copy."
         )
 
+    # fill/put/resize are C-level ndarray mutators that write the buffer
+    # directly, bypassing __setitem__ — without explicit overrides, native
+    # arrays would stay mutable here (and diverge from the client, which has no
+    # such methods).
+    def fill(self, *args: Any, **kwargs: Any) -> None:
+        raise ValueError(
+            "in-place fill is not supported; flopscope arrays are immutable. "
+            "Use fnp.full(shape, value) or fnp.full_like(arr, value) instead."
+        )
+
+    def put(self, *args: Any, **kwargs: Any) -> None:
+        raise ValueError(
+            "in-place put is not supported; flopscope arrays are immutable. "
+            "Build the result functionally instead."
+        )
+
+    def resize(self, *args: Any, **kwargs: Any) -> None:
+        raise ValueError(
+            "in-place resize is not supported; flopscope arrays are immutable. "
+            "Use fnp.reshape(arr, new_shape) to create a reshaped copy."
+        )
+
     # ----- Binary arithmetic -----
 
     def __add__(self, other: Any) -> FlopscopeArray:

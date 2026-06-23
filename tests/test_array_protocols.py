@@ -280,6 +280,34 @@ def test_inplace_sort_raises_immutable():
         a.sort()
 
 
+def test_fill_raises_immutable():
+    # fill is a C-level mutator that bypasses __setitem__; it must be overridden
+    # explicitly or native arrays stay mutable (and diverge from the client).
+    import flopscope.numpy as fnp
+
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="immutable"):
+        a.fill(0.0)
+    assert a.tolist() == [1.0, 2.0, 3.0]  # unchanged
+
+
+def test_put_raises_immutable():
+    import flopscope.numpy as fnp
+
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="immutable"):
+        a.put([0], [9.0])
+    assert a.tolist() == [1.0, 2.0, 3.0]
+
+
+def test_resize_raises_immutable():
+    import flopscope.numpy as fnp
+
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="immutable"):
+        a.resize((1, 3))
+
+
 # ----- ufunc.outer / .reduceat / .at / generic .reduce / .accumulate -----
 
 
