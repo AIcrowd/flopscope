@@ -233,9 +233,10 @@ jobs:
       - name: Generate API docs (untracked; tests validate them)
         run: uv run python scripts/generate_api_docs.py
 
-      - name: Run tests with coverage
-        run: uv run pytest --cov=flopscope --cov-fail-under=85
-
+      # The full flopscope suite is already covered by the `test` job for this
+      # exact py/numpy matrix (3.12 x {2.2,2.3,2.4}); re-running it here is pure
+      # redundancy and only exposes this gate to unrelated flakes. This job runs
+      # the NumPy-borrowed compat suites only.
       - name: "NumPy compat: core umath"
         run: uv run pytest tests/numpy_compat/ --pyargs numpy._core.tests.test_umath -n auto -q
 
