@@ -60,7 +60,7 @@ version_files = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--ignore=tests/numpy_compat -n auto"
+addopts = "--ignore=tests/numpy_compat --ignore=tests/client_compat -n auto"
 filterwarnings = [
     # flopscope's own tests call configure() on the in-process backend
     # legitimately; the participant-facing no-op notice is just noise here.
