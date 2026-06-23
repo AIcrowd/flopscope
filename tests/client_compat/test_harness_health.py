@@ -20,3 +20,16 @@ def test_server_round_trips_a_simple_op():
     a = fnp.array([1, 2, 3])
     b = fnp.array([4, 5, 6])
     assert fnp.add(a, b).tolist() == [5, 7, 9]
+
+
+def test_numpy_sum_is_routed_to_client(_patch_active):
+    import numpy as np
+
+    # np.sum is a non-ufunc reduction in the client registry, so the patch
+    # targets it (ufuncs like np.add are intentionally skipped). np.array stays
+    # native (it is in _SKIP), so the input arrives as a real ndarray and the
+    # patch's input coercer must convert it (client rejects raw ndarrays).
+    # Relies on the ambient BudgetContext from the autouse fixture.
+    out = np.sum(np.array([1, 2, 3, 4]))
+    assert type(out).__name__ == "RemoteArray", f"got {type(out)!r}; swap inactive"
+    assert float(out) == 10.0

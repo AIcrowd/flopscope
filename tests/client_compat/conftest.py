@@ -16,6 +16,37 @@ for _mod_name in list(sys.modules.keys()):
     if _mod_name == "flopscope" or _mod_name.startswith("flopscope."):
         del sys.modules[_mod_name]
 
+# Force NumPy's lazy RNG entropy init NOW, while numpy is still unpatched, so it
+# can never trigger a patched op (-> client dispatch) later. numpy.random's
+# SeedSequence.get_assembled_entropy calls functions the patch replaces; if that
+# init first runs after patching (e.g. mid-test with an open budget), it would
+# dispatch to the server. Doing it here caches the init under native numpy.
+import numpy as _np_warmup  # noqa: E402
+
+_np_warmup.random.default_rng()
+del _np_warmup
+
+
+def pytest_configure(config):
+    # Patch numpy -> client. (_coerce.install(), added in Task 3, runs after
+    # patch() so the RemoteArray->numpy coercion wins for array/asarray.)
+    from ._patch_client import patch
+
+    patch()
+
+
+def pytest_unconfigure(config):
+    from ._patch_client import unpatch
+
+    unpatch()
+
+
+@pytest.fixture()
+def _patch_active():
+    # patch() ran at configure; this fixture documents the dependency for tests
+    # that assert the swap is active.
+    yield
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _server():
