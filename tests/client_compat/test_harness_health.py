@@ -11,8 +11,12 @@ def test_client_is_the_proxy_not_native():
 
 
 def test_server_round_trips_a_simple_op():
+    # Relies on the ambient BudgetContext opened by the autouse
+    # _fresh_connection_and_budget fixture (the client raises
+    # NoBudgetContextError without an active budget). Opening our own here would
+    # nest-conflict, and NumPy's suite never opens one — so this mirrors how the
+    # real suite runs.
     import flopscope as fnp
-    with fnp.BudgetContext(flop_budget=10**15):
-        a = fnp.array([1, 2, 3])
-        b = fnp.array([4, 5, 6])
-        assert fnp.add(a, b).tolist() == [5, 7, 9]
+    a = fnp.array([1, 2, 3])
+    b = fnp.array([4, 5, 6])
+    assert fnp.add(a, b).tolist() == [5, 7, 9]

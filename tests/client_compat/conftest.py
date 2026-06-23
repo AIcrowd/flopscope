@@ -26,16 +26,30 @@ def _server():
 
 @pytest.fixture(autouse=True)
 def _fresh_connection_and_budget():
-    """Reset client connection + budget state around every test.
+    """Reset client connection + budget state and open an ambient budget per test.
 
-    Does NOT open a BudgetContext — each test is responsible for that.
-    Mirrors the ``_reset_client`` fixture in flopscope-client/tests/test_full_integration.py.
+    The ambient ``BudgetContext`` is REQUIRED, not optional: unlike native
+    flopscope (which lazily uses a global-default budget for unbudgeted ops), the
+    CLIENT raises ``NoBudgetContextError: no active session`` if an op runs with
+    no active budget. NumPy's own test suite (which this harness runs against the
+    client) never opens a budget, so without this ambient context every NumPy
+    test would fail spuriously. ``10**15`` FLOPs is effectively unbounded for
+    NumPy's tiny test arrays; ``quiet=True`` suppresses per-test output.
+
+    Hand-written harness tests therefore must NOT open their own BudgetContext
+    (the client rejects nested contexts) — they rely on this ambient one.
     """
+    import flopscope
     from flopscope._connection import reset_connection
     from flopscope._budget import _reset_global_default
 
     reset_connection()
     _reset_global_default()
-    yield
-    reset_connection()
-    _reset_global_default()
+    ctx = flopscope.BudgetContext(flop_budget=10**15, quiet=True)
+    ctx.__enter__()
+    try:
+        yield
+    finally:
+        ctx.__exit__(None, None, None)
+        reset_connection()
+        _reset_global_default()

@@ -82,6 +82,11 @@ exclude_lines = [
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 include = ["src", "tests"]
+# The client-parity harness imports the CLIENT flopscope package
+# (flopscope-client/src), a different package root added to sys.path at runtime
+# that this native-rooted pyright config cannot resolve. It runs as its own
+# pytest process; exclude it from static analysis. (Defaults preserved.)
+exclude = ["**/node_modules", "**/__pycache__", "**/.*", "tests/client_compat"]
 
 [tool.ruff]
 line-length = 88
