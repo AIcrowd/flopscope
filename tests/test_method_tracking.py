@@ -100,53 +100,46 @@ def test_searchsorted_method_tracks():
     assert bc.flops_used > 0
 
 
-# ----- In-place sort / partition -----
+# ----- In-place sort / partition: immutable, must raise -----
 
 
-def test_inplace_sort_method_tracks_and_mutates():
-    """``a.sort()`` mutates ``a`` in place and returns ``None``. The
-    method override must charge FLOPs through ``me.sort``."""
+def test_inplace_sort_raises_immutable():
+    """``a.sort()`` must raise; flopscope arrays are immutable.
+    Use fnp.sort(arr) for a sorted copy."""
     a = fnp.random.randn(8)
-    old_id = id(a)
-    with flops.BudgetContext(flop_budget=int(1e9)) as bc:
-        ret = a.sort()
-    assert ret is None
-    assert id(a) == old_id
-    assert bc.flops_used > 0
-    # ``a`` is now sorted ascending
-    assert np.all(np.diff(np.asarray(a)) >= 0)
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        with pytest.raises(ValueError, match="immutable"):
+            a.sort()
 
 
-def test_inplace_partition_method_tracks_and_mutates():
+def test_inplace_partition_raises_immutable():
+    """``a.partition(k)`` must raise; flopscope arrays are immutable.
+    Use fnp.partition(arr, k) for a copy."""
     a = fnp.random.randn(8)
-    old_id = id(a)
-    with flops.BudgetContext(flop_budget=int(1e9)) as bc:
-        ret = a.partition(3)
-    assert ret is None
-    assert id(a) == old_id
-    assert bc.flops_used > 0
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        with pytest.raises(ValueError, match="immutable"):
+            a.partition(3)
 
 
-def test_inplace_sort_on_symmetric_refuses():
-    """``A_sym.sort()`` would scramble axis order and break the symmetry
-    metadata. The method override must raise rather than silently
-    corrupt the metadata."""
+def test_inplace_sort_on_symmetric_raises_immutable():
+    """``A_sym.sort()`` must raise (immutable, not a symmetry-specific error)."""
     A = flops.symmetrize(
         fnp.random.randn(4, 4),
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        with pytest.raises(ValueError, match="symmetry"):
+        with pytest.raises(ValueError, match="immutable"):
             A.sort()
 
 
-def test_inplace_partition_on_symmetric_refuses():
+def test_inplace_partition_on_symmetric_raises_immutable():
+    """``A_sym.partition(k)`` must raise (immutable)."""
     A = flops.symmetrize(
         fnp.random.randn(4, 4),
         symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
     )
     with flops.BudgetContext(flop_budget=int(1e9)):
-        with pytest.raises(ValueError, match="symmetry"):
+        with pytest.raises(ValueError, match="immutable"):
             A.partition(2)
 
 

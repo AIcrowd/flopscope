@@ -668,68 +668,30 @@ class FlopscopeArray(_np.ndarray):
     def nonzero(self, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # type: ignore[override]
         return _me().nonzero(self, *args, **kwargs)
 
-    # In-place sort/partition: NumPy mutates self and returns None.
-    # Charge FLOPs through me.sort/partition, then copy result into self.
-    # Guard against in-place mutation that would silently break symmetry.
+    # flopscope arrays are immutable: item assignment and in-place mutation
+    # are not supported.  Raise descriptive errors that match the client.
 
-    def _check_inplace_breaks_symmetry(self, op_name):
-        """Refuse in-place ops that would invalidate SymmetricTensor metadata.
-
-        ``self._symmetry`` is set by SymmetricTensor; plain FlopscopeArrays
-        do not have it (or it's None). Guarding via getattr keeps this
-        method valid on both subclasses without a forward reference.
-        """
-        sym = getattr(self, "_symmetry", None)
-        if sym is not None:
-            raise ValueError(
-                f"in-place {op_name} on a SymmetricTensor would break "
-                f"symmetry on axes {sym.axes}; call fnp.{op_name}(arr) for "
-                f"an unsymmetric copy instead."
-            )
+    def __setitem__(self, key: Any, value: Any) -> None:
+        raise TypeError(
+            "flopscope arrays are immutable, so item assignment (arr[i] = ...) "
+            "and indexed in-place updates (arr[i] += ...) are not supported. "
+            "Build the result functionally instead: collect the pieces in a "
+            "list and combine them with fnp.stack(...) / fnp.concatenate(...), "
+            "or use a whole-array update (arr = arr + x). See "
+            "https://aicrowd.github.io/flopscope/docs/getting-started/competition/#immutable-arrays"
+        )
 
     def sort(self, *args: Any, **kwargs: Any) -> None:
-        self._check_inplace_breaks_symmetry("sort")
-        result = _me().sort(self, *args, **kwargs)
-        # Strip both self and result before np.copyto: keeps the
-        # invariant ("never pass a flopscope subclass to a raw NumPy call")
-        # explicit even though np.copyto is currently NOT in the
-        # __array_function__ allowlist.
-        _np.copyto(_to_base_ndarray(self), _to_base_ndarray(result))
+        raise ValueError(
+            "in-place sort is not supported; flopscope arrays are immutable. "
+            "Use fnp.sort(arr) to create a sorted copy."
+        )
 
     def partition(self, kth: Any, *args: Any, **kwargs: Any) -> None:
-        self._check_inplace_breaks_symmetry("partition")
-        result = _me().partition(self, kth, *args, **kwargs)
-        _np.copyto(_to_base_ndarray(self), _to_base_ndarray(result))
-
-    def _inplace_from_result(self, result, op_name):
-        """Apply ``result`` into ``self`` in place; refuse if the
-        operation would destroy or weaken symmetry metadata.
-
-        Compare ``self.symmetry`` and ``result.symmetry`` directly via
-        ``SymmetryGroup.__eq__`` (PR #51 made these value-equal with an
-        identity short-circuit and per-instance canonical-action cache).
-        Scalar in-place ops (``a += 1.0``) keep every group identically,
-        so the comparison passes via the identity short-circuit and the
-        copy proceeds cleanly.
-
-        ``_to_base_ndarray(self)`` is required around ``np.copyto``
-        because ``np.copyto`` could otherwise dispatch via
-        ``__array_function__`` if it ever lands in the allowlist --
-        without the strip, the call would recurse back through flopscope.
-        """
-        self_sym = getattr(self, "_symmetry", None)
-        result_sym = getattr(result, "_symmetry", None)
-        if self_sym is not None:
-            if self_sym != result_sym:
-                raise ValueError(
-                    f"in-place {op_name} would destroy or weaken symmetry "
-                    f"metadata on axes {self_sym.axes} (result symmetry: "
-                    f"{result_sym.axes if result_sym is not None else None}); "
-                    f"use ``self = fnp.{op_name}(self, other)`` to accept the "
-                    f"new result explicitly."
-                )
-        _np.copyto(_to_base_ndarray(self), _to_base_ndarray(result))
-        return self
+        raise ValueError(
+            "in-place partition is not supported; flopscope arrays are "
+            "immutable. Use fnp.partition(arr, kth) to create a copy."
+        )
 
     # ----- Binary arithmetic -----
 
@@ -740,8 +702,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().add(other, self)
 
     def __iadd__(self, other: Any) -> FlopscopeArray:
-        result = _me().add(self, other)
-        return self._inplace_from_result(result, "add")
+        raise TypeError(
+            "in-place add (arr += x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.add(arr, x) instead."
+        )
 
     def __sub__(self, other: Any) -> FlopscopeArray:  # type: ignore[override]
         return _me().subtract(self, other)
@@ -750,8 +714,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().subtract(other, self)
 
     def __isub__(self, other: Any) -> FlopscopeArray:
-        result = _me().subtract(self, other)
-        return self._inplace_from_result(result, "subtract")
+        raise TypeError(
+            "in-place subtract (arr -= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.subtract(arr, x) instead."
+        )
 
     def __mul__(self, other: Any) -> FlopscopeArray:
         return _me().multiply(self, other)
@@ -760,8 +726,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().multiply(other, self)
 
     def __imul__(self, other: Any) -> FlopscopeArray:
-        result = _me().multiply(self, other)
-        return self._inplace_from_result(result, "multiply")
+        raise TypeError(
+            "in-place multiply (arr *= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.multiply(arr, x) instead."
+        )
 
     def __truediv__(self, other: Any) -> FlopscopeArray:  # type: ignore[override]
         return _me().true_divide(self, other)
@@ -770,8 +738,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().true_divide(other, self)
 
     def __itruediv__(self, other: Any) -> FlopscopeArray:
-        result = _me().true_divide(self, other)
-        return self._inplace_from_result(result, "true_divide")
+        raise TypeError(
+            "in-place divide (arr /= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.true_divide(arr, x) instead."
+        )
 
     def __floordiv__(self, other: Any) -> FlopscopeArray:  # type: ignore[override]
         return _me().floor_divide(self, other)
@@ -780,8 +750,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().floor_divide(other, self)
 
     def __ifloordiv__(self, other: Any) -> FlopscopeArray:
-        result = _me().floor_divide(self, other)
-        return self._inplace_from_result(result, "floor_divide")
+        raise TypeError(
+            "in-place floor divide (arr //= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.floor_divide(arr, x) instead."
+        )
 
     def __mod__(self, other: Any) -> FlopscopeArray:
         return _me().mod(self, other)
@@ -790,8 +762,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().mod(other, self)
 
     def __imod__(self, other: Any) -> FlopscopeArray:
-        result = _me().mod(self, other)
-        return self._inplace_from_result(result, "mod")
+        raise TypeError(
+            "in-place mod (arr %= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.mod(arr, x) instead."
+        )
 
     def __pow__(self, other: Any) -> FlopscopeArray:
         return _me().power(self, other)
@@ -800,8 +774,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().power(other, self)
 
     def __ipow__(self, other: Any) -> FlopscopeArray:
-        result = _me().power(self, other)
-        return self._inplace_from_result(result, "power")
+        raise TypeError(
+            "in-place power (arr **= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.power(arr, x) instead."
+        )
 
     def __matmul__(self, other: Any) -> FlopscopeArray:
         return _me().matmul(self, other)
@@ -810,16 +786,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().matmul(other, self)
 
     def __imatmul__(self, other: Any) -> FlopscopeArray:
-        # __imatmul__ is special: matmul output shape may differ from
-        # self.shape, in which case in-place mutation is impossible.
-        # CPython's documented in-place fallback rebinds the name to the
-        # new (out-of-place) result. NumPy raises ValueError on shape
-        # mismatch; we follow the CPython fallback so typical pipelines
-        # using ``A @= B`` to grow state work cleanly.
-        result = _me().matmul(self, other)
-        if result.shape != self.shape:
-            return result
-        return self._inplace_from_result(result, "matmul")
+        raise TypeError(
+            "in-place matmul (arr @= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.matmul(arr, x) instead."
+        )
 
     # ----- Unary arithmetic -----
 
@@ -868,8 +838,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().bitwise_and(other, self)
 
     def __iand__(self, other: Any) -> FlopscopeArray:
-        result = _me().bitwise_and(self, other)
-        return self._inplace_from_result(result, "bitwise_and")
+        raise TypeError(
+            "in-place bitwise and (arr &= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.bitwise_and(arr, x) instead."
+        )
 
     def __or__(self, other: Any) -> FlopscopeArray:
         return _me().bitwise_or(self, other)
@@ -878,8 +850,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().bitwise_or(other, self)
 
     def __ior__(self, other: Any) -> FlopscopeArray:
-        result = _me().bitwise_or(self, other)
-        return self._inplace_from_result(result, "bitwise_or")
+        raise TypeError(
+            "in-place bitwise or (arr |= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.bitwise_or(arr, x) instead."
+        )
 
     def __xor__(self, other: Any) -> FlopscopeArray:
         return _me().bitwise_xor(self, other)
@@ -888,8 +862,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().bitwise_xor(other, self)
 
     def __ixor__(self, other: Any) -> FlopscopeArray:
-        result = _me().bitwise_xor(self, other)
-        return self._inplace_from_result(result, "bitwise_xor")
+        raise TypeError(
+            "in-place bitwise xor (arr ^= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.bitwise_xor(arr, x) instead."
+        )
 
     def __lshift__(self, other: Any) -> FlopscopeArray:
         return _me().left_shift(self, other)
@@ -898,8 +874,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().left_shift(other, self)
 
     def __ilshift__(self, other: Any) -> FlopscopeArray:
-        result = _me().left_shift(self, other)
-        return self._inplace_from_result(result, "left_shift")
+        raise TypeError(
+            "in-place left shift (arr <<= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.left_shift(arr, x) instead."
+        )
 
     def __rshift__(self, other: Any) -> FlopscopeArray:
         return _me().right_shift(self, other)
@@ -908,8 +886,10 @@ class FlopscopeArray(_np.ndarray):
         return _me().right_shift(other, self)
 
     def __irshift__(self, other: Any) -> FlopscopeArray:
-        result = _me().right_shift(self, other)
-        return self._inplace_from_result(result, "right_shift")
+        raise TypeError(
+            "in-place right shift (arr >>= x) is not supported; flopscope arrays are "
+            "immutable. Use arr = fnp.right_shift(arr, x) instead."
+        )
 
 
 def wrap_module_returns(module, skip_names=None, check_module=True):

@@ -466,71 +466,71 @@ class TestFlopscopeArrayReverseOps:
 
 
 class TestFlopscopeArrayInPlaceOps:
-    """Cover lines for __iadd__, __isub__, __imul__, etc."""
+    """In-place ops must raise; flopscope arrays are immutable."""
 
-    def test_iadd(self):
+    def test_iadd_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([1.0, 2.0, 3.0])
-            arr += 1.0
-            numpy.testing.assert_array_equal(arr, [2.0, 3.0, 4.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr += 1.0
 
-    def test_isub(self):
+    def test_isub_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([10.0, 20.0, 30.0])
-            arr -= 5.0
-            numpy.testing.assert_array_equal(arr, [5.0, 15.0, 25.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr -= 5.0
 
-    def test_imul(self):
+    def test_imul_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([1.0, 2.0, 3.0])
-            arr *= 3.0
-            numpy.testing.assert_array_equal(arr, [3.0, 6.0, 9.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr *= 3.0
 
-    def test_itruediv(self):
+    def test_itruediv_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([10.0, 20.0, 30.0])
-            arr /= 10.0
-            numpy.testing.assert_array_equal(arr, [1.0, 2.0, 3.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr /= 10.0
 
-    def test_ifloordiv(self):
+    def test_ifloordiv_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([10.0, 21.0, 35.0])
-            arr //= 10.0
-            numpy.testing.assert_array_equal(arr, [1.0, 2.0, 3.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr //= 10.0
 
-    def test_imod(self):
+    def test_imod_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([10.0, 21.0, 35.0])
-            arr %= 10.0
-            numpy.testing.assert_array_equal(arr, [0.0, 1.0, 5.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr %= 10.0
 
-    def test_ipow(self):
+    def test_ipow_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([2.0, 3.0, 4.0])
-            arr **= 2.0
-            numpy.testing.assert_array_equal(arr, [4.0, 9.0, 16.0])
+            with pytest.raises(TypeError, match="immutable"):
+                arr **= 2.0
 
-    def test_imatmul(self):
+    def test_imatmul_raises(self):
         import flopscope.numpy as fnp
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([[1.0, 0.0], [0.0, 1.0]])
-            arr @= numpy.array([[2.0, 3.0], [4.0, 5.0]])
-            numpy.testing.assert_array_equal(arr, [[2.0, 3.0], [4.0, 5.0]])
+            with pytest.raises(TypeError, match="immutable"):
+                arr @= numpy.array([[2.0, 3.0], [4.0, 5.0]])
 
 
 class TestFlopscopeArrayBitwiseOps:
@@ -549,8 +549,8 @@ class TestFlopscopeArrayBitwiseOps:
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([0b1010, 0b1100], dtype=numpy.int32)
-            arr &= numpy.int32(0b1010)
-            numpy.testing.assert_array_equal(arr, [0b1010, 0b1000])
+            with pytest.raises(TypeError, match="immutable"):
+                arr &= numpy.int32(0b1010)
 
     def test_ror(self):
         import flopscope.numpy as fnp
@@ -565,8 +565,8 @@ class TestFlopscopeArrayBitwiseOps:
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([0b1010, 0b0001], dtype=numpy.int32)
-            arr |= numpy.int32(0b0100)
-            numpy.testing.assert_array_equal(arr, [0b1110, 0b0101])
+            with pytest.raises(TypeError, match="immutable"):
+                arr |= numpy.int32(0b0100)
 
     def test_rxor(self):
         import flopscope.numpy as fnp
@@ -581,8 +581,8 @@ class TestFlopscopeArrayBitwiseOps:
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([0b1010, 0b1100], dtype=numpy.int32)
-            arr ^= numpy.int32(0b1111)
-            numpy.testing.assert_array_equal(arr, [0b0101, 0b0011])
+            with pytest.raises(TypeError, match="immutable"):
+                arr ^= numpy.int32(0b1111)
 
     def test_rlshift(self):
         import flopscope.numpy as fnp
@@ -601,8 +601,8 @@ class TestFlopscopeArrayBitwiseOps:
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([1, 2], dtype=numpy.int32)
-            arr <<= numpy.int32(2)
-            numpy.testing.assert_array_equal(arr, [4, 8])
+            with pytest.raises(TypeError, match="immutable"):
+                arr <<= numpy.int32(2)
 
     def test_rrshift(self):
         import flopscope.numpy as fnp
@@ -617,8 +617,8 @@ class TestFlopscopeArrayBitwiseOps:
 
         with BudgetContext(flop_budget=10**9):
             arr = fnp.array([4, 8], dtype=numpy.int32)
-            arr >>= numpy.int32(1)
-            numpy.testing.assert_array_equal(arr, [2, 4])
+            with pytest.raises(TypeError, match="immutable"):
+                arr >>= numpy.int32(1)
 
 
 class TestArrayWrapReturnScalar:

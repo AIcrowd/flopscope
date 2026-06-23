@@ -253,47 +253,31 @@ def test_mixed_python_scalar_left_dispatches():
     assert bc.flops_used > 0
 
 
-# ----- In-place dunder identity preservation -----
+# ----- Immutability: in-place ops must raise -----
 
 
-def test_inplace_add_preserves_identity():
-    """a += b must mutate a, not rebind it. Currently broken on
-    post-PR-#51 main — fixed in Task 5."""
-    a = fnp.random.randn(8)
-    old_id = id(a)
-    with flops.BudgetContext(flop_budget=int(1e9)):
-        a += 1
-    assert id(a) == old_id
+def test_setitem_raises_immutable():
+    import flopscope.numpy as fnp
+
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(TypeError, match="immutable"):
+        a[0] = 9.0
 
 
-def test_inplace_add_scalar_on_symmetric_tensor_preserves_identity():
-    """``A_sym += 1.0`` is symmetry-preserving (binary-with-scalar keeps
-    every group). It must mutate ``A_sym`` in place AND keep the
-    SymmetricTensor type — no spurious downgrade, no rebinding."""
-    A = flops.symmetrize(
-        fnp.random.randn(4, 4),
-        symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
-    )
-    old_id = id(A)
-    with flops.BudgetContext(flop_budget=int(1e9)) as bc:
-        A += 1.0
-    assert id(A) == old_id
-    assert isinstance(A, flops.SymmetricTensor)
-    assert bc.flops_used > 0
+def test_iadd_raises_immutable():
+    import flopscope.numpy as fnp
+
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(TypeError, match="immutable"):
+        a += fnp.array([1.0, 1.0, 1.0])
 
 
-def test_inplace_add_refuses_when_symmetry_would_be_destroyed():
-    """``A_sym += B_unsymmetric`` would silently overwrite ``A_sym``'s
-    bytes with a non-symmetric result. The in-place dunder must refuse
-    rather than corrupt the symmetry metadata."""
-    A = flops.symmetrize(
-        fnp.random.randn(4, 4),
-        symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)),
-    )
-    B = fnp.random.randn(4, 4)  # plain FlopscopeArray, no symmetry
-    with flops.BudgetContext(flop_budget=int(1e9)):
-        with pytest.raises(ValueError, match="destroy or weaken symmetry"):
-            A += B
+def test_inplace_sort_raises_immutable():
+    import flopscope.numpy as fnp
+
+    a = fnp.array([3.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="immutable"):
+        a.sort()
 
 
 # ----- ufunc.outer / .reduceat / .at / generic .reduce / .accumulate -----
@@ -932,60 +916,6 @@ def test_perf_array_ufunc_dispatch_does_not_copy():
         f"100x np.add(flopscope, flopscope) took {elapsed:.3f}s; "
         f"are we re-introducing per-call copies or O(|G|) work in "
         f"__array_ufunc__ / _filter_to_np_signature?"
-    )
-
-
-def test_perf_warm_inplace_add_scalar_on_symmetric_is_fast():
-    """Warm ``A_sym += 1.0`` on a rank-4 SymmetricTensor must finish
-    well under 50 ms, AND must preserve the symmetry object identity.
-
-    This pins three PR #51 fast paths for the in-place dunder rewrite:
-    - class 4 (``_counted_binary`` scalar fast path) — ``A_sym + 1.0``
-      flows through the scalar branch that returns the operand's
-      symmetry unchanged (same object reference).
-    - class 5 (``SymmetryGroup.__eq__`` identity short-circuit) —
-      ``_inplace_from_result`` does ``self_sym != result_sym``; for
-      scalar ops these are the SAME instance, hitting the identity
-      short-circuit and skipping the O(|G|) ``_canonical_axis_action``
-      comparison.
-    - class 6 (per-instance ``_canonical_axis_action`` cache) — even
-      if identity short-circuit somehow misses, the cache still keeps
-      subsequent calls O(1).
-
-    If this test fails with elapsed > 50 ms or identity is lost, the
-    in-place dunder rewrite is constructing a fresh ``SymmetryGroup``
-    for comparison or wrapping the scalar into an array somewhere
-    along the dispatch chain.
-    """
-    import time
-
-    arr = fnp.random.randn(4, 4, 4, 4)
-    A_sym = flops.symmetrize(
-        arr, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1, 2, 3))
-    )
-    original_symmetry_ref = A_sym._symmetry  # pyright: ignore[reportAttributeAccessIssue]
-    # Warm-up: prime caches and dispatch tables.
-    with flops.BudgetContext(flop_budget=int(1e12)):
-        A_sym += 1.0
-    # The above mutated A_sym; verify identity preserved through warm-up.
-    assert A_sym._symmetry is original_symmetry_ref, (  # pyright: ignore[reportAttributeAccessIssue]
-        "warm-up in-place add lost symmetry object identity; "
-        "_inplace_from_result is constructing a fresh group somewhere"
-    )
-    # Measure the warm path.
-    with flops.BudgetContext(flop_budget=int(1e12)):
-        t0 = time.perf_counter()
-        A_sym += 1.0
-        elapsed = time.perf_counter() - t0
-    assert elapsed < 0.05, (
-        f"warm A_sym += 1.0 took {elapsed * 1000:.1f}ms; "
-        f"PR #51 made this the scalar fast path. Are we missing the "
-        f"identity short-circuit in _inplace_from_result, or wrapping "
-        f"the scalar in an array in __iadd__ before dispatch?"
-    )
-    assert A_sym._symmetry is original_symmetry_ref, (  # pyright: ignore[reportAttributeAccessIssue]
-        "warm in-place add lost symmetry object identity; "
-        "_inplace_from_result is constructing a fresh group somewhere"
     )
 
 

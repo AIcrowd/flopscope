@@ -262,45 +262,6 @@ def test_unary_bitwise_flops_match_function(name, op, func_name):
     assert b1.flops_used == b2.flops_used
 
 
-# ----- In-place operator tests -----
-
-
-def test_inplace_mul_tracked():
-    a = fnp.array([1.0, 2.0, 3.0, 4.0])
-    b = fnp.array([0.5, 1.5, 2.5, 3.5])
-    with flops.BudgetContext(flop_budget=int(1e9)) as budget:
-        a *= b
-    assert budget.flops_used > 0
-    assert isinstance(a, fnp.ndarray)
-
-
-def test_inplace_add_tracked():
-    a = fnp.array([1.0, 2.0, 3.0, 4.0])
-    b = fnp.array([0.5, 1.5, 2.5, 3.5])
-    with flops.BudgetContext(flop_budget=int(1e9)) as budget:
-        a += b
-    assert budget.flops_used > 0
-    assert isinstance(a, fnp.ndarray)
-
-
-def test_inplace_sub_tracked():
-    a = fnp.array([1.0, 2.0, 3.0, 4.0])
-    b = fnp.array([0.5, 1.5, 2.5, 3.5])
-    with flops.BudgetContext(flop_budget=int(1e9)) as budget:
-        a -= b
-    assert budget.flops_used > 0
-    assert isinstance(a, fnp.ndarray)
-
-
-def test_inplace_truediv_tracked():
-    a = fnp.array([1.0, 2.0, 3.0, 4.0])
-    b = fnp.array([0.5, 1.5, 2.5, 3.5])
-    with flops.BudgetContext(flop_budget=int(1e9)) as budget:
-        a /= b
-    assert budget.flops_used > 0
-    assert isinstance(a, fnp.ndarray)
-
-
 # ----- Integration test -----
 
 
