@@ -116,62 +116,16 @@ _BY_DESIGN_IMMUTABLE = {
     "__ixor__",
 }
 
-# Measured 2026-06-23 against flopscope-client 0.8.0rc2 / numpy 2.2. Every entry
-# is a real participant-usable ndarray method/operator the client is MISSING
-# (10/10 sampled raise AttributeError/TypeError live). This is the exhaustive
-# operator/method gap inventory — Phase 2 shrinks it; do not edit by hand except
-# to remove an entry a fix has genuinely closed.
+# Measured 2026-06-23 against flopscope-client 0.8.0rc3 / numpy 2.2.
+# rc3 closed 46 of the original 48 gaps (read-only methods, bitwise/shift
+# operators, conversion dunders, dtype type-objects, layout metadata, accounting,
+# is_symmetric, native immutability, flopscope.numpy package).
+# Only the two numpy dispatch-protocol hooks remain — DEFERRED, not participant-
+# relevant for the evaluation model (participant code never registers custom ufuncs
+# or __array_function__ overrides against the flopscope server).
 KNOWN_MISSING = {
-    # read-only methods (function forms like np.argsort may work; the METHOD does not)
-    "all",
-    "any",
-    "argmax",
-    "argmin",
-    "argpartition",
-    "argsort",
-    "choose",
-    "clip",
-    "compress",
-    "conj",
-    "conjugate",
-    "cumprod",
-    "cumsum",
-    "diagonal",
-    "item",
-    "nonzero",
-    "prod",
-    "repeat",
-    "round",
-    "searchsorted",
-    "squeeze",
-    "std",
-    "swapaxes",
-    "take",
-    "trace",
-    "var",
-    # operator / conversion dunders
-    "__and__",
-    "__or__",
-    "__xor__",
-    "__invert__",
-    "__lshift__",
-    "__rshift__",
-    "__rand__",
-    "__ror__",
-    "__rxor__",
-    "__rlshift__",
-    "__rrshift__",
-    "__divmod__",
-    "__rdivmod__",
-    "__pos__",
-    "__contains__",
-    "__index__",
-    "__complex__",
-    "__copy__",
-    "__deepcopy__",
-    "__array__",
-    "__array_ufunc__",
-    "__array_function__",
+    "__array_ufunc__",  # numpy dispatch protocol — deferred, not eval-model
+    "__array_function__",  # numpy dispatch protocol — deferred, not eval-model
 }
 
 
@@ -196,4 +150,5 @@ def test_remote_array_surface_matches_measured_baseline():
 
 def test_baseline_is_an_honest_count():
     # Guards the documented inventory number against silent drift.
-    assert len(KNOWN_MISSING) == 48
+    # rc3: down from 48 to 2 (only the numpy dispatch-protocol hooks remain, deferred).
+    assert len(KNOWN_MISSING) == 2
