@@ -30,8 +30,17 @@ from __future__ import annotations
 import numpy as np
 from flopscope._remote_array import RemoteArray
 
-# ndarray surface a remote proxy genuinely cannot/should not mirror: local memory
-# layout, numpy-subclass internals, device/IO buffers, object plumbing.
+# Excluded from the fix-now 48 for two DIFFERENT reasons (do not conflate):
+#  - GENUINELY INCOMPATIBLE: raw-buffer / zero-copy interop whose contract is a
+#    pointer to THIS array's local memory (data, __array_interface__,
+#    __array_struct__, ctypes, __buffer__) and memory-reinterpret/view aliasing
+#    (view, getfield, setfield, byteswap). The buffer lives on the server; there
+#    is no local pointer, and a copy silently breaks the zero-copy/aliasing
+#    contract. These are the only truly un-bridgeable entries.
+#  - BRIDGEABLE METADATA we just haven't wired: strides, flags, itemsize are
+#    plain server-reportable values (the client already bridges shape/ndim/size/
+#    dtype/nbytes — the line is currently inconsistent). Worth bridging; parked
+#    here so they don't inflate the fix-now count.
 _PROXY_IMPOSSIBLE = {
     "data",
     "strides",
@@ -76,7 +85,14 @@ _PROXY_IMPOSSIBLE = {
     "__setattr__",
     "__getattribute__",
 }
-# In-place mutation: RemoteArray is immutable by design (server-held handle).
+# In-place mutation. NOTE: this is a DELIBERATE, DOCUMENTED policy divergence, not
+# a technical impossibility — native FlopscopeArray SUPPORTS all of these (verified:
+# a+=b, a.sort(), a[i]=x, a.fill(0)), but the client raises a documented
+# "flopscope arrays are immutable" error (competition docs: #immutable-arrays).
+# They ARE bridgeable to the server, but faithful parity needs the server to model
+# handle aliasing (b=a; a.sort() must mutate b; views must alias) — a half-bridge
+# would be silently wrong. Parked here as a policy decision (keep immutable, or
+# bridge, or make native immutable too so local==eval), NOT counted as fix-now.
 _BY_DESIGN_IMMUTABLE = {
     "fill",
     "partition",
