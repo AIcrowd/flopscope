@@ -109,3 +109,38 @@ def test_raw_buffer_pointers_raise_clear_error():
     for attr in ("data", "ctypes", "__array_interface__", "__array_struct__"):
         with pytest.raises(AttributeError, match="remote"):
             getattr(a, attr)
+
+
+# --- in-place operators: immutable, parity with native (Codex review) ---
+# Native FlopscopeArray raises on `a += b`; without explicit __i* on the client,
+# Python would fall back to __add__ and silently rebind `a`, so `a += b` would
+# work on the eval client while raising locally. The client must raise too.
+
+
+def test_inplace_add_raises_on_client():
+    a, b = fnp.array([1.0, 2.0, 3.0]), fnp.array([1.0, 1.0, 1.0])
+    with pytest.raises(TypeError, match="immutable"):
+        a += b
+
+
+def test_inplace_mul_raises_on_client():
+    a = fnp.array([1.0, 2.0, 3.0])
+    with pytest.raises(TypeError, match="immutable"):
+        a *= fnp.array([2.0, 2.0, 2.0])
+
+
+# --- __complex__ preserves complex values (Codex review) ---
+# Must not route through float(self): float() raises for a genuinely complex
+# size-1 array, unlike NumPy's complex(arr).
+
+
+def test_complex_of_real_scalar_works():
+    assert complex(fnp.array([3.0])) == (3 + 0j)
+
+
+def test_complex_preserves_complex_value():
+    try:
+        a = fnp.array([1 + 2j])
+    except Exception:
+        pytest.skip("client/server does not support complex dtype")
+    assert complex(a) == (1 + 2j)

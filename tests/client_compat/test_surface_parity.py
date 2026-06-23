@@ -85,14 +85,16 @@ _PROXY_IMPOSSIBLE = {
     "__setattr__",
     "__getattribute__",
 }
-# In-place mutation. NOTE: this is a DELIBERATE, DOCUMENTED policy divergence, not
-# a technical impossibility — native FlopscopeArray SUPPORTS all of these (verified:
-# a+=b, a.sort(), a[i]=x, a.fill(0)), but the client raises a documented
-# "flopscope arrays are immutable" error (competition docs: #immutable-arrays).
-# They ARE bridgeable to the server, but faithful parity needs the server to model
-# handle aliasing (b=a; a.sort() must mutate b; views must alias) — a half-bridge
-# would be silently wrong. Parked here as a policy decision (keep immutable, or
-# bridge, or make native immutable too so local==eval), NOT counted as fix-now.
+# In-place mutation. Immutable BY DESIGN on BOTH sides (competition rule
+# #immutable-arrays): native FlopscopeArray and the client RemoteArray both raise
+# a "flopscope arrays are immutable" error for item assignment, augmented
+# assignment, and the C-level mutators (fill/put/resize/sort/partition). Excluded
+# from the required surface because the client deliberately does not mirror the
+# mutating API; the behavioural parity (both raise identically) is locked by
+# dedicated tests (test_audit_gaps.py + tests/test_array_protocols.py), not by
+# this static surface diff. (Bridging to true in-place mutation was rejected: it
+# would need the server to model handle aliasing + views, and a half-bridge would
+# be silently wrong.)
 _BY_DESIGN_IMMUTABLE = {
     "fill",
     "partition",

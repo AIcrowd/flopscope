@@ -580,8 +580,18 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
     def __contains__(self, item):
         return item in _flatten_to_list(self.tolist())
 
+    @timed_dispatch
     def __complex__(self):
-        return complex(float(self))
+        # Fetch the scalar and call complex() directly: routing through
+        # float(self) would raise for a genuinely complex size-1 array
+        # (e.g. fnp.array([1 + 2j])), unlike NumPy's complex(arr).
+        if self.size != 1:
+            raise TypeError("only size-1 arrays can be converted to Python scalars")
+        data, shape, dtype = self._fetch_data()
+        result = _bytes_to_list(data, shape, dtype)
+        while isinstance(result, list):
+            result = result[0]
+        return complex(result)
 
     def __index__(self):
         return int(self)
@@ -637,6 +647,54 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             "or use a whole-array update (arr = arr + x). See "
             "https://aicrowd.github.io/flopscope/docs/getting-started/competition/#immutable-arrays"
         )
+
+    # In-place operators raise, mirroring native FlopscopeArray. Without these,
+    # `a += b` would fall back to __add__ and silently rebind `a` on the client
+    # while raising locally — breaking local==eval immutability parity.
+    def _raise_inplace(self, verb: str, sym: str, func: str):
+        raise TypeError(
+            f"in-place {verb} (arr {sym} x) is not supported; flopscope arrays "
+            f"are immutable. Use arr = fnp.{func}(arr, x) instead."
+        )
+
+    def __iadd__(self, other):
+        self._raise_inplace("add", "+=", "add")
+
+    def __isub__(self, other):
+        self._raise_inplace("subtract", "-=", "subtract")
+
+    def __imul__(self, other):
+        self._raise_inplace("multiply", "*=", "multiply")
+
+    def __itruediv__(self, other):
+        self._raise_inplace("divide", "/=", "true_divide")
+
+    def __ifloordiv__(self, other):
+        self._raise_inplace("floor divide", "//=", "floor_divide")
+
+    def __imod__(self, other):
+        self._raise_inplace("mod", "%=", "mod")
+
+    def __ipow__(self, other):
+        self._raise_inplace("power", "**=", "power")
+
+    def __imatmul__(self, other):
+        self._raise_inplace("matmul", "@=", "matmul")
+
+    def __iand__(self, other):
+        self._raise_inplace("bitwise-and", "&=", "bitwise_and")
+
+    def __ior__(self, other):
+        self._raise_inplace("bitwise-or", "|=", "bitwise_or")
+
+    def __ixor__(self, other):
+        self._raise_inplace("bitwise-xor", "^=", "bitwise_xor")
+
+    def __ilshift__(self, other):
+        self._raise_inplace("left shift", "<<=", "left_shift")
+
+    def __irshift__(self, other):
+        self._raise_inplace("right shift", ">>=", "right_shift")
 
     # -- operator overloads (dispatch to server) ----------------------------
 
