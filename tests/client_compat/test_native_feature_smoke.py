@@ -61,3 +61,23 @@ def test_symmetric_tensor_is_intentionally_server_side():
     # error. Document that contract so it is not mistaken for a parity gap.
     with pytest.raises(AttributeError, match="server-side"):
         _ = fnp.SymmetricTensor
+
+
+def test_symmetrize_result_carries_symmetry_attribute():
+    # Positive control / partial parity: native symmetrize() returns a
+    # SymmetricTensor with a .symmetry attribute; the client returns a RemoteArray
+    # whose .symmetry DOES forward to the server. This part has parity.
+    out = fnp.symmetrize(fnp.array([[1.0, 2.0], [2.0, 1.0]]), symmetry=_sym2())
+    assert type(out.symmetry).__name__ == "SymmetryGroup"
+
+
+def test_symmetrize_result_is_symmetric_method_gap():
+    # PARTIAL-PARITY GAP: native SymmetricTensor has .is_symmetric (the type is a
+    # numpy.ndarray subclass with extra symmetric API); the client's RemoteArray
+    # proxy does NOT forward .is_symmetric. A participant who develops against
+    # native symmetrize().is_symmetric breaks on the client. No xfail — this
+    # failure IS the measurement; flip to a positive assert when Phase 2 closes it.
+    out = fnp.symmetrize(fnp.array([[1.0, 2.0], [2.0, 1.0]]), symmetry=_sym2())
+    assert hasattr(out, "is_symmetric"), (
+        "client symmetrize() result missing .is_symmetric (native SymmetricTensor has it)"
+    )
