@@ -447,4 +447,14 @@ XFAIL_PATTERNS: dict[str, str] = {
     # numpy.polynomial.polyval — flopscope wrapper subclass / dispatch
     # diverges from numpy expectation. Surfaced by harness fix; out of scope.
     "TestEvaluation::test_polyval": NEEDS_TRIAGE,
+    # numpy.polynomial mutates its coefficient array in place internally
+    # (polypow / polymul scratch buffers). Under immutability that raises a
+    # TypeError, which numpy.polynomial swallows and re-raises as NotImplemented,
+    # so it surfaces as "unsupported operand type(s) for *: 'int' and
+    # 'Polynomial'" — the immutability sentinel is lost, so it cannot be matched
+    # at runtime and is pinned here. By-design divergence (#immutable-arrays).
+    "TestFraction::test_Fraction": (
+        "flopscope arrays are immutable (#immutable-arrays); numpy.polynomial "
+        "mutates its coefficient array in place internally"
+    ),
 }

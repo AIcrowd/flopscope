@@ -286,10 +286,14 @@ def reset_budget():
 
 
 def pytest_configure(config):
-    """Freeze numpy, rebind flopscope internals, then patch."""
+    """Freeze numpy, rebind flopscope internals, patch, register global plugins."""
     frozen = _freeze_numpy()
     _rebind_flopscope_np(frozen)
     _patch_numpy()
+    if not config.pluginmanager.has_plugin("flopscope-immutability-xfail"):
+        config.pluginmanager.register(
+            _ImmutabilityXfailPlugin(), "flopscope-immutability-xfail"
+        )
 
 
 def pytest_unconfigure(config):
@@ -306,3 +310,84 @@ def pytest_collection_modifyitems(config, items):
             if fnmatch.fnmatch(node_id, pattern) or pattern in node_id:
                 item.add_marker(pytest.mark.xfail(reason=reason, strict=False))
                 break
+
+
+# ---------------------------------------------------------------------------
+# Immutability divergence -> xfail (runtime, exception-matched)
+# ---------------------------------------------------------------------------
+# flopscope arrays are immutable by design (competition rule #immutable-arrays):
+# __setitem__, the in-place operators, and in-place sort/partition raise. Many
+# of NumPy's own tests mutate arrays in place — often via an ``out=`` scratch
+# buffer or ``arr[...] = `` setup — so when run against flopscope they fail with
+# our immutability TypeError/ValueError. That is a deliberate, documented
+# divergence, not a parity bug. Convert exactly those failures to xfail at
+# report time. Matching the raised exception (rather than enumerating test ids in
+# .xfails) keeps this robust across NumPy versions, which reshuffle which tests
+# happen to mutate. The dedicated surface-parity test pins the immutable method
+# *set*; this only suppresses NumPy tests that exercise that documented behaviour.
+
+# Contiguous phrase present in every immutability guard message
+# (src/flopscope/_ndarray.py). Specific enough not to match NumPy's own
+# read-only errors (e.g. "assignment destination is read-only").
+_IMMUTABLE_SENTINEL = "flopscope arrays are immutable"
+
+
+def _hit_immutability_guard(excinfo) -> bool:
+    """True if the raised exception chain is flopscope's immutability guard."""
+    exc = getattr(excinfo, "value", None)
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (TypeError, ValueError)) and _IMMUTABLE_SENTINEL in str(exc):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+class _ImmutabilityXfailPlugin:
+    """Reclassify in-place-mutation failures as xfail (immutability is by design).
+
+    Registered as a global plugin in :func:`pytest_configure` rather than left as
+    a bare conftest hook so it also fires for the ``--pyargs`` NumPy tests: a
+    per-item runtest hook defined directly in a conftest only runs for items
+    inside that conftest's directory, and the borrowed NumPy tests live in
+    site-packages (the same ``--pyargs`` scoping that makes session hooks like
+    ``pytest_configure`` work but per-item ones silently no-op).
+    """
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(self, item, call):
+        outcome = yield
+        report = outcome.get_result()
+        # ``call`` covers in-test mutation; ``setup`` covers fixtures that mutate
+        # while preparing operands (reported as an ERROR, not a FAILURE).
+        if (
+            report.when in ("setup", "call")
+            and report.failed
+            and _hit_immutability_guard(call.excinfo)
+        ):
+            report.outcome = "skipped"
+            report.wasxfail = (
+                "flopscope arrays are immutable by design (#immutable-arrays); "
+                "NumPy's test mutates in place"
+            )
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_make_collect_report(self, collector):
+        # Some NumPy test modules mutate a (patched) flopscope array at *import*
+        # time — e.g. test_linalg builds strided test cases with ``xi[...] = x``.
+        # Under immutability that raises during collection, so the whole module
+        # is un-collectable and individual tests can never be reached to xfail.
+        # Convert that specific collection failure into a module-level skip
+        # (same by-design rationale as the runtime hook). The skip is loud in
+        # ``-rs`` output, so the coverage trade-off stays visible.
+        outcome = yield
+        report = outcome.get_result()
+        if report.outcome == "failed" and _IMMUTABLE_SENTINEL in str(report.longrepr):
+            report.outcome = "skipped"
+            report.longrepr = (
+                str(getattr(collector, "path", collector.nodeid)),
+                None,
+                "Skipped: flopscope arrays are immutable (#immutable-arrays); "
+                "this NumPy test module mutates an array at import time",
+            )
