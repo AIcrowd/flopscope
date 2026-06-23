@@ -76,6 +76,7 @@ ndarray = RemoteArray
 # Submodules (imported so ``fnp.linalg``, ``fnp.random``, ``fnp.fft`` work)
 # ---------------------------------------------------------------------------
 from flopscope import (
+    accounting,  # noqa: E402, F401
     fft,  # noqa: E402, F401
     flops,  # noqa: E402, F401
     linalg,  # noqa: E402, F401
