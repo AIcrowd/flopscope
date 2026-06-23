@@ -512,6 +512,34 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             result = result[0]
         return bool(result)
 
+    # --- conversion / protocol dunders (rc3 parity) ---
+    def __contains__(self, item):
+        return item in _flatten_to_list(self.tolist())
+
+    def __complex__(self):
+        return complex(float(self))
+
+    def __index__(self):
+        return int(self)
+
+    def __divmod__(self, other):
+        return (self // other, self % other)
+
+    def __rdivmod__(self, other):
+        return (other // self, other % self)
+
+    def __copy__(self):
+        return self  # immutable proxy: a copy is the same handle
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __array__(self, dtype=None):
+        import numpy as _np
+
+        arr = _np.asarray(self.tolist())
+        return arr if dtype is None else arr.astype(dtype)
+
     def __iter__(self):
         if not self._shape:
             raise TypeError("iteration over a 0-d array")
@@ -612,6 +640,9 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
     def __neg__(self):
         return self._dispatch_op("negative", self)
+
+    def __pos__(self):
+        return self._dispatch_op("positive", self)
 
     def __abs__(self):
         return self._dispatch_op("abs", self)
