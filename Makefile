@@ -62,6 +62,22 @@ test-numpy-compat:  ## Run NumPy's own tests against flopscope
 		          numpy.polynomial.tests.test_polynomial \
 		          numpy.random.tests.test_random
 
+.PHONY: test-client-parity
+test-client-parity:  ## Run NumPy's own tests against the flopscope CLIENT (+ live server)
+	$(UV) pytest tests/client_compat/ -n auto -q \
+		--pyargs numpy._core.tests.test_umath \
+		          numpy._core.tests.test_ufunc \
+		          numpy._core.tests.test_numeric \
+		          numpy.linalg.tests.test_linalg \
+		          numpy.fft.tests.test_pocketfft \
+		          numpy.fft.tests.test_helper \
+		          numpy.polynomial.tests.test_polynomial \
+		          numpy.random.tests.test_random
+
+.PHONY: client-parity-inventory
+client-parity-inventory:  ## Run the client-parity harness and emit the categorized failure inventory
+	$(UV) python scripts/client_parity_inventory.py
+
 # ---------------------------------------------------------------------------
 # Docs  (mirrors: CI → docs job)
 # ---------------------------------------------------------------------------

@@ -29,16 +29,34 @@ def _materialize(x):
     return x.tolist() if hasattr(x, "tolist") else float(x)
 
 
+class _CoercingConstructor:
+    """Materialize a leading RemoteArray, then delegate to a numpy constructor.
+
+    Implemented as a CLASS INSTANCE, not a function, on purpose: numpy's tests
+    store constructors as class attributes (e.g. ``self.array = np.array`` then
+    ``self.array([[1, 3]], dtype=...)``). A plain function is a descriptor, so
+    Python would auto-bind ``self`` as the first positional argument — numpy then
+    sees ``array(self, data, dtype=...)`` and raises "dtype given by name and
+    position". Instances have no ``__get__``, so they are returned unbound and
+    receive only the caller's arguments. (Same rationale as the native harness's
+    ``_NonDescriptor``.)
+    """
+
+    def __init__(self, orig):
+        self._orig = orig
+        self.__name__ = getattr(orig, "__name__", "")
+        self.__qualname__ = getattr(orig, "__qualname__", self.__name__)
+        self.__doc__ = getattr(orig, "__doc__", None)
+
+    def __call__(self, obj, *args, **kwargs):
+        if _is_remote(obj):
+            obj = _materialize(obj)
+        return self._orig(obj, *args, **kwargs)
+
+
 def install() -> None:
     for name, orig in _ORIG.items():
-        def make(orig=orig):
-            def wrapper(obj, *args, **kwargs):
-                if _is_remote(obj):
-                    obj = _materialize(obj)
-                return orig(obj, *args, **kwargs)
-            return wrapper
-
-        setattr(np, name, make())
+        setattr(np, name, _CoercingConstructor(orig))
 
 
 def uninstall() -> None:

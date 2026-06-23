@@ -70,9 +70,17 @@ def _input_coercing(client_fn, original_fn):
     ORIGINAL numpy function. Without this guard, numpy/pytest internals that
     call a patched function at import time dispatch to a server that may not
     exist and the whole session dies with a handshake timeout.
+
+    The wrapper introspects as the ORIGINAL numpy function
+    (``wraps(original_fn)``, not ``client_fn``): numpy submodules read function
+    metadata at import time — e.g. ``numpy.ma.extras`` does
+    ``np.apply_over_axes.__doc__.find('Notes')`` — and the client proxies carry
+    ``__doc__ is None``, which would crash that import. Copying numpy's
+    ``__doc__``/``__name__``/``__module__`` keeps that introspection working
+    while behavior still routes to the client.
     """
 
-    @functools.wraps(client_fn)
+    @functools.wraps(original_fn)
     def wrapper(*args, **kwargs):
         import flopscope._budget as _b
 
