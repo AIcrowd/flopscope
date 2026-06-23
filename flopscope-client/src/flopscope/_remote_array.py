@@ -112,6 +112,42 @@ def _resolve_dtype_wire_name(spec: Any) -> str | None:
     return None
 
 
+def _dtype_itemsize(dtype_name: str) -> int:
+    return _DTYPE_INFO[dtype_name][1]
+
+
+def _c_strides(shape, itemsize):
+    strides = []
+    acc = itemsize
+    for d in reversed(shape):
+        strides.append(acc)
+        acc *= d
+    return tuple(reversed(strides))
+
+
+class _RemoteFlags:
+    """Read-only numpy-flags-like view over a remote array's layout."""
+
+    def __init__(self, shape, strides, itemsize):
+        c_contig = strides == _c_strides(shape, itemsize)
+        self._d = {
+            "C_CONTIGUOUS": c_contig,
+            "F_CONTIGUOUS": c_contig and len(shape) <= 1,
+            "OWNDATA": False,
+            "WRITEABLE": False,  # client RemoteArray is immutable
+            "ALIGNED": True,
+        }
+
+    def __getitem__(self, key):
+        return self._d[key]
+
+    def __getattr__(self, name):
+        upper = name.upper()
+        if upper in self._d:
+            return self._d[upper]
+        raise AttributeError(name)
+
+
 def _bytes_to_list(data: bytes, shape: tuple[int, ...], dtype: str) -> Any:
     """Convert raw *data* bytes into a (possibly nested) Python list.
 
@@ -445,6 +481,18 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
     def nbytes(self) -> int:
         _, item_size = _DTYPE_INFO[self._dtype]
         return self.size * item_size
+
+    @property
+    def itemsize(self) -> int:
+        return _dtype_itemsize(self._dtype)
+
+    @property
+    def strides(self) -> tuple:
+        return _c_strides(self._shape, self.itemsize)
+
+    @property
+    def flags(self):
+        return _RemoteFlags(self._shape, self.strides, self.itemsize)
 
     @property
     def T(self):
