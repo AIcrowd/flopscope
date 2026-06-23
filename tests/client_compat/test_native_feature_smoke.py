@@ -14,6 +14,7 @@ All tests rely on the ambient ``BudgetContext`` opened by the autouse
 ``_fresh_connection_and_budget`` fixture (the client rejects nested contexts);
 they must NOT open their own.
 """
+
 from __future__ import annotations
 
 import pytest

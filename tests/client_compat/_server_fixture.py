@@ -1,4 +1,5 @@
 """Native flopscope-server subprocess for the client-parity harness."""
+
 from __future__ import annotations
 
 import os
@@ -57,7 +58,9 @@ FlopscopeServer(url={server_url!r}).run()
 """
     proc = subprocess.Popen(
         [_VENV_PYTHON, "-c", script],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     line = proc.stdout.readline() if proc.stdout else ""
     if "SERVER_READY" not in line:

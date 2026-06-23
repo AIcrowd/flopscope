@@ -1,4 +1,5 @@
 """Client-parity harness: run NumPy's suite against the flopscope CLIENT."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -78,8 +79,9 @@ def _fresh_connection_and_budget():
     Hand-written harness tests therefore must NOT open their own BudgetContext
     (the client rejects nested contexts) — they rely on this ambient one.
     """
-    import flopscope
     from flopscope._connection import reset_connection
+
+    import flopscope
     from flopscope._budget import _reset_global_default
 
     reset_connection()

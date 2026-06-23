@@ -13,6 +13,7 @@ wrappers own ``array``/``asarray``/``asanyarray`` (they do coercion, not client
 routing). ``_ORIG`` is snapshotted at import — before ``patch()`` — so the
 wrappers call the genuine numpy constructors and never recurse.
 """
+
 from __future__ import annotations
 
 import numpy as np

@@ -18,6 +18,7 @@ ufunc-typed names (e.g. ``np.add``) are skipped — their replacements are plain
 functions lacking ``.reduce``/``.outer``/``.nargs`` which numpy probes at
 collection time (same rationale as the native harness).
 """
+
 from __future__ import annotations
 
 import functools
@@ -25,7 +26,6 @@ import importlib
 import sys
 
 import numpy as np
-
 from flopscope._registry_data import FUNCTION_CATEGORIES
 
 # Originals we replaced, for unpatch().

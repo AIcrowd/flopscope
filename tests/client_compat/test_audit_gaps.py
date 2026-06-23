@@ -13,17 +13,18 @@ the test FAILS — a loud signal to flip it into a positive parity assertion.
 All tests rely on the ambient ``BudgetContext`` (autouse fixture); they must NOT
 open their own.
 """
+
 from __future__ import annotations
 
 import pytest
 
 import flopscope as fnp  # the CLIENT
 
-
 # --- Bitwise / shift operators on RemoteArray (audit's #1, ~112 subs) ---
 # Native FlopscopeArray defines __and__/__or__/__xor__/__invert__/__lshift__/
 # __rshift__; RemoteArray defines none. The boolean-mask idiom (a > 0) & (b < 1)
 # is the dominant failure.
+
 
 def test_bitwise_and_gap():
     a, b = fnp.array([1, 0, 1]), fnp.array([1, 1, 0])
@@ -63,6 +64,7 @@ def test_right_shift_gap():
 
 # --- ndarray methods missing on RemoteArray (audit P2) ---
 
+
 def test_argsort_method_gap():
     a = fnp.array([3.0, 1.0, 2.0])
     with pytest.raises(AttributeError, match="argsort"):
@@ -78,6 +80,7 @@ def test_diagonal_method_gap():
 # --- dtype= constructor parity (audit P1) ---
 # String aliases work; Python/numpy TYPE OBJECTS do not.
 
+
 def test_dtype_string_alias_works():
     # Positive control: the string-alias path is already fine on the client.
     out = fnp.array([1, 2, 3], dtype="float64")
@@ -91,12 +94,14 @@ def test_dtype_type_object_gap():
 
 # --- flopscope.numpy is a module, not a package (audit P1, ~7 subs) ---
 
+
 def test_flopscope_numpy_submodule_import_gap():
     with pytest.raises(ModuleNotFoundError, match="not a package"):
         __import__("flopscope.numpy.linalg")
 
 
 # --- scalar conversion: NO LONGER a gap on main (audit's __float__ bug) ---
+
 
 def test_float_of_reduced_scalar_works_now():
     # The audit's struct.unpack scalar-conversion bug does not reproduce on the

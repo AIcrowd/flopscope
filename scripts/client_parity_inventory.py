@@ -17,6 +17,7 @@ gaps (bitwise &, .argsort, flopscope.numpy package). Those are catalogued
 directly in tests/client_compat/test_audit_gaps.py and
 test_native_feature_smoke.py; this report points at them.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,10 +47,18 @@ _EXC = re.compile(r"([A-Za-z_][\w.]*(?:Error|Exception|Warning)): ([^\n]*)")
 
 def run() -> None:
     cmd = [
-        "uv", "run", "pytest", "tests/client_compat/",
-        "-p", "no:cacheprovider", "-n", "auto", "-q",
+        "uv",
+        "run",
+        "pytest",
+        "tests/client_compat/",
+        "-p",
+        "no:cacheprovider",
+        "-n",
+        "auto",
+        "-q",
         f"--junit-xml={_JUNIT}",
-        "--pyargs", *SUITES,
+        "--pyargs",
+        *SUITES,
     ]
     # check=False: a non-zero exit (failures exist) is the normal measurement case.
     subprocess.run(cmd, check=False)
@@ -71,7 +80,7 @@ def parse() -> dict:
     tree = ET.parse(_JUNIT)
     root = tree.getroot()
     suites = root.findall(".//testsuite") or [root]
-    totals = {k: 0 for k in ("tests", "failures", "errors", "skipped")}
+    totals = dict.fromkeys(("tests", "failures", "errors", "skipped"), 0)
     fails: dict[str, list[str]] = defaultdict(list)
     for ts in suites:
         for k in totals:
