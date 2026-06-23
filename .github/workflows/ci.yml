@@ -262,17 +262,16 @@ jobs:
         run: uv run pytest tests/numpy_compat/ --pyargs numpy.random.tests.test_random -n auto -q
 
   client-parity:
-    # NON-BLOCKING parity monitor: runs NumPy's own suite + native-feature smoke
-    # against the flopscope CLIENT (ZMQ proxy + live server). Expected to fail
-    # until the Phase-2 fixes land (e.g. flopscope.accounting), so the whole job
-    # is continue-on-error and never gates CI. A single `uv sync --all-extras`
-    # gives the root venv pyzmq/msgpack for both the client (test process) and
-    # the server subprocess (the fixture falls back to the root venv in CI).
+    # GATE: targeted participant-parity tests must be green (rc3+).
+    # The full numpy-suite measurement runs non-blocking after the gate step
+    # (make test-client-parity-measure recipe lines start with `-` so they
+    # never fail the build). A single `uv sync --all-extras` gives the root
+    # venv pyzmq/msgpack for both the client (test process) and the server
+    # subprocess (the fixture falls back to the root venv in CI).
     if: needs.detect-impact.outputs.run_numpy_compat == 'true'
     needs: [detect-impact]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    continue-on-error: true
+    timeout-minutes: 90
     strategy:
       matrix:
         python-version: ["3.12"]
@@ -288,8 +287,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: "Client-parity: NumPy suite + native-feature smoke against the client"
+      - name: "Client-parity GATE: targeted participant-parity tests"
         run: make test-client-parity
+
+      - name: "Client-parity measurement (non-blocking): numpy's own suite vs the client"
+        run: make test-client-parity-measure
 
   client-server-sync:
     runs-on: ubuntu-latest
