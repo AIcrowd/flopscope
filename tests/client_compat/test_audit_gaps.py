@@ -87,9 +87,10 @@ def test_dtype_string_alias_works():
     assert out.tolist() == [1.0, 2.0, 3.0]
 
 
-def test_dtype_type_object_gap():
-    with pytest.raises(TypeError, match="dtype"):
-        _ = fnp.array([1, 2, 3], dtype=float)
+def test_dtype_type_object_parity():
+    # rc3: dtype= now accepts Python type-objects (float/int) — parity with native.
+    assert fnp.array([1, 2, 3], dtype=float).tolist() == [1.0, 2.0, 3.0]
+    assert fnp.array([1, 2, 3], dtype=int).tolist() == [1, 2, 3]
 
 
 # --- flopscope.numpy is a module, not a package (audit P1, ~7 subs) ---

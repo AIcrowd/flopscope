@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from flopscope._remote_array import _DTYPE_INFO
+from flopscope._remote_array import _DTYPE_INFO, _resolve_dtype_wire_name
 
 # Public attribute name -> canonical wire name (keys of _DTYPE_INFO).
 _PUBLIC_TO_WIRE = {
@@ -111,17 +111,16 @@ class _DType:
 def _normalize_dtype(spec: Any) -> str:
     """Return the canonical wire dtype string for *spec*.
 
-    Accepts a ``_DtypeLabel``, a ``_DType``, or a (possibly aliased) string.
-    Raises ``TypeError`` for anything else.
+    Accepts a ``_DtypeLabel`` / ``_DType``, a (possibly aliased) string, a Python
+    builtin type (``float``/``int``/``bool``/``complex``), a numpy scalar type
+    (``np.float64``), or a numpy dtype / new-style DType object — resolved by the
+    numpy-free duck-typed resolver. Raises ``TypeError`` for anything else.
     """
-    name = getattr(spec, "_flopscope_dtype_name", None)
-    if isinstance(name, str):
-        return name
-    if isinstance(spec, str):
-        wire = _STRING_ALIASES.get(spec)
-        if wire is None:
-            raise TypeError(f"Unknown dtype: {spec!r}")
+    wire = _resolve_dtype_wire_name(spec)
+    if wire is not None:
         return wire
+    if isinstance(spec, str):
+        raise TypeError(f"Unknown dtype: {spec!r}")
     raise TypeError(f"Cannot interpret {spec!r} as a flopscope dtype")
 
 

@@ -41,6 +41,51 @@ _DTYPE_INFO: dict[str, tuple[str, int]] = {
 #: dtypes that are stored as pairs of real components.
 _COMPLEX_DTYPES = frozenset({"complex64", "complex128"})
 
+# Accepted dtype string spellings -> canonical wire name (keys of _DTYPE_INFO
+# plus the "bool_" alias). Kept here (not flopscope._dtypes) so _encode_arg can
+# resolve dtype-like args without a circular import.
+_DTYPE_ALIASES: dict[str, str] = {name: name for name in _DTYPE_INFO}
+_DTYPE_ALIASES["bool_"] = "bool"
+
+# Python builtin types -> wire dtype (numpy's defaults).
+_PY_TYPE_TO_WIRE: dict[type, str] = {
+    float: "float64",
+    int: "int64",
+    bool: "bool",
+    complex: "complex128",
+}
+
+
+def _resolve_dtype_wire_name(spec: Any) -> str | None:
+    """Return the canonical wire dtype name for a dtype-like *spec*, else None.
+
+    Numpy-free + duck-typed, so it recognizes — without importing numpy — every
+    dtype spelling a participant (or numpy's own code) may pass:
+
+    * flopscope dtype labels/objects (``_flopscope_dtype_name``);
+    * dtype string spellings (``"float64"``, ``"bool_"``);
+    * Python builtin types (``float``/``int``/``bool``/``complex``);
+    * numpy scalar TYPE objects (``np.float64`` -> ``__name__`` == "float64");
+    * numpy dtype objects / numpy 2.x new-style DType instances
+      (``np.dtype("float64")`` / a ``Float64DType`` -> ``.name`` == "float64").
+
+    Exotic/unsupported dtypes (e.g. ``longdouble``, structured) return ``None``;
+    the caller decides whether to reject or fall through.
+    """
+    name = getattr(spec, "_flopscope_dtype_name", None)
+    if isinstance(name, str):
+        return name
+    if isinstance(spec, str):
+        return _DTYPE_ALIASES.get(spec)
+    if isinstance(spec, type):
+        if spec in _PY_TYPE_TO_WIRE:
+            return _PY_TYPE_TO_WIRE[spec]
+        return _DTYPE_ALIASES.get(getattr(spec, "__name__", ""))
+    nm = getattr(spec, "name", None)
+    if isinstance(nm, str):
+        return _DTYPE_ALIASES.get(nm)
+    return None
+
 
 def _bytes_to_list(data: bytes, shape: tuple[int, ...], dtype: str) -> Any:
     """Convert raw *data* bytes into a (possibly nested) Python list.
@@ -923,15 +968,18 @@ def _encode_arg(arg):
         return {"__rs__": arg.handle_id}
     if isinstance(arg, RemoteSeedSequence):
         return {"__seq__": arg.handle_id}
-    # Dtype objects (_DtypeLabel / _DType) serialize to their wire name.
-    # Duck-typed to avoid importing flopscope._dtypes (circular).
-    _dtype_name = getattr(arg, "_flopscope_dtype_name", None)
-    if isinstance(_dtype_name, str):
-        return _dtype_name
     from flopscope._perm_group import SymmetryGroup
 
     if isinstance(arg, SymmetryGroup):
         return {"__symmetry_group__": arg.to_payload()}
+    # Dtype-like args serialize to their canonical wire-name string: flopscope
+    # dtype labels/objects, Python builtin types (``float``), numpy scalar types
+    # (``np.float64``), and numpy dtype / new-style DType objects. Strings pass
+    # through unchanged below (the server accepts dtype strings directly).
+    if not isinstance(arg, str):
+        _wire = _resolve_dtype_wire_name(arg)
+        if _wire is not None:
+            return _wire
     if isinstance(arg, (list, tuple)):
         return [_encode_arg(item) for item in arg]
     return arg
