@@ -1,9 +1,12 @@
 """Run the client-parity harness and emit a categorized failure inventory.
 
-Runs the full ``tests/client_compat/`` suite (NumPy's own tests routed to the
-flopscope CLIENT, plus the native-feature smoke + audit-gap probes) and parses
-the JUnit XML it emits. JUnit is used (not ``--report-log``) because it ships
-with pytest — no extra dependency / lockfile churn for a measurement-only tool.
+Runs the local wrapper test files (NumPy's own test classes subclassed as local
+files so the autouse server/budget fixture fires and ops route to the flopscope
+CLIENT) and parses the JUnit XML it emits. Running NumPy's suites via ``--pyargs``
+instead would collect them from site-packages, outside the conftest scope, so
+the fixture never fires and the measurement degrades to a native-vs-native no-op.
+JUnit is used (not ``--report-log``) because it ships with pytest — no extra
+dependency / lockfile churn for a measurement-only tool.
 
 Output: a markdown report with the run totals and every failing test grouped by
 exception signature, split into candidate **fix-now** (a real participant-usable
@@ -26,15 +29,15 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
-SUITES = [
-    "numpy._core.tests.test_umath",
-    "numpy._core.tests.test_ufunc",
-    "numpy._core.tests.test_numeric",
-    "numpy.linalg.tests.test_linalg",
-    "numpy.fft.tests.test_pocketfft",
-    "numpy.fft.tests.test_helper",
-    "numpy.polynomial.tests.test_polynomial",
-    "numpy.random.tests.test_random",
+# Local wrapper test files that subclass NumPy's own test classes so the autouse
+# server/budget fixture actually fires. Running NumPy's suites via ``--pyargs``
+# instead collects them from site-packages — outside the conftest's scope — so
+# the budget fixture never activates, the patch wrapper sees no active
+# BudgetContext, and every op delegates back to native NumPy (a native-vs-native
+# no-op). These wrapper files are what genuinely exercises the CLIENT.
+SUITE_FILES = [
+    "tests/client_compat/test_numpy_function_classes.py",
+    "tests/client_compat/methods/test_numpy_classes.py",
 ]
 
 _JUNIT = "/tmp/client_parity_junit.xml"
@@ -50,15 +53,13 @@ def run() -> None:
         "uv",
         "run",
         "pytest",
-        "tests/client_compat/",
+        *SUITE_FILES,
         "-p",
         "no:cacheprovider",
         "-n",
         "auto",
         "-q",
         f"--junit-xml={_JUNIT}",
-        "--pyargs",
-        *SUITES,
     ]
     # check=False: a non-zero exit (failures exist) is the normal measurement case.
     subprocess.run(cmd, check=False)
