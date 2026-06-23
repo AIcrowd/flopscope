@@ -64,7 +64,7 @@ test-numpy-compat:  ## Run NumPy's own tests against flopscope
 
 .PHONY: test-client-parity
 test-client-parity:  ## Run NumPy's own tests against the flopscope CLIENT (+ live server)
-	$(UV) pytest tests/client_compat/ -n auto -q \
+	$(UV) pytest tests/client_compat/ --ignore=tests/client_compat/methods -n auto -q \
 		--pyargs numpy._core.tests.test_umath \
 		          numpy._core.tests.test_ufunc \
 		          numpy._core.tests.test_numeric \

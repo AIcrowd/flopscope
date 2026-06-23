@@ -1,4 +1,13 @@
-"""Methods mode: run numpy's ndarray method/operator tests against the CLIENT."""
+"""Methods mode: run numpy's ndarray method/operator tests against the CLIENT.
+
+This dir lives UNDER tests/client_compat/, so the parent (function-mode) conftest
+also loads here — fine for a methods-mode run (its function patches are harmless;
+the sessionstart re-patch below wins the np.array conflict). The REVERSE is unsafe:
+a function-mode run that collects this dir would globally construction-patch
+np.array and break the function suite. The `test-client-parity` Makefile target
+therefore passes `--ignore=tests/client_compat/methods`; run this dir only via
+`make test-client-parity-methods` (or an explicit path to it).
+"""
 
 from __future__ import annotations
 
