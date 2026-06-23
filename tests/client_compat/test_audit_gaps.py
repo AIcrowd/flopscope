@@ -85,12 +85,13 @@ def test_dtype_type_object_parity():
     assert fnp.array([1, 2, 3], dtype=int).tolist() == [1, 2, 3]
 
 
-# --- flopscope.numpy is a module, not a package (audit P1, ~7 subs) ---
+# --- flopscope.numpy is now a package (audit P1, ~7 subs) ---
 
 
-def test_flopscope_numpy_submodule_import_gap():
-    with pytest.raises(ModuleNotFoundError, match="not a package"):
-        __import__("flopscope.numpy.linalg")
+def test_flopscope_numpy_is_a_package():
+    import flopscope.numpy.linalg as fnl
+
+    assert hasattr(fnl, "svd")
 
 
 # --- scalar conversion: NO LONGER a gap on main (audit's __float__ bug) ---

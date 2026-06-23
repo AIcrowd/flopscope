@@ -18,3 +18,15 @@ __all__ = list(_flopscope.__all__)
 from flopscope._getattr import make_module_getattr as _make_module_getattr  # noqa: E402,I001
 
 __getattr__ = _make_module_getattr("", "flopscope.numpy")
+
+# Re-export the real submodule packages so `import flopscope.numpy.linalg` works.
+# We must also register them in sys.modules under the flopscope.numpy.* keys so
+# that `import flopscope.numpy.linalg` (dot-import syntax) resolves correctly.
+import sys as _sys  # noqa: E402
+
+from flopscope import fft, linalg, random, stats  # noqa: E402,F401
+
+_sys.modules.setdefault("flopscope.numpy.fft", fft)
+_sys.modules.setdefault("flopscope.numpy.linalg", linalg)
+_sys.modules.setdefault("flopscope.numpy.random", random)
+_sys.modules.setdefault("flopscope.numpy.stats", stats)
