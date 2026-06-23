@@ -28,17 +28,23 @@ del _np_warmup
 
 
 def pytest_configure(config):
-    # Patch numpy -> client. (_coerce.install(), added in Task 3, runs after
-    # patch() so the RemoteArray->numpy coercion wins for array/asarray.)
+    # Import _coerce FIRST so it snapshots the genuine numpy constructors before
+    # patch() runs. Then patch numpy -> client. Then install the RemoteArray ->
+    # numpy coercion AFTER patch() so it owns array/asarray/asanyarray (those do
+    # output coercion for asserts, not client routing).
+    from . import _coerce
     from ._patch_client import patch
 
     patch()
+    _coerce.install()
 
 
 def pytest_unconfigure(config):
+    from . import _coerce
     from ._patch_client import unpatch
 
     unpatch()
+    _coerce.uninstall()
 
 
 @pytest.fixture()

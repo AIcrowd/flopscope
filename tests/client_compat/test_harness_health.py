@@ -33,3 +33,15 @@ def test_numpy_sum_is_routed_to_client(_patch_active):
     out = np.sum(np.array([1, 2, 3, 4]))
     assert type(out).__name__ == "RemoteArray", f"got {type(out)!r}; swap inactive"
     assert float(out) == 10.0
+
+
+def test_numpy_testing_helpers_coerce_remote_array(_patch_active):
+    import numpy as np
+
+    # np.cumsum is a non-ufunc reduction -> patched -> returns a RemoteArray.
+    # numpy's own assert helper must accept that remote handle (it routes through
+    # asanyarray, which _coerce wraps to materialize via .tolist()).
+    # Relies on the ambient BudgetContext from the autouse fixture.
+    out = np.cumsum(np.array([1.0, 2.0, 3.0]))
+    assert type(out).__name__ == "RemoteArray", f"got {type(out)!r}; swap inactive"
+    np.testing.assert_allclose(out, [1.0, 3.0, 6.0])
