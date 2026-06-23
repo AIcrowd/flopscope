@@ -101,3 +101,10 @@ def test_float_of_reduced_scalar_works_now():
     # current client for this path; lock that in so a regression is caught.
     a = fnp.array([1.0, 2.0, 3.0])
     assert float(fnp.max(a)) == 3.0
+
+
+def test_raw_buffer_pointers_raise_clear_error():
+    a = fnp.array([1.0, 2.0, 3.0])
+    for attr in ("data", "ctypes", "__array_interface__", "__array_struct__"):
+        with pytest.raises(AttributeError, match="remote"):
+            getattr(a, attr)

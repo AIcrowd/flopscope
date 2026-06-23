@@ -21,6 +21,16 @@ from flopscope._math_compat import prod as _prod
 #: Maps dtype string to (struct format char, byte width).
 #: Complex types use their float-component format char; _bytes_to_list
 #: handles pairing them into Python complex numbers.
+_RAW_BUFFER_MSG = (
+    "'{attr}' exposes a pointer to the array's local memory buffer, which does "
+    "not exist for a flopscope RemoteArray — the data lives on the remote grading "
+    "server, not in this process. If you genuinely need the bytes locally, "
+    "materialize first with arr.tolist() or numpy.asarray(arr)."
+)
+
+#: Maps dtype string to (struct format char, byte width).
+#: Complex types use their float-component format char; _bytes_to_list
+#: handles pairing them into Python complex numbers.
 _DTYPE_INFO: dict[str, tuple[str, int]] = {
     "float64": ("d", 8),
     "float32": ("f", 4),
@@ -840,6 +850,23 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         if len(args) == 1:
             return flat[args[0]]
         raise TypeError("RemoteArray.item() supports item() or item(flat_index)")
+
+    # --- raw-buffer pointer properties: raise a clear error (rc3 parity) ---
+    @property
+    def data(self):
+        raise AttributeError(_RAW_BUFFER_MSG.format(attr="data"))
+
+    @property
+    def ctypes(self):
+        raise AttributeError(_RAW_BUFFER_MSG.format(attr="ctypes"))
+
+    @property
+    def __array_interface__(self):
+        raise AttributeError(_RAW_BUFFER_MSG.format(attr="__array_interface__"))
+
+    @property
+    def __array_struct__(self):
+        raise AttributeError(_RAW_BUFFER_MSG.format(attr="__array_struct__"))
 
     # RemoteArray is not hashable (same as numpy arrays)
     __hash__ = None  # type: ignore[assignment]
