@@ -1,11 +1,13 @@
 """Client-parity harness: run NumPy's suite against the flopscope CLIENT."""
 from __future__ import annotations
 
+import fnmatch
 import sys
 
 import pytest
 
 from ._server_fixture import ensure_client_on_path, start_server, stop_server
+from .xfails_client import XFAIL_PATTERNS
 
 # MUST happen before any `import flopscope`, so the client wins over native src/.
 # Also purge any already-cached native flopscope from sys.modules so the client
@@ -90,3 +92,12 @@ def _fresh_connection_and_budget():
         ctx.__exit__(None, None, None)
         reset_connection()
         _reset_global_default()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Mark known by-design client divergences as (non-strict) xfail."""
+    for item in items:
+        for pattern, reason in XFAIL_PATTERNS.items():
+            if fnmatch.fnmatch(item.nodeid, pattern) or pattern in item.nodeid:
+                item.add_marker(pytest.mark.xfail(reason=reason, strict=False))
+                break
