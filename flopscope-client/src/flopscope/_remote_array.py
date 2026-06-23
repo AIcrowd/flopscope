@@ -616,6 +616,40 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
     def __abs__(self):
         return self._dispatch_op("abs", self)
 
+    # --- bitwise / shift operators (rc3 parity) ---
+    def __and__(self, other):
+        return self._dispatch_op("bitwise_and", self, other)
+
+    def __rand__(self, other):
+        return self._dispatch_op("bitwise_and", other, self)
+
+    def __or__(self, other):
+        return self._dispatch_op("bitwise_or", self, other)
+
+    def __ror__(self, other):
+        return self._dispatch_op("bitwise_or", other, self)
+
+    def __xor__(self, other):
+        return self._dispatch_op("bitwise_xor", self, other)
+
+    def __rxor__(self, other):
+        return self._dispatch_op("bitwise_xor", other, self)
+
+    def __invert__(self):
+        return self._dispatch_op("invert", self)
+
+    def __lshift__(self, other):
+        return self._dispatch_op("left_shift", self, other)
+
+    def __rlshift__(self, other):
+        return self._dispatch_op("left_shift", other, self)
+
+    def __rshift__(self, other):
+        return self._dispatch_op("right_shift", self, other)
+
+    def __rrshift__(self, other):
+        return self._dispatch_op("right_shift", other, self)
+
     # Comparisons (dispatch to server -- element-wise, returning RemoteArray)
     def __eq__(self, other):
         # Only dispatch to server for array/RemoteArray comparisons

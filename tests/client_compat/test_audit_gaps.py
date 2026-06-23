@@ -26,40 +26,34 @@ import flopscope as fnp  # the CLIENT
 # is the dominant failure.
 
 
-def test_bitwise_and_gap():
+def test_bitwise_and_parity():
     a, b = fnp.array([1, 0, 1]), fnp.array([1, 1, 0])
-    with pytest.raises(TypeError, match="unsupported operand"):
-        _ = a & b
+    assert (a & b).tolist() == [1, 0, 0]
 
 
-def test_bitwise_or_gap():
+def test_bitwise_or_parity():
     a, b = fnp.array([1, 0, 1]), fnp.array([1, 1, 0])
-    with pytest.raises(TypeError, match="unsupported operand"):
-        _ = a | b
+    assert (a | b).tolist() == [1, 1, 1]
 
 
-def test_bitwise_xor_gap():
+def test_bitwise_xor_parity():
     a, b = fnp.array([1, 0, 1]), fnp.array([1, 1, 0])
-    with pytest.raises(TypeError, match="unsupported operand"):
-        _ = a ^ b
+    assert (a ^ b).tolist() == [0, 1, 1]
 
 
-def test_bitwise_invert_gap():
-    a = fnp.array([1, 0, 1])
-    with pytest.raises(TypeError, match="bad operand type for unary"):
-        _ = ~a
+def test_bitwise_invert_parity():
+    a = fnp.array([0, 1, 2])
+    assert (~a).tolist() == [-1, -2, -3]
 
 
-def test_left_shift_gap():
+def test_left_shift_parity():
     a, b = fnp.array([1, 2, 3]), fnp.array([1, 1, 1])
-    with pytest.raises(TypeError, match="unsupported operand"):
-        _ = a << b
+    assert (a << b).tolist() == [2, 4, 6]
 
 
-def test_right_shift_gap():
+def test_right_shift_parity():
     a, b = fnp.array([2, 4, 6]), fnp.array([1, 1, 1])
-    with pytest.raises(TypeError, match="unsupported operand"):
-        _ = a >> b
+    assert (a >> b).tolist() == [1, 2, 3]
 
 
 # --- ndarray methods missing on RemoteArray (audit P2) ---
