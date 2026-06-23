@@ -74,6 +74,10 @@ test-client-parity:  ## Run NumPy's own tests against the flopscope CLIENT (+ li
 		          numpy.polynomial.tests.test_polynomial \
 		          numpy.random.tests.test_random
 
+.PHONY: test-client-parity-methods
+test-client-parity-methods:  ## Run numpy's ndarray METHOD/operator tests against the client (methods mode)
+	$(UV) pytest tests/client_compat/methods/ -n auto -q
+
 .PHONY: client-parity-inventory
 client-parity-inventory:  ## Run the client-parity harness and emit the categorized failure inventory
 	$(UV) python scripts/client_parity_inventory.py
