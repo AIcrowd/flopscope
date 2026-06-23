@@ -65,16 +65,14 @@ def test_right_shift_gap():
 # --- ndarray methods missing on RemoteArray (audit P2) ---
 
 
-def test_argsort_method_gap():
+def test_argsort_method_parity():
     a = fnp.array([3.0, 1.0, 2.0])
-    with pytest.raises(AttributeError, match="argsort"):
-        _ = a.argsort()
+    assert a.argsort().tolist() == [1, 2, 0]
 
 
-def test_diagonal_method_gap():
+def test_diagonal_method_parity():
     a = fnp.array([[1.0, 2.0], [3.0, 4.0]])
-    with pytest.raises(AttributeError, match="diagonal"):
-        _ = a.diagonal()
+    assert a.diagonal().tolist() == [1.0, 4.0]
 
 
 # --- dtype= constructor parity (audit P1) ---

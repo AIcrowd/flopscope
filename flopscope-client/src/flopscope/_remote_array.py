@@ -56,6 +56,21 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
 }
 
 
+def _flatten_to_list(nested):
+    """Flatten arbitrarily-nested lists (RemoteArray.tolist() output) to a flat list."""
+    out: list = []
+
+    def _rec(x):
+        if isinstance(x, list):
+            for e in x:
+                _rec(e)
+        else:
+            out.append(x)
+
+    _rec(nested)
+    return out
+
+
 def _resolve_dtype_wire_name(spec: Any) -> str | None:
     """Return the canonical wire dtype name for a dtype-like *spec*, else None.
 
@@ -670,6 +685,96 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
     def copy(self):
         return self._dispatch_op("copy", self)
+
+    # --- read-only ndarray methods bridged to server ops (rc3 parity) ---
+    def all(self, *args, **kwargs):
+        return self._dispatch_op("all", self, *args, **kwargs)
+
+    def any(self, *args, **kwargs):
+        return self._dispatch_op("any", self, *args, **kwargs)
+
+    def argmax(self, *args, **kwargs):
+        return self._dispatch_op("argmax", self, *args, **kwargs)
+
+    def argmin(self, *args, **kwargs):
+        return self._dispatch_op("argmin", self, *args, **kwargs)
+
+    def argpartition(self, *args, **kwargs):
+        return self._dispatch_op("argpartition", self, *args, **kwargs)
+
+    def argsort(self, *args, **kwargs):
+        return self._dispatch_op("argsort", self, *args, **kwargs)
+
+    def choose(self, *args, **kwargs):
+        return self._dispatch_op("choose", self, *args, **kwargs)
+
+    def clip(self, *args, **kwargs):
+        return self._dispatch_op("clip", self, *args, **kwargs)
+
+    def compress(self, condition, *args, **kwargs):
+        # ndarray method: a.compress(condition, axis=...) == np.compress(condition, a, axis=...)
+        return self._dispatch_op("compress", condition, self, *args, **kwargs)
+
+    def conj(self, *args, **kwargs):
+        return self._dispatch_op("conj", self, *args, **kwargs)
+
+    def conjugate(self, *args, **kwargs):
+        return self._dispatch_op("conjugate", self, *args, **kwargs)
+
+    def cumprod(self, *args, **kwargs):
+        return self._dispatch_op("cumprod", self, *args, **kwargs)
+
+    def cumsum(self, *args, **kwargs):
+        return self._dispatch_op("cumsum", self, *args, **kwargs)
+
+    def diagonal(self, *args, **kwargs):
+        return self._dispatch_op("diagonal", self, *args, **kwargs)
+
+    def nonzero(self, *args, **kwargs):
+        return self._dispatch_op("nonzero", self, *args, **kwargs)
+
+    def prod(self, *args, **kwargs):
+        return self._dispatch_op("prod", self, *args, **kwargs)
+
+    def repeat(self, *args, **kwargs):
+        return self._dispatch_op("repeat", self, *args, **kwargs)
+
+    def round(self, *args, **kwargs):
+        return self._dispatch_op("round", self, *args, **kwargs)
+
+    def searchsorted(self, *args, **kwargs):
+        return self._dispatch_op("searchsorted", self, *args, **kwargs)
+
+    def squeeze(self, *args, **kwargs):
+        return self._dispatch_op("squeeze", self, *args, **kwargs)
+
+    def std(self, *args, **kwargs):
+        return self._dispatch_op("std", self, *args, **kwargs)
+
+    def swapaxes(self, *args, **kwargs):
+        return self._dispatch_op("swapaxes", self, *args, **kwargs)
+
+    def take(self, *args, **kwargs):
+        return self._dispatch_op("take", self, *args, **kwargs)
+
+    def trace(self, *args, **kwargs):
+        return self._dispatch_op("trace", self, *args, **kwargs)
+
+    def var(self, *args, **kwargs):
+        return self._dispatch_op("var", self, *args, **kwargs)
+
+    def item(self, *args):
+        # No server op: materialize and index (numpy .item() common cases).
+        flat = _flatten_to_list(self.tolist())
+        if not args:
+            if len(flat) != 1:
+                raise ValueError(
+                    "can only convert an array of size 1 to a Python scalar"
+                )
+            return flat[0]
+        if len(args) == 1:
+            return flat[args[0]]
+        raise TypeError("RemoteArray.item() supports item() or item(flat_index)")
 
     # RemoteArray is not hashable (same as numpy arrays)
     __hash__ = None  # type: ignore[assignment]

@@ -15,11 +15,23 @@ from __future__ import annotations
 # imported by pytest's collector before pytest_configure / pytest_sessionstart).
 from numpy._core.tests.test_multiarray import (
     TestArgmax as _TestArgmax,
+)
+from numpy._core.tests.test_multiarray import (
     TestArgmin as _TestArgmin,
+)
+from numpy._core.tests.test_multiarray import (
     TestClip as _TestClip,
+)
+from numpy._core.tests.test_multiarray import (
     TestConversion as _TestConversion,
+)
+from numpy._core.tests.test_multiarray import (
     TestMethods as _TestMethods,
+)
+from numpy._core.tests.test_multiarray import (
     TestStats as _TestStats,
+)
+from numpy._core.tests.test_multiarray import (
     TestTake as _TestTake,
 )
 
