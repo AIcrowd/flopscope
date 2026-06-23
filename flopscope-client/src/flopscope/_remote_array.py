@@ -428,6 +428,12 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         return self._symmetry
 
     @property
+    def is_symmetric(self) -> bool:
+        """True if this array carries symmetry metadata (mirrors native
+        SymmetricTensor.is_symmetric)."""
+        return self._symmetry is not None
+
+    @property
     def ndim(self) -> int:
         return len(self._shape)
 
