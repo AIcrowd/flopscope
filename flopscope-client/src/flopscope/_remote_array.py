@@ -308,61 +308,90 @@ class RemoteScalar:
         return hash(self._value)
 
     # -- arithmetic ---------------------------------------------------------
+    #
+    # A scalar combined with an *array* broadcasts to an array, exactly like
+    # numpy (``np.float64(2) * np.array([1, 2])`` -> ``array([2, 4])``). When
+    # ``other`` is a RemoteArray the ``self._value <op> other`` expression is
+    # dispatched through ``RemoteArray.__r<op>__`` and already yields a
+    # RemoteArray; we must return that array UNWRAPPED. Wrapping it back in a
+    # ``RemoteScalar`` would create a malformed "scalar" whose ``_value`` is a
+    # RemoteArray, which later serializes as a raw RemoteArray and crashes the
+    # wire encoder with ``can not serialize 'RemoteArray' object``. The
+    # ``_scalar_result`` helper mirrors numpy: scalar results stay scalars,
+    # array results pass through.
 
     def __add__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value + other_val, self._dtype)
+        return _scalar_result(self._value + other_val, self._dtype)
 
     def __radd__(self, other):
-        return RemoteScalar(other + self._value, self._dtype)
+        return _scalar_result(other + self._value, self._dtype)
 
     def __sub__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value - other_val, self._dtype)
+        return _scalar_result(self._value - other_val, self._dtype)
 
     def __rsub__(self, other):
-        return RemoteScalar(other - self._value, self._dtype)
+        return _scalar_result(other - self._value, self._dtype)
 
     def __mul__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value * other_val, self._dtype)
+        return _scalar_result(self._value * other_val, self._dtype)
 
     def __rmul__(self, other):
-        return RemoteScalar(other * self._value, self._dtype)
+        return _scalar_result(other * self._value, self._dtype)
 
     def __truediv__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value / other_val, self._dtype)
+        return _scalar_result(self._value / other_val, self._dtype)
 
     def __rtruediv__(self, other):
-        return RemoteScalar(other / self._value, self._dtype)
+        return _scalar_result(other / self._value, self._dtype)
 
     def __floordiv__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value // other_val, self._dtype)
+        return _scalar_result(self._value // other_val, self._dtype)
 
     def __rfloordiv__(self, other):
-        return RemoteScalar(other // self._value, self._dtype)
+        return _scalar_result(other // self._value, self._dtype)
 
     def __mod__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value % other_val, self._dtype)
+        return _scalar_result(self._value % other_val, self._dtype)
 
     def __rmod__(self, other):
-        return RemoteScalar(other % self._value, self._dtype)
+        return _scalar_result(other % self._value, self._dtype)
 
     def __pow__(self, other):
         other_val = other._value if isinstance(other, RemoteScalar) else other
-        return RemoteScalar(self._value**other_val, self._dtype)
+        return _scalar_result(self._value**other_val, self._dtype)
 
     def __rpow__(self, other):
-        return RemoteScalar(other**self._value, self._dtype)
+        return _scalar_result(other**self._value, self._dtype)
 
     def __neg__(self):
-        return RemoteScalar(-self._value, self._dtype)
+        return _scalar_result(-self._value, self._dtype)
 
     def __abs__(self):
-        return RemoteScalar(abs(self._value), self._dtype)
+        return _scalar_result(abs(self._value), self._dtype)
+
+
+def _scalar_result(value, dtype):
+    """Wrap a scalar arithmetic result, passing array/proxy results through.
+
+    ``RemoteScalar`` arithmetic with a plain number yields a number, which we
+    re-wrap as a ``RemoteScalar`` (numpy-scalar analog). But ``RemoteScalar``
+    combined with a ``RemoteArray`` broadcasts to a ``RemoteArray`` (the op runs
+    server-side via the array's reflected dunder). That array result must be
+    returned as-is: re-wrapping it would yield a ``RemoteScalar`` holding an
+    array, which the wire encoder later unwraps to a raw ``RemoteArray`` and
+    fails on (``can not serialize 'RemoteArray' object``). ``RemoteScalar``
+    itself passes ``isinstance(_, RemoteArray)`` via the metaclass, so an
+    already-proxy result is also returned unchanged.
+    """
+    if isinstance(value, RemoteArray):
+        return value
+    return RemoteScalar(value, dtype)
 
 
 # ---------------------------------------------------------------------------
