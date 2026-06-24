@@ -3,6 +3,7 @@
 Prod regression (subs 310786, 311261, 311929): "'RemoteGenerator' object has no
 attribute 'permuted' / 'chisquare'".
 """
+
 from __future__ import annotations
 
 import flopscope as fnp

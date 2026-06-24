@@ -339,10 +339,20 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
     # raw bytes directly (C-speed) rather than materializing a Python list, so
     # the timed array() dispatch is not inflated.
     _BUFFER_FORMAT_TO_WIRE = {
-        "f": "float32", "d": "float64", "e": "float16",
-        "b": "int8", "B": "uint8", "h": "int16", "H": "uint16",
-        "i": "int32", "I": "uint32", "l": "int64", "L": "uint64",
-        "q": "int64", "Q": "uint64", "?": "bool",
+        "f": "float32",
+        "d": "float64",
+        "e": "float16",
+        "b": "int8",
+        "B": "uint8",
+        "h": "int16",
+        "H": "uint16",
+        "i": "int32",
+        "I": "uint32",
+        "l": "int64",
+        "L": "uint64",
+        "q": "int64",
+        "Q": "uint64",
+        "?": "bool",
     }
     try:
         mv = memoryview(object)

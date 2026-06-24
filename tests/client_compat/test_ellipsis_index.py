@@ -3,6 +3,7 @@
 Prod regression (sub 310351): "can not serialize 'ellipsis' object" — the client
 index encoder had no branch for Ellipsis.
 """
+
 from __future__ import annotations
 
 import flopscope as fnp

@@ -4,6 +4,7 @@ offending type, not a raw msgpack 'can not serialize' TypeError.
 The function-dispatch proxy already does this; the operator path (_dispatch_op)
 leaked the raw error (this is how the RemoteScalar bug surfaced cryptically).
 """
+
 from __future__ import annotations
 
 import pytest

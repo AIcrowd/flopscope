@@ -5,6 +5,7 @@ array.array('f', ...) C buffer for speed and pass it to fnp.array(); native
 numpy-backed flopscope accepts the buffer protocol, the client rejected it with
 "Cannot create array from array".
 """
+
 from __future__ import annotations
 
 import array as _array
@@ -29,7 +30,7 @@ def test_array_from_array_array_infers_dtype_from_typecode():
 
 def test_array_from_array_array_casts_when_dtype_differs():
     buf = _array.array("d", [1.0, 2.0, 3.0])  # double buffer
-    out = fnp.array(buf, dtype="float32")     # cast to float32 (numpy parity)
+    out = fnp.array(buf, dtype="float32")  # cast to float32 (numpy parity)
     assert out.dtype == "float32"
     assert out.tolist() == [1.0, 2.0, 3.0]
 

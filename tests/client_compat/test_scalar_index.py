@@ -4,6 +4,7 @@ Prod regression (subs 310044, 310045, 310059, 310067): "tuple indices must be
 integers or slices, not RemoteScalar" — a scalar from indexing/reduction used to
 index a Python tuple/list. v22 added __index__ to RemoteArray, not RemoteScalar.
 """
+
 from __future__ import annotations
 
 import pytest
