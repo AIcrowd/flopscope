@@ -354,6 +354,15 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
         "Q": "uint64",
         "?": "bool",
     }
+    # bytes/bytearray/str expose a buffer but numpy treats them as string/bytes
+    # dtypes (e.g. np.array(b"abc") -> |S3 scalar), which flopscope has no dtype
+    # for. Reject cleanly rather than mis-reading them as a uint8 buffer.
+    if isinstance(object, (bytes, bytearray, str)):
+        raise TypeError(
+            f"Cannot create array from {type(object).__name__}. "
+            f"Expected list, tuple, int, float, RemoteArray, or a numeric buffer "
+            f"(array.array / memoryview of a numeric type)."
+        )
     try:
         mv = memoryview(object)
     except TypeError:
@@ -374,8 +383,8 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
 
     raise TypeError(
         f"Cannot create array from {type(object).__name__}. "
-        f"Expected list, tuple, int, float, RemoteArray, or a buffer "
-        f"(array.array / memoryview / bytes-like)."
+        f"Expected list, tuple, int, float, RemoteArray, or a numeric buffer "
+        f"(array.array / memoryview of a numeric type)."
     )
 
 

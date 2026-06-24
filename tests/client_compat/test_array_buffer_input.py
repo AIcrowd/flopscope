@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import array as _array
 
+import pytest
+
 import flopscope as fnp
 
 
@@ -39,3 +41,11 @@ def test_array_from_memoryview():
     buf = _array.array("i", [10, 20, 30])
     out = fnp.array(memoryview(buf))
     assert out.tolist() == [10, 20, 30]
+
+
+def test_array_rejects_raw_bytes_cleanly():
+    # numpy makes a |S3 string scalar; flopscope has no string dtype, so reject
+    # cleanly (not a cryptic downstream error, not a wrong uint8 array).
+    for bad in (b"abc", bytearray(b"abc")):
+        with pytest.raises(TypeError, match="Cannot create array from"):
+            fnp.array(bad)

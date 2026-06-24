@@ -30,6 +30,9 @@ def test_scalar_indexes_list_and_range():
 
 
 def test_noninteger_scalar_rejects_index():
-    s = fnp.array([1.5, 2.5])[0]  # float scalar
+    s_frac = fnp.array([1.5, 2.5])[0]  # fractional float scalar
     with pytest.raises((TypeError, ValueError)):
-        ("a", "b")[s]
+        ("a", "b")[s_frac]
+    s_whole = fnp.array([2.0, 3.0])[0]  # WHOLE-valued float scalar: numpy still rejects
+    with pytest.raises((TypeError, ValueError)):
+        ("a", "b", "c")[s_whole]
