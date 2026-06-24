@@ -162,8 +162,12 @@ def test_handle_einsum_cost(handler, session):
 def test_handle_svd_cost(handler, session):
     import flopscope as flops
 
-    full = handler.handle({"op": "flops.svd_cost", "kwargs": {"m": 128, "n": 64, "k": 0}})
-    topk = handler.handle({"op": "flops.svd_cost", "kwargs": {"m": 128, "n": 64, "k": 8}})
+    full = handler.handle(
+        {"op": "flops.svd_cost", "kwargs": {"m": 128, "n": 64, "k": 0}}
+    )
+    topk = handler.handle(
+        {"op": "flops.svd_cost", "kwargs": {"m": 128, "n": 64, "k": 8}}
+    )
     assert full["status"] == "ok" and topk["status"] == "ok"
     # client surface uses k=0 to mean FULL svd (native k=None), NOT "top-0".
     assert full["result"]["value"] == flops.accounting.svd_cost(128, 64)
