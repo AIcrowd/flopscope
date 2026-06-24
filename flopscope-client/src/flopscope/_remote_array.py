@@ -267,8 +267,10 @@ class RemoteScalar:
         return int(self._value)
 
     def __index__(self) -> int:
-        # Only integer/bool scalars can index (numpy parity: np.float64 has no
-        # __index__, even for whole values like 2.0).
+        # Only integer/bool scalars can index (numpy parity: float/complex
+        # scalars have no __index__, even for whole values like 2.0). The "int"
+        # substring matches BOTH signed and unsigned widths -- "int64" and
+        # "uint64" both contain "int" -- so unsigned scalars index fine too.
         if "int" not in self._dtype and self._dtype != "bool":
             raise TypeError(
                 f"only integer scalars can be used as indices; this RemoteScalar "

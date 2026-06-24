@@ -22,3 +22,11 @@ def test_leading_ellipsis():
 def test_bare_ellipsis_returns_full():
     a = fnp.array([[1.0, 2.0], [3.0, 4.0]])
     assert a[...].tolist() == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_one_element_ellipsis_tuple():
+    # ``arr[..., ]`` passes the key as ``(Ellipsis,)`` -> a one-element list on
+    # the wire; the server must decode it back to a tuple ``(Ellipsis,)``, not a
+    # bare ``[Ellipsis]`` (which numpy rejects). Equivalent to ``arr[...]``.
+    a = fnp.array([[1.0, 2.0], [3.0, 4.0]])
+    assert a[...,].tolist() == [[1.0, 2.0], [3.0, 4.0]]

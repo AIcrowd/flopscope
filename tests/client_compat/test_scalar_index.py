@@ -29,6 +29,16 @@ def test_scalar_indexes_list_and_range():
     assert list(range(s, s + 2)) == [1, 2]
 
 
+def test_unsigned_int_scalar_indexes():
+    # Unsigned integer scalars are valid Python indices (numpy parity). The
+    # dtype gate's "int" substring matches "uintN" too, so these must work.
+    for dt in ("uint8", "uint16", "uint32", "uint64"):
+        s = fnp.array([0, 1], dtype=dt)[1]
+        assert type(s).__name__ == "RemoteScalar" and s.dtype == dt
+        assert ("a", "b")[s] == "b"
+        assert s.__index__() == 1
+
+
 def test_noninteger_scalar_rejects_index():
     s_frac = fnp.array([1.5, 2.5])[0]  # fractional float scalar
     with pytest.raises((TypeError, ValueError)):

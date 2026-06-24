@@ -481,7 +481,13 @@ class RequestHandler:
                 return slice(*[None if p is None else int(p) for p in parts])
         if isinstance(raw_key, list):
             decoded = [self._decode_index_key(item) for item in raw_key]
-            if any(isinstance(d, slice) for d in decoded) or len(decoded) > 1:
+            # A one-element key like ``arr[..., ]`` arrives as ``(Ellipsis,)`` ->
+            # ``[Ellipsis]``; numpy needs the tuple form, so treat Ellipsis (like
+            # a slice) as a marker that this list is a multi-axis index tuple.
+            if (
+                any(isinstance(d, slice) or d is Ellipsis for d in decoded)
+                or len(decoded) > 1
+            ):
                 return tuple(decoded)
             return decoded
         if isinstance(raw_key, (int, float)):
@@ -642,8 +648,12 @@ def _decode_index_key(raw_key):
             return slice(*[None if p is None else int(p) for p in parts])
     if isinstance(raw_key, list):
         decoded = [_decode_index_key(item) for item in raw_key]
-        # A list of slices/ints -> tuple for multi-dim indexing
-        if any(isinstance(d, slice) for d in decoded) or len(decoded) > 1:
+        # A list of slices/ints (or a one-element Ellipsis like ``arr[..., ]``)
+        # -> tuple for multi-dim indexing; numpy needs the tuple form.
+        if (
+            any(isinstance(d, slice) or d is Ellipsis for d in decoded)
+            or len(decoded) > 1
+        ):
             return tuple(decoded)
         # Single-element list: could be the key itself being a list
         # (e.g., fancy indexing) -- keep as list
