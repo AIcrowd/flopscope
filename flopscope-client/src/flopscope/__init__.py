@@ -334,9 +334,38 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
         resp = conn.send_recv(encode_create_from_data(data, [], dtype_str))
         return _result_from_response(resp)
 
+    # Buffer-protocol inputs (stdlib array.array, memoryview, bytes-backed
+    # buffers). Native numpy-backed flopscope accepts these; mirror it. Send the
+    # raw bytes directly (C-speed) rather than materializing a Python list, so
+    # the timed array() dispatch is not inflated.
+    _BUFFER_FORMAT_TO_WIRE = {
+        "f": "float32", "d": "float64", "e": "float16",
+        "b": "int8", "B": "uint8", "h": "int16", "H": "uint16",
+        "i": "int32", "I": "uint32", "l": "int64", "L": "uint64",
+        "q": "int64", "Q": "uint64", "?": "bool",
+    }
+    try:
+        mv = memoryview(object)
+    except TypeError:
+        mv = None
+    if mv is not None and mv.ndim <= 1:
+        native_wire = _BUFFER_FORMAT_TO_WIRE.get(mv.format)
+        if native_wire is not None:
+            data = mv.tobytes()
+            n = mv.nbytes // mv.itemsize
+            conn = get_connection()
+            resp = conn.send_recv(encode_create_from_data(data, [n], native_wire))
+            arr = _result_from_response(resp)
+            if dtype is not None:
+                want = _normalize_dtype(dtype)
+                if want != native_wire:
+                    return array(arr, dtype=want)  # server-side cast (astype)
+            return arr
+
     raise TypeError(
         f"Cannot create array from {type(object).__name__}. "
-        f"Expected list, tuple, int, float, or RemoteArray."
+        f"Expected list, tuple, int, float, RemoteArray, or a buffer "
+        f"(array.array / memoryview / bytes-like)."
     )
 
 
