@@ -107,7 +107,7 @@ wheels = [
 
 [[package]]
 name = "flopscope-client"
-version = "0.8.0rc3"
+version = "0.8.0rc4"
 source = { editable = "." }
 dependencies = [
     { name = "msgpack" },
