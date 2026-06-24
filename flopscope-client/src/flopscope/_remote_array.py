@@ -266,6 +266,19 @@ class RemoteScalar:
     def __int__(self) -> int:
         return int(self._value)
 
+    def __index__(self) -> int:
+        # Allow a 0-D integral scalar to index Python sequences / range()
+        # (numpy parity). A non-integral value must raise (matching numpy's
+        # __index__), so reject it rather than silently truncating.
+        v = self._value
+        iv = int(v)
+        if iv != v:
+            raise TypeError(
+                f"only integer scalars can be used as indices; "
+                f"this RemoteScalar holds {v!r}"
+            )
+        return iv
+
     def __bool__(self) -> bool:
         return bool(self._value)
 
