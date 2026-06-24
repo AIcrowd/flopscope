@@ -274,18 +274,16 @@ def test_normalize_arg_preserves_binary_float64():
     assert result == data
 
 
-def test_normalize_arg_decodes_handle_id():
-    """FIX 2: short ASCII handle IDs like b'a0' must still be decoded."""
-    result = _normalize_arg(b"a0")
-    assert result == "a0"
-    assert isinstance(result, str)
-
-
-def test_normalize_arg_decodes_dtype():
-    """FIX 2: short ASCII dtype strings must still be decoded."""
-    result = _normalize_arg(b"float64")
-    assert result == "float64"
-    assert isinstance(result, str)
+def test_normalize_arg_keeps_all_bytes_as_binary():
+    """Under raw=False decoding, genuine string fields (handle IDs, dtype) arrive
+    as ``str`` at the msgpack layer, so any ``bytes`` reaching _normalize_arg is
+    binary array data and MUST be preserved -- including short, all-printable
+    buffers the old content heuristic wrongly decoded to str (the create_from_data
+    regression; see flopscope-client test_fetch_bytes_decode)."""
+    for buf in (b"a0", b"float64", b"12345678"):
+        result = _normalize_arg(buf)
+        assert result == buf
+        assert isinstance(result, bytes)
 
 
 def test_normalize_arg_preserves_high_bytes():
@@ -300,21 +298,20 @@ def test_normalize_arg_preserves_high_bytes():
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_msg_kwargs_handle_dict():
-    """FIX 8: kwargs values containing handle dicts are normalized recursively."""
+def test_normalize_msg_preserves_binary_in_args_and_kwargs():
+    """_normalize_msg recurses args/kwargs preserving binary buffers. Under raw=False
+    string keys/handles already arrive as str; binary array data stays bytes (a short
+    all-printable buffer must NOT be decoded -- the create_from_data regression)."""
     msg = {
-        "op": "some_op",
-        "args": [],
-        "kwargs": {
-            b"out": {b"__handle__": b"a5"},
-        },
+        "op": "create_from_data",
+        "args": [b"12345678", [1], "float64"],
+        "kwargs": {"data": b"12345678"},
     }
     _normalize_msg(msg)
-    # The dict inside kwargs should have its keys/values normalized
-    out_val = msg["kwargs"]["out"]
-    assert isinstance(out_val, dict)
-    assert "__handle__" in out_val
-    assert out_val["__handle__"] == "a5"
+    assert msg["args"][0] == b"12345678"
+    assert isinstance(msg["args"][0], bytes)
+    assert msg["kwargs"]["data"] == b"12345678"
+    assert isinstance(msg["kwargs"]["data"], bytes)
 
 
 # ---------------------------------------------------------------------------

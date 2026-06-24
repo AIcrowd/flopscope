@@ -89,8 +89,13 @@ def decode_request(raw: bytes) -> dict:
         raise InvalidRequestError("malformed request: empty bytes")
 
     try:
-        # Use raw=True so that we get bytes keys and can selectively decode.
-        msg_raw = msgpack.unpackb(raw, raw=True)
+        # raw=False uses msgpack's native bin/str distinction: the client packs
+        # string fields (op, dtype, handle IDs) as ``str`` and raw array buffers
+        # as ``bin`` (use_bin_type=True), so strings decode to str and binary to
+        # bytes natively. We must NOT guess types from content -- a short,
+        # all-printable-ASCII array buffer is indistinguishable from a string
+        # (see flopscope-client test_fetch_bytes_decode).
+        msg_raw = msgpack.unpackb(raw, raw=False, strict_map_key=False)
     except Exception as exc:
         raise InvalidRequestError(f"malformed request: {exc}") from exc
 

@@ -30,6 +30,13 @@ _ABSTRACT_SCALAR_TYPES = frozenset(
     }
 )
 
+# numpy helpers that wrap an arbitrary Python callable and apply it per element.
+# They can't work in the remote client: the wrapped callable runs in the client
+# process on materialized values, so its work is neither FLOP-counted nor
+# dispatched to the compute server (an accounting hole). Give a clear,
+# actionable error instead of a bare "no attribute".
+_PYFUNC_WRAPPERS = frozenset({"vectorize", "frompyfunc"})
+
 
 def make_module_getattr(module_prefix: str, module_label: str):
     """Return a ``__getattr__`` suitable for assignment at module scope.
@@ -49,6 +56,17 @@ def make_module_getattr(module_prefix: str, module_label: str):
         # Skip dunder/private names to avoid interfering with import machinery
         if name.startswith("_"):
             raise AttributeError(f"module '{module_label}' has no attribute '{name}'")
+
+        if name in _PYFUNC_WRAPPERS:
+            raise AttributeError(
+                f"'{module_label}.{name}' is not supported in the flopscope "
+                f"client: it wraps an arbitrary Python callable applied per "
+                f"element, which cannot be FLOP-counted or dispatched to the "
+                f"remote compute server (the callable would run uncounted in the "
+                f"client process). Use native vectorized ops / ufuncs instead, or "
+                f"flopscope.stats for special functions (e.g. erf via "
+                f"flopscope.stats.norm.cdf)."
+            )
 
         qualified = f"{module_prefix}{name}" if module_prefix else name
         category = get_category(qualified)
