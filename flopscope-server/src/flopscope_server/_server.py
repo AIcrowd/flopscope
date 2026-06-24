@@ -366,13 +366,13 @@ def _normalize_arg(a: object) -> object:
     are always short ASCII).
     """
     if isinstance(a, bytes):
-        # Only decode bytes that are short AND contain only ASCII printable
-        # characters (no bytes > 127).  This catches handle IDs and dtype
-        # strings but never touches binary array data (which often contains
-        # high bytes even if it happens to be valid UTF-8).
-        if len(a) > 0 and len(a) <= 32 and all(32 <= b < 128 for b in a):
-            return a.decode("ascii")
-        return a  # keep as raw bytes (likely binary payload)
+        # Binary payloads (array buffers) MUST stay bytes. Under raw=False
+        # decoding, genuine string fields already arrive as ``str``, so any
+        # ``bytes`` here is binary data -- never guess from content. A short,
+        # all-printable-ASCII buffer is indistinguishable from a string by
+        # content, and decoding it broke create_from_data (see
+        # flopscope-client test_fetch_bytes_decode).
+        return a
     if isinstance(a, dict):
         return {_decode_if_bytes(k): _normalize_arg(v) for k, v in a.items()}
     if isinstance(a, list):

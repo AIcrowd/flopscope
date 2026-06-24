@@ -137,19 +137,23 @@ class TestFix8ScalarDtype:
 
 
 class TestFix9NormalizeArgRecursive:
-    def test_dict_with_nested_list(self):
-        result = _normalize_arg({b"key": [b"hello"]})
-        assert result == {"key": ["hello"]}
+    def test_dict_with_nested_list_preserves_binary(self):
+        # Binary values stay bytes through recursion (keys decode for legacy bytes
+        # keys; under raw=False keys already arrive as str).
+        result = _normalize_arg({b"key": [b"12345678"]})
+        assert result == {"key": [b"12345678"]}
 
-    def test_dict_with_nested_dict(self):
-        result = _normalize_arg({b"outer": {b"inner": b"val"}})
-        assert result == {"outer": {"inner": "val"}}
+    def test_dict_with_nested_dict_preserves_binary(self):
+        result = _normalize_arg({b"outer": {b"inner": b"\x00\x01\x02"}})
+        assert result == {"outer": {"inner": b"\x00\x01\x02"}}
 
     def test_dict_with_bytes_value_long(self):
         binary = bytes(range(256)) * 2
         result = _normalize_arg({b"data": binary})
         assert result["data"] is binary
 
-    def test_dict_with_short_bytes_value(self):
-        result = _normalize_arg({b"dtype": b"float64"})
-        assert result == {"dtype": "float64"}
+    def test_dict_with_short_printable_bytes_value_preserved(self):
+        # The old content heuristic decoded short all-printable byte VALUES to str;
+        # they are now preserved as binary (the create_from_data fix).
+        result = _normalize_arg({b"dtype": b"12345678"})
+        assert result == {"dtype": b"12345678"}

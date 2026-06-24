@@ -180,23 +180,37 @@ class TestProtocol:
             result["result"]["budget_breakdown"]["by_namespace"]["phase"]["calls"] == 1
         )
 
-    def test_normalize_preserves_small_binary_data(self):
-        """FIX 2 (client): small binary array data must NOT be decoded."""
-        import struct
+    def test_decode_response_preserves_binary_data(self):
+        """decode_response (raw=False) keeps binary array buffers as bytes -- even
+        short, all-printable ones the old content heuristic wrongly decoded to str
+        (the __float__/__int__/tolist regression; see test_fetch_bytes_decode)."""
+        import msgpack
+        from flopscope._protocol import decode_response
 
-        from flopscope._protocol import _normalize
+        # The server packs ``data`` as a msgpack bin field (use_bin_type=True).
+        raw = msgpack.packb(
+            {
+                "status": "ok",
+                "result": {"data": b"12345678", "shape": [1], "dtype": "float64"},
+            },
+            use_bin_type=True,
+        )
+        resp = decode_response(raw)
+        assert isinstance(resp["result"]["data"], bytes)
+        assert resp["result"]["data"] == b"12345678"
 
-        data = struct.pack("<d", 3.14)  # 8 bytes float64
-        result = _normalize(data)
-        assert isinstance(result, bytes), "binary float64 data was decoded to str"
+    def test_decode_response_yields_str_for_string_fields(self):
+        """String fields decode to str via msgpack's native bin/str distinction."""
+        import msgpack
+        from flopscope._protocol import decode_response
 
-    def test_normalize_decodes_ascii_handle(self):
-        """FIX 2 (client): short ASCII handle IDs are decoded to str."""
-        from flopscope._protocol import _normalize
-
-        result = _normalize(b"a0")
-        assert result == "a0"
-        assert isinstance(result, str)
+        raw = msgpack.packb(
+            {"status": "ok", "result": {"dtype": "float64"}}, use_bin_type=True
+        )
+        resp = decode_response(raw)
+        assert resp["status"] == "ok" and isinstance(resp["status"], str)
+        assert resp["result"]["dtype"] == "float64"
+        assert isinstance(resp["result"]["dtype"], str)
 
 
 # ---------------------------------------------------------------------------
