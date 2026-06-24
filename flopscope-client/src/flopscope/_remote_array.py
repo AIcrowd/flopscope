@@ -1107,6 +1107,12 @@ class RemoteGenerator:
     def permutation(self, *args, **kwargs):
         return self._call("permutation", *args, **kwargs)
 
+    def permuted(self, *args, **kwargs):
+        return self._call("permuted", *args, **kwargs)
+
+    def chisquare(self, *args, **kwargs):
+        return self._call("chisquare", *args, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # RemoteRandomState

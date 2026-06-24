@@ -33,6 +33,8 @@ _ALLOWED_GEN_METHODS = frozenset(
         "gamma",
         "choice",
         "permutation",
+        "permuted",
+        "chisquare",
     }
 )
 
