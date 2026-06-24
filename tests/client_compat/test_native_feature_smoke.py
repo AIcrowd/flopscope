@@ -55,6 +55,27 @@ def test_accounting_namespace_reachable():
     assert hasattr(fnp, "accounting"), "client missing flopscope.accounting"
 
 
+def test_accounting_cost_helpers_work_end_to_end():
+    # rc3 regression caught by the prod re-grade: flopscope.accounting cost
+    # helpers IMPORTED but failed at CALL time with
+    # "FlopscopeServerError: unknown op: 'flops.einsum_cost'" — the client
+    # proxied einsum_cost/svd_cost to a server op that didn't exist. Exercise
+    # the real client->server path so a call-time regression can't slip through
+    # (the import-only check above could not catch it).
+    ec = fnp.accounting.einsum_cost("ij,jk->ik", [(4, 5), (5, 6)])
+    assert isinstance(ec, int) and ec > 0
+
+    svd_full = fnp.accounting.svd_cost(128, 64)  # k=0 -> FULL svd (not "top-0")
+    svd_topk = fnp.accounting.svd_cost(128, 64, k=8)
+    assert isinstance(svd_full, int) and svd_full > 0
+    assert isinstance(svd_topk, int) and svd_topk > 0
+    assert svd_full > svd_topk  # full decomposition costs more than rank-8
+
+    # pointwise/reduction were already local; confirm they still work too.
+    assert fnp.accounting.pointwise_cost("add", shape=(16, 16)) > 0
+    assert fnp.accounting.reduction_cost("sum", input_shape=(16, 16)) > 0
+
+
 def test_symmetric_tensor_is_intentionally_server_side():
     # NOT a gap: native exposes flopscope.SymmetricTensor, but the client
     # deliberately withholds it (a server-side / analysis API) with a helpful

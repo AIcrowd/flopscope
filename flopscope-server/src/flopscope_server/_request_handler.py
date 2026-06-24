@@ -289,6 +289,37 @@ class RequestHandler:
         return self._pack_result(result)
 
     # ------------------------------------------------------------------
+    # Analytical cost estimators (flopscope.accounting)
+    # ------------------------------------------------------------------
+
+    def _handle_flops_cost(self, op: str, kwargs: dict) -> dict:
+        """Compute a WEIGHTED analytical FLOP cost estimate.
+
+        The client proxies ``flopscope.accounting.einsum_cost`` / ``svd_cost``
+        here. We delegate to native ``flopscope.accounting`` so the returned
+        value uses this session's authoritative weights AND the single-source
+        einsum cost engine — identical to the in-process reference, with no
+        formula duplicated on the client. Pure shape math: no array data, no
+        FLOP budget charged.
+        """
+        kw = {
+            (k.decode("utf-8") if isinstance(k, bytes) else k): v
+            for k, v in kwargs.items()
+        }
+        if op == "flops.einsum_cost":
+            subscripts = kw["subscripts"]
+            if isinstance(subscripts, bytes):
+                subscripts = subscripts.decode("utf-8")
+            shapes = [tuple(s) for s in kw["shapes"]]
+            value = int(flops.accounting.einsum_cost(subscripts, shapes))
+        else:  # flops.svd_cost
+            m, n = int(kw["m"]), int(kw["n"])
+            k = int(kw.get("k") or 0)
+            # Client surface uses k=0 to mean "full SVD"; native uses k=None.
+            value = int(flops.accounting.svd_cost(m, n, None if k == 0 else k))
+        return self._pack_result(value)
+
+    # ------------------------------------------------------------------
     # Flopscope function dispatch
     # ------------------------------------------------------------------
 
@@ -305,6 +336,14 @@ class RequestHandler:
                 dtype = dtype.decode("utf-8")
             result = self._run_kernel(arr.astype, dtype)
             return self._pack_result(result)
+
+        # Analytical cost estimators (flopscope.accounting). The client proxies
+        # these as flops.* ops; compute the WEIGHTED cost via native flopscope's
+        # accounting helpers, which use this session's authoritative weights and
+        # the single-source einsum cost engine (no formula duplicated on the
+        # client). Pure shape math — no array data, no budget charge.
+        if op in ("flops.einsum_cost", "flops.svd_cost"):
+            return self._handle_flops_cost(op, kwargs)
 
         # Generator method calls: op is "Generator.<method>" with the remote
         # generator handle as the first arg. Resolve it and call the method

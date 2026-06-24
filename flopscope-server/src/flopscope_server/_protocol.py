@@ -33,6 +33,12 @@ _PROTOCOL_OPS: frozenset[str] = frozenset(
         "create_from_data",
         "__getitem__",
         "astype",
+        # Analytical FLOP cost estimators (flopscope.accounting). Pure functions
+        # of shapes — the client proxies these here; the server computes the
+        # WEIGHTED cost via native flopscope.accounting (authoritative weights +
+        # the single-source einsum cost engine).
+        "flops.einsum_cost",
+        "flops.svd_cost",
     }
 )
 
