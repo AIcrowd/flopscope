@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.0rc5 (2026-06-25)
+
+### Fix
+
+- **client,server**: decode wire with raw=False; drop bytes-vs-str heuristic (#143)
+
 ## v0.8.0rc4 (2026-06-24)
 
 ### Fix

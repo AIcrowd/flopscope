@@ -474,7 +474,7 @@ wheels = [
 
 [[package]]
 name = "flopscope"
-version = "0.8.0rc4"
+version = "0.8.0rc5"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -539,7 +539,7 @@ dev = [
 
 [[package]]
 name = "flopscope-server"
-version = "0.8.0rc4"
+version = "0.8.0rc5"
 source = { editable = "flopscope-server" }
 dependencies = [
     { name = "flopscope" },
