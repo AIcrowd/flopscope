@@ -432,6 +432,8 @@ def _encode_index_key(key):
         return [_encode_index_key(k) for k in key]
     if isinstance(key, list):
         return [_encode_index_key(k) for k in key]
+    if key is Ellipsis:
+        return {"__ellipsis__": True}
     return key
 
 

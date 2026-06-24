@@ -469,6 +469,8 @@ class RequestHandler:
                 if isinstance(handle, bytes):
                     handle = handle.decode()
                 return self._session.get_array(handle)
+            if raw_key.get("__ellipsis__") or raw_key.get(b"__ellipsis__"):
+                return Ellipsis
             if "__slice__" in raw_key:
                 parts = raw_key["__slice__"]
                 return slice(*[None if p is None else int(p) for p in parts])
@@ -628,8 +630,13 @@ def _decode_index_key(raw_key):
     - list of the above -> tuple (for multi-dimensional indexing)
     """
     if isinstance(raw_key, dict):
+        if raw_key.get("__ellipsis__") or raw_key.get(b"__ellipsis__"):
+            return Ellipsis
         if "__slice__" in raw_key:
             parts = raw_key["__slice__"]
+            return slice(*[None if p is None else int(p) for p in parts])
+        if b"__slice__" in raw_key:
+            parts = raw_key[b"__slice__"]
             return slice(*[None if p is None else int(p) for p in parts])
     if isinstance(raw_key, list):
         decoded = [_decode_index_key(item) for item in raw_key]

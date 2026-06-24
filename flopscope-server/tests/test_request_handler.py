@@ -420,3 +420,15 @@ def test_result_array_size_limit(handler, session, monkeypatch):
     assert resp["status"] == "error"
     assert resp["error_type"] == "ValueError"
     assert "too large" in resp["message"]
+
+
+# ---------------------------------------------------------------------------
+# Ellipsis (...) indexing: client encodes {"__ellipsis__": True}
+# (prod regression sub 310351: "can not serialize 'ellipsis' object")
+# ---------------------------------------------------------------------------
+
+
+def test_decode_index_key_ellipsis(handler):
+    """The {"__ellipsis__": True} wire form decodes to Ellipsis (str + bytes keys)."""
+    assert handler._decode_index_key({"__ellipsis__": True}) is Ellipsis
+    assert handler._decode_index_key({b"__ellipsis__": True}) is Ellipsis
