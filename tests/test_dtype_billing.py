@@ -54,7 +54,6 @@ def test_complex_factor_real_dtype_is_one():
     assert complex_factor_for("multiply", np.dtype("float64")) == 1.0
 
 
-@pytest.mark.xfail(reason="registry classification lands next", strict=True)
 def test_complex_factor_reads_registry():
     assert complex_factor_for("multiply", np.dtype("complex128")) == 6.0
     assert complex_factor_for("add", np.dtype("complex128")) == 2.0
@@ -65,7 +64,6 @@ def test_complex_factor_fails_closed_when_unclassified():
         complex_factor_for("left_shift", np.dtype("complex128"))  # complex-illegal op
 
 
-@pytest.mark.xfail(reason="registry classification lands next", strict=True)
 def test_complex_factor_exact_requires_override():
     with pytest.raises(RuntimeError):
         complex_factor_for("einsum", np.dtype("complex128"))
