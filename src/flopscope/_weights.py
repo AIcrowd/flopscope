@@ -6,7 +6,8 @@ Packaged official weights are loaded automatically on import unless explicitly
 overridden or disabled.
 
 The JSON payload must have a ``"weights"`` key mapping
-``op_name -> float multiplier``.
+``op_name -> float multiplier``. It may also have a ``"dtype_rates"`` key
+mapping ``dtype_name -> float rate`` (see :func:`get_dtype_rate`).
 
 Active weights are loaded from the packaged ``data/default_weights.json`` — the
 single source of truth for billed weights. The sibling ``data/weights.json`` and
@@ -23,6 +24,7 @@ import warnings
 from importlib import resources
 
 _ACTIVE_WEIGHTS: dict[str, float] = {}
+_ACTIVE_DTYPE_RATES: dict[str, float] = {}
 _WARNED_MESSAGES: set[str] = set()
 
 
@@ -61,18 +63,45 @@ def _extract_weights(data: dict, *, source: str) -> dict[str, float]:
     return validated
 
 
-def _read_weights_file(path: str, *, source: str) -> dict[str, float]:
+def _extract_dtype_rates(data: dict, *, source: str) -> dict[str, float] | None:
+    rates = data.get("dtype_rates")
+    if rates is None:
+        return None
+    if not isinstance(rates, dict):
+        raise ValueError(f"{source} has an invalid 'dtype_rates' mapping")
+    validated: dict[str, float] = {}
+    for name, value in rates.items():
+        if not isinstance(name, str):
+            raise ValueError(f"{source} has a non-string dtype name: {name!r}")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(
+                f"{source} dtype rate for {name!r} must be a non-negative finite number"
+            )
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0:
+            raise ValueError(
+                f"{source} dtype rate for {name!r} must be a non-negative finite number"
+            )
+        validated[name] = numeric
+    return validated
+
+
+def _read_weights_file(path: str, *, source: str) -> dict:
     with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return _extract_weights(data, source=source)
+        return json.load(f)
 
 
-def _load_packaged_weights() -> dict[str, float] | None:
+def _load_packaged_weights_data() -> dict | None:
+    """Read and parse the packaged ``default_weights.json`` resource.
+
+    Returns the raw parsed payload (both the ``weights`` and ``dtype_rates``
+    keys, unvalidated) so the caller can extract both. Returns ``None`` — and
+    warns once — if the resource is missing or malformed as JSON.
+    """
     try:
         resource = resources.files("flopscope").joinpath("data/default_weights.json")
         with resource.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return _extract_weights(data, source="Packaged official weights")
+            return json.load(f)
     except Exception as exc:  # pragma: no cover - defensive fallback path
         _warn_once(
             "Flopscope could not load packaged official weights "
@@ -156,8 +185,27 @@ def get_weight(op_name: str) -> float:
     return 1.0
 
 
+def get_dtype_rate(dtype_name: str) -> float:
+    """Billing rate for a resolved dtype name.
+
+    Unit mode (empty table — disabled weights, or test reset) rates
+    everything 1.0. With a loaded table, unknown dtypes fail closed.
+    """
+    from flopscope.errors import UnsupportedDtypeError
+
+    if not _ACTIVE_DTYPE_RATES:
+        return 1.0
+    try:
+        return _ACTIVE_DTYPE_RATES[dtype_name]
+    except KeyError:
+        raise UnsupportedDtypeError(
+            f"dtype {dtype_name!r} has no billing rate; supported dtypes: "
+            f"{sorted(_ACTIVE_DTYPE_RATES)}"
+        ) from None
+
+
 def load_weights(path: str | None = None, *, use_packaged_default: bool = True) -> None:
-    """Resolve and load active FLOP weights.
+    """Resolve and load active FLOP weights and per-dtype billing rates.
 
     Parameters
     ----------
@@ -172,9 +220,11 @@ def load_weights(path: str | None = None, *, use_packaged_default: bool = True) 
     -----
     Resolution order:
 
-    1. If ``FLOPSCOPE_DISABLE_WEIGHTS=1``, all weights are disabled.
+    1. If ``FLOPSCOPE_DISABLE_WEIGHTS=1``, all weights and dtype rates are
+       disabled (unit mode).
     2. If an explicit path or ``FLOPSCOPE_WEIGHTS_FILE`` is provided and valid,
-       it is used.
+       it is used. If its payload has no ``dtype_rates`` key, a warning is
+       emitted and dtype rates stay in unit mode.
     3. If the override is unusable, a warning is emitted and Flopscope falls back
        to the packaged official weights when enabled, otherwise to unit
        weights.
@@ -182,6 +232,7 @@ def load_weights(path: str | None = None, *, use_packaged_default: bool = True) 
        and Flopscope falls back to unit weights.
     """
     _ACTIVE_WEIGHTS.clear()
+    _ACTIVE_DTYPE_RATES.clear()
 
     if _weights_disabled():
         return
@@ -191,14 +242,11 @@ def load_weights(path: str | None = None, *, use_packaged_default: bool = True) 
     )
 
     if override_path is not None:
+        source = f"Custom weights file '{override_path}'"
         try:
-            _ACTIVE_WEIGHTS.update(
-                _read_weights_file(
-                    override_path,
-                    source=f"Custom weights file '{override_path}'",
-                )
-            )
-            return
+            data = _read_weights_file(override_path, source=source)
+            weights = _extract_weights(data, source=source)
+            rates = _extract_dtype_rates(data, source=source)
         except Exception as exc:
             fallback_target = (
                 "packaged official weights" if use_packaged_default else "unit weights"
@@ -207,18 +255,46 @@ def load_weights(path: str | None = None, *, use_packaged_default: bool = True) 
                 f"Flopscope could not load custom weights from '{override_path}' "
                 f"({exc}); falling back to {fallback_target}."
             )
+        else:
+            _ACTIVE_WEIGHTS.update(weights)
+            if rates is None:
+                _warn_once(
+                    f"{source} has no 'dtype_rates'; using unit dtype rates (1.0)."
+                )
+            else:
+                _ACTIVE_DTYPE_RATES.update(rates)
+            return
 
     if not use_packaged_default:
         return
 
-    packaged_weights = _load_packaged_weights()
-    if packaged_weights is not None:
-        _ACTIVE_WEIGHTS.update(packaged_weights)
+    packaged_data = _load_packaged_weights_data()
+    if packaged_data is None:
+        return
+
+    try:
+        packaged_weights = _extract_weights(
+            packaged_data, source="Packaged official weights"
+        )
+        packaged_rates = _extract_dtype_rates(
+            packaged_data, source="Packaged official weights"
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback path
+        _warn_once(
+            "Flopscope could not load packaged official weights "
+            f"({exc}); falling back to unit weights (1.0 for all operations)."
+        )
+        return
+
+    _ACTIVE_WEIGHTS.update(packaged_weights)
+    if packaged_rates is not None:
+        _ACTIVE_DTYPE_RATES.update(packaged_rates)
 
 
 def reset_weights() -> None:
-    """Clear all loaded weights. For testing."""
+    """Clear all loaded weights and dtype rates. For testing."""
     _ACTIVE_WEIGHTS.clear()
+    _ACTIVE_DTYPE_RATES.clear()
     _WARNED_MESSAGES.clear()
 
 

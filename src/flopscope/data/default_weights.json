@@ -461,5 +461,21 @@
     "where": 1.0,
     "zeros": 0.0,
     "zeros_like": 0.0
+  },
+  "dtype_rates": {
+    "bool": 1.0,
+    "int8": 1.0,
+    "uint8": 1.0,
+    "int16": 1.0,
+    "uint16": 1.0,
+    "float16": 1.0,
+    "int32": 1.0,
+    "uint32": 1.0,
+    "float32": 1.0,
+    "int64": 2.0,
+    "uint64": 2.0,
+    "float64": 2.0,
+    "complex64": 1.0,
+    "complex128": 2.0
   }
 }

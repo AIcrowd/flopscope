@@ -48,6 +48,13 @@ class UnsupportedFunctionError(FlopscopeError):
         super().__init__(message)
 
 
+class UnsupportedDtypeError(TypeError):
+    """An operation resolved to a dtype with no billing rate. Raised when production dtype rates are active and the resolved calculation dtype is outside the supported table (e.g. float128), or when a complex-dtype call reaches an op with no complex billing classification."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+
+
 class UnsupportedReturnType(FlopscopeError):
     """Raised when an op's result cannot be serialized across the client/server boundary."""
 
@@ -111,6 +118,7 @@ _FLOPSCOPE_ERRORS: frozenset[str] = frozenset(
         "NoBudgetContextError",
         "SymmetryError",
         "UnsupportedFunctionError",
+        "UnsupportedDtypeError",
         "UnsupportedReturnType",
         "UnauthorizedControlError",
         "RemoteCallbackError",
@@ -124,6 +132,7 @@ _ERROR_MAP: dict[str, type[Exception]] = {
     "NoBudgetContextError": NoBudgetContextError,
     "SymmetryError": SymmetryError,
     "UnsupportedFunctionError": UnsupportedFunctionError,
+    "UnsupportedDtypeError": UnsupportedDtypeError,
     "UnsupportedReturnType": UnsupportedReturnType,
     "UnauthorizedControlError": UnauthorizedControlError,
     "RemoteCallbackError": RemoteCallbackError,

@@ -95,6 +95,7 @@ def _generate_errors() -> str:
         "SymmetryError",
         "TimeExhaustedError",
         "UnauthorizedControlError",
+        "UnsupportedDtypeError",
         "UnsupportedFunctionError",
         "UnsupportedReturnType",
     }
@@ -134,6 +135,17 @@ def _generate_errors() -> str:
             "UnsupportedFunctionError",
             "FlopscopeError",
             "Raised when calling a function not available in the installed NumPy.",
+        ),
+        (
+            "UnsupportedDtypeError",
+            "TypeError",
+            (
+                "An operation resolved to a dtype with no billing rate. Raised "
+                "when production dtype rates are active and the resolved "
+                "calculation dtype is outside the supported table (e.g. "
+                "float128), or when a complex-dtype call reaches an op with no "
+                "complex billing classification."
+            ),
         ),
         (
             "UnsupportedReturnType",
