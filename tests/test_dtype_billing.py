@@ -1,5 +1,9 @@
 """Resolved-dtype computation and complex factor lookup."""
 
+from __future__ import annotations
+
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -67,3 +71,32 @@ def test_complex_factor_fails_closed_when_unclassified():
 def test_complex_factor_exact_requires_override():
     with pytest.raises(RuntimeError):
         complex_factor_for("einsum", np.dtype("complex128"))
+
+
+# Complex real-FLOP total for contractions
+from flopscope._accumulation._cost import AccumulationCost, complex_real_total
+
+
+class _FakeAcc:
+    def __init__(self, total, num_terms, m_total, fallback_used=False):
+        self.total = total
+        self.num_terms = num_terms
+        self.m_total = m_total
+        self.fallback_used = fallback_used
+
+
+def test_complex_real_total_matmul_shape():
+    # ij,jk->ik with m=n=8, K=8: total = 2*512 - 64 = 960 (mults 512, adds 448)
+    acc = cast(AccumulationCost, _FakeAcc(total=960, num_terms=2, m_total=512))
+    assert complex_real_total(acc) == 6 * 512 + 2 * 448  # 3968
+
+
+def test_complex_real_total_pure_product():
+    # i,i->i elementwise product: no accumulation, all units are multiplies
+    acc = cast(AccumulationCost, _FakeAcc(total=100, num_terms=2, m_total=100))
+    assert complex_real_total(acc) == 600
+
+
+def test_complex_real_total_fallback_is_conservative():
+    acc = cast(AccumulationCost, _FakeAcc(total=1000, num_terms=3, m_total=100, fallback_used=True))
+    assert complex_real_total(acc) == 6000

@@ -364,6 +364,23 @@ def aggregate_einsum(
     )
 
 
+def complex_real_total(acc: AccumulationCost) -> int:
+    """Real-FLOP total when this contraction runs in complex arithmetic.
+
+    Decomposition of the aggregate total: multiplies = (num_terms - 1) * m_total
+    (the multiplication chain), adds = total - multiplies (accumulation).
+    Complex costs 6 real FLOPs per multiply and 2 per add. Fallback totals
+    carry no decomposition; bill every unit as a multiply (conservative).
+    """
+    if acc.fallback_used:
+        return 6 * acc.total
+    mults = (acc.num_terms - 1) * acc.m_total
+    adds = acc.total - mults
+    if adds < 0:  # degenerate corner (heavy symmetry savings): stay conservative
+        return 6 * acc.total
+    return 6 * mults + 2 * adds
+
+
 # ── End-to-end orchestrator ──────────────────────────────────────────
 
 
