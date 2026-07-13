@@ -1484,7 +1484,7 @@
       "free": false,
       "module": "numpy",
       "name": "cross",
-      "notes": "Cross product of two 3-D vectors.",
+      "notes": "Cross product of two 3-D vectors. Complex factor 4.7: base cost 3*numel (2 mul + 1 sub per component, non-FMA); honest complex (2*6 + 1*2)/3 = 4.67.",
       "numpy_ref": "np.cross",
       "slug": "cross",
       "status": "supported",

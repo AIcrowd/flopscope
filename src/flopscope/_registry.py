@@ -10,6 +10,32 @@ counted_random_method   method on Generator/RandomState, counted via cost_formul
 free                    zero FLOP cost (allocation, indexing, shape ops, etc.)
 free_random_method      method on Generator/RandomState, no FLOP cost (state, spawn, etc.)
 blacklisted             intentionally unsupported
+
+complex_factor
+--------------
+Each charged op carries a ``complex_factor``: the real-FLOP count at component
+precision that the op executes per billed unit when the resolved calculation
+dtype is complex. It is 1.0 for real dtypes and is applied multiplicatively in
+the bill ``int(flop_cost * dtype_rate * complex_factor * weight)``. Values are a
+float >= 1.0, ``"exact"`` (contraction family — computed per call from the
+einsum accumulation decomposition), or ``"illegal"`` (numpy raises on complex).
+Free/blacklisted ops carry no key.
+
+Atom table (FMA=2 convention; z = a + bi):
+    add / sub / negate      2   (2 real adds)
+    multiply                6   (4 mul + 2 add)
+    divide                 11   (4 mul + 2 add num; 2 mul + 1 add den; 2 div)
+    reciprocal              6
+    fused multiply-add      4   (8 real flops per FMA=2 unit)
+    absolute (hypot)        4   (2 mul + 1 add + 1 sqrt)
+    sqrt                   10
+    ordering compare        2   (lexicographic: real, tie-break imag)
+
+Classification by the op's billed unit: add/compare/sort/set/reduce -> 2;
+multiply/pure-product -> 6; divide -> 11; contraction (FMA) -> "exact";
+transcendental -> (16*T + F)/16 per op; FFT and other complex-native formulas
+(angle/conj) -> 1 (already count complex real-flops); pure movement of whole
+complex values -> 1 (relocation, not arithmetic).
 """
 
 from __future__ import annotations
@@ -1045,8 +1071,8 @@ REGISTRY: dict[str, dict] = {
     "cross": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 4.0,
-        "notes": "Cross product of two 3-D vectors.",
+        "complex_factor": 4.7,
+        "notes": "Cross product of two 3-D vectors. Complex factor 4.7: base cost 3*numel (2 mul + 1 sub per component, non-FMA); honest complex (2*6 + 1*2)/3 = 4.67.",
     },
     "diff": {
         "category": "counted_custom",
@@ -2033,25 +2059,25 @@ REGISTRY: dict[str, dict] = {
     "histogram": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Binning; cost = n*ceil(log2(bins)).",
     },
     "histogram2d": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "2D binning; cost = n*(ceil(log2(bx))+ceil(log2(by))).",
     },
     "histogramdd": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "ND binning; cost = n*sum(ceil(log2(b_i))).",
     },
     "histogram_bin_edges": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Bin edge computation; cost = numel(a).",
     },
     "bincount": {
