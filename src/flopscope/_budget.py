@@ -685,9 +685,12 @@ class BudgetContext:
         Raises BudgetExhaustedError before charging on overshoot; raises
         TimeExhaustedError after the record is appended if the deadline has passed.
 
-        ``dtypes=None`` (the default) is temporary migration state for call sites
-        not yet threading dtypes through: it bills as dtype-neutral (rate 1.0,
-        factor 1.0), identical to pre-dtype-aware billing.
+        ``dtypes=None`` (the default) bills as dtype-neutral (rate 1.0, factor
+        1.0). Both public callers (``deduct`` and ``_DeferredOpTimer.__exit__``,
+        reached via ``deduct_after``) now require a caller-supplied ``dtypes``
+        tuple and raise ``TypeError`` before reaching here if it is ``None``, so
+        this default is unreachable from them; it remains as this internal
+        choke point's own defensive fallback.
         """
         from flopscope._dtype_billing import (
             complex_factor_for,
@@ -746,10 +749,15 @@ class BudgetContext:
         flop_cost: int,
         subscripts: str | None,
         shapes: tuple,
-        dtypes: tuple | None = None,
+        dtypes: tuple | None,
         complex_factor_override: float | None = None,
     ) -> _OpTimer:
         """Deduct FLOPs from the budget and return a timer context manager."""
+        if dtypes is None:
+            raise TypeError(
+                f"deduct({op_name!r}): dtypes= is required; pass () for a "
+                "dtype-neutral op"
+            )
         fs_t0 = time.perf_counter()
         n0 = len(self._op_log)
         try:
@@ -780,7 +788,7 @@ class BudgetContext:
         *,
         subscripts: str | None,
         shapes: tuple,
-        dtypes: tuple | None = None,
+        dtypes: tuple | None,
         complex_factor_override: float | None = None,
     ) -> _DeferredOpTimer:
         """Like :meth:`deduct`, but the FLOP cost is supplied via ``op.set_cost``
@@ -788,6 +796,11 @@ class BudgetContext:
         depends on the result; the numpy call runs inside the timer (via
         ``_call_numpy``) and is recorded as backend time.
         """
+        if dtypes is None:
+            raise TypeError(
+                f"deduct({op_name!r}): dtypes= is required; pass () for a "
+                "dtype-neutral op"
+            )
         return _DeferredOpTimer(
             self,
             op_name,

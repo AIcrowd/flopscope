@@ -51,9 +51,10 @@ def test_override_bypasses_registry_factor():
     )
 
 
-def test_dtype_neutral_and_unmigrated():
+def test_dtype_neutral_and_none_rejected():
     assert _charge("einsum_path", 1, ()) == 1  # declared neutral
-    assert _charge("einsum_path", 1, None) == 1  # unmigrated site (until Task 9)
+    with pytest.raises(TypeError):
+        _charge("einsum_path", 1, None)  # dtypes= is required; None now rejected
 
 
 def test_resolved_dtype_recorded():
