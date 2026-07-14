@@ -296,7 +296,7 @@ arithmetic (`z = a + bi`, FMA=2 convention):
 | divide | 11 | numerator 4 mul + 2 add; denominator 2 mul + 1 add; 2 divides |
 | reciprocal | 6 | special case of divide |
 | fused multiply-add | 4 | 8 real FLOPs per FMA=2 unit (1 complex mul + 1 complex add) |
-| absolute | 4 | |z| = sqrt(re² + im²): 2 mul + 1 add + 1 sqrt |
+| absolute | 4 | abs(z) = sqrt(re² + im²): 2 mul + 1 add + 1 sqrt |
 | sqrt | 10 | complex square root |
 | ordering compare | 2 | lexicographic: compare real parts, tie-break on imaginary |
 
