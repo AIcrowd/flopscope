@@ -127,7 +127,9 @@ def test_deduct_after_attributes_call_to_backend_and_charges():
         def fake_movement():
             budget = get_active_budget()
             assert budget is not None
-            with budget.deduct_after("tile", subscripts=None, shapes=()) as op:
+            with budget.deduct_after(
+                "tile", subscripts=None, shapes=(), dtypes=()
+            ) as op:
                 _call_numpy(time.sleep, 0.05)  # stand-in for numpy data movement
                 op.set_cost(1000)
 
@@ -153,7 +155,9 @@ def test_deduct_after_overshoot_raises_without_recording():
             budget = get_active_budget()
             assert budget is not None
             with pytest.raises(flops.errors.BudgetExhaustedError):
-                with budget.deduct_after("tile", subscripts=None, shapes=()) as op:
+                with budget.deduct_after(
+                    "tile", subscripts=None, shapes=(), dtypes=()
+                ) as op:
                     op.set_cost(1000)  # exceeds budget of 100
 
         fake()
@@ -170,7 +174,7 @@ def test_deduct_after_without_set_cost_raises_runtime_error():
             budget = get_active_budget()
             assert budget is not None
             with pytest.raises(RuntimeError, match="set_cost"):
-                with budget.deduct_after("tile", subscripts=None, shapes=()):
+                with budget.deduct_after("tile", subscripts=None, shapes=(), dtypes=()):
                     pass  # forgot to call set_cost
 
         fake()
@@ -187,7 +191,9 @@ def test_deduct_after_attributes_backend_even_when_block_raises():
             budget = get_active_budget()
             assert budget is not None
             with pytest.raises(ValueError):
-                with budget.deduct_after("tile", subscripts=None, shapes=()) as op:
+                with budget.deduct_after(
+                    "tile", subscripts=None, shapes=(), dtypes=()
+                ) as op:
                     _call_numpy(time.sleep, 0.04)
                     raise ValueError("boom")
 

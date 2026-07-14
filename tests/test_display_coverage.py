@@ -31,7 +31,7 @@ def _make_budget(flop_budget=10_000, namespace=None, ops=None):
     ops = ops or [("matmul", 500), ("add", 100)]
     with BudgetContext(flop_budget=flop_budget, quiet=True, namespace=namespace) as b:
         for op_name, cost in ops:
-            b.deduct(op_name, flop_cost=cost, subscripts=None, shapes=())
+            b.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(), dtypes=())
 
 
 # ======================================================================
@@ -258,7 +258,7 @@ class TestRichSummary:
     def test_display_totals_exclude_implicit_global_default_budget(self):
         _make_budget(flop_budget=5000, namespace="train", ops=[("matmul", 1000)])
         with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("add", flop_cost=10, subscripts=None, shapes=())
+            b.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
 
         totals = _display_totals()
         assert totals["has_explicit_budget"] is True
@@ -326,7 +326,7 @@ class TestRichSummary:
         _make_budget(flop_budget=5000, namespace="train", ops=[("matmul", 1000)])
         # Simulate the global default (None namespace, budget >= 1e15)
         with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("add", flop_cost=10, subscripts=None, shapes=())
+            b.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
         result = _rich_summary(by_namespace=True)
         import io
 
@@ -363,7 +363,7 @@ class TestRichSummary:
 
         # Only the global default namespace (large budget, None ns)
         with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("matmul", flop_cost=100, subscripts=None, shapes=())
+            b.deduct("matmul", flop_cost=100, subscripts=None, shapes=(), dtypes=())
         result = _rich_summary(by_namespace=True)
         assert isinstance(result, Panel)
 

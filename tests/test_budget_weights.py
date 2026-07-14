@@ -35,7 +35,9 @@ def _packaged_weight(op_name):
 def test_deduct_applies_weight(tmp_path):
     load_weights(_write_weights(tmp_path, {"exp": 10.0}))
     with BudgetContext(flop_budget=1_000_000) as budget:
-        budget.deduct("exp", flop_cost=100, subscripts=None, shapes=((100,),))
+        budget.deduct(
+            "exp", flop_cost=100, subscripts=None, shapes=((100,),), dtypes=()
+        )
         assert budget.flops_used == 1000
         rec = budget.op_log[0]
         assert rec.flop_cost == 1000
@@ -43,7 +45,9 @@ def test_deduct_applies_weight(tmp_path):
 
 def test_deduct_weight_default_is_one():
     with BudgetContext(flop_budget=1_000_000) as budget:
-        budget.deduct("add", flop_cost=100, subscripts=None, shapes=((100,),))
+        budget.deduct(
+            "add", flop_cost=100, subscripts=None, shapes=((100,),), dtypes=()
+        )
         assert budget.flops_used == 100
 
 
@@ -51,13 +55,15 @@ def test_deduct_exhaustion_accounts_for_weight(tmp_path):
     load_weights(_write_weights(tmp_path, {"exp": 10.0}))
     with pytest.raises(BudgetExhaustedError):
         with BudgetContext(flop_budget=500) as budget:
-            budget.deduct("exp", flop_cost=100, subscripts=None, shapes=((100,),))
+            budget.deduct(
+                "exp", flop_cost=100, subscripts=None, shapes=((100,),), dtypes=()
+            )
 
 
 def test_deduct_uses_packaged_default_when_explicitly_loaded():
     load_weights(use_packaged_default=True)
     with BudgetContext(flop_budget=1_000_000) as budget:
-        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((10,),))
+        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((10,),), dtypes=())
         assert budget.flops_used == int(10 * _packaged_weight("exp"))
 
 
@@ -71,7 +77,7 @@ def test_public_helpers_match_runtime_deduction_under_default_import_config(
     expected = public_flops.pointwise_cost("exp", shape=(2, 5))
 
     with BudgetContext(flop_budget=1_000_000) as budget:
-        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((2, 5),))
+        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((2, 5),), dtypes=())
         assert budget.flops_used == expected
 
 
@@ -79,5 +85,5 @@ def test_deduct_disable_weights_ignores_packaged_default(monkeypatch):
     monkeypatch.setenv("FLOPSCOPE_DISABLE_WEIGHTS", "1")
     load_weights(use_packaged_default=True)
     with BudgetContext(flop_budget=1_000_000) as budget:
-        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((10,),))
+        budget.deduct("exp", flop_cost=10, subscripts=None, shapes=((10,),), dtypes=())
         assert budget.flops_used == 10

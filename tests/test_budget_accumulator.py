@@ -22,8 +22,8 @@ def test_namespace_record_fields():
 
 def test_budget_summary_dict_unlabeled():
     with BudgetContext(flop_budget=1000, namespace="a", quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
-        ctx.deduct("mul", flop_cost=200, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
+        ctx.deduct("mul", flop_cost=200, subscripts=None, shapes=(), dtypes=())
 
     data = budget_summary_dict()
     assert data["flops_used"] == 300
@@ -38,17 +38,17 @@ def test_budget_summary_dict_by_namespace():
     import flopscope as flops
 
     with BudgetContext(flop_budget=1000, namespace="predict", quiet=True) as ctx:
-        with ctx.deduct("mul", flop_cost=10, subscripts=None, shapes=()):
+        with ctx.deduct("mul", flop_cost=10, subscripts=None, shapes=(), dtypes=()):
             pass
         with flops.namespace("precompute"):
-            with ctx.deduct("add", flop_cost=25, subscripts=None, shapes=()):
+            with ctx.deduct("add", flop_cost=25, subscripts=None, shapes=(), dtypes=()):
                 pass
     with BudgetContext(flop_budget=500, namespace="predict", quiet=True) as ctx:
         with flops.namespace("precompute"):
-            with ctx.deduct("add", flop_cost=15, subscripts=None, shapes=()):
+            with ctx.deduct("add", flop_cost=15, subscripts=None, shapes=(), dtypes=()):
                 pass
     with BudgetContext(flop_budget=250, quiet=True) as ctx:
-        with ctx.deduct("sum", flop_cost=5, subscripts=None, shapes=()):
+        with ctx.deduct("sum", flop_cost=5, subscripts=None, shapes=(), dtypes=()):
             pass
 
     data = budget_summary_dict(by_namespace=True)
@@ -81,7 +81,7 @@ def test_budget_summary_dict_by_namespace_uses_nested_op_namespace():
 
     with BudgetContext(flop_budget=1000, namespace="predict..raw", quiet=True) as ctx:
         with flops.namespace("precompute"):
-            ctx.deduct("add", flop_cost=25, subscripts=None, shapes=())
+            ctx.deduct("add", flop_cost=25, subscripts=None, shapes=(), dtypes=())
 
     data = budget_summary_dict(by_namespace=True)
     assert "predict..raw.precompute" in data["by_namespace"]
@@ -95,9 +95,9 @@ def test_budget_summary_dict_by_namespace_uses_nested_op_namespace():
 
 def test_budget_summary_dict_accumulates_across_contexts():
     with BudgetContext(flop_budget=1000, namespace="a", quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
     with BudgetContext(flop_budget=2000, namespace="b", quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=300, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=300, subscripts=None, shapes=(), dtypes=())
 
     data = budget_summary_dict()
     assert data["flops_used"] == 400
@@ -110,7 +110,7 @@ def test_budget_summary_dict_accumulates_across_contexts():
 
 def test_budget_reset():
     with BudgetContext(flop_budget=1000, quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
     budget_reset()
     data = budget_summary_dict()
     assert data["flops_used"] == 0
@@ -127,7 +127,7 @@ def test_budget_summary_dict_does_not_double_count_reused_decorator_context():
     def compute():
         ctx = get_active_budget()
         assert ctx is not None
-        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
         seen_totals.append(flops.budget_summary_dict()["flops_used"])
 
     compute()
@@ -159,7 +159,7 @@ def test_reused_decorator_context_resets_live_timing_state_between_calls():
         assert ctx is budget_ctx
         seen_ctx_wall_times.append(ctx.wall_time_s)
 
-        with ctx.deduct("add", flop_cost=10, subscripts=None, shapes=()):
+        with ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=()):
             pass
 
         seen_context_live_wall_times.append(ctx.summary_dict()["wall_time_s"])
