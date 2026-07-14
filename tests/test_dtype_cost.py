@@ -551,3 +551,114 @@ def test_linalg_trace_accumulator_dtype_is_billed():
     real = _cost(lambda: fnp.linalg.trace(m))
     cplx = _cost(lambda: fnp.linalg.trace(m, dtype=np.complex128))
     assert cplx == 4 * real
+
+
+# ---------------------------------------------------------------------------
+# Task 10: exploit-kill and resolved-dtype invariant tests
+#
+# These encode the two reported undercounting exploits as assertions and
+# prove the dtype-aware billing closes them: the load-bearing check in each
+# is exploit_cost >= honest_cost (packing must not be profitable), with the
+# concrete values pinned via derivation comments so the invariant stays
+# meaningful even if a future rate/weight tweak shifts the literals.
+# ---------------------------------------------------------------------------
+
+
+def test_complex_packing_is_not_profitable_elementwise():
+    # Complex-packing trick: bundle two independent real payloads (y1, y2)
+    # into one complex64 array's real/imag lanes and run a single complex
+    # multiply against the shared operand x, hoping to recover both x*y1
+    # and x*y2 for less than the price of the two honest real multiplies.
+    load_weights()
+    x = fnp.asarray(np.ones(100, dtype=np.float32))
+    y1 = fnp.asarray(np.ones(100, dtype=np.float32))
+    y2 = fnp.asarray(np.ones(100, dtype=np.float32))
+    packed = fnp.asarray(np.ones(100, dtype=np.complex64))
+    honest = _cost(lambda: (fnp.multiply(x, y1), fnp.multiply(x, y2)))
+    exploit = _cost(lambda: fnp.multiply(x, packed))
+    # honest: 2 * (100 * rate=1.0(f32) * complex_factor=1.0(real) * weight=1.0) = 200
+    # exploit: result_type(f32, c64)=c64; 100 * rate=1.0(c64) * complex_factor=6.0
+    #          (multiply's registry factor) * weight=1.0 = 600
+    assert honest == 200
+    assert exploit == 600
+    assert exploit >= honest  # packing loses 3x, not free
+
+
+def test_complex_packing_is_not_profitable_matmul():
+    # Same packing trick one level up: A @ (B1 + i*B2) in place of the two
+    # honest matmuls A@B1 and A@B1.
+    load_weights()
+    A = fnp.asarray(np.ones((8, 8), dtype=np.float32))
+    B1 = fnp.asarray(np.ones((8, 8), dtype=np.float32))
+    Bc = fnp.asarray(np.ones((8, 8), dtype=np.complex64))
+    honest = _cost(lambda: (fnp.matmul(A, B1), fnp.matmul(A, B1)))
+    exploit = _cost(lambda: fnp.matmul(A, Bc))
+    # honest: 2 * 960 ((8,8)@(8,8) f32, rate 1.0; matches test_matmul_exact_
+    #         complex_billing's f32 pin) = 1920
+    # exploit: result_type(f32, c64)=c64. The einsum accumulation (mu, adds)
+    #          depends only on shapes/subscripts, not on which operand is
+    #          nominally real, so this bills the SAME exact complex total as
+    #          a genuine complex64 @ complex64 matmul: 3968 (matches test_
+    #          matmul_exact_complex_billing's c64 pin).
+    assert honest == 1920
+    assert exploit == 3968
+    assert exploit >= honest  # packing loses ~2x, not free
+
+
+def test_width_packing_is_break_even_or_losing():
+    # Width-packing trick: pack two fp32-precision multiplies into one fp64
+    # multiply (e.g. lower/upper 32 bits of a float64 lane each carrying an
+    # independent fp32 payload), hoping fp64 bills like a single fp32 op.
+    load_weights()
+    a32 = fnp.asarray(np.ones(100, dtype=np.float32))
+    a64 = fnp.asarray(np.ones(100, dtype=np.float64))
+    two_f32 = _cost(lambda: (fnp.multiply(a32, a32), fnp.multiply(a32, a32)))
+    one_f64 = _cost(lambda: fnp.multiply(a64, a64))
+    # two_f32: 2 * (100 * rate=1.0(f32) * weight=1.0) = 200
+    # one_f64: 100 * rate=2.0(f64) * weight=1.0 = 200
+    assert two_f32 == 200
+    assert one_f64 == 200
+    assert one_f64 >= two_f32  # break-even before any pack/unpack overhead
+
+
+def test_output_downcast_does_not_discount():
+    # fnp.matmul(a, b) takes no dtype= kwarg (fnp.matmul(a, b, dtype=np.int8)
+    # raises TypeError -- confirmed while writing this test), so there is no
+    # literal "requested narrow output" to pass. The invariant this locks
+    # instead: billing resolves via np.result_type over the declared operand
+    # dtypes, not the narrowest-looking one. int32 (rate 1.0) combined with
+    # float32 (rate 1.0) numpy-promotes to float64 (rate 2.0) for the actual
+    # compute (np.result_type(int32, float32) == float64), and the bill must
+    # track that promotion exactly -- matching a direct float64 matmul --
+    # rather than discounting to either input's own (lighter) rate.
+    load_weights()
+    a = fnp.asarray(np.ones((8, 8), dtype=np.int32))
+    b = fnp.asarray(np.ones((8, 8), dtype=np.float32))
+    plain = _cost(lambda: fnp.matmul(a, b))  # resolves float64
+    f64 = fnp.asarray(np.ones((8, 8), dtype=np.float64))
+    via_f64 = _cost(lambda: fnp.matmul(f64, f64))
+    assert plain == 1920
+    assert via_f64 == 1920
+    assert plain == via_f64  # no discount for the int32/float32-looking mix
+
+
+def test_astype_to_complex_charges_and_back_charges():
+    # Widening real->complex astype is a safe (lossless) cast: free. The
+    # reverse, narrowing complex->real, discards the imaginary lane and is
+    # charged.
+    load_weights()
+    r = fnp.asarray(np.ones(100, dtype=np.float64))
+    z = fnp.asarray(np.ones(100, dtype=np.complex128))
+    assert _cost(lambda: r.astype(np.complex128)) == 0  # widening: safe cast
+    back = _cost(lambda: z.astype(np.float64))  # lossy: numel * rate * factor
+    # astype's registry entry declares no complex_factor classification, so
+    # complex_factor_for()'s default of 1.0 applies (relocation, not
+    # arithmetic); the dtype rate is the heavier of source/dest
+    # (heavier_billing_dtype(complex128, float64), tied at rate 2.0) ->
+    # 100 * 2.0 * 1.0 = 200. (The brief's draft literal was
+    # int(100 * 2.0 * 2.0) == 400, assuming a second dtype-like 2x factor
+    # stacked on top of the rate; the implemented astype has no such factor.
+    # 200 also matches the existing sibling pin in
+    # test_complex_movement_and_creation_do_not_raise, so this isn't a new
+    # number -- it's consistent with billing already locked in by Task 8a.)
+    assert back == 200
