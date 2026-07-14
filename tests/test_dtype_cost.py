@@ -278,15 +278,26 @@ def test_array_ops_free_op_bills_zero_regardless_of_dtype():
     assert _cost(lambda: fnp.reshape(zc, (3, 4))) == 0
 
 
-def test_astype_bills_input_dtype_ratio():
+def test_astype_bills_heavier_of_src_and_dst_rate():
     # astype (weight 1.0, cost=numel for value-changing casts) bills at the
-    # INPUT dtype: fp64 input costs 2x fp32 input for the same narrowing cast.
+    # HEAVIER of the source and destination rate -- it reads the source and
+    # writes the destination, so the pricier side dominates. Neither source-only
+    # nor result_type is correct: source-only under-bills when dst is pricier
+    # (complex64->float64), result_type over-bills a cross-kind narrowing
+    # (float32+int32 promotes to float64).
     load_weights()
     a64 = fnp.asarray(np.ones(1000, dtype=np.float64))
     a32 = fnp.asarray(np.ones(1000, dtype=np.float32))
-    c64 = _cost(lambda: fnp.astype(a64, np.int32))
-    c32 = _cost(lambda: fnp.astype(a32, np.int32))
-    assert c32 == 1000 and c64 == 2000  # ratio 2.0
+    c64 = fnp.asarray(np.ones(1000, dtype=np.complex64))
+    c128 = fnp.asarray(np.ones(1000, dtype=np.complex128))
+    # source pricier than dest:
+    assert _cost(lambda: fnp.astype(a64, np.int32)) == 2000
+    assert _cost(lambda: fnp.astype(a32, np.int32)) == 1000  # no over-charge
+    # dest pricier than source (the fixed under-bill): complex64->float64 must
+    # match complex128->float64 -- same float64 output, same work.
+    assert _cost(lambda: fnp.astype(c64, np.float64)) == 2000
+    assert _cost(lambda: fnp.astype(c128, np.float64)) == 2000
+    assert _cost(lambda: fnp.astype(a32, np.int64)) == 2000  # real-only dst pricier
 
 
 def test_complex_movement_and_creation_do_not_raise():
@@ -297,6 +308,8 @@ def test_complex_movement_and_creation_do_not_raise():
     assert _cost(lambda: fnp.asarray(np.ones(50, dtype=np.complex128))) == 0
     assert _cost(lambda: fnp.ravel(zc)) == 0
     assert _cost(lambda: fnp.broadcast_to(zc, (2, 100))) == 0
-    # astype complex->real is value-changing (cost=numel) at the complex128
-    # input rate (2.0), factor 1.0: 100 * 2.0 = 200.
+    # astype complex->real is value-changing (cost=numel) billed at the heavier
+    # of the complex128 / float64 rates (both 2.0), factor 1.0: 100 * 2.0 = 200.
+    # Both the function form and the .astype() method form must not raise.
     assert _cost(lambda: fnp.astype(zc, np.float64)) == 200
+    assert _cost(lambda: zc.astype(np.float64)) == 200

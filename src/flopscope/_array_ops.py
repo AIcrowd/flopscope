@@ -21,6 +21,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from flopscope import _symmetry_transport as _st
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import heavier_billing_dtype as _heavier_billing_dtype
 from flopscope._ndarray import (
     FlopscopeArray,
     _asplainflopscope,
@@ -1407,7 +1408,7 @@ def astype(
         flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape,),
-        dtypes=(x_arr.dtype,),
+        dtypes=(_heavier_billing_dtype(x_arr.dtype, _np.dtype(dtype)),),
     ):
         result = _call_numpy(
             _np.astype, _to_base_ndarray(x), dtype, copy=copy, device=device
@@ -1443,7 +1444,7 @@ def _astype_counted(
         flop_cost=cost,
         subscripts=None,
         shapes=(arr_np.shape,),
-        dtypes=(arr_np.dtype,),
+        dtypes=(_heavier_billing_dtype(arr_np.dtype, _np.dtype(dtype)),),
     ):
         result = _call_numpy(
             _np.ndarray.astype,

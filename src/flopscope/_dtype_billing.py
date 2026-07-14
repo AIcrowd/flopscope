@@ -39,6 +39,21 @@ def rate_for(resolved: _np.dtype) -> float:
     return get_dtype_rate(resolved.name)
 
 
+def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
+    """Return the operand dtype with the highest billing rate (ties -> first).
+
+    Unlike ``np.result_type``, this never promotes to a *third* dtype. Use it
+    where the billed cost is the MAX of the operand rates rather than the
+    promoted-loop rate -- e.g. ``astype``, which reads the source and writes
+    the destination, so it should bill at whichever is pricier. ``result_type``
+    would be wrong twice over there: ``result_type(float32, int32) == float64``
+    over-charges a narrowing cross-kind cast, while billing the source alone
+    under-charges when the destination is pricier (``complex64 -> float64``).
+    """
+    dts = [_np.dtype(d) for d in dtypes]
+    return max(dts, key=lambda d: get_dtype_rate(d.name))
+
+
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
 # arithmetic is the base ufunc's, so they inherit its complex factor.
 _UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")
