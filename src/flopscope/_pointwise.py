@@ -2319,6 +2319,17 @@ def _einsum_routed_binary(
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
+    billing_dtypes = (a.dtype, b.dtype)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    complex_override = None
+    resolved = _np.result_type(*billing_dtypes)
+    if resolved.kind == "c" and info.accumulation.total > 0:
+        from flopscope._accumulation._cost import complex_real_total
+
+        complex_override = (
+            complex_real_total(info.accumulation) / info.accumulation.total
+        )
     if out is not None:
         call_kwargs = {**call_kwargs, "out": _to_base_ndarray(out)}
     with budget.deduct(
@@ -2326,6 +2337,8 @@ def _einsum_routed_binary(
         flop_cost=info.accumulation.total,
         subscripts=info.canonical_subscripts,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         if errstate:
             with _np.errstate(divide="ignore", over="ignore", invalid="ignore"):
@@ -2592,11 +2605,20 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         cost = info.accumulation.total
         canonical_subs = info.canonical_subscripts
         out_sym = info.output_symmetry  # scalar output — always None
+        billing_dtypes = (a.dtype, b.dtype)
+        complex_override = None
+        resolved = _np.result_type(*billing_dtypes)
+        if resolved.kind == "c" and cost > 0:
+            from flopscope._accumulation._cost import complex_real_total
+
+            complex_override = complex_real_total(info.accumulation) / cost
         with budget.deduct(
             "tensordot",
             flop_cost=cost,
             subscripts=canonical_subs,
             shapes=(a.shape, b.shape),
+            dtypes=billing_dtypes,
+            complex_factor_override=complex_override,
         ):
             result = _call_numpy(
                 _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
@@ -2628,6 +2650,14 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     # ``_is_oversized_for_cost_model``).
     a_sym = _symmetry_of(a)
     b_sym = _symmetry_of(b)
+    # Only the branches below that reach `_resolve_cost_and_output_symmetry`
+    # (i.e. keep an AccumulationCost around, not just its .total) can supply
+    # an exact complex_factor_override; the einsum_cost/_symmetry_adjusted_cost
+    # branches (oversized symmetry, or rank>52 with no subscripts) compute a
+    # plain int with no mu/adds decomposition, so they stay None and rely on
+    # complex_factor_for's fail-closed raise if a complex dtype ever reaches
+    # them (registry classification "exact").
+    accumulation_for_billing = None
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
         try:
             oversized_order = (
@@ -2681,17 +2711,27 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             _info = _resolve_cost_and_output_symmetry(_subs, a, b)
             cost = _info.accumulation.total
             canonical_subs = _subs
+            accumulation_for_billing = _info.accumulation
         else:
             dense = (
                 _builtins.max(a.size * b.size // contracted, 1) if contracted > 0 else 1
             )
             cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
             canonical_subs = None
+    billing_dtypes = (a.dtype, b.dtype)
+    complex_override = None
+    resolved = _np.result_type(*billing_dtypes)
+    if resolved.kind == "c" and accumulation_for_billing is not None and cost > 0:
+        from flopscope._accumulation._cost import complex_real_total
+
+        complex_override = complex_real_total(accumulation_for_billing) / cost
     with budget.deduct(
         "tensordot",
         flop_cost=cost,
         subscripts=canonical_subs,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         result = _call_numpy(
             _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
@@ -2719,8 +2759,20 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     info = _resolve_cost_and_output_symmetry("i,i->", a_flat, b_flat)
     cost = info.accumulation.total
     canonical_subs = info.canonical_subscripts
+    billing_dtypes = (a.dtype, b.dtype)
+    complex_override = None
+    resolved = _np.result_type(*billing_dtypes)
+    if resolved.kind == "c" and cost > 0:
+        from flopscope._accumulation._cost import complex_real_total
+
+        complex_override = complex_real_total(info.accumulation) / cost
     with budget.deduct(
-        "vdot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
+        "vdot",
+        flop_cost=cost,
+        subscripts=canonical_subs,
+        shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         result = _call_numpy(_np.vdot, _to_base_ndarray(a), _to_base_ndarray(b))
     # vdot returns a scalar, never a SymmetricTensor.

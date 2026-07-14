@@ -172,3 +172,87 @@ def test_generic_ufunc_accumulate_complex_runs_and_bills_base_ufunc_factor():
     assert _cost(lambda: np.subtract.accumulate(_z)) == 2 * _cost(
         lambda: np.subtract.accumulate(_r10)
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: exact complex billing for the einsum/contraction family
+# ---------------------------------------------------------------------------
+
+_A32 = fnp.asarray(np.ones((8, 8), dtype=np.float32))
+_A64 = fnp.asarray(np.ones((8, 8), dtype=np.float64))
+_Ac64 = fnp.asarray(np.ones((8, 8), dtype=np.complex64))
+_Ac128 = fnp.asarray(np.ones((8, 8), dtype=np.complex128))
+
+
+def test_matmul_exact_complex_billing():
+    # (8,8)@(8,8): flop_cost = 2*512 - 64 = 960; complex exact = 3968
+    load_weights()
+    assert _cost(lambda: fnp.matmul(_A32, _A32)) == 960  # f32 rate 1.0
+    assert _cost(lambda: fnp.matmul(_A64, _A64)) == 1920  # f64 rate 2.0
+    assert _cost(lambda: fnp.matmul(_Ac64, _Ac64)) == 3968  # c64: exact factor
+    assert _cost(lambda: fnp.matmul(_Ac128, _Ac128)) == 7936  # c128: exact * 2.0
+
+
+def test_einsum_elementwise_alias_matches_multiply():
+    # einsum('i,i->i') must bill like multiply (factor 6), not a flat 4
+    z = fnp.asarray(np.ones(10, dtype=np.complex128))
+    assert _cost(lambda: fnp.einsum("i,i->i", z, z)) == _cost(
+        lambda: fnp.multiply(z, z)
+    )
+
+
+def test_mixed_real_complex_matmul_bills_complex():
+    load_weights()
+    assert _cost(lambda: fnp.matmul(_A64, _Ac128)) == 7936  # result_type -> complex128
+
+
+def test_einsum_path_stays_dtype_neutral():
+    # einsum_path does no value arithmetic; a complex operand must not raise
+    # and must bill the fixed bookkeeping cost regardless of dtype.
+    assert _cost(lambda: fnp.einsum_path("ij,jk->ik", _A64, _A64)) == _cost(
+        lambda: fnp.einsum_path("ij,jk->ik", _Ac128, _Ac128)
+    )
+
+
+def test_dot_exact_complex_billing_matches_matmul():
+    load_weights()
+    assert _cost(lambda: fnp.dot(_Ac128, _Ac128)) == _cost(
+        lambda: fnp.matmul(_Ac128, _Ac128)
+    )
+
+
+def test_inner_exact_complex_billing():
+    # inner('i,i->') on length-10 vectors: flop_cost = 2*10-1 = 19,
+    # mu=10 (mults), adds=9 -> complex real total = 6*10 + 2*9 = 78.
+    load_weights()
+    z = fnp.asarray(np.ones(10, dtype=np.complex128))
+    assert _cost(lambda: fnp.inner(z, z)) == 78 * 2  # c128 rate 2.0
+
+
+def test_vdot_exact_complex_billing():
+    # vdot conjugates one operand but is still routed through the same
+    # "i,i->" accumulation skeleton as inner, so the exact total matches.
+    load_weights()
+    z = fnp.asarray(np.ones(10, dtype=np.complex128))
+    assert _cost(lambda: fnp.vdot(z, z)) == 78 * 2  # c128 rate 2.0
+
+
+def test_tensordot_full_inner_exact_complex_billing():
+    # Full-inner tensordot (axes=ndim) takes the fast path that shares the
+    # einsum accumulation object with matmul/dot; billing must be exact too.
+    # "ab,ab->" on (8,8): flop_cost = 127, mu=64, adds=63 -> complex real
+    # total = 6*64 + 2*63 = 510.
+    load_weights()
+    z = fnp.asarray(np.ones((8, 8), dtype=np.complex128))
+    assert _cost(lambda: fnp.tensordot(z, z, axes=2)) == 510 * 2  # c128 rate 2.0
+
+
+def test_tensordot_partial_contraction_exact_complex_billing():
+    # Partial contraction (axes=1) routes through the general fallback branch
+    # that still has an einsum accumulation object (no oversized symmetry,
+    # rank well under 52) -- must also bill the exact complex factor, not a
+    # flat/neutral rate. "ab,bd->ad" on (8,8)x(8,8): flop_cost = 960 (same
+    # skeleton as the matmul case), complex real total = 3968.
+    load_weights()
+    z = fnp.asarray(np.ones((8, 8), dtype=np.complex128))
+    assert _cost(lambda: fnp.tensordot(z, z, axes=1)) == 3968 * 2  # c128 rate 2.0
