@@ -30,6 +30,7 @@ class OpRecord(NamedTuple):
     flopscope_overhead_duration_s: float | None = (
         None  # per-op flopscope dispatch time (preamble + deduct body + bookkeeping + postamble)
     )
+    resolved_dtype: str | None = None  # np.result_type name over declared operands
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +145,8 @@ class _DeferredOpTimer:
         "_op_name",
         "_subscripts",
         "_shapes",
+        "_dtypes",
+        "_complex_factor_override",
         "_cost",
         "_block_t0",
         "_backend_duration_s",
@@ -151,12 +154,21 @@ class _DeferredOpTimer:
     )
 
     def __init__(
-        self, budget: BudgetContext, op_name: str, subscripts: str | None, shapes: tuple
+        self,
+        budget: BudgetContext,
+        op_name: str,
+        subscripts: str | None,
+        shapes: tuple,
+        *,
+        dtypes: tuple | None = None,
+        complex_factor_override: float | None = None,
     ):
         self._budget = budget
         self._op_name = op_name
         self._subscripts = subscripts
         self._shapes = shapes
+        self._dtypes = dtypes
+        self._complex_factor_override = complex_factor_override
         self._cost: int | None = None
         self._block_t0: float | None = None
         self._backend_duration_s: float = 0.0
@@ -191,6 +203,8 @@ class _DeferredOpTimer:
             self._cost,
             self._subscripts,
             self._shapes,
+            dtypes=self._dtypes,
+            complex_factor_override=self._complex_factor_override,
             backend_duration_s=self._backend_duration_s,
             overhead_duration_s=in_block_overhead,
         )
@@ -657,20 +671,44 @@ class BudgetContext:
         subscripts: str | None,
         shapes: tuple,
         *,
+        dtypes: tuple | None = None,
+        complex_factor_override: float | None = None,
         backend_duration_s: float | None = None,
         overhead_duration_s: float | None = None,
     ) -> None:
-        """Weight -> budget-check -> charge -> append OpRecord -> post-op deadline check.
+        """Weight/dtype-rate/complex-factor -> budget-check -> charge -> append OpRecord -> post-op deadline check.
 
         Shared by deduct() (durations filled in later by _OpTimer.__exit__, so left
-        None here) and _DeferredOpTimer.__exit__ (durations already known). Raises
-        BudgetExhaustedError before charging on overshoot; raises TimeExhaustedError
-        after the record is appended if the deadline has passed.
+        None here) and _DeferredOpTimer.__exit__ (durations already known). Resolves
+        the billing dtype and looks up its rate/complex-factor before the budget
+        check, so an UnsupportedDtypeError raises before any FLOPs are recorded.
+        Raises BudgetExhaustedError before charging on overshoot; raises
+        TimeExhaustedError after the record is appended if the deadline has passed.
+
+        ``dtypes=None`` (the default) is temporary migration state for call sites
+        not yet threading dtypes through: it bills as dtype-neutral (rate 1.0,
+        factor 1.0), identical to pre-dtype-aware billing.
         """
+        from flopscope._dtype_billing import (
+            complex_factor_for,
+            rate_for,
+            resolve_billing_dtype,
+        )
         from flopscope._weights import get_weight
 
         weight = get_weight(op_name)
-        adjusted_cost = int(flop_cost * weight)
+        resolved = resolve_billing_dtype(dtypes) if dtypes is not None else None
+        if resolved is None:
+            dtype_rate = 1.0
+            complex_factor = 1.0
+        else:
+            dtype_rate = rate_for(resolved)
+            complex_factor = (
+                complex_factor_override
+                if complex_factor_override is not None
+                else complex_factor_for(op_name, resolved)
+            )
+        adjusted_cost = int(flop_cost * dtype_rate * complex_factor * weight)
         if adjusted_cost > self.flops_remaining:
             raise BudgetExhaustedError(
                 op_name, flop_cost=adjusted_cost, flops_remaining=self.flops_remaining
@@ -689,6 +727,7 @@ class BudgetContext:
                 flopscope_context_start_offset_s=offset,
                 flopscope_backend_duration_s=backend_duration_s,
                 flopscope_overhead_duration_s=overhead_duration_s,
+                resolved_dtype=resolved.name if resolved is not None else None,
             )
         )
         if self._deadline is not None and now > self._deadline:
@@ -701,13 +740,27 @@ class BudgetContext:
             )
 
     def deduct(
-        self, op_name: str, *, flop_cost: int, subscripts: str | None, shapes: tuple
+        self,
+        op_name: str,
+        *,
+        flop_cost: int,
+        subscripts: str | None,
+        shapes: tuple,
+        dtypes: tuple | None = None,
+        complex_factor_override: float | None = None,
     ) -> _OpTimer:
         """Deduct FLOPs from the budget and return a timer context manager."""
         fs_t0 = time.perf_counter()
         n0 = len(self._op_log)
         try:
-            self._charge_op(op_name, flop_cost, subscripts, shapes)
+            self._charge_op(
+                op_name,
+                flop_cost,
+                subscripts,
+                shapes,
+                dtypes=dtypes,
+                complex_factor_override=complex_factor_override,
+            )
             return _OpTimer(self, op_index=len(self._op_log) - 1)
         finally:
             deduct_body_time = time.perf_counter() - fs_t0
@@ -722,14 +775,27 @@ class BudgetContext:
                 )
 
     def deduct_after(
-        self, op_name: str, *, subscripts: str | None, shapes: tuple
+        self,
+        op_name: str,
+        *,
+        subscripts: str | None,
+        shapes: tuple,
+        dtypes: tuple | None = None,
+        complex_factor_override: float | None = None,
     ) -> _DeferredOpTimer:
         """Like :meth:`deduct`, but the FLOP cost is supplied via ``op.set_cost``
         inside the block and charged at block exit. Use for ops whose cost
         depends on the result; the numpy call runs inside the timer (via
         ``_call_numpy``) and is recorded as backend time.
         """
-        return _DeferredOpTimer(self, op_name, subscripts, shapes)
+        return _DeferredOpTimer(
+            self,
+            op_name,
+            subscripts,
+            shapes,
+            dtypes=dtypes,
+            complex_factor_override=complex_factor_override,
+        )
 
     def summary_dict(self, by_namespace: bool = False) -> dict:
         """Return structured summary data for this budget context.

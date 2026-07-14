@@ -156,14 +156,20 @@ from flopscope.numpy.linalg._solvers import (
 )
 
 
-def _weight_cost(op_name: str, analytical_cost: int) -> int:
+def _weight_cost(
+    op_name: str,
+    analytical_cost: int,
+    *,
+    dtype_rate: float = 1.0,
+    complex_factor: float = 1.0,
+) -> int:
     """Convert an analytical FLOP count into the public weighted estimate.
 
-    This intentionally mirrors ``BudgetContext.deduct()`` by flooring via
-    ``int(...)`` after applying the weight multiplier, so public estimates and
-    runtime accounting stay in sync.
+    Mirrors ``BudgetContext.deduct()`` exactly: same factors, same
+    multiplication order, floored once via ``int(...)``, so public estimates
+    and runtime accounting stay in sync.
     """
-    return int(analytical_cost * get_weight(op_name))
+    return int(analytical_cost * dtype_rate * complex_factor * get_weight(op_name))
 
 
 def _make_weighted_cost(op_name: str, analytical_fn):
