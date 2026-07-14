@@ -457,9 +457,7 @@ attach_docstring(empty_like, _np.empty_like, "free", "0 FLOPs")
 def identity(n: int, dtype: DTypeLike = float) -> FlopscopeArray:
     """Return identity matrix. Wraps ``numpy.identity``. Cost: 0 FLOPs."""
     budget = require_budget()
-    with budget.deduct(
-        "identity", flop_cost=0, subscripts=None, shapes=(), dtypes=()
-    ):
+    with budget.deduct("identity", flop_cost=0, subscripts=None, shapes=(), dtypes=()):
         result = _call_numpy(_np.identity, n, dtype=dtype)
     symmetry = _infer_structural_constructor_symmetry(kind="identity")
     if symmetry is not None:
@@ -2935,9 +2933,7 @@ def resize(*args, **kwargs):
     """Return new array with given shape. Cost: numel(output)."""
     budget = require_budget()
     stripped_args = _to_base_ndarray_tree(args)
-    _resize_dtype = (
-        _np.asarray(args[0]).dtype if args else _np.dtype(float)
-    )
+    _resize_dtype = _np.asarray(args[0]).dtype if args else _np.dtype(float)
     with budget.deduct_after(
         "resize", subscripts=None, shapes=(), dtypes=(_resize_dtype,)
     ) as _op:

@@ -431,7 +431,11 @@ def bincount(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     x = _np.asarray(x)
     cost = _builtins.max(x.size, 1)
     with budget.deduct(
-        "bincount", flop_cost=cost, subscripts=None, shapes=(x.shape,), dtypes=(x.dtype,)
+        "bincount",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(
             _np.bincount,
@@ -640,7 +644,11 @@ def piecewise(
     )
     cost = x.size
     with budget.deduct(
-        "piecewise", flop_cost=cost, subscripts=None, shapes=(x.shape,), dtypes=(x.dtype,)
+        "piecewise",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         pass
     return result  # type: ignore[return-value]

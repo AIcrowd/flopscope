@@ -258,7 +258,10 @@ def polyint(p: ArrayLike, m: int = 1, k: ArrayLike | None = None) -> FlopscopeAr
     if k is not None:
         billing_dtypes += (_np.asarray(k).dtype,)
     with budget.deduct(
-        "polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,),
+        "polyint",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
         dtypes=billing_dtypes,
     ):
         if k is None:

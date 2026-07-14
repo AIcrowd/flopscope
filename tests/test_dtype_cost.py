@@ -403,5 +403,28 @@ def test_histogram_array_bins_dtype_is_billed():
     c32 = _cost(lambda: fnp.histogram(d, bins=fnp.asarray(b32)))  # type: ignore[arg-type]
     c64 = _cost(lambda: fnp.histogram(d, bins=fnp.asarray(b32.astype(np.float64))))  # type: ignore[arg-type]
     assert c32 > 0 and c64 == 2 * c32
-    # int bins is a count, not data -> dtype irrelevant, unchanged.
-    assert _cost(lambda: fnp.histogram(d, bins=10)) > 0
+    # int bins is a count, not data -> dtype irrelevant. Pin the exact value so
+    # a future change to the int-bins path can't silently drift:
+    # 100 elems * ceil(log2(10))=4 = 400.
+    assert _cost(lambda: fnp.histogram(d, bins=10)) == 400
+
+
+def test_histogram2d_histogramdd_array_bins_dtype_is_billed():
+    # histogram2d/histogramdd fold array bin-edge dtypes in too; fp64 edges must
+    # bill 2x fp32, while int-count bins stay unchanged.
+    load_weights()
+    x = fnp.asarray(np.ones(100, dtype=np.float32))
+    y = fnp.asarray(np.ones(100, dtype=np.float32))
+    e32 = np.linspace(0, 2, 5).astype(np.float32)
+    e64 = e32.astype(np.float64)
+    h2_32 = _cost(
+        lambda: fnp.histogram2d(x, y, bins=[fnp.asarray(e32), fnp.asarray(e32)])
+    )
+    h2_64 = _cost(
+        lambda: fnp.histogram2d(x, y, bins=[fnp.asarray(e64), fnp.asarray(e64)])
+    )
+    assert h2_32 > 0 and h2_64 == 2 * h2_32
+    s = fnp.asarray(np.ones((100, 2), dtype=np.float32))
+    hd_32 = _cost(lambda: fnp.histogramdd(s, bins=[fnp.asarray(e32), fnp.asarray(e32)]))
+    hd_64 = _cost(lambda: fnp.histogramdd(s, bins=[fnp.asarray(e64), fnp.asarray(e64)]))
+    assert hd_32 > 0 and hd_64 == 2 * hd_32
