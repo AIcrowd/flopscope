@@ -642,6 +642,20 @@ def test_output_downcast_does_not_discount():
     assert plain == via_f64  # no discount for the int32/float32-looking mix
 
 
+def test_requested_output_downcast_does_not_discount():
+    # The other half of the resolved-dtype rule: an EXPLICIT narrow dtype=
+    # request must not discount the bill. multiply folds dtype= into the
+    # billing tuple, and np.result_type still resolves the wider operand
+    # dtype, so asking for float32 output on float64 operands still bills at
+    # the float64 rate (the real compute precision), not float32's.
+    load_weights()
+    w = fnp.asarray(np.ones(100, dtype=np.float64))
+    plain = _cost(lambda: fnp.multiply(w, w))
+    downcast_requested = _cost(lambda: fnp.multiply(w, w, dtype=np.float32))
+    assert plain == 200
+    assert downcast_requested == plain  # requesting a narrow dtype= is not a discount
+
+
 def test_astype_to_complex_charges_and_back_charges():
     # Widening real->complex astype is a safe (lossless) cast: free. The
     # reverse, narrowing complex->real, discards the imaginary lane and is
