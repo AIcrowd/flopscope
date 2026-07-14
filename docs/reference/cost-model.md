@@ -10,15 +10,16 @@
 flopscope bills compute as:
 
 ```
-charged = int(flop_cost × weight)
+charged = int(flop_cost × dtype_rate × complex_factor × weight)
 ```
 
 ## How to read this
 
-1. **[Billing model & design principles](#billing-model--design-principles)** — the one equation and *why* it is split into `flop_cost` and `weight`.
-2. **[Non-exploitability](#non-exploitability)** — the invariants that keep billing sound, and the test that enforces each.
-3. **[Cost by family](#cost-by-family)** — the rule + evidence + representative ops for the family you care about.
-4. **[Exhaustive per-op reference](#exhaustive-per-op-reference)** — drill into `ops.json` for one op's exact formula.
+1. **[Billing model & design principles](#billing-model--design-principles)** — the one equation and *why* it is split into four factors.
+2. **[Dtype and precision](#dtype-and-precision)** — how width (`dtype_rate`) and complex structure (`complex_factor`) are priced, and why.
+3. **[Non-exploitability](#non-exploitability)** — the invariants that keep billing sound, and the test that enforces each.
+4. **[Cost by family](#cost-by-family)** — the rule + evidence + representative ops for the family you care about.
+5. **[Exhaustive per-op reference](#exhaustive-per-op-reference)** — drill into `ops.json` for one op's exact formula.
 
 **Completeness guarantee:** every billed operation is classified in the registry and
 appears in `ops.json` with a `cost_formula`; `tests/test_cost_model_coverage.py`
@@ -29,19 +30,41 @@ rule below. So nothing billed is undocumented, even where this doc summarizes by
 
 ## Billing model & design principles
 
-Every operation is charged `charged = int(flop_cost × weight)`.
+Every operation is charged `charged = int(flop_cost × dtype_rate × complex_factor × weight)`.
 
-**Two layers, on purpose.** `flop_cost` is the operation count: every shape- and
-algorithm-dependent term lives here, so anyone — us or a participant — can read it off
-the formula and audit it function by function. `weight` is a separate per-element factor
-that captures how much more one element of an operation costs on real hardware: a plain
-add is `1`, while a transcendental element (`sin`, `exp`, …) does many times more
-floating-point work. Rather than bill each op its exact measured ratio — noisy,
-machine-specific, and hard to audit — we group operations into a small fixed ladder of
-tiers (`{0, 1, 8, 16}`); that grouping is a deliberate competition-design choice. The
-rule that keeps the split honest — and the model non-gameable — is that **a shape or
-algorithm constant never lives in a weight**: anything depending on a matrix dimension
-or loop length belongs in `flop_cost`. (Enforced by `tests/test_weight_tier_policy.py`.)
+**Four factors, on purpose.** Each factor isolates one kind of reasoning so it can be
+read off and audited on its own:
+
+- **`flop_cost`** — the operation count. Every shape- and algorithm-dependent term lives
+  here, so anyone — us or a participant — can read it off the formula and audit it
+  function by function.
+- **`dtype_rate`** — the width factor. One billed FLOP is one 32-bit-class real
+  operation; a 64-bit-class operand bills `2×`. Like the weight ladder this is a *policy*
+  table (subject to tuning), not shape math — defined in
+  [Dtype and precision](#dtype-and-precision).
+- **`complex_factor`** — the complex-structure factor. It is `1` for real dtypes and, for
+  complex dtypes, the number of real (component-precision) operations one billed unit
+  expands into (a complex multiply is 6 real FLOPs, a complex add 2). It is *math*, not
+  policy — a textbook decomposition fixed per op, and computed per call for the
+  contraction family from the same accumulation that produces `flop_cost`.
+- **`weight`** — the hardware tier. A separate per-element factor for how much more one
+  element costs on real hardware: a plain add is `1`, while a transcendental element
+  (`sin`, `exp`, …) does many times more floating-point work. Rather than bill each op its
+  exact measured ratio — noisy, machine-specific, and hard to audit — we group operations
+  into a small fixed ladder of tiers (`{0, 1, 8, 16}`); that grouping is a deliberate
+  competition-design choice.
+
+For a real 32-bit workload `dtype_rate` and `complex_factor` are both `1`, so the bill is
+exactly `int(flop_cost × weight)` and nothing here changes.
+
+The rule that keeps the split honest — and the model non-gameable — is one **separation
+invariant**: *a shape or algorithm constant never lives in a weight* (anything depending
+on a matrix dimension or loop length belongs in `flop_cost`); *width policy never lives in
+`flop_cost` or `weight`* (it lives in `dtype_rate`); and *complex structure lives in
+`complex_factor`* — computed per call for the contraction family from the same
+decomposition that produces `flop_cost`. (The weight half is enforced by
+`tests/test_weight_tier_policy.py`; the complex-classification half by
+`tests/test_complex_factor_completeness.py`.)
 
 **We bill the textbook standard-algorithm cost, not literal BLAS/LAPACK.**
 `linalg.inv` is billed `2n³` (the standard LU-based `dgetrf`+`dgetri` operation
@@ -57,6 +80,10 @@ Each floating-point multiply, add, subtract, divide, or square root counts
 as 1 FLOP.  A fused multiply-add (FMA) therefore counts as 2.  This matches
 the standard textbook convention.  All formulas in this document are stated
 in FMA=2 units unless noted.
+
+All formulas count *operations*; the billing **unit** (one 32-bit-class real
+op) and the per-width and complex-structure pricing are defined once in
+[Dtype and precision](#dtype-and-precision).
 
 ### Comparison and select
 
@@ -181,6 +208,215 @@ charges the same weight as its canonical twin.
 
 ---
 
+## Dtype and precision
+
+`flop_cost` counts operations, but two operations of the same shape can do very different
+amounts of real floating-point work depending on their **dtype**. Two factors price that:
+`dtype_rate` (how wide each scalar is) and `complex_factor` (how much a complex operation
+expands into real ones). Both sit in the billing product
+`int(flop_cost × dtype_rate × complex_factor × weight)`, and both are `1.0` for the
+32-bit real baseline — so a real-fp32 workload bills exactly its `flop_cost × weight` and
+nothing in this section changes it.
+
+### Why width and structure are priced
+
+We identified two ways a dtype-blind meter under-counts:
+
+**Complex packing.** A complex multiply does the work of four real multiplies and two
+real adds, but a dtype-blind meter would bill `x * z` (with `z` complex) as one real
+multiply. A participant can then carry two independent real payloads in the real and
+imaginary lanes of one complex array and recover both products from a single "one-FLOP"
+multiply — buying two real results for less than the price of one. The same trick scales
+through every complex-valued op, most sharply through matmul, where one complex matmul
+stands in for two real ones.
+
+**Width (bit) packing.** A float64 lane is twice as wide as a float32 lane. A dtype-blind
+meter bills a float64 multiply the same as a float32 multiply, so a participant can pack
+two independent lower-precision payloads into the two halves of a 64-bit lane (or a narrow
+integer into a wide one) and process both under a single op's charge.
+
+The answer to both is the same, and it is **not** to ban wide or complex dtypes — it is
+to **price them**. `dtype_rate` charges a 64-bit-class op `2×` a 32-bit-class op;
+`complex_factor` charges a complex op the real-operation count it actually expands into.
+Under that pricing neither pack pays off (see [On packing](#on-packing)).
+
+### The billing unit and rate table
+
+> **One billed FLOP is one 32-bit-class real scalar operation** — a float32 or int32 add,
+> multiply, compare, and so on.
+
+Everything is priced relative to that anchor. `dtype_rate` is the width multiplier for the
+call's resolved dtype:
+
+| dtype | rate | | dtype | rate |
+|---|---|---|---|---|
+| `bool` | 1.0 | | `int32` | 1.0 |
+| `int8` | 1.0 | | `uint32` | 1.0 |
+| `uint8` | 1.0 | | `float32` | 1.0 |
+| `int16` | 1.0 | | `int64` | 2.0 |
+| `uint16` | 1.0 | | `uint64` | 2.0 |
+| `float16` | 1.0 | | `float64` | 2.0 |
+| | | | `complex64` | 1.0 |
+| | | | `complex128` | 2.0 |
+
+- **32-bit-class and narrower → `1.0`.** float16/int16/int8/bool all bill at the baseline
+  width.
+- **64-bit-class → `2.0`.** float64, int64, uint64 do twice the scalar work of the
+  baseline width.
+- **complex → its component width's rate.** `complex64` is two float32 components → `1.0`;
+  `complex128` is two float64 components → `2.0`. The *structure* cost of being complex
+  (that a complex multiply is several real ones) is carried separately by
+  `complex_factor`, not folded in here.
+
+These are **current policy values, subject to tuning** — the same status as the weight
+ladder, and configured in the same file (`src/flopscope/data/default_weights.json`, under
+`"dtype_rates"`). They are a deliberate competition-design choice, not a hardware
+measurement.
+
+**Fail-closed.** Any dtype not in the table (for example `float128` or `object`) has no
+defined rate, so billing **raises `UnsupportedDtypeError` before charging any FLOPs**
+rather than guessing. A dtype cannot slip through unpriced.
+
+### Complex arithmetic from first principles
+
+`complex_factor` answers one question per op: *when the resolved dtype is complex, how many
+real (component-precision) FLOPs does one billed unit of this op actually perform?* It is
+`1.0` for real dtypes. For complex dtypes it is a fixed decomposition of the op into real
+arithmetic (`z = a + bi`, FMA=2 convention):
+
+| atom | real FLOPs | decomposition |
+|---|---|---|
+| add / subtract / negate | 2 | two real adds |
+| multiply | 6 | 4 real mul + 2 real add |
+| divide | 11 | numerator 4 mul + 2 add; denominator 2 mul + 1 add; 2 divides |
+| reciprocal | 6 | special case of divide |
+| fused multiply-add | 4 | 8 real FLOPs per FMA=2 unit (1 complex mul + 1 complex add) |
+| absolute (`hypot`) | 4 | 2 mul + 1 add + 1 sqrt |
+| sqrt | 10 | complex square root |
+| ordering compare | 2 | lexicographic: compare real parts, tie-break on imaginary |
+
+Every charged op is classified by the atom its **billed unit** reduces to:
+
+| class | factor | representative ops |
+|---|---|---|
+| add / compare / sort / set / reduce-sum | **2** | `add`, `subtract`, `sum`, `mean`, `cumsum`, `sort`, `unique`, `where`, comparisons (`less`/`greater`/`equal`), set ops |
+| multiply / pure product | **6** | `multiply`, `prod` (`square` = 5) |
+| divide | **11** | `divide` (`reciprocal` = 6) |
+| variance family | **2.5** | `var`, `std` (square-and-sum: mostly adds, some multiplies) |
+| absolute / magnitude | **4** | `abs`, `hypot` |
+| transcendental | **per op** | `log` 2.25, `exp` 3.1, `sin`/`cos` 3.4, `tan` 3.6 — each from its complex closed form |
+| dense linalg | **4** | `inv`, `solve`, `svd`, `det`, `qr`, `eig`, … (complex factorization ≈ 4× the real arithmetic) |
+| contraction (FMA) | **exact** | `einsum`, `matmul`, `dot`, `inner`, `tensordot`, `vdot`, … — computed per call |
+| complex-native formula | **1** | `fft.*`, `conj`, `angle` — the formula already counts complex real-FLOPs |
+| movement / free | **1** | copy / gather / creation of whole complex values — relocation, not arithmetic |
+| complex-illegal | **raises** | `floor`/`ceil`/`trunc`, bitwise & shift ops, `mod`/`fmod`/`floor_divide`, real-only math (`cbrt`, `i0`, `unwrap`, …) and the real-only random samplers — anything numpy rejects on complex input |
+
+Composite `counted_custom` ops carry a per-op derived factor of the same kind (for example
+`polyval` 4, `cross` 4.7, `interp` 3, `cov`/`corrcoef` 4). Two subtleties are worth
+stating explicitly.
+
+**Contraction is billed exactly, not with a flat factor.** A length-`K` dot product is `K`
+multiplies + `K − 1` adds (real `flop_cost = 2K − 1`). In complex arithmetic that is `K`
+complex multiplies + `K − 1` complex adds = `6K + 2(K − 1) = 8K − 2` real FLOPs. The ratio
+`(8K − 2) / (2K − 1)` is `6` at `K = 1`, `≈ 4.13` at `K = 8`, and approaches `4` as
+`K → ∞` — it is **not** a constant. So the contraction family carries the sentinel
+`"exact"`, and the engine computes the complex total per call directly from the same
+accumulation that produced `flop_cost`: `6·(multiplies) + 2·(adds)`, with the multiply and
+add counts read straight off the einsum cost object. A single flat factor would invite
+**alias-shopping** — route a multiply-heavy computation through the contraction whose flat
+factor is cheapest. Exact per-call billing removes the arbitrage: `einsum('i,i->i', z, z)`
+(a pure elementwise product, `K = 1`, all multiplies) bills factor 6, identical to
+`multiply(z, z)`, not a discounted 4.
+
+**FFT is priced in at factor 1.** The FFT `flop_cost` of `5N·log₂N` is *already* a count
+of real FLOPs, so its `complex_factor` is `1.0`; applying a second complex factor would
+double-charge. Derivation: a radix-2 FFT does `(N/2)·log₂N` butterflies; each butterfly is
+one complex multiply (6 real FLOPs) + two complex adds (2 × 2 = 4 real FLOPs) = 10 real
+FLOPs; `10 × (N/2)·log₂N = 5N·log₂N`. The complex structure is baked into `flop_cost`, so
+`complex_factor` stays `1`.
+
+**Guaranteed coverage.** Every charged op carries an explicit `complex_factor` (a number,
+`"exact"`, or `"illegal"`); `tests/test_complex_factor_completeness.py` fails the build if
+any charged op is unclassified. An op with no classification is necessarily
+free / movement / blacklisted and bills factor `1` — relocating a whole complex value is
+not arithmetic.
+
+### Which dtype prices a call
+
+The billing dtype for a call is **`np.result_type` over every array operand plus any
+explicit `dtype=` / `out=` request** — the dtype the computation actually runs in —
+declared at each op's deduct site. Python scalars follow NumPy's NEP 50 weak promotion, so
+`f32_array * 2.0` stays float32 (the scalar does not up-promote the array).
+
+Worked consequences:
+
+- **Mixed kinds promote up.** `matmul(int32_array, float32_array)` resolves to `float64`
+  (numpy's promotion for that mix) and bills at the float64 rate — the same as a genuine
+  float64 matmul. There is no discount for feeding narrow-looking operands.
+- **A narrow `dtype=` request is not a discount.** `result_type` keeps the wider operand,
+  so `multiply(f64, f64, dtype=float32)` still bills float64: the requested output width
+  does not change the precision the multiply runs at.
+- **`astype` bills the heavier of source and destination.** It reads the source and writes
+  the destination, so it is charged at whichever of the two dtypes has the higher rate
+  (`heavier_billing_dtype`, not `result_type` — which would over-promote a cross-kind cast
+  such as `float32 → int32` to float64). A lossless widening cast (for example
+  `float32 → float64` or `float64 → complex128`) stays free; a value-changing cast is
+  charged `numel` at that heavier rate.
+- **`real` / `imag` are free.** Extracting a component of a complex value is a
+  view / constant-fill, not arithmetic — `flop_cost = 0`.
+- **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype (for
+  example `einsum_path`, or window functions that take an integer length) resolve to rate
+  `1.0`, factor `1.0`, so the rate table cannot perturb them.
+
+### Worked examples
+
+Billed FLOPs for an `N = 100` elementwise call under production rates (`multiply`: weight
+1, factor 6; `add`: weight 1, factor 2; `sin`: weight 16, factor 3.4):
+
+| op | float32 | float64 | complex64 | complex128 |
+|---|---|---|---|---|
+| `multiply` | 100 | 200 | 600 | 1200 |
+| `add` | 100 | 200 | 200 | 400 |
+| `sin` | 1600 | 3200 | 5440 | 10880 |
+
+Reading one cell: `multiply` on `complex128` = `int(100 × 2.0 × 6.0 × 1.0) = 1200` —
+`flop_cost` 100, float64-component rate 2.0, complex-multiply factor 6.0, baseline weight
+1.0. `add` on `complex64` = `int(100 × 1.0 × 2.0 × 1.0) = 200`: a complex add's factor is
+only 2, so it costs far less than the complex multiply. `sin` carries its weight-16
+transcendental tier and a 3.4 complex factor, so `complex128` =
+`int(100 × 2.0 × 3.4 × 16) = 10880`.
+
+Contraction is exact rather than a flat factor: a `matmul` of two `(8, 8)` matrices bills
+`960` real (`2·8³ − 8²`), `1920` at float64, and `3968` at complex64 — the engine's exact
+`6·512 + 2·448` (512 scalar multiplies, 448 adds), a ratio of `≈ 4.13`, not `4`. At
+complex128 it is `7936` (that exact total × the 2.0 rate). These values are pinned in
+`tests/test_dtype_cost.py`.
+
+### On packing
+
+Packing is **not banned and not judged** — it is priced so it does not pay:
+
+- **Complex packing loses.** Two honest real multiplies of 100-element float32 arrays bill
+  `200`; folding the two payloads into one complex64 multiply bills `600` (factor 6) — a
+  `3×` loss. At matmul scale the packed complex matmul bills `3968` against the `1920` of
+  the two honest real matmuls — roughly `2×` worse, and that is before any pack/unpack
+  overhead.
+- **Width packing breaks even at best.** Two float32 multiplies bill `2 × 100 = 200`; one
+  float64 multiply carrying both payloads bills `100 × 2.0 = 200` — identical, and that is
+  *before* the arithmetic to pack the lanes in and unpack the results out, which is itself
+  charged. So 32-into-64 packing is break-even-or-losing.
+- **Sub-32-bit lane tricks** (packing several int8 or int16 payloads into a wider lane) can
+  in principle recover a small constant-factor advantage, since everything at or below
+  32-bit shares the `1.0` rate. That gain is bounded and small, is considered in-bounds,
+  and the rate table deliberately does not chase it.
+
+The resolved-dtype rule closes the escape hatch that would otherwise reopen these: a
+participant cannot request a narrow output dtype to dodge the wide rate, because billing
+resolves the dtype the compute actually runs in (`np.result_type`), not the narrowest
+operand or an explicit narrow `dtype=`.
+
+---
+
 ## Non-exploitability
 
 The cost model meters compute so a participant cannot do expensive real work while
@@ -197,7 +433,9 @@ each backed by a CI-enforced test you can open and read:
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
 | **Free-tier discipline** | only ops that perform no value arithmetic/comparison carry weight 0; a value-test is charged wherever it hides — including `a.nonzero()` (method), value-changing `astype`, `where(1-arg)`, `argwhere`, `flatnonzero`, and `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **Memoization accepted** | free gather makes look-up-table reuse (precompute once with a charged op, then `take` for free) cheaper — this is deliberate: memoization is a legitimate optimization under a pure-compute metric | documented here; `test_data_movement_free_tier.py` |
-| **End-to-end billing** | production `flop_cost × weight` is pinned per tier `{0,1,8,16}` (catches a silent weight regression) | `test_production_weight_billing.py` |
+| **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
+| **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; and the **resolved-dtype rule** (`np.result_type`) blocks downcast dodges — a narrow `dtype=` request cannot discount the wider compute precision | `tests/test_dtype_cost.py` (width-packing + resolved-dtype tests) |
+| **End-to-end billing** | production billing is pinned per weight tier `{0,1,8,16}` (catches a silent weight regression) | `test_production_weight_billing.py` |
 
 An auditor can read this table top-to-bottom and, for each claim, open the named test
 to see exactly what guarantees it. The first two rows are the load-bearing ones: an exact
@@ -227,9 +465,11 @@ only representatives are listed and the full set is a filter in
 (ceil, floor, trunc, rint, around/round), sign/abs, logical (not, and, or,
 xor), bitwise (and, or, xor, invert, left_shift, right_shift), comparisons
 (equal, not_equal, greater, less, greater_equal, less_equal), copies
-(positive, negative, real, imag, conj/conjugate, fabs, modf, frexp, spacing,
+(positive, negative, conj/conjugate, fabs, modf, frexp, spacing,
 nan_to_num, isclose, isneginf, isposinf, deg2rad/degrees, rad2deg/radians,
 ldexp, nextafter, copysign, heaviside, signbit), and their NumPy aliases.
+(`real`/`imag` are **not** here — component extraction is free; see
+[View / free](#view--free-weight-00).)
 
 **Transcendental tier (weight 16.0)**: exp, exp2, expm1, log, log2, log10,
 log1p, cbrt, sin, cos, tan, sinh, cosh, tanh, arcsin, arccos, arctan,
@@ -240,6 +480,13 @@ aliases (asin, acos, atan, asinh, acosh, atanh, atan2, pow).
 logaddexp2, floor_divide, mod/remainder, fmod, float_power.
 
 **Basis**: DECLARED per-element FMA=2 convention and empirical calibration.
+
+**Complex dtypes**: each op bills its per-op `complex_factor` from the class table in
+[Dtype and precision](#complex-arithmetic-from-first-principles) — `add`/comparisons 2,
+`multiply` 6, `divide` 11, `abs` 4, transcendentals per op (`sin` 3.4, `log` 2.25); `conj`
+and `angle` are complex-native (factor 1); rounding, bitwise, and `mod`-family ops are
+complex-illegal and raise.
+
 Source: `src/flopscope/_pointwise.py`.
 
 ---
@@ -267,6 +514,10 @@ plus the per-output subtract, and `mean`/`average` add the per-output divide.
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
 | `nanmean` | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides; billed identically to mean |
+
+**Complex dtypes**: sum-type reductions (`sum`, `mean`, `cumsum`, `nansum`, …) bill factor
+2 (complex add); product reductions (`prod`, `cumprod`, `nanprod`) factor 6 (complex
+multiply); the variance family (`var`, `std`, `nanvar`, `nanstd`) factor 2.5.
 
 Source: `src/flopscope/_pointwise.py`; reduction accumulation model in
 `src/flopscope/_accumulation/`.
@@ -333,6 +584,13 @@ build on the same helper.
 | `linalg.matrix_power` | `(⌊log₂ k⌋ + popcount(k) − 1) × matmul_cost(n, n, n)` | repeated squaring |
 | `linalg.multi_dot` | sum of optimal-chain matmul costs; each step `2mkn − mn` | optimal chain order |
 
+**Complex dtypes**: the contraction family is billed **exactly**, not with a flat factor.
+The engine expands each call's `flop_cost` into `6·(multiplies) + 2·(adds)` from the same
+accumulation decomposition (see
+[the exact-contraction rule](#complex-arithmetic-from-first-principles)). For a length-`K`
+dot product the complex/real ratio is `(8K − 2)/(2K − 1)` (6 at `K=1`, `≈4.13` at `K=8`),
+so `einsum('i,i->i', z, z)` bills exactly like a complex `multiply`.
+
 All contraction ops use **weight 1.0** — the shape formulas already carry the
 full FMA=2 cost. Source: `_pointwise.py` (op wrappers), `_einsum.py`
 (`_resolve_cost_and_output_symmetry`), `_flops.py` (`einsum_cost`,
@@ -373,6 +631,10 @@ Weight: **1.0** for `arange` and `linspace`; **16.0** for `geomspace` and
 | `setdiff1d`, `setxor1d`, `union1d` | `(n + m) × ⌈log₂(n + m)⌉` | DECLARED |
 
 All sort/select ops use **weight 1.0**; comparison = 1 FLOP convention.
+
+**Complex dtypes**: comparisons are lexicographic (compare real parts, tie-break on
+imaginary), so the sort/select family bills factor 2.
+
 Source: `src/flopscope/_sorting_ops.py`, `src/flopscope/_flops.py` (`sort_cost`, `search_cost`).
 
 ---
@@ -382,6 +644,9 @@ Source: `src/flopscope/_sorting_ops.py`, `src/flopscope/_flops.py` (`sort_cost`,
 All ops use **weight 1.0** with all shape constants in `flop_cost`.  Per-matrix
 cost is multiplied by the batch dimension product for stacked inputs.  Zero-dim
 matrices charge 0.
+
+**Complex dtypes**: the dense linalg family bills `complex_factor = 4` — a complex
+factorization does roughly `4×` the real arithmetic of its real counterpart.
 
 | Op | flop_cost (per matrix) | basis | source |
 |---|---|---|---|
@@ -414,7 +679,8 @@ matrices charge 0.
 
 These ops use LAPACK drivers that iterate until convergence; counts are
 leading-order estimates of the standard operation count.  All use
-**weight 1.0**.
+**weight 1.0**, and bill `complex_factor = 4` on complex input (as for the
+direct linalg family).
 
 | Op | flop_cost (per matrix) | basis | source |
 |---|---|---|---|
@@ -475,6 +741,11 @@ constant is the standard textbook estimate.
 | `fft.rfftfreq` | `n//2 + 1` (real-spectrum grid has `n//2 + 1` elements) | DECLARED: `n//2 + 1` divides |
 | `fft.fftshift`, `fft.ifftshift` | 0 | DECLARED free/metadata |
 
+**Complex dtypes**: `complex_factor` is **1** (priced in) — `5N·log₂N` already counts the
+complex transform's real FLOPs (10 per radix-2 butterfly), so a complex128 transform bills
+only the `2.0` dtype rate over its float32 counterpart, with no extra structural factor
+(see [FFT is priced in](#complex-arithmetic-from-first-principles)).
+
 All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_transforms.py`.
 
 ---
@@ -533,6 +804,13 @@ Weight tiers:
 | `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` (weight **16.0**) → billed `16 × numel` | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
 | `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
 | `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` (weight **16.0**) → `16 × numel` | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions | `_cost_formulas.py` |
+
+**Complex dtypes**: the distribution samplers produce **real-only** outputs, so a complex
+resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output
+dtype's** rate — `standard_normal(dtype=float64)` bills `2×` the float32 draw. The
+data-movement random ops (`shuffle`, `permutation`, `choice`, `Generator.permuted`) permute
+caller-supplied values of any dtype and are billed dtype-neutrally, so complex input does
+not raise.
 
 Source: `src/flopscope/numpy/random/_cost_formulas.py`.
 
@@ -678,6 +956,11 @@ compute cost.  The predicate and the selection are the *same* step here — unli
 | `a.astype(float64)` | free | width cast = representation only (no value change) |
 | `a.astype(bool)` | charged `numel(a)` | per-element `!=0` test = value-comparison |
 
+**Complex dtypes**: relocating a whole complex value is one relocation, not arithmetic, so
+the free movement/gather ops carry `complex_factor = 1` and never raise on complex input
+(weight 0 ⇒ 0 FLOPs regardless). The charged selector-deriving siblings (`nonzero`,
+`argwhere`, `flatnonzero`) test `!= 0`, a value comparison, so they bill factor 2 on complex.
+
 Source: `src/flopscope/_array_ops.py`.
 
 ---
@@ -718,6 +1001,11 @@ For `pad` stat modes: `cross_i = numel_in // in_shape[i]`, `stat_len_i = min(sta
 in_shape[i])` (default = full axis), summed over padded axes only; a full-axis stat serves
 both sides (one reduction). `mean` adds one divide per stat output cell.
 
+**Complex dtypes**: the charged `pad` stat modes and `trim_zeros` bill factor 2 (value
+scan / reduction); `ravel_multi_index` is integer index math and is complex-illegal. A
+value-changing `copyto` (like `astype`) is billed at the **heavier** of the source and
+destination rate — see [Which dtype prices a call](#which-dtype-prices-a-call).
+
 ---
 
 ### Functional / higher-order
@@ -748,10 +1036,12 @@ in the Billing model section for the full rule and both refinements):
 - **Views / metadata**: `reshape`, `ravel`, `flatten`, `transpose`, `squeeze`,
   `expand_dims`, `broadcast_to`, `atleast_1d/2d/3d`, `asarray` (no copy),
   `asfortranarray`, `ascontiguousarray`, `astype` (no copy / lossless-width),
-  `view`, `diagonal` (view), `moveaxis`, `swapaxes`,
+  `view`, `diagonal` (view), `moveaxis`, `swapaxes`, `real`, `imag`,
   `ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`,
   `data`, `ctypes`, `strides`, `T`, `linalg.diagonal`, `linalg.matrix_transpose`,
   `fft.fftshift`, `fft.ifftshift`, `isscalar`, `isfortran`.
+  (`real`/`imag` extract a component of a complex value — a strided view or constant-fill,
+  no arithmetic; see [Which dtype prices a call](#which-dtype-prices-a-call).)
 - **Copy / materialize**: `concatenate`, `stack`, `hstack`, `vstack`,
   `column_stack`, `dstack`, `block`, `bmat`, `tile`, `repeat`, `resize`,
   `roll`, `tril`, `triu`, `copy`, `insert`, `append`, `delete`, `diagflat`,
