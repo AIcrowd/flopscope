@@ -1462,23 +1462,38 @@ def asarray(
     dtype: DTypeLike | None = None,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Convert to array. Cost: numel(output)."""
+    """Convert to array. Cost: numel on a value-changing dtype cast, else 0."""
     budget = require_budget()
-    # Pre-compute cost; asarray on an already-array is a no-op
     _probe = _np.asarray(a)
-    cost = max(_probe.size, 1)
+    # asarray is a view/no-op unless an explicit dtype= forces a value-changing
+    # cast; then it does the same work as astype and is charged identically
+    # (numel at the heavier of source/target rate), so it is not a free
+    # alternative to astype for conversions. A lossless widening stays free.
+    if dtype is not None and _cast_changes_values(_probe.dtype, dtype):
+        cost = _probe.size
+        _asarray_dtypes: tuple = (
+            _heavier_billing_dtype(_probe.dtype, _np.dtype(dtype)),
+        )
+    else:
+        cost = 0
+        _asarray_dtypes = (_probe.dtype,)
     with budget.deduct(
         "asarray",
         flop_cost=cost,
         subscripts=None,
         shapes=(_probe.shape,),
-        dtypes=(_probe.dtype,),
+        dtypes=_asarray_dtypes,
     ):
         result = _call_numpy(_np.asarray, a, dtype=dtype, **kwargs)
     return result  # type: ignore[return-value]
 
 
-attach_docstring(asarray, _np.asarray, "free", "0 FLOPs")
+attach_docstring(
+    asarray,
+    _np.asarray,
+    "counted_custom",
+    "numel on a value-changing dtype cast (like astype), else 0",
+)
 
 
 @_counted_wrapper

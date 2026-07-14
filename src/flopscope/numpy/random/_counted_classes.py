@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 import numpy as _np
 
 from flopscope._budget import _counted_wrapper
-from flopscope._ndarray import _asflopscope
+from flopscope._ndarray import _asflopscope, _to_base_ndarray
 from flopscope._registry import REGISTRY
 from flopscope._validation import require_budget
 from flopscope.errors import UnsupportedFunctionError
@@ -39,16 +39,16 @@ def _make_counted_method(
     base_method = getattr(base_cls, method_name)
     formula = COST_FORMULAS[formula_name]
 
-    # choice/permutation/permuted/shuffle draw from arbitrary (possibly
-    # complex) caller-supplied data rather than sampling a new value from a
-    # distribution; numpy permutes/shuffles/selects complex arrays fine, but
-    # the registry's complex_factor="illegal" for these methods is only
-    # valid for the genuine real-only distribution samplers this dispatcher
-    # also builds. Leave dtype undeclared for the pass-through methods to
-    # avoid a false-positive UnsupportedDtypeError regression; every other
-    # method synthesizes new real-only values, so its actual output dtype
-    # (read off the already-computed result) is safe to declare.
-    _dtype_neutral_methods = frozenset({"choice", "permutation", "permuted", "shuffle"})
+    # choice/permutation/permuted/shuffle relocate arbitrary caller-supplied
+    # values (movement ops, registry complex_factor 1.0) rather than sampling
+    # a new value from a distribution. A FlopscopeArray operand must be
+    # stripped to a base ndarray before numpy's C code (numpy calls empty_like
+    # internally, which trips the fnp-reentry guard for the in-place
+    # shuffle/permuted). Their shape-based cost counts the dtype-independent
+    # swap / selection work, so they bill dtype-neutral -- unlike a genuine
+    # sampler, which synthesizes new values and bills its output dtype (read
+    # off the already-computed result).
+    _movement_methods = frozenset({"choice", "permutation", "permuted", "shuffle"})
 
     @functools.wraps(base_method)
     @_counted_wrapper
@@ -58,9 +58,15 @@ def _make_counted_method(
         # __getattribute__ gate intercepting any internal sibling calls
         # (e.g. Generator.choice → Generator.integers).
         plain = plain_factory(self)
-        result = base_method(plain, *args, **kwargs)
+        if method_name in _movement_methods:
+            call_args = tuple(
+                _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
+            )
+        else:
+            call_args = args
+        result = base_method(plain, *call_args, **kwargs)
         cost = formula(args, kwargs, result)
-        if method_name in _dtype_neutral_methods:
+        if method_name in _movement_methods:
             billing_dtypes: tuple = ()
         elif isinstance(result, _np.ndarray):
             billing_dtypes = (result.dtype,)

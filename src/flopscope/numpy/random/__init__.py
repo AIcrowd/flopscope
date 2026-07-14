@@ -46,7 +46,7 @@ from numpy.random import SeedSequence
 # circular import with _counted_classes.py.
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._flops import _ceil_log2, sort_cost  # noqa: F401
-from flopscope._ndarray import FlopscopeArray
+from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
 from flopscope._validation import require_budget
 
@@ -512,15 +512,21 @@ def permutation(x):
     Cost: numel(output) FLOPs.
     """
     budget = require_budget()
-    n = int(x) if isinstance(x, (int, _np.integer)) else x.shape[0]
+    is_int_arg = isinstance(x, (int, _np.integer))
+    n = int(x) if is_int_arg else x.shape[0]
     cost = _builtins.max(n, 1)
-    # permutation draws from arbitrary (possibly complex) caller-supplied
-    # data rather than sampling a new value from a distribution; the
-    # registry's complex_factor="illegal" for this op is only valid for the
-    # genuine real-only distribution samplers, so dtype is intentionally
-    # left undeclared here (numpy permutes complex arrays fine).
+    # permutation relocates caller-supplied values (a movement op,
+    # complex_factor 1.0 in the registry). Its shape[0] cost counts the
+    # Fisher-Yates swap / RNG work, which is dtype-independent, so it bills
+    # dtype-neutral -- a complex/fp64 permutation costs the same as fp32
+    # (unlike a genuine sampler, which bills the width of the values it
+    # synthesizes).
     with budget.deduct(
-        "random.permutation", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
+        "random.permutation",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((n,),),
+        dtypes=(),
     ):
         result = _call_numpy(_npr.permutation, x)
     return result
@@ -538,12 +544,21 @@ def shuffle(x):
     else:
         n = len(x)
     cost = _builtins.max(n, 1)
-    # shuffle reorders arbitrary (possibly complex) caller-supplied data
-    # in place; see the dtype-declaration note on permutation above.
+    # shuffle reorders caller-supplied data in place (movement op, registry
+    # factor 1.0). Its shape[0] cost counts the dtype-independent Fisher-Yates
+    # swap / RNG work, so it bills dtype-neutral (complex/fp64 shuffles cost
+    # the same as fp32).
+    # numpy.random.shuffle mutates in place and internally calls empty_like on
+    # x; a FlopscopeArray operand must be stripped to a base ndarray first
+    # (it shares the same buffer, so the in-place shuffle is still observed).
     with budget.deduct(
-        "random.shuffle", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
+        "random.shuffle",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((n,),),
+        dtypes=(),
     ):
-        _call_numpy(_npr.shuffle, x)
+        _call_numpy(_npr.shuffle, _to_base_ndarray(x))
 
 
 @_counted_wrapper
@@ -556,6 +571,9 @@ def choice(a, size=None, replace=True, p=None):
     for the data-dependent rejection loop if ``replace=False`` with ``p``.
     """
     budget = require_budget()
+    # choice relocates values out of `a` (a movement op, registry factor 1.0).
+    # Its cost counts the dtype-independent selection / RNG work, so it bills
+    # dtype-neutral (complex/fp64 populations cost the same as fp32).
     if isinstance(a, (int, _np.integer)):
         n = int(a)
     else:
@@ -568,8 +586,6 @@ def choice(a, size=None, replace=True, p=None):
             # CDF build: cumsum + normalise + final pass (3*n), then
             # binary-search per draw (out_size * ceil(log2(n))).
             cost += 3 * n + _builtins.max(out_size, 1) * _ceil_log2(n)
-        # choice selects from arbitrary (possibly complex) caller-supplied
-        # data; see the dtype-declaration note on permutation above.
         with budget.deduct(
             "random.choice",
             flop_cost=cost,
@@ -590,7 +606,11 @@ def choice(a, size=None, replace=True, p=None):
             # + searchsorted; sort_cost(n) is the documented conservative floor.
             cost = sort_cost(n)
         with budget.deduct(
-            "random.choice", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
+            "random.choice",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=((n,),),
+            dtypes=(),
         ):
             result = _call_numpy(_npr.choice, a, size=size, replace=replace, p=p)
     # Preserve identity when picking a scalar from an object-dtype array:

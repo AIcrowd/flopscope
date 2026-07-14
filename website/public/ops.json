@@ -586,7 +586,7 @@
       "slug": "asarray",
       "status": "supported",
       "summary": "Convert the input to an array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",

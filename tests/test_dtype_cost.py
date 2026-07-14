@@ -6,11 +6,6 @@ import pytest
 import flopscope as f
 from flopscope._weights import load_weights
 
-# Inputs built outside any BudgetContext (input construction is billed).
-_f32 = np.ones(10, dtype=np.float32)
-_f64 = np.ones(10, dtype=np.float64)
-_c128 = np.ones(10, dtype=np.complex128)
-
 
 def _charge(op_name, flop_cost, dtypes, override=None) -> int:
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
@@ -513,14 +508,14 @@ def test_random_standard_normal_dtype_bills_by_rate():
 
 
 def test_random_movement_ops_on_complex_do_not_raise():
-    # permutation/shuffle/choice(+Generator.permuted) draw from arbitrary
+    # permutation/shuffle/choice(+Generator.permuted) relocate arbitrary
     # (possibly complex) caller-supplied data rather than sampling a new
-    # value from a distribution. numpy itself permutes/shuffles/selects
-    # complex arrays fine, but the registry's complex_factor="illegal" for
-    # these ops is only valid for genuine real-only distribution samplers.
-    # These sites intentionally leave dtype undeclared (dtypes=()) to avoid
-    # a false-positive UnsupportedDtypeError regression on legitimate
-    # complex input; this test pins that non-regression.
+    # value from a distribution, so they are movement ops (complex_factor
+    # 1.0) that bill dtype-neutral. numpy permutes/shuffles/selects complex
+    # arrays fine; these sites bill dtypes=() so a complex operand neither
+    # raises nor incurs a spurious width multiplier. This pins the whole
+    # surface (module-level fns + Generator.permuted, which the dedicated
+    # neutrality test above does not separately exercise).
     load_weights()
     with f.BudgetContext(flop_budget=10**18, quiet=True):
         zc = np.ones(8, dtype=np.complex128)
@@ -740,3 +735,52 @@ def test_mixed_unpromotable_operands_bill_without_raising():
     td = fnp.asarray(np.array([1, 2], dtype="timedelta64[s]"))
     fl = fnp.asarray(np.ones(2, dtype=np.float64))
     assert _cost(lambda: np.logical_and(td, fl)) == 4  # 2 elems * rate 2.0
+
+
+def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
+    # shuffle/permutation/choice relocate caller data (movement, factor 1.0).
+    # Their shape[axis] cost counts the dtype-INDEPENDENT Fisher-Yates swap /
+    # selection work, so they bill dtype-neutral: a complex/fp64 population
+    # costs the SAME as fp32 (contrast a genuine sampler, which bills the width
+    # of the values it synthesizes). They must also (a) not crash on a
+    # FlopscopeArray operand and (b) accept complex.
+    from flopscope._registry import REGISTRY
+
+    load_weights()
+    zc = fnp.asarray(np.arange(10, dtype=np.complex128))
+    fr = fnp.asarray(np.arange(10, dtype=np.float32))
+    fd = fnp.asarray(np.arange(10, dtype=np.float64))
+    # in-place shuffle must not raise (regression: empty_like reentry) and
+    # bills shape[0]=10 flat, with no 2x for the complex width.
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        fnp.random.shuffle(zc)
+        assert b.flops_used == 10  # neutral: NOT 20
+    # complex == fp64 == fp32 (all shape-based, dtype-blind).
+    assert (
+        _cost(lambda: fnp.random.permutation(zc))
+        == _cost(lambda: fnp.random.permutation(fd))
+        == _cost(lambda: fnp.random.permutation(fr))
+    )
+    # Generator path strips the FlopscopeArray operand and is likewise neutral.
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        fnp.random.default_rng(0).shuffle(
+            fnp.asarray(np.arange(8, dtype=np.complex128))
+        )
+        assert b.flops_used == 8  # neutral: NOT 16
+    # Registry hygiene: movement ops are classified 1.0 (numpy permutes complex
+    # fine), NOT "illegal" -- so a future dtype declaration cannot wrongly raise.
+    assert REGISTRY["random.shuffle"]["complex_factor"] == 1.0
+    assert REGISTRY["random.Generator.shuffle"]["complex_factor"] == 1.0
+
+
+def test_asarray_charges_value_changing_cast_like_astype():
+    # asarray(x, dtype=) that changes values does the same work as astype and
+    # is charged the same (numel at the heavier rate) -- not a free conversion.
+    # No dtype / lossless widening stays free.
+    load_weights()
+    a32 = fnp.asarray(np.ones(100, dtype=np.float32))
+    a64 = fnp.asarray(np.ones(100, dtype=np.float64))
+    assert _cost(lambda: fnp.asarray(a32)) == 0  # no-op
+    assert _cost(lambda: fnp.asarray(a32, dtype=np.float64)) == 0  # lossless widen
+    assert _cost(lambda: fnp.asarray(a64, dtype=np.int32)) == 200  # lossy, f64 rate
+    assert _cost(lambda: fnp.asarray(a32, dtype=np.int32)) == 100  # lossy, f32 rate

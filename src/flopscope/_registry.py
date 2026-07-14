@@ -2374,7 +2374,7 @@ REGISTRY: dict[str, dict] = {
     "random.choice": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "notes": "Sampling; cost = numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; n*ceil(log2(n)) conservative floor if replace=False with p.",
     },
     "random.default_rng": {
@@ -2503,7 +2503,7 @@ REGISTRY: dict[str, dict] = {
     "random.permutation": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "notes": "Shuffle; cost = n*ceil(log2(n)).",
     },
     "random.poisson": {
@@ -2579,7 +2579,7 @@ REGISTRY: dict[str, dict] = {
     "random.shuffle": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "notes": "Shuffle; cost = n*ceil(log2(n)).",
     },
     "random.standard_cauchy": {
@@ -2688,7 +2688,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.choice": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
         "notes": "numel(output) if replace; n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
@@ -2835,14 +2835,14 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.permutation": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Random permutation; cost = shape[axis] (Fisher-Yates draws).",
     },
     "random.Generator.permuted": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "numel(input)",
         "notes": "Permute along axis; cost from input array size.",
@@ -2877,7 +2877,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.shuffle": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "In-place shuffle; cost = shape[axis] (Fisher-Yates draws).",
@@ -3003,7 +3003,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.choice": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
         "notes": "Legacy choice sampler; numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
@@ -3136,7 +3136,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.permutation": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Legacy permutation; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
@@ -3206,7 +3206,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.shuffle": {
         "category": "counted_random_method",
-        "complex_factor": "illegal",
+        "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Legacy in-place shuffle; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
