@@ -49,7 +49,7 @@ class UnsupportedFunctionError(FlopscopeError):
 
 
 class UnsupportedDtypeError(TypeError):
-    """An operation resolved to a dtype with no billing rate. Raised when production dtype rates are active and the resolved calculation dtype is outside the supported table (e.g. float128), or when a complex-dtype call reaches an op with no complex billing classification."""
+    """An operation resolved to a dtype with no billing rate. Raised when production dtype rates are active and the resolved calculation dtype is a numeric type absent from the supported table (a future dtype numpy or an extension package might introduce), or when a complex-dtype call reaches an op marked complex-illegal."""
 
     def __init__(self, message: str = "") -> None:
         super().__init__(message)

@@ -51,8 +51,9 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
 # no precision-packing exploit is possible through them -- they bill at the
 # neutral rate 1.0 instead of failing closed. (Their wall time is covered by
 # the residual-time penalty.) The fail-closed rule targets NUMERIC dtypes
-# outside the supported table -- e.g. float128/complex256, whose extra mantissa
-# width is exactly the precision side door dtype-aware billing closes.
+# absent from the supported table -- future types numpy or an extension
+# package might introduce; every known numpy numeric dtype (including the
+# extended-precision longdouble family) carries an explicit rate.
 _NON_NUMERIC_KINDS = frozenset("OUSVMm")
 
 
