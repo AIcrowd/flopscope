@@ -497,9 +497,12 @@ class TestSortComplex:
         with BudgetContext(flop_budget=10**6) as budget:
             result = sort_complex(a)
         assert numpy.allclose(result, numpy.sort_complex(a))
-        # Cost should be n * ceil(log2(n))
+        # Cost should be n * ceil(log2(n)), times the registry complex_factor
+        # (2.0: lexicographic compare touches both components) since `a` is
+        # a genuinely complex128 array and unit dtype rates leave that
+        # factor as the only multiplier.
         n = a.size
-        expected_cost = n * math.ceil(math.log2(n))
+        expected_cost = 2 * n * math.ceil(math.log2(n))
         assert budget.flops_used == expected_cost
 
     def test_sort_complex_real_input(self):

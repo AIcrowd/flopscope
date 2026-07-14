@@ -132,7 +132,7 @@ def _unary_input(name):
         return numpy.abs(a) + 1.1
     if name in ("log", "log10", "log1p", "log2", "sqrt", "reciprocal"):
         return numpy.abs(a) + 0.1
-    if name in ("angle", "real_if_close", "imag"):
+    if name in ("angle", "real_if_close"):
         return a.astype(complex)
     if name in ("bitwise_invert", "bitwise_not", "invert", "bitwise_count"):
         return numpy.random.randint(0, 255, (10, 10))
@@ -144,7 +144,15 @@ def test_unary_numel(name, we):
     fn = getattr(we, name)
     inp = _unary_input(name)
     cost = _cost_of(fn, inp)
-    assert cost == 100, f"{name}: expected numel=100, got {cost}"
+    # real_if_close takes complex input (see _unary_input) and its registry
+    # complex_factor is 2.0 (test-and-patch: checks the imaginary part
+    # against a tolerance and conditionally copies the real component,
+    # structurally matching isnan/isfinite) -- unit dtype rates here, so only
+    # the complex factor applies: 100 * 2.0 = 200. Every other op in this
+    # list bills numel(input) = 100 unchanged (real input, or "angle" whose
+    # complex_factor is 1.0 -- priced-in).
+    expected = 200 if name == "real_if_close" else 100
+    assert cost == expected, f"{name}: expected {expected}, got {cost}"
 
 
 def test_isclose_numel(we):

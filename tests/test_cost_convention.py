@@ -352,7 +352,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     ),
     "sort_complex": (
         lambda: fnp.sort_complex(_complex50),
-        50 * int(math.ceil(math.log2(50))),  # 300
+        # complex_factor 2.0 (lexicographic compare touches both components);
+        # unit dtype rates, so only the complex factor applies: 300 * 2 = 600.
+        2 * 50 * int(math.ceil(math.log2(50))),  # 600
     ),
     "partition": (
         lambda: fnp.partition(_v100, 10),

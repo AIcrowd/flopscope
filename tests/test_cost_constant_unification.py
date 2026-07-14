@@ -78,7 +78,9 @@ def test_pinv_lstsq_self_correct_no_double_count():
 def test_svd_family_packaged_weights_are_unity():
     load_weights()  # packaged table; linalg weights must now be 1.0
     A = fnp.asarray(np.random.rand(200, 20))
-    assert cost(lambda: fnp.linalg.svdvals(A)) == 176_000
+    # np.random.rand is float64 (dtype_rate 2.0); weight stays 1.0:
+    # 176_000 * 2.0 * 1.0 = 352_000
+    assert cost(lambda: fnp.linalg.svdvals(A)) == 352_000
 
 
 # ---------------- Task 2: direct solvers ----------------
@@ -138,7 +140,8 @@ def test_direct_family_packaged_weights_are_unity():
     load_weights()
     A = fnp.asarray(np.random.rand(100, 100))
     SPD = fnp.asarray(np.asarray(A) @ np.asarray(A).T + 100 * np.eye(100))
-    assert cost(lambda: fnp.linalg.cholesky(SPD)) == 100**3 // 3
+    # float64 (dtype_rate 2.0) * weight 1.0
+    assert cost(lambda: fnp.linalg.cholesky(SPD)) == 2 * (100**3 // 3)
 
 
 # ---------------- Task 4: eigen family (PROVISIONAL constants) ----------------
@@ -192,8 +195,10 @@ def test_multivariate_normal_default_size_is_one_sample():
 def test_multivariate_normal_packaged_weight_is_unity():
     load_weights()
     d = 30
-    # Weight for this composite op must stay 1.0 so charged == flop_cost
-    expected = svd_cost(d, d, with_vectors=True) + 2 * d * d + 16 * d
+    # Weight for this composite op must stay 1.0 so charged == flop_cost * dtype_rate.
+    # multivariate_normal always draws float64 output (no dtype= parameter),
+    # so dtype_rate is fixed at 2.0 regardless of the mean/cov input dtype.
+    expected = 2 * (svd_cost(d, d, with_vectors=True) + 2 * d * d + 16 * d)
     assert (
         cost(lambda: fnp.random.multivariate_normal(np.zeros(d), np.eye(d))) == expected
     )
@@ -371,10 +376,13 @@ def test_lexsort_bills_all_slices():
 def test_sort_complex_per_slice():
     from flopscope._flops import sort_cost
 
+    # unit dtype rates (no load_weights()); sort_complex's registry
+    # complex_factor is 2.0 (lexicographic compare touches both components),
+    # and that factor is math, not policy -- always active.
     a = fnp.asarray(np.random.rand(100, 70) + 1j * np.random.rand(100, 70))
-    assert cost(lambda: fnp.sort_complex(a)) == 100 * sort_cost(70)
+    assert cost(lambda: fnp.sort_complex(a)) == 2 * 100 * sort_cost(70)
     v = fnp.asarray(np.random.rand(1000) + 1j)
-    assert cost(lambda: fnp.sort_complex(v)) == sort_cost(1000)
+    assert cost(lambda: fnp.sort_complex(v)) == 2 * sort_cost(1000)
 
 
 def test_select_bills_broadcast_output():
@@ -429,9 +437,11 @@ def test_stats_ppf_composites_packaged_weight_unity():
     x = fnp.asarray(np.random.rand(100) * 0.8 + 0.1)
     import flopscope.stats as fstats
 
-    assert cost(lambda: fstats.norm.ppf(x)) == 83 * 100
-    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 81 * 100
-    assert cost(lambda: fstats.lognorm.ppf(x, 0.5)) == 106 * 100
+    # stats._base coerces inputs to float64 (dtype_rate 2.0) before billing;
+    # weight stays 1.0, so charged = 2 * (per_elem * n).
+    assert cost(lambda: fstats.norm.ppf(x)) == 2 * 83 * 100
+    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 2 * 81 * 100
+    assert cost(lambda: fstats.lognorm.ppf(x, 0.5)) == 2 * 106 * 100
 
 
 # ---- stats gap fixes (audit-2 verified, PR fix/cost-model-gaps) ----
@@ -853,12 +863,14 @@ def test_stats_gap_fixes_packaged_weight_unity():
     xpos100 = fnp.asarray(np.abs(np.random.rand(100)) + 0.1)
     u100 = fnp.asarray(np.random.rand(100))
 
-    assert cost(lambda: fstats.laplace.cdf(x100)) == 40 * 100
-    assert cost(lambda: fstats.laplace.ppf(q100)) == 51 * 100
-    assert cost(lambda: fstats.lognorm.pdf(xpos100, 0.5)) == 62 * 100
-    assert cost(lambda: fstats.lognorm.cdf(xpos100, 0.5)) == 70 * 100
-    assert cost(lambda: fstats.uniform.cdf(u100)) == 4 * 100
-    assert cost(lambda: fstats.cauchy.pdf(x100)) == 6 * 100
+    # stats._base coerces inputs to float64 (dtype_rate 2.0) before billing;
+    # weight stays 1.0, so charged = 2 * (per_elem * n).
+    assert cost(lambda: fstats.laplace.cdf(x100)) == 2 * 40 * 100
+    assert cost(lambda: fstats.laplace.ppf(q100)) == 2 * 51 * 100
+    assert cost(lambda: fstats.lognorm.pdf(xpos100, 0.5)) == 2 * 62 * 100
+    assert cost(lambda: fstats.lognorm.cdf(xpos100, 0.5)) == 2 * 70 * 100
+    assert cost(lambda: fstats.uniform.cdf(u100)) == 2 * 4 * 100
+    assert cost(lambda: fstats.cauchy.pdf(x100)) == 2 * 6 * 100
 
 
 # ---------------- reductions & predicates (audit-2 verified) ----------------
@@ -1218,6 +1230,9 @@ def test_choice_replace_false_with_p_uses_sort_cost():
 # Task 1: stats composite family (13 ops) — PR fix/cost-model-gaps
 # Each op: cost_per_elem moved from 1 to K; weight 16.0 → 1.0.
 # K derived from structural FMA=2 count (transcendental = 16 FLOPs).
+# stats._base coerces every input to float64 before billing, so with
+# load_weights() active (dtype_rate 2.0) charged = 2 * per_elem * n; weight
+# itself stays 1.0.
 # ---------------------------------------------------------------------------
 
 
@@ -1228,7 +1243,7 @@ def test_stats_expon_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 3.0)
-        assert cost(lambda: fstats.expon.pdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.expon.pdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1240,7 +1255,7 @@ def test_stats_expon_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 3.0)
-        assert cost(lambda: fstats.expon.cdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.expon.cdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1252,7 +1267,7 @@ def test_stats_expon_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.expon.ppf(q)) == 27 * 1000
+        assert cost(lambda: fstats.expon.ppf(q)) == 2 * 27 * 1000
     finally:
         reset_weights()
 
@@ -1264,7 +1279,7 @@ def test_stats_cauchy_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.cauchy.cdf(x)) == 20 * 1000
+        assert cost(lambda: fstats.cauchy.cdf(x)) == 2 * 20 * 1000
     finally:
         reset_weights()
 
@@ -1276,7 +1291,7 @@ def test_stats_cauchy_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.cauchy.ppf(q)) == 28 * 1000
+        assert cost(lambda: fstats.cauchy.ppf(q)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1288,7 +1303,7 @@ def test_stats_logistic_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.logistic.pdf(x)) == 23 * 1000
+        assert cost(lambda: fstats.logistic.pdf(x)) == 2 * 23 * 1000
     finally:
         reset_weights()
 
@@ -1300,7 +1315,7 @@ def test_stats_logistic_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.logistic.cdf(x)) == 21 * 1000
+        assert cost(lambda: fstats.logistic.cdf(x)) == 2 * 21 * 1000
     finally:
         reset_weights()
 
@@ -1312,7 +1327,7 @@ def test_stats_logistic_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.logistic.ppf(q)) == 28 * 1000
+        assert cost(lambda: fstats.logistic.ppf(q)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1324,7 +1339,7 @@ def test_stats_laplace_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.laplace.pdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.laplace.pdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1336,7 +1351,7 @@ def test_stats_truncnorm_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 28 * 1000
+        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1348,7 +1363,7 @@ def test_stats_truncnorm_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 51 * 1000
+        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 2 * 51 * 1000
     finally:
         reset_weights()
 
@@ -1363,17 +1378,18 @@ def test_stats_composite_family_packaged_weight_unity():
     xl = fnp.asarray(np.linspace(-3.0, 3.0, 100))
     xt = fnp.asarray(np.random.rand(100) * 0.6 + 0.2)
 
-    assert cost(lambda: fstats.expon.pdf(x)) == 22 * 100
-    assert cost(lambda: fstats.expon.cdf(x)) == 22 * 100
-    assert cost(lambda: fstats.expon.ppf(q)) == 27 * 100
-    assert cost(lambda: fstats.cauchy.cdf(xl)) == 20 * 100
-    assert cost(lambda: fstats.cauchy.ppf(q)) == 28 * 100
-    assert cost(lambda: fstats.logistic.pdf(xl)) == 23 * 100
-    assert cost(lambda: fstats.logistic.cdf(xl)) == 21 * 100
-    assert cost(lambda: fstats.logistic.ppf(q)) == 28 * 100
-    assert cost(lambda: fstats.laplace.pdf(xl)) == 22 * 100
-    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 28 * 100
-    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 51 * 100
+    # every input is float64 (dtype_rate 2.0); weight stays 1.0.
+    assert cost(lambda: fstats.expon.pdf(x)) == 2 * 22 * 100
+    assert cost(lambda: fstats.expon.cdf(x)) == 2 * 22 * 100
+    assert cost(lambda: fstats.expon.ppf(q)) == 2 * 27 * 100
+    assert cost(lambda: fstats.cauchy.cdf(xl)) == 2 * 20 * 100
+    assert cost(lambda: fstats.cauchy.ppf(q)) == 2 * 28 * 100
+    assert cost(lambda: fstats.logistic.pdf(xl)) == 2 * 23 * 100
+    assert cost(lambda: fstats.logistic.cdf(xl)) == 2 * 21 * 100
+    assert cost(lambda: fstats.logistic.ppf(q)) == 2 * 28 * 100
+    assert cost(lambda: fstats.laplace.pdf(xl)) == 2 * 22 * 100
+    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 2 * 28 * 100
+    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 2 * 51 * 100
 
 
 # ---------------- Task 2: fft freq grids + random samplers ----------------
