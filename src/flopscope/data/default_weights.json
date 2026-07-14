@@ -475,7 +475,11 @@
     "int64": 2.0,
     "uint64": 2.0,
     "float64": 2.0,
+    "float96": 3.0,
+    "float128": 4.0,
     "complex64": 1.0,
-    "complex128": 2.0
+    "complex128": 2.0,
+    "complex192": 3.0,
+    "complex256": 4.0
   }
 }

@@ -256,31 +256,41 @@ call's resolved dtype:
 | `int16` | 1.0 | | `int64` | 2.0 |
 | `uint16` | 1.0 | | `uint64` | 2.0 |
 | `float16` | 1.0 | | `float64` | 2.0 |
-| | | | `complex64` | 1.0 |
-| | | | `complex128` | 2.0 |
+| `float96` | 3.0 | | `complex64` | 1.0 |
+| `float128` | 4.0 | | `complex128` | 2.0 |
+| `complex192` | 3.0 | | `complex256` | 4.0 |
 
 - **32-bit-class and narrower → `1.0`.** float16/int16/int8/bool all bill at the baseline
   width.
 - **64-bit-class → `2.0`.** float64, int64, uint64 do twice the scalar work of the
   baseline width.
+- **Extended precision → width class.** `float96` (3.0) and `float128` (4.0) are the
+  platform `longdouble` types (Linux only; on macOS/Windows `longdouble` aliases
+  `float64`). At these rates, packing narrower payloads through their wider mantissas
+  still loses: two float32-payload products in one `float128` multiply cost `4.0`
+  against the honest `2 × 1.0`. Note these dtypes cannot cross the evaluation wire
+  (the transfer codec accepts the 14 standard dtypes) — they are priced for in-process
+  compute only.
 - **complex → its component width's rate.** `complex64` is two float32 components → `1.0`;
-  `complex128` is two float64 components → `2.0`. The *structure* cost of being complex
-  (that a complex multiply is several real ones) is carried separately by
-  `complex_factor`, not folded in here.
+  `complex128` is two float64 components → `2.0`; `complex192`/`complex256` follow their
+  extended components (3.0 / 4.0). The *structure* cost of being complex (that a complex
+  multiply is several real ones) is carried separately by `complex_factor`, not folded
+  in here.
 
 These are **current policy values, subject to tuning** — the same status as the weight
 ladder, and configured in the same file (`src/flopscope/data/default_weights.json`, under
 `"dtype_rates"`). They are a deliberate competition-design choice, not a hardware
 measurement.
 
-**Fail-closed for numeric dtypes.** Any *numeric* dtype not in the table (for example
-`float128` / `complex256`, whose wider mantissa is exactly the precision side door this
-section closes) has no defined rate, so billing **raises `UnsupportedDtypeError` before
-charging any FLOPs** rather than guessing. A numeric dtype cannot slip through unpriced.
-*Non-numeric* dtypes (`object`, `str_`, `bytes_`, `datetime64`, `timedelta64`,
-structured/void) are not floating-point arithmetic — no precision packing is possible
-through them — so they bill at the neutral rate `1.0`, preserving plain-numpy behavior
-for non-numeric arrays; their wall time is covered by the residual-time penalty.
+**Fail-closed for unknown numeric dtypes.** Any *numeric* dtype not in the table (a
+future type numpy or an extension package might introduce) has no defined rate, so
+billing **raises `UnsupportedDtypeError` before charging any FLOPs** rather than
+guessing — a numeric dtype cannot slip through unpriced; supporting a new one is a
+deliberate one-line policy addition to the table. *Non-numeric* dtypes (`object`,
+`str_`, `bytes_`, `datetime64`, `timedelta64`, structured/void) are not floating-point
+arithmetic — no precision packing is possible through them — so they bill at the
+neutral rate `1.0`, preserving plain-numpy behavior for non-numeric arrays; their wall
+time is covered by the residual-time penalty.
 
 ### Complex arithmetic from first principles
 

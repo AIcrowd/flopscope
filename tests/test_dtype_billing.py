@@ -53,12 +53,17 @@ def test_rate_for_uses_active_table():
     load_weights()
     assert rate_for(np.dtype("float64")) == 2.0
     assert rate_for(np.dtype("complex64")) == 1.0
-    # Numeric dtypes OUTSIDE the table fail closed (the float128/complex256
-    # precision side door). Name-level check: platform-independent.
+    # Extended precision is PRICED by width class, not banned: float128 costs
+    # 2x float64 (4.0 in fp32 units); packing two f32-payload products into
+    # its mantissa still loses (4.0 vs honest 2.0).
     from flopscope._weights import get_dtype_rate
 
+    assert get_dtype_rate("float128") == 4.0
+    assert get_dtype_rate("complex256") == 4.0  # component width float128
+    # Numeric dtypes genuinely OUTSIDE the table (future types) still fail
+    # closed. Name-level check: platform-independent.
     with pytest.raises(UnsupportedDtypeError):
-        get_dtype_rate("float128")
+        get_dtype_rate("float256")
 
 
 def test_rate_for_non_numeric_kinds_bill_neutral():

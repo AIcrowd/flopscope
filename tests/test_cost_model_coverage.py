@@ -117,8 +117,8 @@ def test_cost_model_dtype_table_covers_every_supported_dtype():
     # supported dtype must be added to the doc's rate table too.
     doc = COST_MODEL_MD.read_text()
     rates = json.loads(DEFAULT_WEIGHTS.read_text())["dtype_rates"]
-    assert len(rates) == 14, (
-        f"expected 14 supported dtypes in default_weights.json, got {len(rates)}"
+    assert len(rates) == 18, (
+        f"expected 18 supported dtypes in default_weights.json, got {len(rates)}"
     )
     missing = [name for name in rates if f"`{name}`" not in doc]
     assert not missing, (

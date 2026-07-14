@@ -90,23 +90,23 @@ def test_non_numeric_dtype_bills_neutral_rate():
 @pytest.mark.skipif(
     not hasattr(np, "float128"), reason="float128 not available on this platform"
 )
-def test_unsupported_numeric_dtype_fails_closed_before_charging():
-    # Numeric dtypes outside the supported table (float128's wider mantissa is
-    # the precision side door) fail closed BEFORE any FLOPs are recorded.
+def test_float128_bills_extended_width_rate():
+    # Extended precision is priced, not banned: float128 bills 2x float64
+    # (rate 4.0 in fp32 units). Width packing through its mantissa still
+    # loses: two f32-payload products packed into one float128 multiply cost
+    # 4.0 vs the honest 2 x 1.0 = 2.0, and one f64-payload product costs 4.0
+    # vs the honest 2.0.
     load_weights()
-    from flopscope.errors import UnsupportedDtypeError
-
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
-        with pytest.raises(UnsupportedDtypeError):
-            with b.deduct(
-                "multiply",
-                flop_cost=1,
-                subscripts=None,
-                shapes=(),
-                dtypes=(np.dtype("float128"),),
-            ):
-                pass
-        assert b.flops_used == 0
+        with b.deduct(
+            "multiply",
+            flop_cost=10,
+            subscripts=None,
+            shapes=(),
+            dtypes=(np.dtype("float128"),),
+        ):
+            pass
+        assert b.flops_used == 40  # 10 * rate 4.0
 
 
 # ---------------------------------------------------------------------------

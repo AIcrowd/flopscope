@@ -19,8 +19,14 @@ EXPECTED_PACKAGED_RATES = {
     "int64": 2.0,
     "uint64": 2.0,
     "float64": 2.0,
+    # Extended precision (Linux-only dtypes): priced by width class, not
+    # banned. Packing through their mantissas still loses at these rates.
+    "float96": 3.0,
+    "float128": 4.0,
     "complex64": 1.0,  # component width: float32
     "complex128": 2.0,  # component width: float64
+    "complex192": 3.0,  # component width: float96
+    "complex256": 4.0,  # component width: float128
 }
 
 
@@ -37,9 +43,11 @@ def test_unit_mode_returns_one_for_everything():
 
 
 def test_production_mode_fails_closed_on_unknown_dtype():
+    # float128 is now priced (4.0); a genuinely unknown future numeric dtype
+    # name still fails closed.
     load_weights()
     with pytest.raises(UnsupportedDtypeError):
-        get_dtype_rate("float128")
+        get_dtype_rate("float256")
 
 
 def test_disable_env_gives_unit_rates(monkeypatch):
