@@ -276,3 +276,27 @@ def test_array_ops_free_op_bills_zero_regardless_of_dtype():
     load_weights()
     zc = fnp.asarray(np.ones(12, dtype=np.complex128))
     assert _cost(lambda: fnp.reshape(zc, (3, 4))) == 0
+
+
+def test_astype_bills_input_dtype_ratio():
+    # astype (weight 1.0, cost=numel for value-changing casts) bills at the
+    # INPUT dtype: fp64 input costs 2x fp32 input for the same narrowing cast.
+    load_weights()
+    a64 = fnp.asarray(np.ones(1000, dtype=np.float64))
+    a32 = fnp.asarray(np.ones(1000, dtype=np.float32))
+    c64 = _cost(lambda: fnp.astype(a64, np.int32))
+    c32 = _cost(lambda: fnp.astype(a32, np.int32))
+    assert c32 == 1000 and c64 == 2000  # ratio 2.0
+
+
+def test_complex_movement_and_creation_do_not_raise():
+    # Free / data-movement ops on complex values must not fail closed; they
+    # bill at factor 1.0 (weight 0 -> 0 FLOPs), never raise UnsupportedDtypeError.
+    load_weights()
+    zc = fnp.asarray(np.ones(100, dtype=np.complex128))
+    assert _cost(lambda: fnp.asarray(np.ones(50, dtype=np.complex128))) == 0
+    assert _cost(lambda: fnp.ravel(zc)) == 0
+    assert _cost(lambda: fnp.broadcast_to(zc, (2, 100))) == 0
+    # astype complex->real is value-changing (cost=numel) at the complex128
+    # input rate (2.0), factor 1.0: 100 * 2.0 = 200.
+    assert _cost(lambda: fnp.astype(zc, np.float64)) == 200

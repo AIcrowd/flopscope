@@ -48,7 +48,14 @@ def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
     """Complex structure factor for one billed unit of ``op_name``.
 
     1.0 for real dtypes. For complex dtypes the factor comes from the op's
-    registry classification; unclassified or complex-illegal ops fail closed.
+    registry classification. Ops explicitly marked ``"illegal"`` (numpy raises
+    on complex) or ``"exact"`` (contraction family — the call site must supply
+    an override) fail closed. Ops with NO classification are free /
+    data-movement / blacklisted / unknown: they relocate or allocate whole
+    complex values without doing complex arithmetic, so their factor is 1.0
+    (one relocation per value). Charged ops are guaranteed an explicit factor
+    by ``test_complex_factor_completeness``, so a missing classification here
+    is never a charged op silently defaulting.
 
     A generic ufunc-method name (``"<ufunc>.<method>"``, e.g.
     ``"multiply.reduce"``) that is not itself a registry key falls back to
@@ -69,9 +76,9 @@ def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
                 entry = REGISTRY.get(op_name[: -len(suffix)])
                 break
     factor = None if entry is None else entry.get("complex_factor")
-    if factor is None or factor == "illegal":
+    if factor == "illegal":
         raise UnsupportedDtypeError(
-            f"operation {op_name!r} has no complex billing classification "
+            f"operation {op_name!r} is not defined for complex dtypes "
             f"(resolved dtype {resolved.name!r})"
         )
     if factor == "exact":
@@ -79,4 +86,8 @@ def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
             f"operation {op_name!r} computes its complex cost exactly; the call "
             "site must pass complex_factor_override to deduct()/deduct_after()"
         )
+    if factor is None:
+        # Free / data-movement / blacklisted / unknown op: relocates or
+        # allocates whole complex values, no complex arithmetic -> factor 1.0.
+        return 1.0
     return float(factor)

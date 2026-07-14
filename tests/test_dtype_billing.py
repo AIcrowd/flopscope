@@ -71,6 +71,14 @@ def test_complex_factor_fails_closed_when_unclassified():
         complex_factor_for("left_shift", np.dtype("complex128"))  # complex-illegal op
 
 
+def test_complex_factor_free_op_is_one_not_raise():
+    # Free / data-movement / blacklisted ops carry no complex_factor; they
+    # relocate whole complex values (no arithmetic) -> factor 1.0, never raise.
+    assert complex_factor_for("reshape", np.dtype("complex128")) == 1.0
+    assert complex_factor_for("asarray", np.dtype("complex128")) == 1.0
+    assert complex_factor_for("some_unknown_op_xyz", np.dtype("complex128")) == 1.0
+
+
 def test_complex_factor_exact_requires_override():
     with pytest.raises(RuntimeError):
         complex_factor_for("einsum", np.dtype("complex128"))

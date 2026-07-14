@@ -763,7 +763,7 @@ def split(
         flop_cost=cost,
         subscripts=None,
         shapes=(ary_arr.shape,),
-        dtypes=(),
+        dtypes=(ary_arr.dtype,),
     ):
         raw_pieces = _call_numpy(
             _np.split,
@@ -835,7 +835,7 @@ def vsplit(
         flop_cost=cost,
         subscripts=None,
         shapes=(ary_arr.shape,),
-        dtypes=(),
+        dtypes=(ary_arr.dtype,),
     ):
         raw_pieces = _call_numpy(_np.vsplit, ary_arr, indices_or_sections)
     if out_group is not None:
@@ -913,7 +913,7 @@ def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a_arr.shape,),
-        dtypes=(),
+        dtypes=(a_arr.dtype,),
     ):
         result = _call_numpy(_np.ravel, a_arr, **kwargs)
     if in_group is not None and out_group is None:
@@ -1314,7 +1314,7 @@ def broadcast_to(
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(arr.dtype,),
     ):
         result = _call_numpy(_np.broadcast_to, arr, output_shape)
     in_group = array.symmetry if isinstance(array, SymmetricTensor) else None
@@ -1407,7 +1407,7 @@ def astype(
         flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape,),
-        dtypes=(),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(
             _np.astype, _to_base_ndarray(x), dtype, copy=copy, device=device
@@ -1443,7 +1443,7 @@ def _astype_counted(
         flop_cost=cost,
         subscripts=None,
         shapes=(arr_np.shape,),
-        dtypes=(),
+        dtypes=(arr_np.dtype,),
     ):
         result = _call_numpy(
             _np.ndarray.astype,
@@ -1473,7 +1473,7 @@ def asarray(
         flop_cost=cost,
         subscripts=None,
         shapes=(_probe.shape,),
-        dtypes=(),
+        dtypes=(_probe.dtype,),
     ):
         result = _call_numpy(_np.asarray, a, dtype=dtype, **kwargs)
     return result  # type: ignore[return-value]
@@ -1618,7 +1618,7 @@ def array_split(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArra
         flop_cost=cost,
         subscripts=None,
         shapes=(ary_arr.shape,),
-        dtypes=(),
+        dtypes=(ary_arr.dtype,),
     ):
         result = _call_numpy(_np.array_split, _to_base_ndarray(ary), *args, **kwargs)
     return result  # type: ignore[return-value]
@@ -1855,7 +1855,7 @@ def broadcast_arrays(*args: ArrayLike, **kwargs: Any) -> tuple[FlopscopeArray, .
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=tuple(a.dtype for a in arrays),
     ):
         pass  # numpy call already executed above
     if not result:
@@ -2152,7 +2152,7 @@ def dsplit(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
         flop_cost=cost,
         subscripts=None,
         shapes=(ary_arr.shape,),
-        dtypes=(),
+        dtypes=(ary_arr.dtype,),
     ):
         raw_pieces = _call_numpy(_np.dsplit, ary_arr, *args, **kwargs)
     if out_group is not None:
@@ -2304,7 +2304,7 @@ def from_dlpack(*args, **kwargs):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result
@@ -2329,7 +2329,7 @@ def frombuffer(
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result  # type: ignore[return-value]
@@ -2349,7 +2349,7 @@ def fromfile(*args, **kwargs):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result
@@ -2417,7 +2417,7 @@ def fromregex(*args, **kwargs):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result
@@ -2437,7 +2437,7 @@ def fromstring(*args, **kwargs):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result
@@ -2968,7 +2968,7 @@ def rollaxis(*args, **kwargs):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(),
+        dtypes=(result.dtype,) if hasattr(result, "dtype") else (),
     ):
         pass  # numpy call already executed above
     return result
