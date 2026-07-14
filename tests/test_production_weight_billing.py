@@ -50,8 +50,8 @@ def _billed(call):
 # dtype), so add/exp resolve dtype_rate 2.0. random.randn has no dtype=
 # parameter and always draws float64, so it is also dtype_rate 2.0. reshape
 # and take are weight 0.0 (billed 0 regardless of dtype_rate). hanning takes
-# no array operand and declares dtypes=() (dtype-neutral), so it stays at
-# dtype_rate 1.0 and is unaffected by the dtype-aware billing migration.
+# no array operand but always produces a float64 window, so it declares that
+# output dtype and bills dtype_rate 2.0 — consistent with the samplers.
 _TIER_CASES = [
     ("free: reshape", "reshape", lambda: fnp.reshape(_A, (10, 10)), 0, 0.0),
     ("free: take (was gather)", "take", lambda: fnp.take(_A, _IDX), 0, 0.0),
@@ -62,7 +62,8 @@ _TIER_CASES = [
         200,
         1.0,
     ),  # 100 * 2.0(f64) * 1.0
-    ("half: hanning", "hanning", lambda: fnp.hanning(100), 1600, 8.0),
+    # 2n * 2.0(f64 output) * 8.0 = 200 * 2.0 * 8.0
+    ("half: hanning", "hanning", lambda: fnp.hanning(100), 3200, 8.0),
     (
         "transcendental: exp",
         "exp",
@@ -85,7 +86,7 @@ _DTYPE_RATE_BY_WEIGHT_KEY = {
     "reshape": 1.0,
     "take": 1.0,
     "add": 2.0,
-    "hanning": 1.0,
+    "hanning": 2.0,  # fixed float64 output window
     "exp": 2.0,
     "random.randn": 2.0,
 }
