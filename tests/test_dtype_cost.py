@@ -428,3 +428,94 @@ def test_histogram2d_histogramdd_array_bins_dtype_is_billed():
     hd_32 = _cost(lambda: fnp.histogramdd(s, bins=[fnp.asarray(e32), fnp.asarray(e32)]))
     hd_64 = _cost(lambda: fnp.histogramdd(s, bins=[fnp.asarray(e64), fnp.asarray(e64)]))
     assert hd_32 > 0 and hd_64 == 2 * hd_32
+
+
+# ---------------------------------------------------------------------------
+# Task 8c: fft/linalg/random/stats dtype declarations
+# ---------------------------------------------------------------------------
+
+
+def test_fft_complex_bills_by_rate_not_double_charged():
+    # fft.* registry complex_factor is 1.0 (priced-in: the 5*n*ceil(log2(n))
+    # formula already counts complex real-FLOPs), so a complex128 input must
+    # bill exactly the dtype-RATE ratio over a float32 input of the same
+    # shape (2.0 under production rates) -- NOT an extra factor stacked on
+    # top of the rate (which would show up as a 4x ratio instead of 2x).
+    load_weights()
+    n = 16
+    r32 = fnp.asarray(np.ones(n, dtype=np.float32))
+    c128 = fnp.asarray(np.ones(n, dtype=np.complex128))
+    real_cost = _cost(lambda: fnp.fft.fft(r32))
+    complex_cost = _cost(lambda: fnp.fft.fft(c128))
+    assert real_cost > 0
+    assert complex_cost == 2 * real_cost
+
+
+def test_linalg_inv_complex_bills_quadruple_real():
+    # linalg.* registry complex_factor is 4.0.
+    load_weights()
+    a64 = fnp.asarray(np.eye(4, dtype=np.float64))
+    ac128 = fnp.asarray(np.eye(4, dtype=np.complex128))
+    real_cost = _cost(lambda: fnp.linalg.inv(a64))
+    complex_cost = _cost(lambda: fnp.linalg.inv(ac128))
+    assert real_cost > 0
+    assert complex_cost == 4 * real_cost
+
+
+def test_linalg_solve_complex_bills_quadruple_real():
+    # Two-operand linalg site: both a and b must be declared.
+    load_weights()
+    a64 = fnp.asarray(np.eye(4, dtype=np.float64))
+    b64 = fnp.asarray(np.ones(4, dtype=np.float64))
+    ac128 = fnp.asarray(np.eye(4, dtype=np.complex128))
+    bc128 = fnp.asarray(np.ones(4, dtype=np.complex128))
+    real_cost = _cost(lambda: fnp.linalg.solve(a64, b64))
+    complex_cost = _cost(lambda: fnp.linalg.solve(ac128, bc128))
+    assert real_cost > 0
+    assert complex_cost == 4 * real_cost
+
+
+def test_random_standard_normal_dtype_bills_by_rate():
+    # Generator.standard_normal(dtype=...) must declare the actual OUTPUT
+    # dtype (read off the already-computed result), so float64 bills 2x
+    # float32 under production dtype rates.
+    load_weights()
+    rng = fnp.random.default_rng(0)
+    cost_f32 = _cost(lambda: rng.standard_normal(100, dtype=np.float32))
+    cost_f64 = _cost(lambda: rng.standard_normal(100, dtype=np.float64))
+    assert cost_f32 > 0
+    assert cost_f64 == 2 * cost_f32
+
+
+def test_random_movement_ops_on_complex_do_not_raise():
+    # permutation/shuffle/choice(+Generator.permuted) draw from arbitrary
+    # (possibly complex) caller-supplied data rather than sampling a new
+    # value from a distribution. numpy itself permutes/shuffles/selects
+    # complex arrays fine, but the registry's complex_factor="illegal" for
+    # these ops is only valid for genuine real-only distribution samplers.
+    # These sites intentionally leave dtype undeclared (dtypes=()) to avoid
+    # a false-positive UnsupportedDtypeError regression on legitimate
+    # complex input; this test pins that non-regression.
+    load_weights()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        zc = np.ones(8, dtype=np.complex128)
+        fnp.random.permutation(zc)
+        fnp.random.shuffle(zc.copy())
+        fnp.random.choice(zc, size=2, replace=False)
+        rng = fnp.random.default_rng(0)
+        rng.permutation(zc)
+        rng.choice(zc, size=2, replace=False)
+        rng.permuted(zc)
+        rng.shuffle(zc.copy())
+
+
+def test_stats_norm_pdf_bills_forced_float64():
+    # stats.<dist>.pdf/cdf/ppf coerce the input to float64 before billing
+    # (_deduct_and_call does `np.asarray(x, dtype=np.float64)`), so the
+    # billing dtype is always float64 regardless of the caller's input dtype.
+    load_weights()
+    from flopscope import stats as fstats
+
+    x32 = fnp.asarray(np.zeros(10, dtype=np.float32))
+    x64 = fnp.asarray(np.zeros(10, dtype=np.float64))
+    assert _cost(lambda: fstats.norm.pdf(x32)) == _cost(lambda: fstats.norm.pdf(x64))

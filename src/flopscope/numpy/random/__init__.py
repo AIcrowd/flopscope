@@ -90,13 +90,22 @@ def _counted_sampler(
     def wrapper(*args, **kwargs):
         budget = require_budget()
         result = np_func(*args, **kwargs)
+        # This factory wraps many distributions with heterogeneous output
+        # dtypes (float64 for normal/exponential/..., int64 for
+        # poisson/binomial/randint/...); read the already-computed result's
+        # actual dtype rather than guessing a per-distribution default.
         if isinstance(result, _np.ndarray):
             n = _builtins.max(result.size, 1)
+            dtypes: tuple = (result.dtype,)
         elif isinstance(result, (int, float, _np.integer, _np.floating)):
             n = 1
+            dtypes = (_np.dtype(type(result)),)
         else:
             n = 1
-        with budget.deduct(op_name, flop_cost=n, subscripts=None, shapes=((n,),)):
+            dtypes = ()
+        with budget.deduct(
+            op_name, flop_cost=n, subscripts=None, shapes=((n,),), dtypes=dtypes
+        ):
             pass  # numpy already executed
         return result
 
@@ -124,7 +133,14 @@ def _counted_dims_sampler(
         budget = require_budget()
         n = int(_np.prod(dims)) if dims else 1
         cost = _builtins.max(n, 1)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=((n,),)):
+        # rand/randn have no dtype= param and always return float64.
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=((n,),),
+            dtypes=(_np.dtype(_np.float64),),
+        ):
             if dims:
                 result = np_func(*dims)
             else:
@@ -332,8 +348,13 @@ def uniform(low=0.0, high=1.0, size=None):
     budget = require_budget()
     result = _npr.uniform(low, high, size)
     n = _builtins.max(result.size, 1) if isinstance(result, _np.ndarray) else 1
+    # np.random.uniform has no dtype= param and always returns float64.
     with budget.deduct(
-        "random.uniform", flop_cost=3 * n, subscripts=None, shapes=((n,),)
+        "random.uniform",
+        flop_cost=3 * n,
+        subscripts=None,
+        shapes=((n,),),
+        dtypes=(_np.dtype(_np.float64),),
     ):
         pass  # numpy already executed
     return result
@@ -419,6 +440,7 @@ def multivariate_normal(mean, cov, size=None, check_valid="warn", tol=1e-8):
         flop_cost=flop_cost,
         subscripts=None,
         shapes=((N, d),),
+        dtypes=(result.dtype,),
     ):
         pass  # numpy already executed (module convention for samplers)
     return result
@@ -448,7 +470,15 @@ def _counted_size_only_sampler(
         budget = require_budget()
         n = _output_size(size=size)
         cost = _builtins.max(n, 1)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=((n,),)):
+        # random/random_sample/ranf/sample have no dtype= param and always
+        # return float64.
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=((n,),),
+            dtypes=(_np.dtype(_np.float64),),
+        ):
             result = _call_numpy(np_func, size=size)
         return result
 
@@ -484,8 +514,13 @@ def permutation(x):
     budget = require_budget()
     n = int(x) if isinstance(x, (int, _np.integer)) else x.shape[0]
     cost = _builtins.max(n, 1)
+    # permutation draws from arbitrary (possibly complex) caller-supplied
+    # data rather than sampling a new value from a distribution; the
+    # registry's complex_factor="illegal" for this op is only valid for the
+    # genuine real-only distribution samplers, so dtype is intentionally
+    # left undeclared here (numpy permutes complex arrays fine).
     with budget.deduct(
-        "random.permutation", flop_cost=cost, subscripts=None, shapes=((n,),)
+        "random.permutation", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
     ):
         result = _call_numpy(_npr.permutation, x)
     return result
@@ -503,8 +538,10 @@ def shuffle(x):
     else:
         n = len(x)
     cost = _builtins.max(n, 1)
+    # shuffle reorders arbitrary (possibly complex) caller-supplied data
+    # in place; see the dtype-declaration note on permutation above.
     with budget.deduct(
-        "random.shuffle", flop_cost=cost, subscripts=None, shapes=((n,),)
+        "random.shuffle", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
     ):
         _call_numpy(_npr.shuffle, x)
 
@@ -531,8 +568,14 @@ def choice(a, size=None, replace=True, p=None):
             # CDF build: cumsum + normalise + final pass (3*n), then
             # binary-search per draw (out_size * ceil(log2(n))).
             cost += 3 * n + _builtins.max(out_size, 1) * _ceil_log2(n)
+        # choice selects from arbitrary (possibly complex) caller-supplied
+        # data; see the dtype-declaration note on permutation above.
         with budget.deduct(
-            "random.choice", flop_cost=cost, subscripts=None, shapes=((out_size,),)
+            "random.choice",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=((out_size,),),
+            dtypes=(),
         ):
             result = _call_numpy(_npr.choice, a, size=size, replace=replace, p=p)
     else:
@@ -547,7 +590,7 @@ def choice(a, size=None, replace=True, p=None):
             # + searchsorted; sort_cost(n) is the documented conservative floor.
             cost = sort_cost(n)
         with budget.deduct(
-            "random.choice", flop_cost=cost, subscripts=None, shapes=((n,),)
+            "random.choice", flop_cost=cost, subscripts=None, shapes=((n,),), dtypes=()
         ):
             result = _call_numpy(_npr.choice, a, size=size, replace=replace, p=p)
     # Preserve identity when picking a scalar from an object-dtype array:
@@ -699,11 +742,17 @@ def symmetric(
     G = _builtins.max(symmetry.order(), 1)
     # sample numel + projection core ((|G|+1)*numel) == sample + symmetrize
     cost = _builtins.max(sample_size + (G + 1) * sample_size, 1)
+    # `sample` is usually drawn from a named real-only numpy distribution,
+    # but `distribution` may be an arbitrary caller callable that returns
+    # complex data; the registry's complex_factor="illegal" here is only
+    # valid for the genuine real-only samplers, so dtype is intentionally
+    # left undeclared (see the dtype-declaration note on permutation above).
     with budget.deduct(
         "random.symmetric",
         flop_cost=cost,
         subscripts=None,
         shapes=(shape_tuple,),
+        dtypes=(),
     ):
         from flopscope._symmetric import (
             SymmetricTensor,
@@ -724,8 +773,9 @@ def bytes(length):
     """
     budget = require_budget()
     cost = _builtins.max(int(length), 1)
+    # Output is a Python `bytes` object, not a numpy array -- no billing dtype.
     with budget.deduct(
-        "random.bytes", flop_cost=cost, subscripts=None, shapes=((length,),)
+        "random.bytes", flop_cost=cost, subscripts=None, shapes=((length,),), dtypes=()
     ):
         result = _call_numpy(_npr.bytes, length)
     return result

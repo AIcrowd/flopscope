@@ -69,6 +69,7 @@ class ContinuousDistribution:
             flop_cost=cost_per_elem * n,
             subscripts=None,
             shapes=(x.shape,),
+            dtypes=(x.dtype,),
         ):
             result = compute_fn(x, *args, **kwargs)
         return _asflopscope(result)

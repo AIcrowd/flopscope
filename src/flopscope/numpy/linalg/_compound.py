@@ -86,7 +86,11 @@ def multi_dot(
     cost = multi_dot_cost(shapes)
     out_stripped = _to_base_ndarray(out) if out is not None else None
     with budget.deduct(
-        "linalg.multi_dot", flop_cost=cost, subscripts=None, shapes=tuple(shapes)
+        "linalg.multi_dot",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=tuple(shapes),
+        dtypes=tuple(arr.dtype for arr in arrays),
     ):
         result = _call_numpy(
             _np.linalg.multi_dot,
@@ -151,7 +155,11 @@ def matrix_power(a: ArrayLike, n: int) -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = matrix_power_cost(size, n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.matrix_power", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.matrix_power",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.matrix_power, _to_base_ndarray(a), n)
     if isinstance(result, _np.ndarray) and inputs_were_whest:

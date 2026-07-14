@@ -93,7 +93,11 @@ def svd(
         else 0
     )
     with budget.deduct(
-        "linalg.svd", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.svd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         if compute_uv:
             # When k is specified, always use economy decomposition then slice.

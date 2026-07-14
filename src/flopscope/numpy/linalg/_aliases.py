@@ -49,6 +49,7 @@ def cross(x1: ArrayLike, x2: ArrayLike, /, *, axis: int = -1) -> FlopscopeArray:
         flop_cost=_builtins.max(out_size * 3, 1),
         subscripts=None,
         shapes=(x1_arr.shape, x2_arr.shape),
+        dtypes=(x1_arr.dtype, x2_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.cross, _to_base_ndarray(x1), _to_base_ndarray(x2), axis=axis

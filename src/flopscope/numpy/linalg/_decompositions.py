@@ -49,7 +49,11 @@ def cholesky(a: ArrayLike, /, *, upper: bool = False) -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = cholesky_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.cholesky", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.cholesky",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.cholesky, _to_base_ndarray(a), upper=upper)
     if isinstance(result, _np.ndarray) and inputs_were_whest:
@@ -97,7 +101,13 @@ def qr(
     m, n = a.shape[-2], a.shape[-1]
     batch = _batch_size(a.shape)
     cost = qr_cost(m, n, mode=mode) * batch if not _has_zero_dim(a.shape) else 0
-    with budget.deduct("linalg.qr", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "linalg.qr",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
+    ):
         result = _call_numpy(_np.linalg.qr, _to_base_ndarray(a), mode=mode)  # type: ignore[reportCallIssue]
     if mode in ("reduced", "complete"):
         q, r = result  # type: ignore[reportGeneralTypeIssues]
@@ -159,7 +169,11 @@ def eig(a: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]:
     batch = _batch_size(a.shape)
     cost = eig_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eig", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eig",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.eig, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -208,7 +222,11 @@ def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[FlopscopeArray, FlopscopeArray]
     batch = _batch_size(a.shape)
     cost = eigh_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigh", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigh",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.eigh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -259,7 +277,11 @@ def eigvals(a: ArrayLike) -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = eigvals_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigvals", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigvals",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.eigvals, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -308,7 +330,11 @@ def eigvalsh(a: ArrayLike, UPLO: str = "L") -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = eigvalsh_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigvalsh", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigvalsh",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.eigvalsh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -351,7 +377,11 @@ def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
         raise ValueError(f"k must satisfy 1 <= k <= min(m, n) = {min(m, n)}, got k={k}")
     cost = svdvals_cost(m, n, k) * batch if not _has_zero_dim(x.shape) else 0
     with budget.deduct(
-        "linalg.svdvals", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.svdvals",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(_np.linalg.svdvals, _to_base_ndarray(x))
     if k < min(m, n):

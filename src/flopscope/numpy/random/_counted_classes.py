@@ -39,6 +39,17 @@ def _make_counted_method(
     base_method = getattr(base_cls, method_name)
     formula = COST_FORMULAS[formula_name]
 
+    # choice/permutation/permuted/shuffle draw from arbitrary (possibly
+    # complex) caller-supplied data rather than sampling a new value from a
+    # distribution; numpy permutes/shuffles/selects complex arrays fine, but
+    # the registry's complex_factor="illegal" for these methods is only
+    # valid for the genuine real-only distribution samplers this dispatcher
+    # also builds. Leave dtype undeclared for the pass-through methods to
+    # avoid a false-positive UnsupportedDtypeError regression; every other
+    # method synthesizes new real-only values, so its actual output dtype
+    # (read off the already-computed result) is safe to declare.
+    _dtype_neutral_methods = frozenset({"choice", "permutation", "permuted", "shuffle"})
+
     @functools.wraps(base_method)
     @_counted_wrapper
     def wrapped(self, *args: Any, **kwargs: Any) -> Any:
@@ -49,7 +60,15 @@ def _make_counted_method(
         plain = plain_factory(self)
         result = base_method(plain, *args, **kwargs)
         cost = formula(args, kwargs, result)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=()):
+        if method_name in _dtype_neutral_methods:
+            billing_dtypes: tuple = ()
+        elif isinstance(result, _np.ndarray):
+            billing_dtypes = (result.dtype,)
+        else:
+            billing_dtypes = ()
+        with budget.deduct(
+            op_name, flop_cost=cost, subscripts=None, shapes=(), dtypes=billing_dtypes
+        ):
             pass  # numpy already executed; deduct is post-hoc for output-dependent cost
         if isinstance(result, _np.ndarray):
             return _asflopscope(result)

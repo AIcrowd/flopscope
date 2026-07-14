@@ -77,7 +77,11 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     nrhs = b.shape[-1] if b.ndim >= 2 else 1
     cost = solve_cost(n, nrhs=nrhs) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.solve", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.solve",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.linalg.solve, _to_base_ndarray(a), _to_base_ndarray(b))
     if b_was_whest:
@@ -134,7 +138,11 @@ def inv(a: ArrayLike) -> FlopscopeArray:
         inv_cost(n, symmetric=is_symmetric) * batch if not _has_zero_dim(a.shape) else 0
     )
     with budget.deduct(
-        "linalg.inv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.inv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.inv, _to_base_ndarray(a))
     if is_symmetric:
@@ -243,7 +251,11 @@ def lstsq(
         else 0
     )
     with budget.deduct(
-        "linalg.lstsq", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.lstsq",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.lstsq, _to_base_ndarray(a), _to_base_ndarray(b), rcond=rcond
@@ -325,7 +337,11 @@ def pinv(
     if rtol is not None:
         kwargs["rtol"] = rtol  # type: ignore[reportAssignmentType]
     with budget.deduct(
-        "linalg.pinv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.pinv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.pinv, _to_base_ndarray(a), **kwargs)
     if inputs_were_whest:
@@ -378,7 +394,13 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
         a = _np.asarray(a)
     cost = tensorsolve_cost(a.shape)
     with budget.deduct(
-        "linalg.tensorsolve", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.tensorsolve",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        # b is not coerced to ndarray at this site (only used inside the
+        # numpy call below); a is the only operand already available here.
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(
             _np.linalg.tensorsolve,
@@ -434,7 +456,11 @@ def tensorinv(a: ArrayLike, ind: int = 2) -> FlopscopeArray:
         a = _np.asarray(a)
     cost = tensorinv_cost(a.shape, ind=ind)
     with budget.deduct(
-        "linalg.tensorinv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.tensorinv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.tensorinv, _to_base_ndarray(a), ind=ind)
     if inputs_were_whest:

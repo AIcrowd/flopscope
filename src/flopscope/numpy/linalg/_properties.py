@@ -52,7 +52,11 @@ def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeAr
     n = max(n, 0)
     cost = trace_cost(n) * _batch_size(x.shape) if not _has_zero_dim(x.shape) else 0
     with budget.deduct(
-        "linalg.trace", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.trace",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(
             _np.linalg.trace, _to_base_ndarray(x), offset=offset, dtype=dtype
@@ -101,7 +105,11 @@ def det(a: ArrayLike) -> FlopscopeArray:
         det_cost(n, symmetric=is_symmetric) * batch if not _has_zero_dim(a.shape) else 0
     )
     with budget.deduct(
-        "linalg.det", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.det",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.det, _to_base_ndarray(a))
     if isinstance(result, _np.ndarray) and inputs_were_whest:
@@ -152,7 +160,11 @@ def slogdet(a: ArrayLike) -> SlogdetResult:
         else 0
     )
     with budget.deduct(
-        "linalg.slogdet", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.slogdet",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.linalg.slogdet, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -268,7 +280,11 @@ def norm(
             _to_base_ndarray(x), ord=ord, axis=axis, keepdims=keepdims
         )
     with budget.deduct(
-        "linalg.norm", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.norm",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(
             _np.linalg.norm, _to_base_ndarray(x), ord=ord, axis=axis, keepdims=keepdims
@@ -351,7 +367,11 @@ def vector_norm(
     n_groups = (x.size // group_numel) if group_numel else 0
     cost = vector_norm_cost(effective_shape, ord=ord) * max(n_groups, 0)
     with budget.deduct(
-        "linalg.vector_norm", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.vector_norm",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(
             _np.linalg.vector_norm,
@@ -427,7 +447,11 @@ def matrix_norm(
         else 0
     )
     with budget.deduct(
-        "linalg.matrix_norm", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.matrix_norm",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         result = _call_numpy(
             _np.linalg.matrix_norm, _to_base_ndarray(x), ord=ord, keepdims=keepdims
@@ -474,7 +498,11 @@ def cond(x: ArrayLike, p: Any = None) -> FlopscopeArray:
         _np.any(_np.isnan(_to_base_ndarray(x)))
     )
     with budget.deduct(
-        "linalg.cond", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.cond",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(x.dtype,),
     ):
         if has_nan and x.ndim > 2:
             # Batch with NaN: process each matrix individually so NaN
@@ -543,7 +571,11 @@ def matrix_rank(
     if rtol is not None:
         kwargs["rtol"] = rtol  # type: ignore[reportAssignmentType]
     with budget.deduct(
-        "linalg.matrix_rank", flop_cost=cost, subscripts=None, shapes=(A.shape,)
+        "linalg.matrix_rank",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(A.shape,),
+        dtypes=(A.dtype,),
     ):
         result = _call_numpy(_np.linalg.matrix_rank, _to_base_ndarray(A), **kwargs)
     if isinstance(result, _np.ndarray) and inputs_were_whest:
