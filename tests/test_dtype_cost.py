@@ -676,3 +676,33 @@ def test_astype_to_complex_charges_and_back_charges():
     # test_complex_movement_and_creation_do_not_raise, so this isn't a new
     # number -- it's consistent with billing already locked in by Task 8a.)
     assert back == 200
+
+
+# ---------------------------------------------------------------------------
+# Task 11: real/imag are free-tier component extraction (view, no arithmetic)
+# ---------------------------------------------------------------------------
+
+
+def test_real_imag_bill_zero_flops():
+    # np.real(z)/np.imag(z) extract a component of a complex value -- a
+    # strided VIEW for real, a constant-fill for imag on real input -- no
+    # floating-point arithmetic is performed. The fix hardcodes flop_cost=0
+    # at the call site (not merely a zero weight), so this holds under BOTH
+    # unit weights (default here -- conftest resets weights per test) and
+    # production weights.
+    assert _cost(lambda: fnp.real(_z)) == 0
+    assert _cost(lambda: fnp.imag(_z)) == 0
+    load_weights()
+    assert _cost(lambda: fnp.real(_z)) == 0
+    assert _cost(lambda: fnp.imag(_z)) == 0
+
+
+def test_real_imag_still_return_correct_components():
+    # Billing changed; behavior must not. real/imag still extract the
+    # correct component values (functional correctness, not just cost).
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        z = fnp.asarray(np.array([3.0 + 4.0j, -1.0 - 2.0j]))
+        r = fnp.real(z)
+        i = fnp.imag(z)
+    assert np.array_equal(np.asarray(r), [3.0, -1.0])
+    assert np.array_equal(np.asarray(i), [4.0, -2.0])

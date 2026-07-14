@@ -392,16 +392,21 @@ REGISTRY: dict[str, dict] = {
         "notes": "Return angle of complex argument element-wise.",
     },
     "real": {
-        "category": "counted_unary",
+        "category": "free",
         "module": "numpy",
-        "complex_factor": 1.0,
-        "notes": "Return real part of complex array.",
+        "notes": (
+            "Return real part of complex array. Component extraction -- a "
+            "view, no arithmetic -- so it is free."
+        ),
     },
     "imag": {
-        "category": "counted_unary",
+        "category": "free",
         "module": "numpy",
-        "complex_factor": 1.0,
-        "notes": "Return imaginary part of complex array.",
+        "notes": (
+            "Return imaginary part of complex array. Component extraction -- "
+            "a view (or constant-fill for real input), no arithmetic -- so "
+            "it is free."
+        ),
     },
     "sinc": {
         "category": "counted_unary",

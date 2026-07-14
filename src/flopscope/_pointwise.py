@@ -401,6 +401,56 @@ def _counted_unary(np_func, op_name: str):
 
 
 @_counted_wrapper
+def _free_unary(np_func, op_name: str):
+    """Factory for unary ops that are pure component/data extraction.
+
+    Structurally identical to :func:`_counted_unary` (same symmetry / ``out=``
+    / NaN-Inf handling) but always bills ``flop_cost=0``: the op returns a
+    view or a constant-filled array and performs no floating-point
+    arithmetic, so charging ``numel`` would overcount. Still routes through
+    ``budget.deduct`` so wall time is accounted.
+    """
+    supports_out = _supports_out_argument(np_func)
+
+    @_counted_wrapper
+    def wrapper(
+        x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
+    ) -> FlopscopeArray:
+        budget = require_budget()
+        if not isinstance(x, _np.ndarray):
+            x = _np.asarray(x)
+        symmetry = _symmetry_of(x)
+        symmetry = _prepare_symmetric_out(out, symmetry)
+        billing_dtypes: tuple = (x.dtype,)
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=0,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
+            result = _call_with_optional_out(
+                np_func,
+                x,
+                out=None if isinstance(out, SymmetricTensor) else out,
+                supports_out=supports_out,
+                **kwargs,
+            )
+        maybe_check_nan_inf(result, op_name)
+        return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
+
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
+    attach_docstring(wrapper, np_func, "free", "0 FLOPs")
+    _apply_numpy_signature(wrapper, np_func)
+    return wrapper
+
+
+@_counted_wrapper
 def _counted_unary_multi(np_func, op_name: str):
     """Factory for unary functions that return multiple arrays (modf, frexp).
 
@@ -1156,7 +1206,7 @@ fabs = _counted_unary(_np.fabs, "fabs")
 fix = _counted_unary(_np.fix, "fix")
 fix.__signature__ = _inspect.signature(_np.fix)  # pyright: ignore[reportFunctionMemberAccess]
 i0 = _counted_unary(_np.i0, "i0")
-imag = _counted_unary(_np.imag, "imag")
+imag = _free_unary(_np.imag, "imag")
 imag.__signature__ = _inspect.signature(_np.imag)  # pyright: ignore[reportFunctionMemberAccess]
 invert = _counted_unary(_np.invert, "invert")
 iscomplex = _counted_unary(_np.iscomplex, "iscomplex")
@@ -1191,7 +1241,7 @@ nan_to_num.__signature__ = _inspect.signature(_np.nan_to_num)  # pyright: ignore
 positive = _counted_unary(_np.positive, "positive")
 rad2deg = _counted_unary(_np.rad2deg, "rad2deg")
 radians = _counted_unary(_np.radians, "radians")
-real = _counted_unary(_np.real, "real")
+real = _free_unary(_np.real, "real")
 real.__signature__ = _inspect.signature(_np.real)  # pyright: ignore[reportFunctionMemberAccess]
 real_if_close = _counted_unary(_np.real_if_close, "real_if_close")
 real_if_close.__signature__ = _inspect.signature(_np.real_if_close)  # pyright: ignore[reportFunctionMemberAccess]
