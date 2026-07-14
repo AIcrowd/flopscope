@@ -15,6 +15,7 @@ from numpy.typing import ArrayLike
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import billing_operand
 from flopscope._flops import _ceil_log2
 from flopscope._flops import (
     analytical_pointwise_cost as pointwise_cost,
@@ -370,7 +371,18 @@ def _counted_unary(np_func, op_name: str):
         symmetry = _symmetry_of(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+        billing_dtypes: tuple = (x.dtype,)
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 x,
@@ -410,7 +422,20 @@ def _counted_unary_multi(np_func, op_name: str):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+        billing_dtypes: tuple = (x.dtype,)
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if out is not None:
+            for o in out:
+                if isinstance(o, _np.ndarray):
+                    billing_dtypes += (o.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_multi_out(
                 np_func,
                 x,
@@ -460,8 +485,17 @@ def _counted_binary(np_func, op_name: str):
         out_symmetry = _prepare_symmetric_out(out, out_symmetry)
 
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
         with budget.deduct(
-            op_name, flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape, y.shape),
+            dtypes=billing_dtypes,
         ):
             # Call the underlying ufunc with the ORIGINAL inputs so that
             # Python-scalar dtype promotion (NEP 50) and FloatingPointError
@@ -543,8 +577,19 @@ def _counted_binary_multi(np_func, op_name: str):
                 output_shape,
             )
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if out is not None:
+            for o in out:
+                if isinstance(o, _np.ndarray):
+                    billing_dtypes += (o.dtype,)
         with budget.deduct(
-            op_name, flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape, y.shape),
+            dtypes=billing_dtypes,
         ):
             # Pass the ORIGINAL inputs so NEP 50 dtype-promotion rules
             # apply at the NumPy boundary. Stripping happens inside the
@@ -912,7 +957,18 @@ def _counted_reduction(
             np_out_kwarg = out_for_np
             np_supports_out_for_call = supports_out
 
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        billing_dtypes: tuple = (a.dtype,)
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             if _axis_is_second_positional:
                 result = _call_with_optional_out(
                     np_func,
@@ -1028,7 +1084,16 @@ def around(
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
-    with budget.deduct("around", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "around",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_with_optional_out(
             _np.around,
             a,
@@ -1129,7 +1194,16 @@ def round(
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
-    with budget.deduct("round", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "round",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_with_optional_out(
             _np.round,
             a,
@@ -1170,7 +1244,11 @@ def sort_complex(a: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     cost = 1 if a.ndim == 0 else _sort_cost_nd(a, a.ndim - 1)
     with budget.deduct(
-        "sort_complex", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "sort_complex",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(_np.sort_complex, _to_base_ndarray(a))
     return result  # type: ignore[return-value]  # wrapped at fnp.sort_complex import time
@@ -1204,8 +1282,13 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
     )
     # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
     cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
+    billing_dtypes = (billing_operand(a, a_arr), billing_operand(b, b_arr))
     with budget.deduct(
-        "isclose", flop_cost=cost, subscripts=None, shapes=(a_arr.shape, b_arr.shape)
+        "isclose",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a_arr.shape, b_arr.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.isclose, _to_base_ndarray(a), _to_base_ndarray(b), **kwargs
@@ -1352,26 +1435,38 @@ def clip(
     Output shape is the broadcast of a with all bound arrays.
     """
     budget = require_budget()
+    a_orig = a
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     operand_arrays = [(a, _symmetry_of(a))]
+    billing_dtypes: tuple = (billing_operand(a_orig, a),)
     for value in args:
         if value is None:
             continue
         arr = value if isinstance(value, _np.ndarray) else _np.asarray(value)
         operand_arrays.append((arr, _symmetry_of(arr)))
+        billing_dtypes += (billing_operand(value, arr),)
     for key in ("a_min", "a_max", "min", "max"):
         value = kwargs.get(key)
         if value is None:
             continue
         arr = value if isinstance(value, _np.ndarray) else _np.asarray(value)
         operand_arrays.append((arr, _symmetry_of(arr)))
+        billing_dtypes += (billing_operand(value, arr),)
     n_bounds = len(operand_arrays) - 1
     output_shape = _np.broadcast_shapes(*(arr.shape for arr, _ in operand_arrays))
     symmetry, _ = _pointwise_symmetry(operand_arrays, output_shape)
     _prepare_symmetric_out(out, symmetry)
     cost = _builtins.max(n_bounds, 1) * pointwise_cost(output_shape, symmetry=symmetry)
-    with budget.deduct("clip", flop_cost=cost, subscripts=None, shapes=(output_shape,)):
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "clip",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(output_shape,),
+        dtypes=billing_dtypes,
+    ):
         # Delegate all argument handling (validation, min/max/a_min/a_max) to numpy
         result = _call_with_optional_out(
             _np.clip,
@@ -1454,7 +1549,18 @@ def _counted_mean(np_func, op_name: str):
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
 
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        billing_dtypes: tuple = (a.dtype,)
+        if dtype is not None:
+            billing_dtypes += (_np.dtype(dtype),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 a,
@@ -1523,7 +1629,18 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         )
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        billing_dtypes: tuple = (a.dtype,)
+        if dtype is not None:
+            billing_dtypes += (_np.dtype(dtype),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 a,
@@ -1603,7 +1720,19 @@ def average(
     weights_raw = (
         _to_base_ndarray(weights) if isinstance(weights, _np.ndarray) else weights
     )
-    with budget.deduct("average", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if weights is not None:
+        weights_arr = (
+            weights if isinstance(weights, _np.ndarray) else _np.asarray(weights)
+        )
+        billing_dtypes += (billing_operand(weights, weights_arr),)
+    with budget.deduct(
+        "average",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.average,
             a_raw,
@@ -1652,7 +1781,11 @@ def count_nonzero(
         else None
     )
     with budget.deduct(
-        "count_nonzero", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "count_nonzero",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(
             _np.count_nonzero, _to_base_ndarray(a), axis=axis, keepdims=keepdims
@@ -1738,11 +1871,15 @@ def median(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "median",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.median,
@@ -1804,11 +1941,15 @@ def nanmedian(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanmedian",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanmedian,
@@ -1862,11 +2003,16 @@ def nanpercentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanpercentile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanpercentile,
@@ -1919,11 +2065,16 @@ def nanquantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanquantile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanquantile,
@@ -1979,11 +2130,16 @@ def percentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "percentile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.percentile,
@@ -2036,11 +2192,16 @@ def quantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "quantile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.quantile,
@@ -2080,7 +2241,9 @@ def ptp(
     symmetry = a.symmetry if isinstance(a, SymmetricTensor) else None
     m = _num_output_orbits(tuple(a.shape), axes_summed, symmetry)
     cost = 2 * reduction_cost(a.shape, axis, symmetry=symmetry) + m
-    with budget.deduct("ptp", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "ptp", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+    ):
         stripped = _to_base_ndarray(a)
         if hasattr(_np, "ptp"):
             result = _call_numpy(_np.ptp, stripped, axis=axis, **kwargs)
@@ -2292,8 +2455,15 @@ def outer(
     canonical_subs = info.canonical_subscripts
     if output_sym is not None:
         output_sym = _prepare_symmetric_out(out, output_sym)
+    billing_dtypes: tuple = (a.dtype, b.dtype)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
-        "outer", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
+        "outer",
+        flop_cost=cost,
+        subscripts=canonical_subs,
+        shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.outer,
@@ -2554,7 +2724,11 @@ def kron(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     # kron output size = a.size * b.size
     cost = _builtins.max(a.size * b.size, 1)
     with budget.deduct(
-        "kron", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "kron",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.kron, _to_base_ndarray(a), _to_base_ndarray(b))
     return result  # type: ignore[return-value]  # wrapped at fnp.kron import time
@@ -2584,7 +2758,7 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     stripped_a = _to_base_ndarray(a)
     stripped_b = _to_base_ndarray(b)
     with budget.deduct_after(
-        "cross", subscripts=None, shapes=(a.shape, b.shape)
+        "cross", subscripts=None, shapes=(a.shape, b.shape), dtypes=(a.dtype, b.dtype)
     ) as _op:
         result = _call_numpy(_np.cross, stripped_a, stripped_b, **kwargs)
         _op.set_cost(
@@ -2632,12 +2806,18 @@ def diff(
     L = a.shape[ax]
     # numpy concatenates prepend/append along the diff axis before differencing,
     # so the effective axis length L grows by their contribution.
+    billing_dtypes: tuple = (a.dtype,)
     if prepend is not _np._NoValue:  # type: ignore[attr-defined]
         p = _np.asanyarray(_to_base_ndarray(prepend))
         L += 1 if p.ndim == 0 else p.shape[ax] if p.ndim > ax else 1
+        # np.diff concatenates prepend/append via np.concatenate, which does
+        # NOT follow NEP 50 weak-scalar promotion (unlike ufunc arithmetic);
+        # bill the coerced array's dtype directly rather than billing_operand.
+        billing_dtypes += (p.dtype,)
     if append is not _np._NoValue:  # type: ignore[attr-defined]
         p = _np.asanyarray(_to_base_ndarray(append))
         L += 1 if p.ndim == 0 else p.shape[ax] if p.ndim > ax else 1
+        billing_dtypes += (p.dtype,)
     prod_outside = int(_np.prod(a.shape[:ax]))
     prod_inside = int(_np.prod(a.shape[ax + 1 :]))
     per_iter_sum = n * L - n * (n + 1) // 2
@@ -2654,6 +2834,7 @@ def diff(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.diff, _to_base_ndarray(a), n=n, axis=axis, **np_kwargs)
     return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
@@ -2757,7 +2938,16 @@ def gradient(
 
         cost = base + surcharge
 
-    with budget.deduct("gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)):
+    # varargs (spacing/coordinate arrays) never change np.gradient's output
+    # dtype (verified: gradient(f32, spacing=np.float64(...)) stays float32),
+    # so only f's dtype prices the call.
+    with budget.deduct(
+        "gradient",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(f.shape,),
+        dtypes=(f.dtype,),
+    ):
         result = _call_numpy(
             _np.gradient,
             _to_base_ndarray(f),
@@ -2791,11 +2981,15 @@ def ediff1d(ary: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     if to_end is not None:
         extra += _np.asarray(to_end).size
     cost = _builtins.max(ary.size - 1 + extra, 1)
+    # to_begin/to_end must be same_kind-compatible with ary's dtype (numpy
+    # raises TypeError otherwise) and never change the output dtype, so only
+    # ary's dtype prices the call.
     with budget.deduct(
         "ediff1d",
         flop_cost=cost,
         subscripts=None,
         shapes=(ary.shape,),
+        dtypes=(ary.dtype,),
     ):
         # ``to_begin`` / ``to_end`` kwargs may be FlopscopeArrays — strip via tree.
         stripped_kwargs = {
@@ -2845,6 +3039,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
         flop_cost=flop_cost,
         subscripts=None,
         shapes=(a.shape, v.shape),
+        dtypes=(a.dtype, v.dtype),
     ):
         result = _call_numpy(
             _np.convolve, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
@@ -2932,6 +3127,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, v.shape),
+        dtypes=(a.dtype, v.dtype),
     ):
         result = _call_numpy(
             _np.correlate, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
@@ -3000,7 +3196,19 @@ def corrcoef(x: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> Flopsco
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     cost = _corrcoef_cost(x, y)
-    with budget.deduct("corrcoef", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    # np.corrcoef always computes at least in float64 (numpy internally uses
+    # np.result_type(x, y, np.float64)), regardless of the input dtype.
+    billing_dtypes: tuple = (x.dtype, _np.dtype("float64"))
+    if y is not None:
+        y_arr = y if isinstance(y, _np.ndarray) else _np.asarray(y)
+        billing_dtypes += (y_arr.dtype,)
+    with budget.deduct(
+        "corrcoef",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.corrcoef,
             _to_base_ndarray(x),
@@ -3026,7 +3234,19 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
     if not isinstance(m, _np.ndarray):
         m = _np.asarray(m)
     cost = _cov_cost(m, y)
-    with budget.deduct("cov", flop_cost=cost, subscripts=None, shapes=(m.shape,)):
+    # np.cov always computes at least in float64 (numpy internally uses
+    # np.result_type(m, y, np.float64)), regardless of the input dtype.
+    billing_dtypes: tuple = (m.dtype, _np.dtype("float64"))
+    if y is not None:
+        y_arr = y if isinstance(y, _np.ndarray) else _np.asarray(y)
+        billing_dtypes += (y_arr.dtype,)
+    with budget.deduct(
+        "cov",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(m.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.cov,
             _to_base_ndarray(m),
@@ -3050,8 +3270,16 @@ def trapezoid(
     budget = require_budget()
     if not isinstance(y, _np.ndarray):
         y = _np.asarray(y)
+    billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+    if x is not None:
+        x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
+        billing_dtypes += (billing_operand(x, x_arr),)
     with budget.deduct(
-        "trapezoid", flop_cost=4 * y.size, subscripts=None, shapes=(y.shape,)
+        "trapezoid",
+        flop_cost=4 * y.size,
+        subscripts=None,
+        shapes=(y.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.trapezoid,
@@ -3078,8 +3306,16 @@ if hasattr(_np, "trapz"):
         budget = require_budget()
         if not isinstance(y, _np.ndarray):
             y = _np.asarray(y)
+        billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+        if x is not None:
+            x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
+            billing_dtypes += (billing_operand(x, x_arr),)
         with budget.deduct(
-            "trapz", flop_cost=4 * y.size, subscripts=None, shapes=(y.shape,)
+            "trapz",
+            flop_cost=4 * y.size,
+            subscripts=None,
+            shapes=(y.shape,),
+            dtypes=billing_dtypes,
         ):
             result = _call_numpy(
                 _np.trapz,
@@ -3109,11 +3345,20 @@ def interp(x: ArrayLike, xp: ArrayLike, fp: ArrayLike, **kwargs: Any) -> Flopsco
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     xp_arr = _np.asarray(xp)
+    fp_arr = _np.asarray(fp)
     n = _builtins.max(x.size, 1)
     xp_len = _builtins.max(xp_arr.size, 1)
     cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1)
+    # np.interp always computes the x/xp search+blend in float64 regardless
+    # of x/xp's own precision, but the interpolated VALUE keeps fp's dtype
+    # (e.g. complex fp -> complex128 output); bill both contributions.
+    billing_dtypes = (_np.dtype("float64"), fp_arr.dtype)
     with budget.deduct(
-        "interp", flop_cost=cost, subscripts=None, shapes=(x.shape, xp_arr.shape)
+        "interp",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape, xp_arr.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.interp,

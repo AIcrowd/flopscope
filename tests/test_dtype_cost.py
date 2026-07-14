@@ -85,3 +85,47 @@ def test_unsupported_dtype_fails_closed_before_charging():
             ):
                 pass
         assert b.flops_used == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 6: pointwise/reduction factories declare their billing dtypes
+# ---------------------------------------------------------------------------
+
+import flopscope.numpy as fnp  # noqa: E402
+
+_a32 = fnp.asarray(np.ones(10, dtype=np.float32))
+_b32 = fnp.asarray(np.ones(10, dtype=np.float32))
+_z = fnp.asarray(np.ones(10, dtype=np.complex128))
+
+
+def _cost(fn) -> int:
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        fn()
+        return b.flops_used
+
+
+def test_elementwise_multiply_complex_bills_six_per_element():
+    assert _cost(lambda: fnp.multiply(_z, _z)) == 60  # unit rates; factor 6
+
+
+def test_elementwise_add_complex_bills_two_per_element():
+    assert _cost(lambda: fnp.add(_z, _z)) == 20
+
+
+def test_nep50_scalar_keeps_float32_billing():
+    load_weights()  # production rates: f32=1.0, f64=2.0
+    assert _cost(lambda: fnp.multiply(_a32, 2.0)) == 10  # stays float32
+    assert _cost(lambda: fnp.multiply(_a32, _b32)) == 10
+    _a64 = fnp.asarray(np.ones(10, dtype=np.float64))
+    assert _cost(lambda: fnp.multiply(_a64, _a64)) == 20
+
+
+def test_explicit_dtype_kwarg_raises_billing_dtype():
+    load_weights()
+    assert _cost(lambda: fnp.add(_a32, _b32, dtype=np.float64)) == 20
+
+
+def test_reduction_sum_complex_bills_factor_two():
+    # ratio-based: robust to the reduction skeleton's exact flop_cost formula
+    _r = fnp.asarray(np.ones(10, dtype=np.float64))
+    assert _cost(lambda: fnp.sum(_z)) == 2 * _cost(lambda: fnp.sum(_r))
