@@ -304,6 +304,7 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "histogram_bin_edges",
         "histogramdd",
         "hsplit",
+        "imag",  # component extraction — free (view), like iscomplexobj/isrealobj
         "in1d",
         "indices",
         "insert",
@@ -414,6 +415,7 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "random.weibull",
         "random.zipf",
         "ravel_multi_index",
+        "real",  # component extraction — free (view), like iscomplexobj/isrealobj
         "repeat",
         "require",
         "resize",

@@ -94,7 +94,6 @@ _UNARY_NUMEL = [
     "positive",
     "rad2deg",
     "radians",
-    "real",
     "reciprocal",
     "rint",
     "sign",
@@ -112,7 +111,6 @@ _UNARY_NUMEL = [
     "frexp",
     "modf",
     "real_if_close",
-    "imag",
     "bitwise_invert",
     "bitwise_not",
     "invert",
@@ -121,7 +119,8 @@ _UNARY_NUMEL = [
     "isreal",
     "isneginf",
     "isposinf",
-    # iscomplexobj and isrealobj are dtype predicates (free, 0 FLOPs) — see test_dtype_predicates_are_free
+    # iscomplexobj/isrealobj (dtype predicates) and real/imag (component
+    # extraction — a view, no arithmetic) are free (0 FLOPs), not counted_unary.
 ]
 
 
