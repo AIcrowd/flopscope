@@ -65,7 +65,9 @@ def sort(
     else:
         ax = axis % a.ndim
         cost = _sort_cost_nd(a, ax)
-    with budget.deduct("sort", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "sort", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+    ):
         result = _call_numpy(
             _np.sort, _to_base_ndarray(a), axis=axis, kind=kind, order=order, **kwargs
         )
@@ -93,7 +95,9 @@ def argsort(
     else:
         ax = axis % a.ndim
         cost = _sort_cost_nd(a, ax)
-    with budget.deduct("argsort", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "argsort", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+    ):
         result = _call_numpy(_np.argsort, _to_base_ndarray(a), axis=axis, **kwargs)
     return result  # type: ignore[return-value]
 
@@ -126,7 +130,10 @@ def lexsort(keys: Sequence[ArrayLike], axis: int = -1) -> FlopscopeArray:
         num_slices = (first.size // n) if (first.ndim > 0 and n > 0) else 1
         cost = max(k * num_slices * sort_cost(n), 1)
     shapes = tuple(_np.asarray(key).shape for key in keys_list)
-    with budget.deduct("lexsort", flop_cost=cost, subscripts=None, shapes=shapes):
+    dtypes = tuple(_np.asarray(key).dtype for key in keys_list)
+    with budget.deduct(
+        "lexsort", flop_cost=cost, subscripts=None, shapes=shapes, dtypes=dtypes
+    ):
         result = _call_numpy(_np.lexsort, _to_base_ndarray_tree(keys_list), axis=axis)
     return result
 
@@ -163,7 +170,13 @@ def partition(
             numel *= d
         num_slices = numel // n if n > 0 else 1
         cost = max(num_slices * n * kth_count, 1)
-    with budget.deduct("partition", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "partition",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
+    ):
         result = _call_numpy(
             _np.partition, _to_base_ndarray(a), kth, axis=axis, **kwargs
         )
@@ -201,7 +214,11 @@ def argpartition(
         num_slices = numel // n if n > 0 else 1
         cost = max(num_slices * n * kth_count, 1)
     with budget.deduct(
-        "argpartition", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "argpartition",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(
             _np.argpartition, _to_base_ndarray(a), kth, axis=axis, **kwargs
@@ -245,6 +262,7 @@ def searchsorted(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, v_arr.shape),
+        dtypes=(a.dtype, v_arr.dtype),
     ):
         result = _call_numpy(
             _np.searchsorted, _to_base_ndarray(a), _to_base_ndarray(v), **kwargs
@@ -281,6 +299,7 @@ def digitize(
         flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape, bins_arr.shape),
+        dtypes=(x_arr.dtype, bins_arr.dtype),
     ):
         result = _call_numpy(
             _np.digitize, _to_base_ndarray(x), _to_base_ndarray(bins), **kwargs
@@ -335,7 +354,11 @@ def unique(ar: ArrayLike, **kwargs: Any) -> FlopscopeArray | tuple[FlopscopeArra
         for k in ("return_index", "return_inverse", "return_counts")
     )
     with budget.deduct(
-        "unique", flop_cost=cost, subscripts=None, shapes=(ar_arr.shape,)
+        "unique",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(ar_arr.shape,),
+        dtypes=(ar_arr.dtype,),
     ):
         result = _call_numpy(_np.unique, ar_arr, **kwargs)
         # Shim: restore the sort guarantee for string / complex dtypes on numpy
@@ -367,7 +390,11 @@ def unique_all(x: ArrayLike, /) -> Any:
     x_arr = _np.asarray(x)
     cost = _unique_cost(x_arr)
     with budget.deduct(
-        "unique_all", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "unique_all",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.unique_all, x_arr)
     return result
@@ -383,7 +410,11 @@ def unique_counts(x: ArrayLike, /) -> Any:
     x_arr = _np.asarray(x)
     cost = _unique_cost(x_arr)
     with budget.deduct(
-        "unique_counts", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "unique_counts",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.unique_counts, x_arr)
     return result
@@ -401,7 +432,11 @@ def unique_inverse(x: ArrayLike, /) -> Any:
     x_arr = _np.asarray(x)
     cost = _unique_cost(x_arr)
     with budget.deduct(
-        "unique_inverse", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "unique_inverse",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.unique_inverse, x_arr)
     return result
@@ -419,7 +454,11 @@ def unique_values(x: ArrayLike, /) -> FlopscopeArray:
     x_arr = _np.asarray(x)
     cost = _unique_cost(x_arr)
     with budget.deduct(
-        "unique_values", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "unique_values",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.unique_values, x_arr)
     return result  # type: ignore[return-value]
@@ -474,7 +513,11 @@ if hasattr(_np, "in1d"):
         a2 = _np.asarray(ar2)
         cost = _membership_cost(a1, a2)
         with budget.deduct(
-            "in1d", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+            "in1d",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a1.shape, a2.shape),
+            dtypes=(a1.dtype, a2.dtype),
         ):
             result = _call_numpy(
                 _np.in1d, _to_base_ndarray(ar1), _to_base_ndarray(ar2), **kwargs
@@ -512,7 +555,11 @@ def isin(
     te = _np.asarray(test_elements)
     cost = _membership_cost(el, te)
     with budget.deduct(
-        "isin", flop_cost=cost, subscripts=None, shapes=(el.shape, te.shape)
+        "isin",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(el.shape, te.shape),
+        dtypes=(el.dtype, te.dtype),
     ):
         result = _call_numpy(
             _np.isin,
@@ -557,7 +604,11 @@ def intersect1d(
     else:
         cost = sort_cost(n) + sort_cost(m) + sort_cost(n + m)
     with budget.deduct(
-        "intersect1d", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "intersect1d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(
             _np.intersect1d, _to_base_ndarray(ar1), _to_base_ndarray(ar2), **kwargs
@@ -582,7 +633,11 @@ def union1d(ar1: ArrayLike, ar2: ArrayLike) -> FlopscopeArray:
     a2 = _np.asarray(ar2)
     cost = _set_cost(a1, a2)
     with budget.deduct(
-        "union1d", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "union1d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.union1d, _to_base_ndarray(ar1), _to_base_ndarray(ar2))
     return result  # type: ignore[return-value]
@@ -603,7 +658,11 @@ def setdiff1d(
     a2 = _np.asarray(ar2)
     cost = _set_cost(a1, a2)
     with budget.deduct(
-        "setdiff1d", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "setdiff1d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(
             _np.setdiff1d, _to_base_ndarray(ar1), _to_base_ndarray(ar2), **kwargs
@@ -629,7 +688,11 @@ def setxor1d(
     a2 = _np.asarray(ar2)
     cost = _set_cost(a1, a2)
     with budget.deduct(
-        "setxor1d", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "setxor1d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(
             _np.setxor1d, _to_base_ndarray(ar1), _to_base_ndarray(ar2), **kwargs

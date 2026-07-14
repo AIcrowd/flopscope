@@ -80,7 +80,9 @@ def unwrap(
     kwargs = {"axis": axis, "period": period}
     if discont is not None:
         kwargs["discont"] = discont
-    with budget.deduct("unwrap", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    with budget.deduct(
+        "unwrap", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+    ):
         result = _call_numpy(_np.unwrap, _to_base_ndarray(p), **kwargs)
     return result  # type: ignore[return-value]
 

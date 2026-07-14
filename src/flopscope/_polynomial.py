@@ -160,7 +160,11 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
     m = x_arr.size
     cost = polyval_cost(deg, m)
     with budget.deduct(
-        "polyval", flop_cost=cost, subscripts=None, shapes=(p_arr.shape, x_arr.shape)
+        "polyval",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p_arr.shape, x_arr.shape),
+        dtypes=(p_arr.dtype, x_arr.dtype),
     ):
         result = _call_numpy(_np.polyval, p_arr, x_arr)
     return result  # type: ignore[return-value]
@@ -181,7 +185,11 @@ def polyadd(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     n2 = len(a2)
     cost = polyadd_cost(n1, n2)
     with budget.deduct(
-        "polyadd", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polyadd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polyadd, a1, a2)
     return result  # type: ignore[return-value]
@@ -200,7 +208,11 @@ def polysub(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     n2 = len(a2)
     cost = polysub_cost(n1, n2)
     with budget.deduct(
-        "polysub", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polysub",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polysub, a1, a2)
     return result  # type: ignore[return-value]
@@ -216,7 +228,9 @@ def polyder(p: ArrayLike, m: int = 1) -> FlopscopeArray:
     p = _np.asarray(p)
     n = len(p)
     cost = polyder_cost(n, int(m))
-    with budget.deduct("polyder", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    with budget.deduct(
+        "polyder", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+    ):
         result = _call_numpy(_np.polyder, p, m=m)
     return result  # type: ignore[return-value]
 
@@ -237,7 +251,9 @@ def polyint(p: ArrayLike, m: int = 1, k: ArrayLike | None = None) -> FlopscopeAr
     n = len(p)
     m_int = int(m)
     cost = polyint_cost(n, m_int)
-    with budget.deduct("polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    with budget.deduct(
+        "polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+    ):
         if k is None:
             result = _call_numpy(_np.polyint, p, m=m)
         else:
@@ -263,7 +279,11 @@ def polymul(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     n2 = len(a2)
     cost = polymul_cost(n1, n2)
     with budget.deduct(
-        "polymul", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polymul",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polymul, a1, a2)
     return result  # type: ignore[return-value]
@@ -287,7 +307,11 @@ def polydiv(u: ArrayLike, v: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]
     n2 = len(v)
     cost = polydiv_cost(n1, n2)
     with budget.deduct(
-        "polydiv", flop_cost=cost, subscripts=None, shapes=(u.shape, v.shape)
+        "polydiv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(u.shape, v.shape),
+        dtypes=(u.dtype, v.dtype),
     ):
         result = _call_numpy(_np.polydiv, u, v)
     return result  # type: ignore[return-value]
@@ -320,8 +344,15 @@ def polyfit(
         kwargs["w"] = _to_base_ndarray(_np.asarray(kwargs["w"]))
     m = len(x_arr)
     cost = polyfit_cost(m, deg)
+    billing_dtypes = (x_arr.dtype, y_arr.dtype)
+    if kwargs.get("w") is not None:
+        billing_dtypes += (kwargs["w"].dtype,)
     with budget.deduct(
-        "polyfit", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "polyfit",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.polyfit, x_arr, y_arr, deg, **kwargs)  # type: ignore[arg-type]
     return result  # type: ignore[return-value]
@@ -345,7 +376,13 @@ def poly(seq_of_zeros: ArrayLike) -> FlopscopeArray:
     else:
         n = len(seq)
         cost = poly_cost(n)
-    with budget.deduct("poly", flop_cost=cost, subscripts=None, shapes=(seq.shape,)):
+    with budget.deduct(
+        "poly",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(seq.shape,),
+        dtypes=(seq.dtype,),
+    ):
         result = _call_numpy(_np.poly, _to_base_ndarray(seq))
     return result  # type: ignore[return-value]
 
@@ -373,7 +410,9 @@ def roots(p: ArrayLike) -> FlopscopeArray:
     else:
         n = (len(_p_flat) - 1 - _last) - _first  # trimmed companion dimension
     cost = roots_cost(n)
-    with budget.deduct("roots", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    with budget.deduct(
+        "roots", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+    ):
         result = _call_numpy(_np.roots, p)
     return result  # type: ignore[return-value]
 

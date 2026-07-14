@@ -161,7 +161,11 @@ def symmetrize(
     cost = max((group.order() + 1) * n, 1)
     budget = require_budget()
     with budget.deduct(
-        "symmetrize", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "symmetrize",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
     ):
         projected = _project_core(array, group)
         # D1: internal validation runs but is NOT billed — build the tensor
@@ -267,7 +271,11 @@ def is_symmetric(
     cost = max(k * (7 * n - 1), 1)
     budget = require_budget()
     with budget.deduct(
-        "is_symmetric", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "is_symmetric",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
     ):
         return _check_generators(array, group, atol=atol, rtol=rtol)
 
@@ -845,7 +853,11 @@ def as_symmetric(
     cost = max(k * (7 * n - 1), 1)
     budget = require_budget()
     with budget.deduct(
-        "as_symmetric", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "as_symmetric",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
     ):
         validate_symmetry_groups(array, [group])
         return SymmetricTensor(array, symmetry=group)

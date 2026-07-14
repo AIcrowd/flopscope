@@ -36,7 +36,9 @@ def bartlett_cost(n: int) -> int:
 def bartlett(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = bartlett_cost(M)
-    with budget.deduct("bartlett", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "bartlett", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+    ):
         result = _call_numpy(_np.bartlett, M)
     return result  # type: ignore[return-value]
 
@@ -70,7 +72,9 @@ def blackman_cost(n: int) -> int:
 def blackman(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = blackman_cost(M)
-    with budget.deduct("blackman", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "blackman", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+    ):
         result = _call_numpy(_np.blackman, M)
     return result  # type: ignore[return-value]
 
@@ -104,7 +108,9 @@ def hamming_cost(n: int) -> int:
 def hamming(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hamming_cost(M)
-    with budget.deduct("hamming", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "hamming", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+    ):
         result = _call_numpy(_np.hamming, M)
     return result  # type: ignore[return-value]
 
@@ -136,7 +142,9 @@ def hanning_cost(n: int) -> int:
 def hanning(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hanning_cost(M)
-    with budget.deduct("hanning", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "hanning", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+    ):
         result = _call_numpy(_np.hanning, M)
     return result  # type: ignore[return-value]
 
@@ -171,7 +179,9 @@ def kaiser_cost(n: int) -> int:
 def kaiser(M: int, beta: float) -> FlopscopeArray:
     budget = require_budget()
     cost = kaiser_cost(M)
-    with budget.deduct("kaiser", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "kaiser", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+    ):
         result = _call_numpy(_np.kaiser, M, beta)
     return result  # type: ignore[return-value]
 

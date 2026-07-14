@@ -63,7 +63,18 @@ def trace(
     else:
         cost = 0
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct("trace", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if dtype is not None:
+        billing_dtypes += (_np.dtype(dtype),)
+    if out_stripped is not None:
+        billing_dtypes += (out_stripped.dtype,)
+    with budget.deduct(
+        "trace",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.trace,
             _to_base_ndarray(a),
@@ -96,7 +107,11 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     # 6 FLOPs/elem tolerance core (sub + 2*abs + mul + add + cmp) + (numel-1) all-reduce
     cost = _builtins.max(7 * numel - 1, 1)
     with budget.deduct(
-        "allclose", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "allclose",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.allclose, a, b, **kwargs)
     return result  # type: ignore[return-value]
@@ -119,7 +134,11 @@ def array_equal(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     # array_equal does not broadcast; returns False on shape mismatch
     cost = _builtins.max(a.size, b.size, 1)
     with budget.deduct(
-        "array_equal", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "array_equal",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.array_equal, a, b, **kwargs)
     return result  # type: ignore[return-value]
@@ -144,7 +163,11 @@ def array_equiv(a: ArrayLike, b: ArrayLike) -> bool:
     except ValueError:
         cost = _builtins.max(a.size, b.size, 1)
     with budget.deduct(
-        "array_equiv", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "array_equiv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.array_equiv, a, b)
     return result  # type: ignore[return-value]
@@ -174,7 +197,7 @@ def histogram(
         # Deferred cost: resolve nbins from returned edges, then charge
         # 2n (min/max scan) + estimator_cost*n + n*ceil_log2(nbins_resolved)
         with budget.deduct_after(
-            "histogram", subscripts=None, shapes=(a.shape,)
+            "histogram", subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
         ) as _op:
             result = _call_numpy(
                 _np.histogram,
@@ -193,7 +216,13 @@ def histogram(
     else:
         bins_arr = _np.asarray(bins)
         cost = _builtins.max(n * _ceil_log2(_builtins.len(bins_arr)), 1)
-    with budget.deduct("histogram", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "histogram",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
+    ):
         result = _call_numpy(
             _np.histogram,
             a,
@@ -248,7 +277,11 @@ def histogram2d(
         cost = _builtins.max(n, 1)
 
     with budget.deduct(
-        "histogram2d", flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+        "histogram2d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape, y.shape),
+        dtypes=(x.dtype, y.dtype),
     ):
         result = _call_numpy(
             _np.histogram2d,
@@ -302,7 +335,11 @@ def histogramdd(
         cost = _builtins.max(n, 1)
 
     with budget.deduct(
-        "histogramdd", flop_cost=cost, subscripts=None, shapes=(sample.shape,)
+        "histogramdd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(sample.shape,),
+        dtypes=(sample.dtype,),
     ):
         result = _call_numpy(
             _np.histogramdd,
@@ -341,7 +378,11 @@ def histogram_bin_edges(
     else:
         cost = _builtins.max(n, 1)
     with budget.deduct(
-        "histogram_bin_edges", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "histogram_bin_edges",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(
             _np.histogram_bin_edges,
@@ -366,7 +407,9 @@ def bincount(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     budget = require_budget()
     x = _np.asarray(x)
     cost = _builtins.max(x.size, 1)
-    with budget.deduct("bincount", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    with budget.deduct(
+        "bincount", flop_cost=cost, subscripts=None, shapes=(x.shape,), dtypes=(x.dtype,)
+    ):
         result = _call_numpy(
             _np.bincount,
             x,
@@ -395,7 +438,13 @@ def logspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    with budget.deduct_after("logspace", subscripts=None, shapes=()) as _op:
+    _dtype = kwargs.get("dtype")
+    _billing_dtype = (
+        _np.dtype(_dtype) if _dtype is not None else _np.result_type(start, stop)
+    )
+    with budget.deduct_after(
+        "logspace", subscripts=None, shapes=(), dtypes=(_billing_dtype,)
+    ) as _op:
         result = _call_numpy(
             _np.logspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -419,7 +468,13 @@ def geomspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    with budget.deduct_after("geomspace", subscripts=None, shapes=()) as _op:
+    _dtype = kwargs.get("dtype")
+    _billing_dtype = (
+        _np.dtype(_dtype) if _dtype is not None else _np.result_type(start, stop)
+    )
+    with budget.deduct_after(
+        "geomspace", subscripts=None, shapes=(), dtypes=(_billing_dtype,)
+    ) as _op:
         result = _call_numpy(
             _np.geomspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -447,7 +502,9 @@ def vander(
     if N is None:
         N = n
     cost = _builtins.max(n * (N - 2), 1)
-    with budget.deduct("vander", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    with budget.deduct(
+        "vander", flop_cost=cost, subscripts=None, shapes=(x.shape,), dtypes=(x.dtype,)
+    ):
         result = _call_numpy(_np.vander, x, N=N, **kwargs)
     return result  # type: ignore[return-value]
 
@@ -484,7 +541,11 @@ def apply_along_axis(
     )
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct(
-        "apply_along_axis", flop_cost=cost, subscripts=None, shapes=(arr.shape,)
+        "apply_along_axis",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(arr.shape,),
+        dtypes=(arr.dtype,),
     ):
         pass
     return result  # type: ignore[return-value]
@@ -514,7 +575,11 @@ def apply_over_axes(
     )
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct(
-        "apply_over_axes", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "apply_over_axes",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         pass
     return result  # type: ignore[return-value]
@@ -551,7 +616,9 @@ def piecewise(
         **kw,
     )
     cost = x.size
-    with budget.deduct("piecewise", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    with budget.deduct(
+        "piecewise", flop_cost=cost, subscripts=None, shapes=(x.shape,), dtypes=(x.dtype,)
+    ):
         pass
     return result  # type: ignore[return-value]
 

@@ -313,3 +313,70 @@ def test_complex_movement_and_creation_do_not_raise():
     # Both the function form and the .astype() method form must not raise.
     assert _cost(lambda: fnp.astype(zc, np.float64)) == 200
     assert _cost(lambda: zc.astype(np.float64)) == 200
+
+
+# ---------------------------------------------------------------------------
+# Task 8b: sorting/counting/polynomial/window/unwrap/symmetric dtype
+# declarations (_sorting_ops.py, _counting_ops.py, _polynomial.py,
+# _window.py, _unwrap.py, _symmetric.py).
+# ---------------------------------------------------------------------------
+
+
+def test_sort_complex_bills_double_real_factor():
+    # sort has registry complex_factor=2.0 (lexicographic real/imag compare);
+    # unit dtype rates isolate the factor from the dtype-rate table.
+    assert _cost(lambda: fnp.sort(_z)) == 2 * _cost(lambda: fnp.sort(_r10))
+
+
+def test_unique_complex_bills_double_real_factor():
+    # unique shares the sort-based cost family; same complex_factor=2.0.
+    assert _cost(lambda: fnp.unique(_z)) == 2 * _cost(lambda: fnp.unique(_r10))
+
+
+def test_polyval_complex_bills_quadruple_real_factor():
+    # polyval has registry complex_factor=4.0.
+    p_r = fnp.asarray(np.ones(5, dtype=np.float64))
+    p_c = fnp.asarray(np.ones(5, dtype=np.complex128))
+    x_r = fnp.asarray(np.ones(5, dtype=np.float64))
+    assert _cost(lambda: fnp.polyval(p_c, x_r)) == 4 * _cost(
+        lambda: fnp.polyval(p_r, x_r)
+    )
+
+
+def test_symmetrize_complex_bills_double_real_factor():
+    # symmetrize has registry complex_factor=2.0.
+    g = f.SymmetryGroup.symmetric(axes=(0, 1))
+    r = fnp.asarray(np.ones((4, 4), dtype=np.float64))
+    c = fnp.asarray(np.ones((4, 4), dtype=np.complex128))
+    assert _cost(lambda: f.symmetrize(c, symmetry=g)) == 2 * _cost(
+        lambda: f.symmetrize(r, symmetry=g)
+    )
+
+
+def test_trace_fp64_bills_double_fp32():
+    # dtype-RATE test (not complex_factor): under production rates float64
+    # is priced 2x float32 for the same element count.
+    load_weights()
+    m32 = fnp.asarray(np.eye(4, dtype=np.float32))
+    m64 = fnp.asarray(np.eye(4, dtype=np.float64))
+    assert _cost(lambda: fnp.trace(m64)) == 2 * _cost(lambda: fnp.trace(m32))
+
+
+def test_unwrap_complex_fails_closed_before_numpy_call():
+    # unwrap is registry-"illegal" for complex (phase unwrap is undefined for
+    # complex-valued input); billing must raise before the numpy call runs,
+    # instead of leaking numpy's own TypeError from inside the ufunc chain.
+    from flopscope.errors import UnsupportedDtypeError
+
+    zc = fnp.asarray(np.ones(10, dtype=np.complex128))
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.unwrap(zc)
+        assert b.flops_used == 0
+
+
+def test_window_ops_stay_dtype_neutral():
+    # Window ops take an int length, not an array operand; dtypes=() must
+    # keep billing flat regardless of which dtype-rate table is active.
+    load_weights()
+    assert _cost(lambda: fnp.bartlett(8)) == 32  # 4*8, unaffected by dtype rates
