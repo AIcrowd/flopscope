@@ -379,9 +379,12 @@ Worked consequences:
   charged `numel` at that heavier rate.
 - **`real` / `imag` are free.** Extracting a component of a complex value is a
   view / constant-fill, not arithmetic — `flop_cost = 0`.
-- **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype (for
-  example `einsum_path`, or window functions that take an integer length) resolve to rate
-  `1.0`, factor `1.0`, so the rate table cannot perturb them.
+- **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype at
+  all (for example `einsum_path`) resolve to rate `1.0`, factor `1.0`, so the rate table
+  cannot perturb them. Ops with a *fixed* output dtype but no array operand — window
+  functions, `fft.fftfreq`, the random samplers — are **not** neutral: they declare
+  their output dtype (numpy produces float64 for all of these), so their real float64
+  arithmetic bills at the float64 rate like everything else.
 
 ### Worked examples
 

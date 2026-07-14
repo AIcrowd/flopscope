@@ -31,7 +31,8 @@ def fftfreq(n: int, d: float = 1.0, device: Any = None) -> FlopscopeArray:
         flop_cost=max(int(n), 1),
         subscripts=None,
         shapes=((n,),),
-        dtypes=(),
+        # fftfreq grids are always float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.fft.fftfreq, n, d=d, **kwargs)
     return result  # type: ignore[reportReturnType]
@@ -59,7 +60,8 @@ def rfftfreq(n: int, d: float = 1.0, device: Any = None) -> FlopscopeArray:
         flop_cost=max(grid, 1),
         subscripts=None,
         shapes=((grid,),),
-        dtypes=(),
+        # fftfreq grids are always float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.fft.rfftfreq, n, d=d, **kwargs)
     return result  # type: ignore[reportReturnType]

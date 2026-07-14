@@ -397,11 +397,14 @@ def test_unwrap_complex_fails_closed_before_numpy_call():
         assert b.flops_used == 0
 
 
-def test_window_ops_stay_dtype_neutral():
-    # Window ops take an int length, not an array operand; dtypes=() must
-    # keep billing flat regardless of which dtype-rate table is active.
+def test_window_ops_bill_their_float64_output():
+    # Window ops take an int length but do genuine float64 arithmetic (numpy
+    # windows always return float64), so they bill that width — consistent
+    # with the random samplers, which are structurally identical
+    # (scalar in, fixed-float64 out, real transcendental work).
     load_weights()
-    assert _cost(lambda: fnp.bartlett(8)) == 32  # 4*8, unaffected by dtype rates
+    assert _cost(lambda: fnp.bartlett(8)) == 64  # 4*8 * float64 rate 2.0
+    assert _cost(lambda: fnp.fft.fftfreq(100)) == 200  # n * rate 2.0
 
 
 def test_polyint_k_operand_is_billed():

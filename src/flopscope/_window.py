@@ -37,7 +37,12 @@ def bartlett(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = bartlett_cost(M)
     with budget.deduct(
-        "bartlett", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+        "bartlett",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.bartlett, M)
     return result  # type: ignore[return-value]
@@ -73,7 +78,12 @@ def blackman(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = blackman_cost(M)
     with budget.deduct(
-        "blackman", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+        "blackman",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.blackman, M)
     return result  # type: ignore[return-value]
@@ -109,7 +119,12 @@ def hamming(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hamming_cost(M)
     with budget.deduct(
-        "hamming", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+        "hamming",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.hamming, M)
     return result  # type: ignore[return-value]
@@ -143,7 +158,12 @@ def hanning(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hanning_cost(M)
     with budget.deduct(
-        "hanning", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+        "hanning",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.hanning, M)
     return result  # type: ignore[return-value]
@@ -180,7 +200,12 @@ def kaiser(M: int, beta: float) -> FlopscopeArray:
     budget = require_budget()
     cost = kaiser_cost(M)
     with budget.deduct(
-        "kaiser", flop_cost=cost, subscripts=None, shapes=((M,),), dtypes=()
+        "kaiser",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.kaiser, M, beta)
     return result  # type: ignore[return-value]
