@@ -256,3 +256,23 @@ def test_tensordot_partial_contraction_exact_complex_billing():
     load_weights()
     z = fnp.asarray(np.ones((8, 8), dtype=np.complex128))
     assert _cost(lambda: fnp.tensordot(z, z, axes=1)) == 3968 * 2  # c128 rate 2.0
+
+
+# --- Task 8a: _array_ops.py dtype declarations ---------------------------
+
+
+def test_array_ops_creation_bills_output_dtype():
+    # Cost-bearing creation declares the OUTPUT dtype: int64 (rate 2.0) bills
+    # twice int32 (rate 1.0) for the same element count.
+    load_weights()
+    c32 = _cost(lambda: fnp.arange(100, dtype=np.int32))
+    c64 = _cost(lambda: fnp.arange(100, dtype=np.int64))
+    assert c32 > 0
+    assert c64 == 2 * c32
+
+
+def test_array_ops_free_op_bills_zero_regardless_of_dtype():
+    # flop_cost=0 data-movement ops (reshape) bill 0 for any dtype, incl complex.
+    load_weights()
+    zc = fnp.asarray(np.ones(12, dtype=np.complex128))
+    assert _cost(lambda: fnp.reshape(zc, (3, 4))) == 0
