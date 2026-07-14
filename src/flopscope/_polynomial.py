@@ -251,8 +251,15 @@ def polyint(p: ArrayLike, m: int = 1, k: ArrayLike | None = None) -> FlopscopeAr
     n = len(p)
     m_int = int(m)
     cost = polyint_cost(n, m_int)
+    # ``k`` (integration constants) is a genuine second operand: complex k
+    # yields a complex result, so its dtype must join the billing tuple or the
+    # complex factor is bypassed.
+    billing_dtypes = (p.dtype,)
+    if k is not None:
+        billing_dtypes += (_np.asarray(k).dtype,)
     with budget.deduct(
-        "polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+        "polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,),
+        dtypes=billing_dtypes,
     ):
         if k is None:
             result = _call_numpy(_np.polyint, p, m=m)

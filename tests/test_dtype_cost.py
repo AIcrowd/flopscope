@@ -380,3 +380,28 @@ def test_window_ops_stay_dtype_neutral():
     # keep billing flat regardless of which dtype-rate table is active.
     load_weights()
     assert _cost(lambda: fnp.bartlett(8)) == 32  # 4*8, unaffected by dtype rates
+
+
+def test_polyint_k_operand_is_billed():
+    # polyint's `k` (integration constants) is a second operand: complex k
+    # yields a complex result and must bill the 2x complex factor, not dodge it.
+    load_weights()
+    p = fnp.asarray(np.ones(5, dtype=np.float64))
+    real_k = _cost(lambda: fnp.polyint(p, m=1, k=[5.0]))
+    cplx_k = _cost(lambda: fnp.polyint(p, m=1, k=[1 + 2j]))
+    assert cplx_k == 2 * real_k
+
+
+def test_histogram_array_bins_dtype_is_billed():
+    # Array bin edges are a second operand numpy promotes across; an fp64 or
+    # complex edge array must not bill the same as an fp32 one.
+    load_weights()
+    d = fnp.asarray(np.ones(100, dtype=np.float32))
+    b32 = np.linspace(0, 2, 5).astype(np.float32)
+    # histogram's mirrored signature types bins as int|Sequence[int]|str; numpy
+    # (and the runtime) accept float/array edges, so ignore the narrow hint.
+    c32 = _cost(lambda: fnp.histogram(d, bins=fnp.asarray(b32)))  # type: ignore[arg-type]
+    c64 = _cost(lambda: fnp.histogram(d, bins=fnp.asarray(b32.astype(np.float64))))  # type: ignore[arg-type]
+    assert c32 > 0 and c64 == 2 * c32
+    # int bins is a count, not data -> dtype irrelevant, unchanged.
+    assert _cost(lambda: fnp.histogram(d, bins=10)) > 0

@@ -216,12 +216,19 @@ def histogram(
     else:
         bins_arr = _np.asarray(bins)
         cost = _builtins.max(n * _ceil_log2(_builtins.len(bins_arr)), 1)
+    # An array ``bins`` (edge values) is a genuine second operand — numpy
+    # promotes across data and edges — so its dtype must join the billing tuple
+    # or a complex/fp64 edge array bypasses the factor. An int ``bins`` is a
+    # count, not data, so its dtype is irrelevant.
+    _hist_dtypes = (
+        (a.dtype,) if _np.isscalar(bins) else (a.dtype, _np.asarray(bins).dtype)
+    )
     with budget.deduct(
         "histogram",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=_hist_dtypes,
     ):
         result = _call_numpy(
             _np.histogram,
@@ -276,12 +283,20 @@ def histogram2d(
     else:
         cost = _builtins.max(n, 1)
 
+    # Array-valued bin edges are genuine operands numpy promotes across; fold
+    # their dtype in so complex/fp64 edges don't bypass the factor. Integer
+    # bins are counts, not data -> skipped.
+    _bin_dtypes = tuple(
+        _np.asarray(b).dtype
+        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
+        if not _np.isscalar(b)
+    )
     with budget.deduct(
         "histogram2d",
         flop_cost=cost,
         subscripts=None,
         shapes=(x.shape, y.shape),
-        dtypes=(x.dtype, y.dtype),
+        dtypes=(x.dtype, y.dtype) + _bin_dtypes,
     ):
         result = _call_numpy(
             _np.histogram2d,
@@ -334,12 +349,20 @@ def histogramdd(
     else:
         cost = _builtins.max(n, 1)
 
+    # Array-valued bin edges are genuine operands numpy promotes across; fold
+    # their dtype in so complex/fp64 edges don't bypass the factor. Integer
+    # bins are counts, not data -> skipped.
+    _bin_dtypes = tuple(
+        _np.asarray(b).dtype
+        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
+        if not _np.isscalar(b)
+    )
     with budget.deduct(
         "histogramdd",
         flop_cost=cost,
         subscripts=None,
         shapes=(sample.shape,),
-        dtypes=(sample.dtype,),
+        dtypes=(sample.dtype,) + _bin_dtypes,
     ):
         result = _call_numpy(
             _np.histogramdd,
