@@ -681,11 +681,15 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype, b.dtype)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.outer",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.outer(
             _to_base_ndarray(a),
@@ -719,11 +723,15 @@ def _counted_ufunc_reduce_generic(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.reduce",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.reduce(
             _to_base_ndarray(a),
@@ -757,11 +765,15 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.accumulate",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.accumulate(
             _to_base_ndarray(a),
@@ -792,11 +804,15 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     indices_stripped = (
         _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
     )
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.reduceat",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.reduceat(
             _to_base_ndarray(a),
@@ -858,6 +874,7 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         flop_cost=n_ops,
         subscripts=None,
         shapes=(a.shape,) if hasattr(a, "shape") else (),
+        dtypes=(a.dtype,) if hasattr(a, "dtype") else (),
     ):
         ufunc.at(
             _to_base_ndarray(a),

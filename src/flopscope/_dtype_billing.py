@@ -39,17 +39,35 @@ def rate_for(resolved: _np.dtype) -> float:
     return get_dtype_rate(resolved.name)
 
 
+# Generic ufunc method names are "<ufunc>.<method>"; their per-element
+# arithmetic is the base ufunc's, so they inherit its complex factor.
+_UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")
+
+
 def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
     """Complex structure factor for one billed unit of ``op_name``.
 
     1.0 for real dtypes. For complex dtypes the factor comes from the op's
     registry classification; unclassified or complex-illegal ops fail closed.
+
+    A generic ufunc-method name (``"<ufunc>.<method>"``, e.g.
+    ``"multiply.reduce"``) that is not itself a registry key falls back to
+    its base ufunc's factor: the per-element arithmetic of ``reduce`` /
+    ``accumulate`` / ``reduceat`` / ``outer`` / ``at`` IS the base ufunc's.
+    Real registry keys that happen to contain dots (``fft.fft``,
+    ``linalg.svd``, ``linalg.outer``, ``stats.norm.pdf``) always resolve on
+    the direct lookup first, so they are never mistaken for a ufunc method.
     """
     if resolved.kind != "c":
         return 1.0
     from flopscope._registry import REGISTRY
 
     entry = REGISTRY.get(op_name)
+    if entry is None:
+        for suffix in _UFUNC_METHOD_SUFFIXES:
+            if op_name.endswith(suffix):
+                entry = REGISTRY.get(op_name[: -len(suffix)])
+                break
     factor = None if entry is None else entry.get("complex_factor")
     if factor is None or factor == "illegal":
         raise UnsupportedDtypeError(

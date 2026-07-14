@@ -129,3 +129,46 @@ def test_reduction_sum_complex_bills_factor_two():
     # ratio-based: robust to the reduction skeleton's exact flop_cost formula
     _r = fnp.asarray(np.ones(10, dtype=np.float64))
     assert _cost(lambda: fnp.sum(_z)) == 2 * _cost(lambda: fnp.sum(_r))
+
+
+# ---------------------------------------------------------------------------
+# Task 6b: generic ufunc-method dispatch (np.<ufunc>.<method> on a
+# FlopscopeArray) inherits its base ufunc's complex factor via fallback.
+#
+# ``multiply``/``add`` are routed to a dedicated fast path
+# (FlopscopeArray._REDUCE_TO_WHEST) for ``.reduce``/``.accumulate``, so
+# those methods on those two ufuncs do NOT exercise the generic dispatch
+# sites this task changes. ``.outer`` always uses the generic path
+# regardless of ufunc, and ``subtract`` is never whest-routed — so
+# ``multiply.outer`` and ``subtract.reduce``/``subtract.accumulate`` are
+# the calls that genuinely reach _counted_ufunc_outer /
+# _counted_ufunc_reduce_generic / _counted_ufunc_accumulate_generic.
+# ---------------------------------------------------------------------------
+
+_r10 = fnp.asarray(np.ones(10, dtype=np.float64))
+
+
+def test_generic_ufunc_outer_complex_bills_base_ufunc_factor():
+    # multiply.outer always uses the generic path; base factor is multiply's (6).
+    assert _cost(lambda: np.multiply.outer(_z, _z)) == 6 * _cost(
+        lambda: np.multiply.outer(_r10, _r10)
+    )
+
+
+def test_generic_ufunc_reduce_complex_runs_and_bills_base_ufunc_factor():
+    # subtract is not whest-routed, so subtract.reduce reaches the generic
+    # fallback. Before this task's fix, dtypes=None there billed complex
+    # inputs as dtype-neutral (factor 1) instead of raising OR correctly
+    # scaling — this is the regression the naive "just add dtypes=" would
+    # have caused (fail-closed RAISE on every complex generic-ufunc-method
+    # call). Asserting it both runs AND bills factor 2 (subtract's factor)
+    # covers that regression.
+    assert _cost(lambda: np.subtract.reduce(_z)) == 2 * _cost(
+        lambda: np.subtract.reduce(_r10)
+    )
+
+
+def test_generic_ufunc_accumulate_complex_runs_and_bills_base_ufunc_factor():
+    assert _cost(lambda: np.subtract.accumulate(_z)) == 2 * _cost(
+        lambda: np.subtract.accumulate(_r10)
+    )

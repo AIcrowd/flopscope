@@ -23,7 +23,10 @@ def test_resolve_empty_is_dtype_neutral():
 
 def test_resolve_promotes_like_numpy():
     assert resolve_billing_dtype((np.dtype("int32"), np.dtype("float32"))) == np.float64
-    assert resolve_billing_dtype((np.dtype("float64"), np.dtype("complex64"))) == np.complex128
+    assert (
+        resolve_billing_dtype((np.dtype("float64"), np.dtype("complex64")))
+        == np.complex128
+    )
 
 
 def test_resolve_includes_explicit_output_dtype():
@@ -71,6 +74,29 @@ def test_complex_factor_fails_closed_when_unclassified():
 def test_complex_factor_exact_requires_override():
     with pytest.raises(RuntimeError):
         complex_factor_for("einsum", np.dtype("complex128"))
+
+
+def test_complex_factor_ufunc_method_falls_back_to_base():
+    c = np.dtype("complex128")
+    assert complex_factor_for("multiply.reduce", c) == 6.0
+    assert complex_factor_for("add.reduce", c) == 2.0
+    assert complex_factor_for("subtract.accumulate", c) == 2.0
+    assert complex_factor_for("multiply.outer", c) == 6.0
+
+
+def test_complex_factor_ufunc_method_illegal_base_still_raises():
+    with pytest.raises(UnsupportedDtypeError):
+        complex_factor_for("logaddexp.reduce", np.dtype("complex128"))
+
+
+def test_complex_factor_dotted_registry_key_is_not_stripped():
+    # "linalg.outer" is itself a registry key (not a generic ufunc-method
+    # name) and must resolve on the direct lookup, never via the ".outer"
+    # suffix-stripping fallback (there is no "linalg" registry entry).
+    from flopscope._registry import REGISTRY
+
+    direct = REGISTRY["linalg.outer"]["complex_factor"]
+    assert complex_factor_for("linalg.outer", np.dtype("complex128")) == direct
 
 
 # Complex real-FLOP total for contractions
