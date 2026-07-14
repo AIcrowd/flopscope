@@ -53,8 +53,24 @@ def test_rate_for_uses_active_table():
     load_weights()
     assert rate_for(np.dtype("float64")) == 2.0
     assert rate_for(np.dtype("complex64")) == 1.0
+    # Numeric dtypes OUTSIDE the table fail closed (the float128/complex256
+    # precision side door). Name-level check: platform-independent.
+    from flopscope._weights import get_dtype_rate
+
     with pytest.raises(UnsupportedDtypeError):
-        rate_for(np.dtype("object"))
+        get_dtype_rate("float128")
+
+
+def test_rate_for_non_numeric_kinds_bill_neutral():
+    # object/str/bytes/datetime64/timedelta64 are not floating-point
+    # arithmetic; no precision-packing exploit is possible through them, and
+    # the numpy-compat guarantee requires them to keep working. They bill at
+    # the neutral rate 1.0 rather than failing closed.
+    load_weights()
+    assert rate_for(np.dtype("object")) == 1.0
+    assert rate_for(np.dtype("str_")) == 1.0
+    assert rate_for(np.dtype("datetime64[s]")) == 1.0
+    assert rate_for(np.dtype("timedelta64[s]")) == 1.0
 
 
 def test_complex_factor_real_dtype_is_one():
@@ -164,3 +180,19 @@ def test_complex_real_total_mu_none_is_conservative():
         _FakeAcc(total=500, num_terms=2, m_total=100, mu=None),
     )
     assert complex_real_total(acc) == 3000
+
+
+def test_resolve_promotion_failure_falls_back_to_heaviest():
+    # Some numpy loops accept operand mixes with NO common promoted dtype
+    # (logical ufuncs on anything; timedelta64/float64 division). result_type
+    # raises DTypePromotionError there; billing falls back to the heaviest
+    # individual operand rate instead of failing a call numpy allows.
+    load_weights()
+    assert (
+        resolve_billing_dtype((np.dtype("timedelta64[s]"), np.dtype("float64")))
+        == np.float64
+    )
+    assert (
+        resolve_billing_dtype((np.dtype("V8"), np.dtype("float64"), np.dtype("int32")))
+        == np.float64
+    )

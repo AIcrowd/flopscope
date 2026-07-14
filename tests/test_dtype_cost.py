@@ -70,11 +70,32 @@ def test_resolved_dtype_recorded():
         assert b._op_log[-1].resolved_dtype == "float64"
 
 
-def test_unsupported_dtype_fails_closed_before_charging():
+def test_non_numeric_dtype_bills_neutral_rate():
+    # object/str/datetime are not floating-point arithmetic: they bill at the
+    # neutral rate 1.0 (numpy-compat requires them functional; no precision
+    # exploit is possible through non-numeric kinds).
+    load_weights()
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        with b.deduct(
+            "multiply",
+            flop_cost=10,
+            subscripts=None,
+            shapes=(),
+            dtypes=(np.dtype("object"),),
+        ):
+            pass
+        assert b.flops_used == 10  # rate 1.0, factor 1.0
+
+
+@pytest.mark.skipif(
+    not hasattr(np, "float128"), reason="float128 not available on this platform"
+)
+def test_unsupported_numeric_dtype_fails_closed_before_charging():
+    # Numeric dtypes outside the supported table (float128's wider mantissa is
+    # the precision side door) fail closed BEFORE any FLOPs are recorded.
     load_weights()
     from flopscope.errors import UnsupportedDtypeError
 
-    # float128 is unavailable on this platform; object exercises the same fail-closed path
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
         with pytest.raises(UnsupportedDtypeError):
             with b.deduct(
@@ -82,7 +103,7 @@ def test_unsupported_dtype_fails_closed_before_charging():
                 flop_cost=1,
                 subscripts=None,
                 shapes=(),
-                dtypes=(np.dtype("object"),),
+                dtypes=(np.dtype("float128"),),
             ):
                 pass
         assert b.flops_used == 0
@@ -706,3 +727,13 @@ def test_real_imag_still_return_correct_components():
         i = fnp.imag(z)
     assert np.array_equal(np.asarray(r), [3.0, -1.0])
     assert np.array_equal(np.asarray(i), [4.0, -2.0])
+
+
+def test_mixed_unpromotable_operands_bill_without_raising():
+    # numpy's logical ufuncs accept any dtype mix (no common promotion); the
+    # billing path must not raise where numpy succeeds. Bills at the heaviest
+    # individual operand rate (float64 -> 2.0).
+    load_weights()
+    td = fnp.asarray(np.array([1, 2], dtype="timedelta64[s]"))
+    fl = fnp.asarray(np.ones(2, dtype=np.float64))
+    assert _cost(lambda: np.logical_and(td, fl)) == 4  # 2 elems * rate 2.0

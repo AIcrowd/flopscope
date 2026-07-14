@@ -273,9 +273,14 @@ ladder, and configured in the same file (`src/flopscope/data/default_weights.jso
 `"dtype_rates"`). They are a deliberate competition-design choice, not a hardware
 measurement.
 
-**Fail-closed.** Any dtype not in the table (for example `float128` or `object`) has no
-defined rate, so billing **raises `UnsupportedDtypeError` before charging any FLOPs**
-rather than guessing. A dtype cannot slip through unpriced.
+**Fail-closed for numeric dtypes.** Any *numeric* dtype not in the table (for example
+`float128` / `complex256`, whose wider mantissa is exactly the precision side door this
+section closes) has no defined rate, so billing **raises `UnsupportedDtypeError` before
+charging any FLOPs** rather than guessing. A numeric dtype cannot slip through unpriced.
+*Non-numeric* dtypes (`object`, `str_`, `bytes_`, `datetime64`, `timedelta64`,
+structured/void) are not floating-point arithmetic — no precision packing is possible
+through them — so they bill at the neutral rate `1.0`, preserving plain-numpy behavior
+for non-numeric arrays; their wall time is covered by the residual-time penalty.
 
 ### Complex arithmetic from first principles
 

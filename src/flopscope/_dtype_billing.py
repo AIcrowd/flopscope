@@ -29,13 +29,36 @@ def billing_operand(orig, coerced):
 
 
 def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
-    """Resolved calculation dtype, or None for a declared dtype-neutral call."""
+    """Resolved calculation dtype, or None for a declared dtype-neutral call.
+
+    Some numpy loops accept operand mixes that have NO common promoted dtype
+    (logical ufuncs accept anything; ``timedelta64 / float64`` divides without
+    promoting), so ``result_type`` can refuse a combination the op itself
+    supports. In that case bill conservatively at the heaviest individual
+    operand's rate instead of failing a call plain numpy would allow.
+    """
     if not dtypes:
         return None
-    return _np.result_type(*dtypes)
+    try:
+        return _np.result_type(*dtypes)
+    except _np.exceptions.DTypePromotionError:
+        resolved = [_np.result_type(d) for d in dtypes]  # each alone resolves
+        return max(resolved, key=rate_for)
+
+
+# Non-numeric dtype kinds: object (O), str (U), bytes (S), void/structured (V),
+# datetime64 (M), timedelta64 (m). These are not floating-point arithmetic, so
+# no precision-packing exploit is possible through them -- they bill at the
+# neutral rate 1.0 instead of failing closed. (Their wall time is covered by
+# the residual-time penalty.) The fail-closed rule targets NUMERIC dtypes
+# outside the supported table -- e.g. float128/complex256, whose extra mantissa
+# width is exactly the precision side door dtype-aware billing closes.
+_NON_NUMERIC_KINDS = frozenset("OUSVMm")
 
 
 def rate_for(resolved: _np.dtype) -> float:
+    if resolved.kind in _NON_NUMERIC_KINDS:
+        return 1.0
     return get_dtype_rate(resolved.name)
 
 
@@ -51,7 +74,7 @@ def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     under-charges when the destination is pricier (``complex64 -> float64``).
     """
     dts = [_np.dtype(d) for d in dtypes]
-    return max(dts, key=lambda d: get_dtype_rate(d.name))
+    return max(dts, key=rate_for)
 
 
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
