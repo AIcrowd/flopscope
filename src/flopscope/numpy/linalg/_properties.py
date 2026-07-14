@@ -51,12 +51,15 @@ def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeAr
         n = min(n, x.shape[-2] + offset)
     n = max(n, 0)
     cost = trace_cost(n) * _batch_size(x.shape) if not _has_zero_dim(x.shape) else 0
+    # An explicit accumulator dtype= produces its own (possibly complex) result,
+    # so fold it into the billing tuple or it bypasses the complex/fp64 factor.
+    _trace_dtypes = (x.dtype,) if dtype is None else (x.dtype, _np.dtype(dtype))
     with budget.deduct(
         "linalg.trace",
         flop_cost=cost,
         subscripts=None,
         shapes=(x.shape,),
-        dtypes=(x.dtype,),
+        dtypes=_trace_dtypes,
     ):
         result = _call_numpy(
             _np.linalg.trace, _to_base_ndarray(x), offset=offset, dtype=dtype

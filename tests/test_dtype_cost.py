@@ -519,3 +519,34 @@ def test_stats_norm_pdf_bills_forced_float64():
     x32 = fnp.asarray(np.zeros(10, dtype=np.float32))
     x64 = fnp.asarray(np.zeros(10, dtype=np.float64))
     assert _cost(lambda: fstats.norm.pdf(x32)) == _cost(lambda: fstats.norm.pdf(x64))
+
+
+def test_linalg_tensorsolve_and_solve_asymmetric_complex_operand():
+    # A real `a` with a complex `b` still yields a complex result, so both
+    # operands must be billed -> the 4x complex factor applies even when only
+    # the RHS is complex. (Guards the multi-operand declaration; a symmetric
+    # real->complex flip can't distinguish "both declared" from "one suffices".)
+    load_weights()
+    a = fnp.asarray(np.eye(6, dtype=np.float64))
+    b_r = fnp.asarray(np.ones(6, dtype=np.float64))
+    b_c = fnp.asarray(np.ones(6, dtype=np.complex128))
+    assert _cost(lambda: fnp.linalg.solve(a, b_c)) == 4 * _cost(
+        lambda: fnp.linalg.solve(a, b_r)
+    )
+    # tensorsolve delegates to solve; same asymmetric property.
+    ta = fnp.asarray(np.eye(6, dtype=np.float64).reshape(6, 6))
+    tb_r = fnp.asarray(np.ones(6, dtype=np.float64))
+    tb_c = fnp.asarray(np.ones(6, dtype=np.complex128))
+    assert _cost(lambda: fnp.linalg.tensorsolve(ta, tb_c)) == 4 * _cost(
+        lambda: fnp.linalg.tensorsolve(ta, tb_r)
+    )
+
+
+def test_linalg_trace_accumulator_dtype_is_billed():
+    # linalg.trace(real, dtype=complex) accumulates in complex -> must bill the
+    # complex factor via the dtype= kwarg, not just the input dtype.
+    load_weights()
+    m = fnp.asarray(np.ones((8, 8), dtype=np.float64))
+    real = _cost(lambda: fnp.linalg.trace(m))
+    cplx = _cost(lambda: fnp.linalg.trace(m, dtype=np.complex128))
+    assert cplx == 4 * real

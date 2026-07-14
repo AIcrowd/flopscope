@@ -392,15 +392,17 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
     inputs_were_whest = isinstance(a, FlopscopeArray) or isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+    b_arr = _np.asarray(b)
     cost = tensorsolve_cost(a.shape)
     with budget.deduct(
         "linalg.tensorsolve",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        # b is not coerced to ndarray at this site (only used inside the
-        # numpy call below); a is the only operand already available here.
-        dtypes=(a.dtype,),
+        # tensorsolve delegates to solve: a real `a` with a complex `b` yields a
+        # complex result, so both operands must join the billing dtype tuple or
+        # the 4x complex factor is bypassed (mirrors solve/lstsq above).
+        dtypes=(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.tensorsolve,
