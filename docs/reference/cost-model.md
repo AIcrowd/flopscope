@@ -296,7 +296,7 @@ arithmetic (`z = a + bi`, FMA=2 convention):
 | divide | 11 | numerator 4 mul + 2 add; denominator 2 mul + 1 add; 2 divides |
 | reciprocal | 6 | special case of divide |
 | fused multiply-add | 4 | 8 real FLOPs per FMA=2 unit (1 complex mul + 1 complex add) |
-| absolute (`hypot`) | 4 | 2 mul + 1 add + 1 sqrt |
+| absolute | 4 | |z| = sqrt(re² + im²): 2 mul + 1 add + 1 sqrt |
 | sqrt | 10 | complex square root |
 | ordering compare | 2 | lexicographic: compare real parts, tie-break on imaginary |
 
@@ -308,7 +308,7 @@ Every charged op is classified by the atom its **billed unit** reduces to:
 | multiply / pure product | **6** | `multiply`, `prod` (`square` = 5) |
 | divide | **11** | `divide` (`reciprocal` = 6) |
 | variance family | **2.5** | `var`, `std` (square-and-sum: mostly adds, some multiplies) |
-| absolute / magnitude | **4** | `abs`, `hypot` |
+| absolute / magnitude | **4** | `abs` (`hypot` itself is complex-illegal: numpy raises) |
 | transcendental | **per op** | `log` 2.25, `exp` 3.1, `sin`/`cos` 3.4, `tan` 3.6 — each from its complex closed form |
 | dense linalg | **4** | `inv`, `solve`, `svd`, `det`, `qr`, `eig`, … (complex factorization ≈ 4× the real arithmetic) |
 | contraction (FMA) | **exact** | `einsum`, `matmul`, `dot`, `inner`, `tensordot`, `vdot`, … — computed per call |
@@ -777,8 +777,10 @@ Source: `src/flopscope/_polynomial.py`.
 
 Random ops are composite: the generation kernel cost and any setup cost
 (PRNG state update, rejection sampling) are folded into `flop_cost`; the
-weight tier **varies** by distribution family.  Billed cost = `flop_cost ×
-weight`.
+weight tier **varies** by distribution family.  The full bill follows the
+four-factor formula — draws bill their output dtype's rate (numpy's samplers
+default to float64, rate 2.0), and complex output dtypes do not exist for
+random generation, so `complex_factor` is always 1 here.
 
 Weight tiers:
 
