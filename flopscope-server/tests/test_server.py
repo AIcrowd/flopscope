@@ -182,7 +182,7 @@ def test_budget_close_returns_structured_namespace_breakdown(server_and_client):
     ctx = server._session.budget_context
     ctx._push_namespace("phase")
     try:
-        ctx.deduct("add", flop_cost=1, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=())
     finally:
         ctx._pop_namespace("phase")
 

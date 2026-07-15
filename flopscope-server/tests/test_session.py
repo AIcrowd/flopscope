@@ -186,7 +186,9 @@ def test_close_keeps_flat_summary_for_unlabeled_sessions(session):
 
 def test_close_includes_namespace_breakdown_when_session_is_labeled(session):
     with flops.namespace("phase"):
-        session.budget_context.deduct("add", flop_cost=1, subscripts=None, shapes=())
+        session.budget_context.deduct(
+            "add", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        )
 
     result = session.close()
     assert "By namespace:" in result["budget_summary"]
@@ -196,7 +198,9 @@ def test_close_includes_namespace_breakdown_when_session_is_labeled(session):
 
 
 def test_close_budget_breakdown_keeps_unlabeled_ops_structured(session):
-    session.budget_context.deduct("add", flop_cost=1, subscripts=None, shapes=())
+    session.budget_context.deduct(
+        "add", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+    )
 
     result = session.close()
     assert result["budget_breakdown"]["by_namespace"][None]["flops_used"] == 1
