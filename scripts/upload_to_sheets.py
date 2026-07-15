@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Upload weights.csv to Google Sheets with formatting, dropdowns, and color coding.
+"""Upload a flopscope review CSV to Google Sheets with formatting and dropdowns.
 
-Requires: gws CLI (https://github.com/googleworkspace/cli) authenticated via `gws auth login`.
+Schema-agnostic: each uploadable sheet is described by a ``SheetPreset``
+(title, key column, dropdown columns, reviewer-owned columns, CSV path).
+Re-uploads preserve reviewer-owned columns, realigned by the preset's key
+column so reviewer annotations survive row insertions/removals/reordering.
+
+Requires: gws CLI (https://github.com/googleworkspace/cli) authenticated via
+`gws auth login`.
 
 Usage::
 
-    python scripts/upload_to_sheets.py
-    python scripts/upload_to_sheets.py --csv src/flopscope/data/weights.csv
+    python scripts/upload_to_sheets.py                            # weights (default)
+    python scripts/upload_to_sheets.py --preset cost-model
+    python scripts/upload_to_sheets.py --preset cost-model --spreadsheet-id <id>
+    python scripts/upload_to_sheets.py --csv path/to/other.csv    # override preset CSV
 """
 
 from __future__ import annotations
@@ -16,14 +24,68 @@ import csv
 import json
 import subprocess
 import sys
+import tempfile
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CSV = REPO_ROOT / "src" / "flopscope" / "data" / "weights.csv"
-TITLE = "flopscope FLOP Weight Calibration Review"
+
+# Name of the tab that holds the uploaded CSV data (sheetId 0 in every preset).
+DATA_SHEET_TITLE = "All Operations"
+
+# Reviewer-owned columns of the weights sheet. "Reviewer Weight" ships (empty)
+# inside weights.csv; the other three exist only on the live sheet.
+_WEIGHTS_PRESERVE = frozenset(
+    {
+        "Reviewer Weight",
+        "Reviewer Notes",
+        "Review Status",
+        "Post Review Action",
+    }
+)
+
+# Reviewer-annotation columns of the cost-model sheet. The generated CSV does
+# not ship them; the uploader appends them as empty columns on upload.
+_COST_MODEL_ANNOTATIONS = ("looks-right?", "proposed-change", "reviewer-notes")
 
 
-import tempfile
+@dataclass(frozen=True)
+class SheetPreset:
+    """Declarative description of one uploadable review sheet.
+
+    Attributes:
+        title: Spreadsheet title used when creating a new spreadsheet.
+        key_column: Header of the column that uniquely identifies a row
+            (e.g. "Operation" / "op"). Reviewer data is realigned by this
+            key across re-uploads.
+        dropdown_columns: Mapping of column header -> allowed values; each
+            gets a ONE_OF_LIST data-validation dropdown, resolved by header
+            name on the uploaded sheet.
+        preserve_columns: Headers that belong to reviewers even if they
+            appear in our CSV — never overwritten by CSV data on re-upload
+            (the sheet's values are the source of truth).
+        csv_path: Default CSV to upload (overridable via --csv).
+        ship_empty_columns: Columns to append (empty) to the CSV at load
+            time. Used when the CSV generator does not ship the reviewer
+            columns itself; combined with preserve_columns this makes the
+            sheet ship ready-to-annotate while keeping annotations safe.
+        format_hook: Optional callable (headers, num_rows, num_cols) ->
+            batchUpdate requests for preset-specific formatting (colors,
+            widths, conditional rules).
+        summary_builder: Optional callable (csv rows) -> summary rows. When
+            set, a "Review Summary" tab is created and populated on initial
+            spreadsheet creation.
+    """
+
+    title: str
+    key_column: str
+    dropdown_columns: dict[str, tuple[str, ...]]
+    preserve_columns: frozenset[str]
+    csv_path: Path
+    ship_empty_columns: tuple[str, ...] = ()
+    format_hook: Callable[[list[str], int, int], list[dict]] | None = None
+    summary_builder: Callable[[list[list[str]]], list[list[str]]] | None = None
 
 
 def gws(*args: str, json_body: dict | None = None) -> dict:
@@ -91,19 +153,43 @@ def load_csv(path: Path) -> list[list[str]]:
         return list(reader)
 
 
-def create_spreadsheet() -> str:
+def _append_ship_empty_columns(
+    rows: list[list[str]], columns: Sequence[str]
+) -> list[list[str]]:
+    """Append reviewer-annotation columns that the CSV does not ship.
+
+    The weights CSV ships its reviewer-owned column ("Reviewer Weight") as an
+    empty column inside the CSV itself. Generated CSVs (cost-model) stay free
+    of review columns, so the uploader appends them here — header names plus
+    an empty cell on every data row — before upload. Downstream,
+    ``preserve_columns`` marks them reviewer-owned so re-uploads never
+    overwrite what reviewers typed. Idempotent: names already present in the
+    header are skipped; with no missing names the rows are returned unchanged.
+    """
+    if not rows:
+        return rows
+    header = rows[0]
+    missing = [c for c in columns if c not in header]
+    if not missing:
+        return rows
+    new_header = header + missing
+    width = len(new_header)
+    return [new_header] + [row + [""] * (width - len(row)) for row in rows[1:]]
+
+
+def create_spreadsheet(preset: SheetPreset) -> str:
     """Create a new Google Sheets spreadsheet and return its ID."""
-    print(f"Creating spreadsheet: {TITLE}")
+    print(f"Creating spreadsheet: {preset.title}")
+    sheets: list[dict] = [{"properties": {"title": DATA_SHEET_TITLE, "sheetId": 0}}]
+    if preset.summary_builder is not None:
+        sheets.append({"properties": {"title": "Review Summary", "sheetId": 1}})
     resp = gws(
         "sheets",
         "spreadsheets",
         "create",
         json_body={
-            "properties": {"title": TITLE},
-            "sheets": [
-                {"properties": {"title": "All Operations", "sheetId": 0}},
-                {"properties": {"title": "Review Summary", "sheetId": 1}},
-            ],
+            "properties": {"title": preset.title},
+            "sheets": sheets,
         },
     )
     sid = resp.get("spreadsheetId", "")
@@ -116,7 +202,7 @@ def create_spreadsheet() -> str:
 
 
 def _read_sheet_all(
-    sid: str, sheet_name: str = "All Operations"
+    sid: str, sheet_name: str = DATA_SHEET_TITLE
 ) -> tuple[list[str], list[list[str]]]:
     """Read all data from a sheet. Returns (headers, data_rows)."""
     resp = gws(
@@ -138,50 +224,36 @@ def _read_sheet_all(
     return all_rows[0], all_rows[1:]
 
 
-# Column headers that belong to the reviewer even if they appear in our CSV.
-# These columns must never be overwritten by CSV data — their values on the
-# sheet are the source of truth (filled in by reviewers).
-_ALWAYS_PRESERVE = frozenset(
-    {
-        "Reviewer Weight",
-        "Reviewer Notes",
-        "Review Status",
-        "Post Review Action",
-    }
-)
-
-
 def _find_reviewer_columns(
     sheet_headers: list[str],
     csv_headers: list[str],
+    preserve: frozenset[str],
 ) -> list[int]:
     """Return sheet column indices that should be preserved (reviewer-owned).
 
     A column is reviewer-owned if:
     - Its header is NOT in our CSV headers, OR
-    - Its header is in _ALWAYS_PRESERVE (e.g. "Reviewer Weight" which is
-      in our CSV but always empty — the reviewer fills it in on the sheet).
+    - Its header is in ``preserve`` (e.g. "Reviewer Weight" which is in the
+      weights CSV but always empty — the reviewer fills it in on the sheet).
     """
-    csv_set = set(csv_headers) - _ALWAYS_PRESERVE
-    return [
-        i
-        for i, h in enumerate(sheet_headers)
-        if h not in csv_set or h in _ALWAYS_PRESERVE
-    ]
+    csv_set = set(csv_headers) - preserve
+    return [i for i, h in enumerate(sheet_headers) if h not in csv_set or h in preserve]
 
 
-def upload_data(sid: str, rows: list[list[str]]) -> None:
-    """Upload CSV data to Sheet 1, preserving reviewer-added columns.
+def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[str]:
+    """Upload CSV data to the data sheet, preserving reviewer-added columns.
 
     Algorithm:
     1. Read the sheet's current state (headers + all data).
-    2. Identify reviewer-added columns (headers not in our CSV).
-    3. Build a map: operation_name -> {reviewer_col_header: value, ...}
-       keyed by the Operation column so alignment is by name, not row.
-    4. Clear the sheet and write our CSV data (all columns including
-       our "Reviewer Weight" placeholder).
-    5. Write reviewer data back, aligned by operation name to match
-       the new row order.
+    2. Identify reviewer-owned columns (headers not in our CSV, plus the
+       preset's ``preserve_columns`` even when CSV-shipped).
+    3. Build a map: key -> {reviewer_col_header: value, ...} keyed by the
+       preset's key column so alignment is by key, not row position.
+    4. Clear the sheet and write our CSV data (all columns including any
+       shipped-empty reviewer placeholders).
+    5. Write reviewer data back, aligned by key to match the new row order.
+
+    Returns the header row actually written to the sheet.
     """
     csv_headers = rows[0]
     csv_data = rows[1:]
@@ -193,10 +265,12 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
     if not sheet_headers:
         print("  Fresh sheet, uploading all columns...")
         _upload_all_rows(sid, rows)
-        return
+        return list(csv_headers)
 
     # --- Step 2: Identify reviewer columns ---
-    reviewer_col_indices = _find_reviewer_columns(sheet_headers, csv_headers)
+    reviewer_col_indices = _find_reviewer_columns(
+        sheet_headers, csv_headers, preset.preserve_columns
+    )
     reviewer_col_names = [sheet_headers[i] for i in reviewer_col_indices]
     reviewer_col_set = set(reviewer_col_names)
 
@@ -205,31 +279,32 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
     else:
         print("  No reviewer columns found.")
 
-    # --- Step 3: Build operation -> reviewer data map ---
-    # Find the Operation column on the sheet (should be index 0)
+    # --- Step 3: Build key -> reviewer data map ---
+    # Find the key column on the sheet (falls back to the first column).
     try:
-        op_col_idx = sheet_headers.index("Operation")
+        sheet_key_idx = sheet_headers.index(preset.key_column)
     except ValueError:
-        op_col_idx = 0
+        sheet_key_idx = 0
 
     reviewer_data: dict[str, dict[str, str]] = {}
     for row in sheet_data:
-        if not row or len(row) <= op_col_idx:
+        if not row or len(row) <= sheet_key_idx:
             continue
-        op_name = row[op_col_idx]
-        if not op_name:
+        key = row[sheet_key_idx]
+        if not key:
             continue
-        reviewer_data[op_name] = {}
+        reviewer_data[key] = {}
         for col_idx in reviewer_col_indices:
             col_name = sheet_headers[col_idx]
             value = row[col_idx] if col_idx < len(row) else ""
-            reviewer_data[op_name][col_name] = value
+            reviewer_data[key][col_name] = value
 
     non_empty = sum(
-        1 for op_vals in reviewer_data.values() for v in op_vals.values() if v.strip()
+        1 for key_vals in reviewer_data.values() for v in key_vals.values() if v.strip()
     )
     print(
-        f"  Captured {non_empty} non-empty reviewer values across {len(reviewer_data)} ops."
+        f"  Captured {non_empty} non-empty reviewer values across "
+        f"{len(reviewer_data)} rows."
     )
 
     # --- Step 4: Clear sheet and write CSV data ---
@@ -243,22 +318,22 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
         json.dumps(
             {
                 "spreadsheetId": sid,
-                "range": "'All Operations'!A1:ZZ",
+                "range": f"'{DATA_SHEET_TITLE}'!A1:ZZ",
             }
         ),
     )
 
     # Build output column order: preserve the sheet's original column layout.
     # For each sheet column, either pull from CSV (by header name) or from
-    # the reviewer data (by operation name). This keeps reviewer columns
-    # in their original positions (e.g. F and G stay as F and G).
+    # the reviewer data (by key). This keeps reviewer columns in their
+    # original positions (e.g. F and G stay as F and G).
     csv_header_to_idx = {h: i for i, h in enumerate(csv_headers)}
 
-    # Determine output columns: sheet's existing order, but skip CSV's
-    # "Reviewer Weight" since it's always empty and the sheet has the real one.
+    # Determine output columns: sheet's existing order, but skip the CSV's
+    # shipped-empty reviewer placeholders since the sheet has the real ones.
     out_col_sources: list[tuple[str, str]] = []  # (header, source: "csv"|"reviewer")
     for sheet_col_name in sheet_headers:
-        if sheet_col_name in _ALWAYS_PRESERVE:
+        if sheet_col_name in preset.preserve_columns:
             out_col_sources.append((sheet_col_name, "reviewer"))
         elif (
             sheet_col_name in csv_header_to_idx
@@ -271,15 +346,21 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
     # Add any CSV columns not already on the sheet (new columns)
     sheet_header_set = set(sheet_headers)
     for csv_h in csv_headers:
-        if csv_h not in sheet_header_set and csv_h not in _ALWAYS_PRESERVE:
+        if csv_h not in sheet_header_set and csv_h not in preset.preserve_columns:
             out_col_sources.append((csv_h, "csv"))
+
+    # CSV key column index (falls back to the first column).
+    try:
+        csv_key_idx = csv_headers.index(preset.key_column)
+    except ValueError:
+        csv_key_idx = 0
 
     # Build rows
     out_headers = [src[0] for src in out_col_sources]
     out_data = []
     for csv_row in csv_data:
-        op_name = csv_row[0] if csv_row else ""
-        reviewer_vals = reviewer_data.get(op_name, {})
+        key = csv_row[csv_key_idx] if len(csv_row) > csv_key_idx else ""
+        reviewer_vals = reviewer_data.get(key, {})
         row = []
         for col_name, source in out_col_sources:
             if source == "csv":
@@ -292,8 +373,9 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
         out_data.append(row)
 
     # --- Step 5: Apply reviewer weights to Active Weight locally ---
-    # Where the reviewer provided a numeric weight, use it as Active Weight.
-    # This avoids per-cell API writes after upload.
+    # Weights-preset enrichment: where the reviewer provided a numeric weight,
+    # use it as Active Weight. This avoids per-cell API writes after upload.
+    # No-op for presets without both columns (e.g. cost-model).
     active_idx = (
         out_headers.index("Active Weight") if "Active Weight" in out_headers else -1
     )
@@ -320,8 +402,9 @@ def upload_data(sid: str, rows: list[list[str]]) -> None:
         f"  Uploaded {len(out_data)} rows: {len(out_col_sources)} columns "
         f"({sum(1 for _, s in out_col_sources if s == 'csv')} CSV, "
         f"{sum(1 for _, s in out_col_sources if s == 'reviewer')} reviewer), "
-        f"aligned by operation name."
+        f"aligned by {preset.key_column!r}."
     )
+    return out_headers
 
 
 def _upload_all_rows(sid: str, rows: list[list[str]]) -> None:
@@ -339,7 +422,7 @@ def _upload_all_rows(sid: str, rows: list[list[str]]) -> None:
             json.dumps(
                 {
                     "spreadsheetId": sid,
-                    "range": f"'All Operations'!A{row_start}",
+                    "range": f"'{DATA_SHEET_TITLE}'!A{row_start}",
                     "valueInputOption": "USER_ENTERED",
                 }
             ),
@@ -482,62 +565,51 @@ def _gradient_rule(
     }
 
 
-def apply_formatting(sid: str, num_rows: int, num_cols: int) -> None:
-    """Apply all formatting, dropdowns, and conditional rules."""
-    print("Applying formatting...")
-    sheet_id = 0
-    requests = []
-
-    # ---- Clear ALL existing conditional formatting first ----
-    # Without this, rules accumulate across uploads and stale rules
-    # override the new ones (Sheets evaluates top-down, first match wins).
-    # We read the current count and delete them all in reverse order.
-    try:
-        sheet_meta = gws(
-            "sheets",
-            "spreadsheets",
-            "get",
-            "--params",
-            json.dumps(
-                {
-                    "spreadsheetId": sid,
-                    "fields": "sheets.conditionalFormats",
-                }
-            ),
-        )
-        if isinstance(sheet_meta, str):
-            sheet_meta = json.loads(sheet_meta)
-        existing_rules = sheet_meta["sheets"][0].get("conditionalFormats", [])
-        if existing_rules:
-            # Delete in reverse order so indices stay valid
-            for i in range(len(existing_rules) - 1, -1, -1):
-                requests.append(
-                    {
-                        "deleteConditionalFormatRule": {
-                            "sheetId": sheet_id,
-                            "index": i,
-                        }
-                    }
-                )
-            print(f"  Clearing {len(existing_rules)} stale conditional format rules...")
-    except Exception as e:
-        print(f"  Warning: could not read existing rules: {e}")
-
-    # ---- Freeze header row + column A ----
-    requests.append(
-        {
-            "updateSheetProperties": {
-                "properties": {
-                    "sheetId": sheet_id,
-                    "gridProperties": {
-                        "frozenRowCount": 1,
-                        "frozenColumnCount": 1,
+def _dropdown_requests(
+    preset: SheetPreset, headers: list[str], num_rows: int, sheet_id: int
+) -> list[dict]:
+    """ONE_OF_LIST data-validation dropdowns, resolved by header name."""
+    requests: list[dict] = []
+    for col_name, options in preset.dropdown_columns.items():
+        if col_name not in headers:
+            print(f"  Warning: dropdown column {col_name!r} not on sheet; skipping.")
+            continue
+        col = headers.index(col_name)
+        requests.append(
+            {
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
                     },
-                },
-                "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [{"userEnteredValue": o} for o in options],
+                        },
+                        "showCustomUi": True,
+                        "strict": False,
+                    },
+                }
             }
-        }
-    )
+        )
+    return requests
+
+
+def _weights_format_requests(
+    headers: list[str], num_rows: int, num_cols: int
+) -> list[dict]:
+    """Weights-sheet formatting (unchanged legacy behavior).
+
+    Column indices here are positional on purpose: they target the LIVE
+    weights sheet layout (which has reviewer-inserted columns H-J), exactly
+    as the pre-preset version of this script did. ``headers`` is unused.
+    """
+    sheet_id = 0
+    requests: list[dict] = []
 
     # ---- Header row formatting ----
     # Section A (cols 0-9, A-J: review columns): dark blue-gray bg, white text, bold
@@ -608,37 +680,6 @@ def apply_formatting(sid: str, num_rows: int, num_cols: int) -> None:
                     }
                 },
                 "fields": "userEnteredFormat.backgroundColor",
-            }
-        }
-    )
-
-    # ---- Status dropdown (col B, index 1) ----
-    requests.append(
-        {
-            "setDataValidation": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "endRowIndex": num_rows,
-                    "startColumnIndex": 1,
-                    "endColumnIndex": 2,
-                },
-                "rule": {
-                    "condition": {
-                        "type": "ONE_OF_LIST",
-                        "values": [
-                            {"userEnteredValue": "benchmarked"},
-                            {"userEnteredValue": "alias"},
-                            {"userEnteredValue": "excluded"},
-                            {"userEnteredValue": "free"},
-                            {"userEnteredValue": "blacklisted"},
-                            {"userEnteredValue": "blacklisted-by-reviewer"},
-                            {"userEnteredValue": "keep"},
-                        ],
-                    },
-                    "showCustomUi": True,
-                    "strict": False,
-                },
             }
         }
     )
@@ -796,6 +837,225 @@ def apply_formatting(sid: str, num_rows: int, num_cols: int) -> None:
             }
         }
     )
+    return requests
+
+
+def _cost_model_format_requests(
+    headers: list[str], num_rows: int, num_cols: int
+) -> list[dict]:
+    """Cost-model-sheet formatting; columns are resolved by header name."""
+    sheet_id = 0
+    requests: list[dict] = []
+
+    def col_of(name: str) -> int | None:
+        return headers.index(name) if name in headers else None
+
+    # ---- Header row: single dark section across all current columns ----
+    requests.append(
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": max(len(headers), num_cols),
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": _color(0.2, 0.3, 0.4),
+                        "textFormat": {
+                            "foregroundColor": _color(1, 1, 1),
+                            "bold": True,
+                            "fontSize": 10,
+                        },
+                    }
+                },
+                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat",
+            }
+        }
+    )
+
+    # ---- Annotation columns: light yellow "fill me in" cue ----
+    for name in _COST_MODEL_ANNOTATIONS:
+        col = col_of(name)
+        if col is None:
+            continue
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": _color(1.0, 0.98, 0.8),
+                        }
+                    },
+                    "fields": "userEnteredFormat.backgroundColor",
+                }
+            }
+        )
+
+    # ---- Conditional formatting: looks-right? verdicts ----
+    verdict_col = col_of("looks-right?")
+    if verdict_col is not None:
+        verdict_rules = [
+            ("yes", _color(0.72, 0.88, 0.72)),  # green
+            ("no", _color(0.95, 0.7, 0.65)),  # red
+            ("unsure", _color(1.0, 0.95, 0.6)),  # yellow
+        ]
+        for text, bg in verdict_rules:
+            requests.append(_text_eq_rule(sheet_id, verdict_col, num_rows, text, bg))
+
+    # ---- Column widths (by header name) ----
+    col_widths = {
+        "op": 190,
+        "module": 90,
+        "status": 100,
+        "category": 160,
+        "flop_cost_formula": 240,
+        "weight": 80,
+        "complex_factor": 110,
+        "dtype_rate_rule": 120,
+        "example_input": 130,
+        "raw_flop_cost": 110,
+        "raw_flop_cost_2x": 120,
+        "billed_int16": 100,
+        "billed_fp32": 100,
+        "billed_fp64": 100,
+        "billed_complex128": 130,
+        "complex_penalty": 120,
+        "notes": 380,
+        "numpy_range": 110,
+        "registry_ref": 320,
+        "cost_impl_ref": 320,
+        "looks-right?": 110,
+        "proposed-change": 260,
+        "reviewer-notes": 320,
+    }
+    for name, width in col_widths.items():
+        col = col_of(name)
+        if col is None:
+            continue
+        requests.append(
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": col,
+                        "endIndex": col + 1,
+                    },
+                    "properties": {"pixelSize": width},
+                    "fields": "pixelSize",
+                }
+            }
+        )
+
+    # ---- Wrap text on prose columns ----
+    for name in ("notes", "proposed-change", "reviewer-notes"):
+        col = col_of(name)
+        if col is None:
+            continue
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
+                    },
+                    "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
+                    "fields": "userEnteredFormat.wrapStrategy",
+                }
+            }
+        )
+
+    return requests
+
+
+def apply_formatting(
+    sid: str,
+    preset: SheetPreset,
+    headers: list[str],
+    num_rows: int,
+    num_cols: int,
+) -> None:
+    """Apply dropdowns and preset formatting to the data sheet.
+
+    ``headers`` is the header row actually written by ``upload_data`` (CSV
+    columns plus shipped-empty and preserved reviewer columns); dropdown
+    targets are resolved against it by name. ``num_rows``/``num_cols`` are
+    the uploaded CSV dimensions, used by preset format hooks for ranges.
+    """
+    print("Applying formatting...")
+    sheet_id = 0
+    requests = []
+
+    # ---- Clear ALL existing conditional formatting first ----
+    # Without this, rules accumulate across uploads and stale rules
+    # override the new ones (Sheets evaluates top-down, first match wins).
+    # We read the current count and delete them all in reverse order.
+    try:
+        sheet_meta = gws(
+            "sheets",
+            "spreadsheets",
+            "get",
+            "--params",
+            json.dumps(
+                {
+                    "spreadsheetId": sid,
+                    "fields": "sheets.conditionalFormats",
+                }
+            ),
+        )
+        if isinstance(sheet_meta, str):
+            sheet_meta = json.loads(sheet_meta)
+        existing_rules = sheet_meta["sheets"][0].get("conditionalFormats", [])
+        if existing_rules:
+            # Delete in reverse order so indices stay valid
+            for i in range(len(existing_rules) - 1, -1, -1):
+                requests.append(
+                    {
+                        "deleteConditionalFormatRule": {
+                            "sheetId": sheet_id,
+                            "index": i,
+                        }
+                    }
+                )
+            print(f"  Clearing {len(existing_rules)} stale conditional format rules...")
+    except Exception as e:
+        print(f"  Warning: could not read existing rules: {e}")
+
+    # ---- Freeze header row + key column ----
+    requests.append(
+        {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {
+                        "frozenRowCount": 1,
+                        "frozenColumnCount": 1,
+                    },
+                },
+                "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+            }
+        }
+    )
+
+    # ---- Dropdowns (from the preset, resolved by header name) ----
+    requests += _dropdown_requests(preset, headers, num_rows, sheet_id)
+
+    # ---- Preset-specific formatting (colors, widths, conditional rules) ----
+    if preset.format_hook is not None:
+        requests += preset.format_hook(headers, num_rows, num_cols)
 
     # ---- Send batch updates in chunks (avoid CLI arg length limits) ----
     CHUNK_SIZE = 10
@@ -813,10 +1073,8 @@ def apply_formatting(sid: str, num_rows: int, num_cols: int) -> None:
     print(f"  Formatting applied ({len(requests)} requests total).")
 
 
-def create_summary_sheet(sid: str, rows: list[list[str]]) -> None:
-    """Populate the Review Summary sheet with formulas."""
-    print("Creating summary sheet...")
-    header = rows[0]
+def _weights_summary_rows(rows: list[list[str]]) -> list[list[str]]:
+    """Build the weights Review Summary tab content (unchanged legacy)."""
     data_rows = rows[1:]
 
     # Build summary data
@@ -864,6 +1122,15 @@ def create_summary_sheet(sid: str, rows: list[list[str]]) -> None:
         ["5. Weight < 1.0 means cheaper than np.add per analytical FLOP", ""]
     )
     summary.append(["6. Weight > 1.0 means more expensive (e.g., sin=18.39)", ""])
+    return summary
+
+
+def create_summary_sheet(sid: str, rows: list[list[str]], preset: SheetPreset) -> None:
+    """Populate the Review Summary sheet, if the preset defines one."""
+    if preset.summary_builder is None:
+        return
+    print("Creating summary sheet...")
+    summary = preset.summary_builder(rows)
 
     gws(
         "sheets",
@@ -883,36 +1150,87 @@ def create_summary_sheet(sid: str, rows: list[list[str]]) -> None:
     print("  Summary sheet created.")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Upload weights CSV to Google Sheets")
+PRESETS: dict[str, SheetPreset] = {
+    "weights": SheetPreset(
+        title="flopscope FLOP Weight Calibration Review",
+        key_column="Operation",
+        dropdown_columns={
+            "Status": (
+                "benchmarked",
+                "alias",
+                "excluded",
+                "free",
+                "blacklisted",
+                "blacklisted-by-reviewer",
+                "keep",
+            ),
+        },
+        preserve_columns=_WEIGHTS_PRESERVE,
+        csv_path=REPO_ROOT / "src" / "flopscope" / "data" / "weights.csv",
+        format_hook=_weights_format_requests,
+        summary_builder=_weights_summary_rows,
+    ),
+    "cost-model": SheetPreset(
+        title="flopscope Cost Model Review",
+        key_column="op",
+        dropdown_columns={
+            "looks-right?": ("yes", "no", "unsure"),
+        },
+        preserve_columns=frozenset(_COST_MODEL_ANNOTATIONS),
+        csv_path=REPO_ROOT / "docs" / "reference" / "cost-model-sheet.csv",
+        ship_empty_columns=_COST_MODEL_ANNOTATIONS,
+        format_hook=_cost_model_format_requests,
+    ),
+}
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Upload a flopscope review CSV to Google Sheets"
+    )
+    parser.add_argument(
+        "--preset",
+        choices=sorted(PRESETS),
+        default="weights",
+        help="Which sheet preset to upload (default: weights)",
+    )
     parser.add_argument(
         "--csv",
         type=Path,
-        default=DEFAULT_CSV,
-        help=f"Path to weights CSV (default: {DEFAULT_CSV})",
+        default=None,
+        help="Override the preset's CSV path",
     )
     parser.add_argument(
         "--spreadsheet-id",
         type=str,
         default=None,
         help="Update an existing spreadsheet instead of creating a new one. "
-        "Reviewer-added columns are preserved and realigned by operation name.",
+        "Reviewer-added columns are preserved and realigned by the preset's "
+        "key column.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    rows = load_csv(args.csv)
-    print(f"Loaded {len(rows)} rows, {len(rows[0])} columns from {args.csv}")
+    preset = PRESETS[args.preset]
+    csv_path: Path = args.csv if args.csv is not None else preset.csv_path
+
+    rows = load_csv(csv_path)
+    rows = _append_ship_empty_columns(rows, preset.ship_empty_columns)
+    print(f"Loaded {len(rows)} rows, {len(rows[0])} columns from {csv_path}")
 
     if args.spreadsheet_id:
         sid = args.spreadsheet_id
         print(f"Updating existing spreadsheet: {sid}")
-        upload_data(sid, rows)
-        apply_formatting(sid, num_rows=len(rows), num_cols=len(rows[0]))
+        headers = upload_data(sid, rows, preset)
+        apply_formatting(
+            sid, preset, headers, num_rows=len(rows), num_cols=len(rows[0])
+        )
     else:
-        sid = create_spreadsheet()
-        upload_data(sid, rows)
-        apply_formatting(sid, num_rows=len(rows), num_cols=len(rows[0]))
-        create_summary_sheet(sid, rows)
+        sid = create_spreadsheet(preset)
+        headers = upload_data(sid, rows, preset)
+        apply_formatting(
+            sid, preset, headers, num_rows=len(rows), num_cols=len(rows[0])
+        )
+        create_summary_sheet(sid, rows, preset)
 
     url = f"https://docs.google.com/spreadsheets/d/{sid}"
     print(f"\nDone! Spreadsheet URL:\n  {url}")
