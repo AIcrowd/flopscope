@@ -78,6 +78,45 @@ def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     return max(dts, key=rate_for)
 
 
+_DEFAULT_INT = _np.dtype(_np.int_)
+_DEFAULT_UINT = _np.dtype(_np.uint)
+
+
+def sum_accumulator_dtype(a_dtype: _np.dtype) -> _np.dtype:
+    """numpy's accumulator dtype for a ``sum``/``prod``-style reduction with
+    ``dtype=None``.
+
+    numpy widens a narrow-integer or boolean reduction to the default platform
+    integer to avoid overflow (bool/int8-32 -> int64, uint8-32 -> uint64 on a
+    64-bit platform); floats and complex -- including float16 -- keep their own
+    dtype. Billing on the input dtype would charge such a reduction at the
+    narrow-integer rate even though numpy accumulates at 64-bit, a width
+    discount; billing on this accumulator dtype closes it. Keying the threshold
+    off the platform's own ``int_`` size keeps it correct where the default
+    integer is 32-bit.
+    """
+    kind, size = a_dtype.kind, a_dtype.itemsize
+    if kind == "b" or (kind == "i" and size < _DEFAULT_INT.itemsize):
+        return _DEFAULT_INT
+    if kind == "u" and size < _DEFAULT_UINT.itemsize:
+        return _DEFAULT_UINT
+    return a_dtype
+
+
+def mean_compute_dtype(a_dtype: _np.dtype) -> _np.dtype:
+    """numpy's compute dtype for ``mean``/``var``/``std`` with ``dtype=None``.
+
+    numpy evaluates the mean/variance of a boolean or integer array in
+    ``float64``; float and complex inputs keep their own dtype (so complex
+    variance still carries its complex factor). Billing on the input dtype
+    would charge an integer mean/variance at the integer rate even though the
+    arithmetic runs in float64.
+    """
+    if a_dtype.kind in "biu":
+        return _np.dtype(_np.float64)
+    return a_dtype
+
+
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
 # arithmetic is the base ufunc's, so they inherit its complex factor.
 _UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")

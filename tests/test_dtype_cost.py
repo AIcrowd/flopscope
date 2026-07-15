@@ -784,3 +784,70 @@ def test_asarray_charges_value_changing_cast_like_astype():
     assert _cost(lambda: fnp.asarray(a32, dtype=np.float64)) == 0  # lossless widen
     assert _cost(lambda: fnp.asarray(a64, dtype=np.int32)) == 200  # lossy, f64 rate
     assert _cost(lambda: fnp.asarray(a32, dtype=np.int32)) == 100  # lossy, f32 rate
+
+
+# ---------------------------------------------------------------------------
+# Review follow-up: numpy's implicit reduction/accumulator dtype (width path)
+# ---------------------------------------------------------------------------
+
+
+def test_integer_accumulating_reductions_bill_int64_accumulator():
+    # numpy widens a narrow-int sum/prod/cumsum to a 64-bit accumulator, so
+    # billing must too -- else int32 reductions ride at the 32-bit rate while
+    # numpy accumulates at 64-bit. Floats do NOT widen (float16 stays float16).
+    load_weights()
+    i32 = fnp.asarray(np.ones(1000, dtype=np.int32))
+    u32 = fnp.asarray(np.ones(1000, dtype=np.uint32))
+    f32 = fnp.asarray(np.ones(1000, dtype=np.float32))
+    f16 = fnp.asarray(np.ones(1000, dtype=np.float16))
+    for red in (fnp.sum, fnp.prod, fnp.cumsum, fnp.cumprod):
+        assert _cost(lambda r=red: r(i32)) == 2 * _cost(
+            lambda r=red: r(f32)
+        )  # int64 rate
+        assert _cost(lambda r=red: r(u32)) == 2 * _cost(
+            lambda r=red: r(f32)
+        )  # uint64 rate
+        assert _cost(lambda r=red: r(f16)) == _cost(lambda r=red: r(f32))  # no widening
+
+
+def test_extremum_and_index_reductions_do_not_widen():
+    # max/min do not promote (result is the input dtype); argmax/argmin return
+    # an int64 INDEX but the work is input-dtype comparisons -- neither should
+    # be billed at the int64 rate for an int32 input.
+    load_weights()
+    i32 = fnp.asarray(np.ones(1000, dtype=np.int32))
+    f32 = fnp.asarray(np.ones(1000, dtype=np.float32))
+    for red in (fnp.max, fnp.min, fnp.argmax, fnp.argmin):
+        assert _cost(lambda r=red: r(i32)) == _cost(
+            lambda r=red: r(f32)
+        )  # int32 rate 1.0
+
+
+def test_mean_variance_of_integers_bill_float64():
+    # mean/var/std of a bool/integer array are computed in float64 by numpy.
+    load_weights()
+    i32 = fnp.asarray(np.ones(1000, dtype=np.int32))
+    f32 = fnp.asarray(np.ones(1000, dtype=np.float32))
+    for red in (fnp.mean, fnp.var, fnp.std):
+        assert _cost(lambda r=red: r(i32)) == 2 * _cost(lambda r=red: r(f32))  # float64
+
+
+def test_complex_variance_keeps_complex_factor():
+    # A complex input keeps its own dtype through mean/var (not coerced to a
+    # real), so complex variance still carries the var complex factor (2.5).
+    load_weights()
+    c64 = fnp.asarray(np.ones(1000, dtype=np.complex64))
+    f32 = fnp.asarray(np.ones(1000, dtype=np.float32))
+    assert _cost(lambda: fnp.var(c64)) == int(2.5 * _cost(lambda: fnp.var(f32)))
+
+
+def test_scalar_rng_draw_bills_output_dtype():
+    # A size=None sampler draw returns a scalar; it must bill its output width,
+    # not fall through to dtype-neutral. It bills identically to a 1-element
+    # array draw (float64) and matches the array draw's float64 per-element
+    # rate -- under the old behavior the scalar was billed neutral (half).
+    load_weights()
+    scalar = _cost(lambda: fnp.random.default_rng(0).standard_normal())
+    size1 = _cost(lambda: fnp.random.default_rng(0).standard_normal(1))
+    arr = _cost(lambda: fnp.random.default_rng(0).standard_normal(1000))
+    assert scalar == size1 == arr // 1000

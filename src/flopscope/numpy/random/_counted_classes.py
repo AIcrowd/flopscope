@@ -70,6 +70,12 @@ def _make_counted_method(
             billing_dtypes: tuple = ()
         elif isinstance(result, _np.ndarray):
             billing_dtypes = (result.dtype,)
+        elif isinstance(result, (int, float, _np.integer, _np.floating)):
+            # size=None sampler draws return a python/numpy scalar (e.g.
+            # standard_normal() -> float64, integers() -> int64); bill its dtype
+            # so a scalar draw is not undercharged as dtype-neutral. Mirrors the
+            # module-level sampler wrapper.
+            billing_dtypes = (_np.dtype(type(result)),)
         else:
             billing_dtypes = ()
         with budget.deduct(

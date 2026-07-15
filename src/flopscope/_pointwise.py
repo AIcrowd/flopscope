@@ -15,7 +15,11 @@ from numpy.typing import ArrayLike
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
-from flopscope._dtype_billing import billing_operand
+from flopscope._dtype_billing import (
+    billing_operand,
+    mean_compute_dtype,
+    sum_accumulator_dtype,
+)
 from flopscope._flops import _ceil_log2
 from flopscope._flops import (
     analytical_pointwise_cost as pointwise_cost,
@@ -46,6 +50,26 @@ from flopscope.errors import (
     SymmetryError,
     UnsupportedFunctionError,
     _warn_symmetry_loss,
+)
+
+# Reductions that accumulate values (add/multiply family) and so inherit
+# numpy's integer-widening accumulator dtype when called with dtype=None.
+# Extremum (max/min), index (argmax/argmin) and boolean (all/any) reductions
+# are excluded: they do not widen, and an index output is int64 regardless of
+# the arithmetic precision.
+_INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
+    {
+        "sum",
+        "prod",
+        "cumsum",
+        "cumprod",
+        "cumulative_sum",
+        "cumulative_prod",
+        "nansum",
+        "nanprod",
+        "nancumsum",
+        "nancumprod",
+    }
 )
 
 # ---------------------------------------------------------------------------
@@ -1024,7 +1048,14 @@ def _counted_reduction(
             np_out_kwarg = out_for_np
             np_supports_out_for_call = supports_out
 
-        billing_dtypes: tuple = (a.dtype,)
+        # Accumulating reductions widen a narrow-integer input to numpy's
+        # default 64-bit accumulator; bill that, not the input dtype.
+        base_dtype = (
+            sum_accumulator_dtype(a.dtype)
+            if op_name in _INTEGER_ACCUMULATING_REDUCTIONS
+            else a.dtype
+        )
+        billing_dtypes: tuple = (base_dtype,)
         if kwargs.get("dtype") is not None:
             billing_dtypes += (_np.dtype(kwargs["dtype"]),)
         if isinstance(out, _np.ndarray):
@@ -1616,7 +1647,8 @@ def _counted_mean(np_func, op_name: str):
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
 
-        billing_dtypes: tuple = (a.dtype,)
+        # mean of a boolean/integer array is computed in float64 by numpy.
+        billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
         if dtype is not None:
             billing_dtypes += (_np.dtype(dtype),)
         if isinstance(out, _np.ndarray):
@@ -1696,7 +1728,8 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         )
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
-        billing_dtypes: tuple = (a.dtype,)
+        # var/std of a boolean/integer array is computed in float64 by numpy.
+        billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
         if dtype is not None:
             billing_dtypes += (_np.dtype(dtype),)
         if isinstance(out, _np.ndarray):
