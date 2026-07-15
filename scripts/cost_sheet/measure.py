@@ -91,11 +91,18 @@ _DTYPES = {
 }
 
 
-def measure_op(make, scalable: bool) -> dict:
-    """make(dtype, scale=1) -> zero-arg callable running the op on that input."""
-    raw = measure_raw(make(np.float32, 1))
-    raw2x = measure_raw(make(np.float32, 2)) if scalable else ""
-    site = capture_cost_site(make(np.float32, 1))
+def measure_op(make, scalable: bool, raw_dtype: str = "float32") -> dict:
+    """make(dtype, scale=1) -> zero-arg callable running the op on that input.
+
+    raw_dtype names the dtype for the RAW (and cost-site) passes -- float32 by
+    default, but integer-only ops (bitwise/shift/gcd) must measure at an
+    integer dtype or the raw pass itself would raise. The four billed columns
+    always honor their own dtypes (an op that rejects one records "raises").
+    """
+    rdt = getattr(np, raw_dtype)
+    raw = measure_raw(make(rdt, 1))
+    raw2x = measure_raw(make(rdt, 2)) if scalable else ""
+    site = capture_cost_site(make(rdt, 1))
     billed = {}
     for name, dt in _DTYPES.items():
         try:

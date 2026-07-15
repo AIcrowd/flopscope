@@ -43,13 +43,6 @@ CSV = REPO / "docs" / "reference" / "cost-model-sheet.csv"
 DT_CSV = REPO / "docs" / "reference" / "cost-model-dtype-rates.csv"
 HTML = REPO / "website" / "public" / "cost-model-sheet.html"
 
-_CHARGED = {
-    "counted_unary",
-    "counted_binary",
-    "counted_reduction",
-    "counted_custom",
-    "counted_random_method",
-}
 _SHA_RE = re.compile(r"blob/[0-9a-f]{40}/")
 
 
@@ -152,7 +145,9 @@ def build_rows() -> tuple[list[CostRow], list[str], list[tuple[str, str]]]:
                     missing.append(op)
                     base.update(example_input="(pending curation)", raw_flop_cost="")
                 else:
-                    m = measure.measure_op(spec.make, spec.scalable)
+                    m = measure.measure_op(
+                        spec.make, spec.scalable, raw_dtype=spec.raw_dtype
+                    )
                     impl = m["cost_impl"]
                     base.update(
                         example_input=spec.describe,

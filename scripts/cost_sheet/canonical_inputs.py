@@ -31,6 +31,10 @@ class InputSpec:
     describe: str
     make: Callable[..., Any]  # make(dtype, scale=1) -> zero-arg callable
     scalable: bool
+    # Dtype for the RAW/cost-site measurement passes. float32 for most ops;
+    # integer-only ops (bitwise/shift/gcd) must measure at an integer dtype.
+    # The four billed columns always honor their own dtypes regardless.
+    raw_dtype: str = "float32"
 
 
 def _arr(n: int, dt: Any) -> Any:
