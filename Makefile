@@ -16,7 +16,7 @@ UV    := uv run
 # Composite targets
 # ---------------------------------------------------------------------------
 .PHONY: ci
-ci: lint check-lock lint-commits typecheck test test-numpy-compat check-sync check-sync-versions docs-build  ## Run the full CI pipeline locally
+ci: lint check-lock lint-commits typecheck test test-numpy-compat check-sync check-sync-versions check-cost-sheet docs-build  ## Run the full CI pipeline locally
 
 # ---------------------------------------------------------------------------
 # Lint  (mirrors: CI → lint job)
@@ -107,6 +107,14 @@ docs-deploy:  ## Docs deploy is handled by CI on push to main
 check-sync:  ## Verify client is in sync with core library
 	$(UV) python scripts/sync_client.py --check
 	$(UV) pytest tests/test_client_server_parity.py tests/test_serialization_parity.py -v
+
+# ---------------------------------------------------------------------------
+.PHONY: cost-sheet check-cost-sheet
+cost-sheet:  ## Regenerate the cost-model sheet (CSV + HTML + dtype rates)
+	$(UV) python scripts/generate_cost_sheet.py
+
+check-cost-sheet:  ## Verify the committed cost-model sheet is not stale
+	$(UV) python scripts/generate_cost_sheet.py --check
 
 .PHONY: check-sync-versions
 check-sync-versions:  ## Verify all package versions are in lockstep
