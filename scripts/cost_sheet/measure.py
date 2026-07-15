@@ -74,3 +74,32 @@ def capture_cost_site(call) -> tuple[str, int] | None:
         if orig_da:
             _budget.BudgetContext.deduct_after = orig_da
     return hits[0] if hits else None
+
+
+import numpy as np
+
+_DTYPES = {
+    "int16": np.int16,
+    "float32": np.float32,
+    "float64": np.float64,
+    "complex128": np.complex128,
+}
+
+
+def measure_op(make, scalable: bool) -> dict:
+    """make(dtype, scale=1) -> zero-arg callable running the op on that input."""
+    raw = measure_raw(make(np.float32, 1))
+    raw2x = measure_raw(make(np.float32, 2)) if scalable else ""
+    site = capture_cost_site(make(np.float32, 1))
+    billed = {}
+    for name, dt in _DTYPES.items():
+        try:
+            billed[name] = measure_billed(make(dt, 1))
+        except Exception:
+            billed[name] = "raises"
+    return {
+        "raw_flop_cost": raw,
+        "raw_flop_cost_2x": raw2x,
+        "billed": billed,
+        "cost_impl": site,
+    }
