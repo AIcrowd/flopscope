@@ -68,3 +68,5 @@ website/.generated/
 website/public/api-data/
 # Generated from the single source docs/reference/cost-model.md (see render_cost_model_page).
 website/content/docs/understanding/flop-counting-model.mdx
+# Local curation work-lists (see scripts/cost_sheet/curation_worklist.py).
+scratch/
