@@ -3,7 +3,7 @@ import numpy as np
 import flopscope as f
 import flopscope.numpy as fnp
 from flopscope._registry import REGISTRY
-from scripts.cost_sheet.canonical_inputs import CANONICAL_INPUTS, resolve
+from scripts.cost_sheet.canonical_inputs import resolve
 from scripts.cost_sheet.measure import capture_cost_site
 
 # Known representatives, one per charged category. At this stage only the
@@ -45,12 +45,25 @@ def test_cost_site_attributes_to_the_op_not_input_construction():
         assert site != asarray_site, f"{cat}:{op} cost site landed on asarray"
 
 
-def test_uncovered_charged_op_resolves_to_none_not_raise():
-    # counted_custom has no category default, so any unseeded custom op is
-    # uncovered until the curation task fills the long tail.
-    op, entry = next(
-        (k, e)
+def test_unknown_op_resolves_to_none_not_raise():
+    # The resolver returns None (never raises) for an op it has no coverage
+    # for. Post-curation every real charged op IS covered, so probe with a
+    # synthetic registry entry instead of hunting for an uncovered real one.
+    assert resolve("not_a_real_op_xyz", {"category": "counted_custom"}) is None
+
+
+def test_every_charged_op_resolves_post_curation():
+    # Curation closed the long tail: every charged registry op resolves.
+    charged = {
+        "counted_unary",
+        "counted_binary",
+        "counted_reduction",
+        "counted_custom",
+        "counted_random_method",
+    }
+    unresolved = [
+        k
         for k, e in REGISTRY.items()
-        if e.get("category") == "counted_custom" and k not in CANONICAL_INPUTS
-    )
-    assert resolve(op, entry) is None, f"{op} should be uncovered at this stage"
+        if e.get("category") in charged and resolve(k, e) is None
+    ]
+    assert unresolved == [], f"uncovered charged ops: {unresolved}"

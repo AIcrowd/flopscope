@@ -17,8 +17,10 @@ to ``asarray``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -156,12 +158,51 @@ CANONICAL_INPUTS: dict[str, InputSpec] = {
 }
 
 
+# --- Layer 1.5: curated inputs (generated data, adversarially verified) ------
+# scripts/cost_sheet/curated_inputs.json is produced by the curation workflow:
+# per-op input_code snippets defining ``make(dt, s=1)``, each verified to
+# measure exactly its predicted raw cost at 1x AND 2x scale, deterministically,
+# with inputs built outside the returned callable. Loaded lazily and cached.
+
+_CURATED_PATH = Path(__file__).with_name("curated_inputs.json")
+_curated_cache: dict[str, InputSpec] = {}
+_curated_raw: dict[str, dict] = {}
+_curated_loaded = False
+
+
+def _load_curated() -> dict[str, dict]:
+    global _curated_loaded
+    if not _curated_loaded:
+        if _CURATED_PATH.exists():
+            _curated_raw.update(json.loads(_CURATED_PATH.read_text()))
+        _curated_loaded = True
+    return _curated_raw
+
+
+def curated_input(op: str) -> InputSpec | None:
+    if op in _curated_cache:
+        return _curated_cache[op]
+    entry = _load_curated().get(op)
+    if entry is None:
+        return None
+    ns: dict[str, Any] = {"np": np, "fnp": fnp}
+    exec(entry["input_code"], ns)  # noqa: S102 -- repo-internal generated data
+    spec = InputSpec(
+        entry["describe"], ns["make"], entry["scalable"], entry["raw_dtype"]
+    )
+    _curated_cache[op] = spec
+    return spec
+
+
 # --- Resolver ----------------------------------------------------------------
 
 
 def resolve(op: str, entry: dict) -> InputSpec | None:
     if op in CANONICAL_INPUTS:
         return CANONICAL_INPUTS[op]
+    c = curated_input(op)
+    if c is not None:
+        return c
     h = harvest_from_tests(op)
     if h is not None:
         return h
