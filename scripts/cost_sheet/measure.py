@@ -9,16 +9,19 @@ from flopscope._weights import load_weights, reset_weights
 
 REPO = Path(__file__).resolve().parents[2]
 _SRC = REPO / "src" / "flopscope"
-_BILLING = {"_budget.py", "_dtype_billing.py", "_accounting.py", "_flops.py"}
+_BILLING = {"_budget.py", "_dtype_billing.py", "accounting.py", "_flops.py"}
+
 
 def _run(call) -> int:
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
         call()
     return b.flops_used
 
+
 def measure_raw(call) -> int:
-    reset_weights()          # unit mode: weight=1, dtype_rate=1
+    reset_weights()  # unit mode: weight=1, dtype_rate=1
     return _run(call)
+
 
 def measure_billed(call) -> int | str:
     load_weights()
@@ -27,12 +30,14 @@ def measure_billed(call) -> int | str:
     finally:
         reset_weights()
 
+
 def _rel(fname: str) -> str | None:
     p = Path(fname).resolve()
     try:
         return str(p.relative_to(REPO))
     except ValueError:
         return None
+
 
 def capture_cost_site(call) -> tuple[str, int] | None:
     """Hook deduct/deduct_after; record the innermost flopscope-source frame
@@ -42,7 +47,7 @@ def capture_cost_site(call) -> tuple[str, int] | None:
     orig_da = getattr(_budget.BudgetContext, "deduct_after", None)
 
     def _record():
-        for fr in inspect.stack()[2:]:                 # skip _record + patched
+        for fr in inspect.stack()[2:]:  # skip _record + patched
             name = Path(fr.filename).name
             resolved = Path(fr.filename).resolve()
             if str(_SRC) in str(resolved) and name not in _BILLING:

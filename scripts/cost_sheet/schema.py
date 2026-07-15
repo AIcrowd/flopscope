@@ -1,28 +1,31 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, fields
+
 
 @dataclass(frozen=True)
 class CostRow:
     op: str
     module: str
-    status: str            # charged | free | blacklisted
+    status: str  # charged | free | blacklisted
     category: str
     flop_cost_formula: str
     weight: float
-    complex_factor: str    # number as str, "exact", or "illegal"
+    complex_factor: str  # number as str, "exact", or "illegal"
     dtype_rate_rule: str
     example_input: str
     raw_flop_cost: int
     raw_flop_cost_2x: str  # int or "" (non-scalable)
-    billed_int16: str      # int or "n/a"/"raises"
+    billed_int16: str  # int or "n/a"/"raises"
     billed_fp32: str
     billed_fp64: str
     billed_complex128: str
-    complex_penalty: str   # ratio like "8.0" or "—"
+    complex_penalty: str  # ratio like "8.0" or "—"
     notes: str
     numpy_range: str
-    registry_ref: str      # github permalink
-    cost_impl_ref: str     # github permalink
+    registry_ref: str  # github permalink
+    cost_impl_ref: str  # github permalink
+
 
 COLUMNS = [f.name for f in fields(CostRow)]
 
