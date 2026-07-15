@@ -13,6 +13,17 @@ def test_measure_raw_isolates_flop_cost():
     assert measure_raw(lambda: fnp.add(_a(np.float32), _a(np.float32))) == 1000
 
 
+def test_measure_raw_resets_production_weights():
+    # Discriminating isolation test: even with production weights already
+    # loaded, measure_raw must reset to unit mode. A float64 add is 1000 raw
+    # (unit), not 2000 (float64 dtype_rate 2.0) -- so this fails if the
+    # reset_weights() in measure_raw is removed.
+    from flopscope._weights import load_weights
+
+    load_weights()
+    assert measure_raw(lambda: fnp.add(_a(np.float64), _a(np.float64))) == 1000
+
+
 def test_measure_billed_applies_production_rates():
     # complex128 add -> 1000 * rate 2.0 * complex_factor 2.0 = 4000
     assert measure_billed(lambda: fnp.add(_a(np.complex128), _a(np.complex128))) == 4000
