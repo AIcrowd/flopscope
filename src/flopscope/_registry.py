@@ -2691,7 +2691,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 1.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
-        "notes": "numel(output) if replace; n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
+        "notes": "n = pool length along the sampled axis (`axis`, default 0). numel(output) if replace (+ CDF build 3n + ceil(log2(n)) binary search per draw when p given); n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
     },
     "random.Generator.dirichlet": {
         "category": "counted_random_method",

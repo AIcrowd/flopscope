@@ -578,6 +578,7 @@ def choice(a, size=None, replace=True, p=None):
         n = int(a)
     else:
         a_arr = _np.asarray(a)
+        # shape[0] is correct: the legacy API rejects multi-dim pools (no axis).
         n = a_arr.shape[0] if a_arr.ndim > 0 else 1
     if replace:
         out_size = _output_size(size=size)

@@ -94,6 +94,46 @@ def _shape_axis(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> i
     return 1
 
 
+def _choice_pool_size(args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
+    """Pool length n for choice: the extent of the dimension being sampled.
+
+    ``Generator.choice(a, size=None, replace=True, p=None, axis=0,
+    shuffle=True)`` samples along ``axis`` (5th positional), so n must be
+    the pool's extent along that axis, not ``shape[0]``. The legacy
+    signatures sharing this formula (``RandomState.choice`` and module-level
+    ``random.choice``) have no ``axis`` argument and require 1-D pools, so
+    the ``axis=0`` default keeps their billing exactly as before.
+
+    Mirrors ``_shape_axis``: ``int`` pool -> ``int(a)``; 0-D ndarray ->
+    ``int(a)``; ndarray -> ``shape[axis]``; ``__len__`` fallback for
+    non-ndarray sequences (axis-0 semantics -- numpy converts them anyway);
+    ``axis=None`` (not valid for numpy choice, handled defensively) -> numel.
+    Floors at 1.
+    """
+    a = args[0] if args else kwargs.get("a")
+    if a is None:
+        return 1
+    if isinstance(a, (int, _np.integer)):
+        return _builtins.max(int(a), 1)
+
+    axis = args[4] if len(args) >= 5 else kwargs.get("axis", 0)
+    if axis is None:
+        if isinstance(a, _np.ndarray):
+            return _builtins.max(int(a.size), 1)
+        if hasattr(a, "__len__"):
+            return _builtins.max(len(a), 1)
+        return 1
+
+    if isinstance(a, _np.ndarray):
+        if a.ndim == 0:
+            # 0-D scalar array; numpy choice treats as int(a)
+            return _builtins.max(int(a), 1)
+        return _builtins.max(int(a.shape[int(axis)]), 1)
+    if hasattr(a, "__len__"):
+        return _builtins.max(len(a), 1)
+    return 1
+
+
 def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
     # Generator.choice:    choice(a, size=None, replace=True, p=None, axis=0, shuffle=True)
     # RandomState.choice:  choice(a, size=None, replace=True, p=None)
@@ -110,32 +150,15 @@ def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
     if replace:
         base = _numel_output(args, kwargs, result)
         if p is not None:
-            # numpy builds a CDF over n-element pool: cumsum + normalise + final pass
-            # (3*n) then binary-searches each draw (size * ceil(log2(n))).
-            a = args[0] if args else kwargs.get("a")
-            if isinstance(a, (int, _np.integer)):
-                n = int(a)
-            elif isinstance(a, _np.ndarray):
-                n = int(a.shape[0]) if a.ndim > 0 else 1
-            elif hasattr(a, "__len__"):
-                n = len(a)  # pyright: ignore[reportArgumentType]  # guarded by hasattr
-            else:
-                n = 1
-            n = _builtins.max(n, 1)
+            # numpy builds a CDF over the n-element pool (n = extent along the
+            # sampled axis): cumsum + normalise + final pass (3*n) then
+            # binary-searches each draw (size * ceil(log2(n))).
+            n = _choice_pool_size(args, kwargs)
             draws = _builtins.max(base, 1)
             base += 3 * n + draws * _ceil_log2(n)
         return base
-    # replace=False: extract pop size n
-    a = args[0] if args else kwargs.get("a")
-    if isinstance(a, (int, _np.integer)):
-        n = int(a)
-    elif isinstance(a, _np.ndarray):
-        n = int(a.shape[0]) if a.ndim > 0 else 1
-    elif hasattr(a, "__len__"):
-        n = len(a)  # pyright: ignore[reportArgumentType]  # guarded by hasattr
-    else:
-        n = 1
-    n = _builtins.max(n, 1)
+    # replace=False: pool size n along the sampled axis
+    n = _choice_pool_size(args, kwargs)
     if p is None:
         # Fisher-Yates O(n): legacy RandomState.choice is permutation(pop)[:size];
         # Generator uses Floyd's/tail-shuffle (<= O(n)); n is a conservative ceiling.

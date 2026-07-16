@@ -94,6 +94,26 @@ class TestCountedGeneratorMethods:
         # charging n is a conservative ceiling matching random.permutation.
         assert budget.flops_used == n
 
+    def test_choice_2d_pool_bills_along_sampled_axis(self):
+        from flopscope.numpy.random._counted_classes import _CountedGenerator
+
+        pool_2d = np.arange(2000).reshape(2, 1000)
+        pool_1d = np.arange(1000)
+
+        rng = _CountedGenerator(np.random.default_rng(42).bit_generator)
+        with BudgetContext(flop_budget=10**6, quiet=True) as budget_2d:
+            rng.choice(pool_2d, size=5, replace=False, axis=1)
+
+        rng = _CountedGenerator(np.random.default_rng(42).bit_generator)
+        with BudgetContext(flop_budget=10**6, quiet=True) as budget_1d:
+            rng.choice(pool_1d, size=5, replace=False)
+
+        # Sampling along axis=1 of a (2, 1000) pool is 1000 candidates' worth
+        # of selection work — the same as a 1-D pool of length 1000, and NOT
+        # shape[0] = 2 (the pre-fix undercount).
+        assert budget_2d.flops_used == budget_1d.flops_used
+        assert budget_2d.flops_used >= 1000
+
     def test_shuffle_charges_input_size(self):
         from flopscope.numpy.random._counted_classes import _CountedGenerator
 

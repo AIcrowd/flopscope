@@ -6398,7 +6398,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.Generator.choice",
-      "notes": "numel(output) if replace; n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
+      "notes": "n = pool length along the sampled axis (`axis`, default 0). numel(output) if replace (+ CDF build 3n + ceil(log2(n)) binary search per draw when p given); n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
       "numpy_ref": "np.random.Generator.choice",
       "slug": "random-Generator-choice",
       "status": "supported",
