@@ -117,6 +117,40 @@ def mean_compute_dtype(a_dtype: _np.dtype) -> _np.dtype:
     return a_dtype
 
 
+def reduction_billing_dtype(
+    a_dtype: _np.dtype,
+    *,
+    explicit_dtype=None,
+    out_dtype: _np.dtype | None = None,
+    default_dtype: _np.dtype | None = None,
+) -> _np.dtype:
+    """Billed dtype for a reduction, mirroring numpy's accumulator resolution.
+
+    numpy computes a reduction in the explicit ``dtype=`` if given, else in
+    ``out``'s dtype if given (``ufunc.reduce``: the intermediate dtype
+    defaults to the output array's), else in the op family's implicit default
+    (integer-widening for sum/prod, float64 for integer mean/var). The billed
+    dtype follows that accumulator but is floored at the input's own rate:
+    an explicit narrow accumulator on wider data embeds a per-element lossy
+    downcast, which is priced like ``astype`` (heavier side), so
+    ``sum(f64, dtype=f32)`` bills float64 while ``sum(i32, dtype=i32)`` bills
+    int32. ``heavier_billing_dtype`` (max-by-rate) deliberately avoids
+    ``result_type``'s promotion to a third dtype.
+    """
+    if explicit_dtype is not None:
+        accumulator = _np.dtype(explicit_dtype)
+    elif out_dtype is not None:
+        accumulator = out_dtype
+    elif default_dtype is not None:
+        accumulator = default_dtype
+    else:
+        accumulator = a_dtype
+    candidates = [accumulator, a_dtype]
+    if out_dtype is not None:
+        candidates.append(out_dtype)
+    return heavier_billing_dtype(*candidates)
+
+
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
 # arithmetic is the base ufunc's, so they inherit its complex factor.
 _UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")
