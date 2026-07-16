@@ -971,3 +971,58 @@ def test_ufunc_reduce_protocol_bills_requested_accumulator():
             warnings.simplefilter("ignore", UserWarning)  # auto-route notice
             np.add.reduce(arr, dtype=np.int32)
         assert b.flops_used - before == 999  # int32 accumulator, rate 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 4: mean/variance factories + generic ufunc-method paths resolve their
+# accumulator dtype
+# ---------------------------------------------------------------------------
+
+
+def test_mean_variance_explicit_dtype_replaces_float64_default():
+    import flopscope.numpy as fnp
+
+    x = np.arange(1000, dtype=np.int32)
+    # Implicit float64 compute (existing behavior — pins Task 4 didn't break it).
+    assert _billed_with_production_rates(lambda: fnp.mean(x)) == (2000, "float64")
+    # Explicit float32 compute: numpy honors it; bill rate 1.0.
+    assert _billed_with_production_rates(
+        lambda: fnp.mean(x, dtype=np.float32)
+    ) == (1000, "float32")
+    billed, dt = _billed_with_production_rates(lambda: fnp.var(x, dtype=np.float32))
+    assert dt == "float32"
+    billed64, _ = _billed_with_production_rates(lambda: fnp.var(x))
+    assert billed * 2 == billed64  # rate 1.0 vs 2.0 on the same flop_cost
+
+
+def test_mean_positional_dtype_is_billed():
+    import flopscope.numpy as fnp
+
+    x = np.ones(1000, dtype=np.float32)
+    # np.mean(a, axis, dtype): positional dtype binds the wrapper's named param.
+    assert _billed_with_production_rates(lambda: fnp.mean(x, None, np.float64))[1] == "float64"
+
+
+def test_generic_ufunc_reduce_bills_requested_dtype():
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.ones(100, dtype=np.float32))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            np.subtract.reduce(arr, dtype=np.float64)
+        # 99 subtract steps... reduction_cost(100 elems) at f64 rate 2.0.
+        billed = b.flops_used - before
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b2:
+        load_weights()
+        arr2 = fnp.asarray(np.ones(100, dtype=np.float32))
+        before2 = b2.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            np.subtract.reduce(arr2)
+        baseline = b2.flops_used - before2
+    assert billed == 2 * baseline  # f64-requested accumulation bills 2x f32

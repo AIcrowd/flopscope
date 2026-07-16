@@ -799,9 +799,14 @@ def _counted_ufunc_reduce_generic(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype,)
-    if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            default_dtype=a.dtype,
+        ),
+    )
     with budget.deduct(
         f"{ufunc.__name__}.reduce",
         flop_cost=cost,
@@ -841,9 +846,14 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype,)
-    if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            default_dtype=a.dtype,
+        ),
+    )
     with budget.deduct(
         f"{ufunc.__name__}.accumulate",
         flop_cost=cost,
@@ -1666,12 +1676,16 @@ def _counted_mean(np_func, op_name: str):
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
 
-        # mean of a boolean/integer array is computed in float64 by numpy.
-        billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
-        if dtype is not None:
-            billing_dtypes += (_np.dtype(dtype),)
-        if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+        # numpy computes an integer mean in float64 unless an explicit dtype
+        # overrides the accumulator; bill that, floored at the input's rate.
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=mean_compute_dtype(a.dtype),
+            ),
+        )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1747,12 +1761,17 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         )
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
-        # var/std of a boolean/integer array is computed in float64 by numpy.
-        billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
-        if dtype is not None:
-            billing_dtypes += (_np.dtype(dtype),)
-        if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+        # numpy computes an integer var/std in float64 unless an explicit
+        # dtype overrides the accumulator; bill that, floored at the
+        # input's rate.
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=mean_compute_dtype(a.dtype),
+            ),
+        )
         with budget.deduct(
             op_name,
             flop_cost=cost,
