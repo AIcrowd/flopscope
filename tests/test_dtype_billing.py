@@ -244,3 +244,53 @@ def test_reduction_billing_dtype_floors_at_input_rate():
         np.dtype(np.int64), explicit_dtype=np.float32, out_dtype=f32
     )
     assert got == np.dtype(np.int64)
+
+
+def test_unary_float_loop_dtype_maps_ints_by_size():
+    from flopscope._dtype_billing import unary_float_loop_dtype as u
+
+    # numpy unary float-only ufuncs pick the same-size float loop:
+    # exp(int8)->float16, exp(int16)->float32, exp(int32/int64)->float64.
+    assert u(np.dtype(np.bool_)) == np.dtype(np.float16)
+    assert u(np.dtype(np.int8)) == np.dtype(np.float16)
+    assert u(np.dtype(np.uint8)) == np.dtype(np.float16)
+    assert u(np.dtype(np.int16)) == np.dtype(np.float32)
+    assert u(np.dtype(np.int32)) == np.dtype(np.float64)
+    assert u(np.dtype(np.int64)) == np.dtype(np.float64)
+    # floats and complex pass through untouched
+    assert u(np.dtype(np.float32)) == np.dtype(np.float32)
+    assert u(np.dtype(np.complex64)) == np.dtype(np.complex64)
+    # non-numeric kinds pass through (neutral billing handles them)
+    assert u(np.dtype("O")) == np.dtype("O")
+
+
+def test_binary_float_loop_dtype_maps_all_ints_to_f64():
+    from flopscope._dtype_billing import binary_float_loop_dtype as b
+
+    # binary float-only ufuncs have no int loops: divide(int8,int8)->float64.
+    for dt in (np.bool_, np.int8, np.int16, np.int32, np.int64, np.uint32):
+        assert b(np.dtype(dt)) == np.dtype(np.float64)
+    assert b(np.dtype(np.float32)) == np.dtype(np.float32)
+    assert b(np.dtype(np.complex128)) == np.dtype(np.complex128)
+
+
+def test_fft_billing_dtype():
+    from flopscope._dtype_billing import fft_billing_dtype as fbd
+
+    assert fbd(np.dtype(np.float16)) == np.dtype(np.complex64)
+    assert fbd(np.dtype(np.float32)) == np.dtype(np.complex64)
+    assert fbd(np.dtype(np.complex64)) == np.dtype(np.complex64)
+    for dt in (np.int8, np.int32, np.int64, np.float64, np.complex128):
+        assert fbd(np.dtype(dt)) == np.dtype(np.complex128)
+
+
+def test_linalg_compute_dtype_and_tuple_helper():
+    from flopscope._dtype_billing import linalg_billing_dtypes, linalg_compute_dtype
+
+    assert linalg_compute_dtype(np.dtype(np.int32)) == np.dtype(np.float64)
+    assert linalg_compute_dtype(np.dtype(np.float32)) == np.dtype(np.float32)
+    assert linalg_compute_dtype(np.dtype(np.complex64)) == np.dtype(np.complex64)
+    assert linalg_billing_dtypes(np.dtype(np.int64), np.dtype(np.int64)) == (
+        np.dtype(np.float64),
+    )
+    assert linalg_billing_dtypes(np.dtype(np.float32)) == (np.dtype(np.float32),)

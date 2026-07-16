@@ -151,6 +151,67 @@ def reduction_billing_dtype(
     return heavier_billing_dtype(*candidates)
 
 
+def unary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
+    """Compute dtype of a float-only UNARY ufunc (exp/sin/sqrt family).
+
+    numpy selects the same-size float loop for integer/bool inputs
+    (exp(int8) -> float16, exp(int16) -> float32, exp(int32/64) -> float64);
+    float and complex inputs keep their own loop. Billing the raw integer
+    dtype would charge int32 transcendentals at the 32-bit rate while the
+    arithmetic runs in float64.
+    """
+    if resolved.kind not in "biu":
+        return resolved
+    if resolved.itemsize <= 1:
+        return _np.dtype(_np.float16)
+    if resolved.itemsize == 2:
+        return _np.dtype(_np.float32)
+    return _np.dtype(_np.float64)
+
+
+def binary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
+    """Compute dtype of a float-only BINARY ufunc (divide/arctan2/hypot...).
+
+    Unlike the unary case, numpy resolves integer/bool operand pairs of a
+    binary float-only ufunc to the default float: divide(int8, int8) ->
+    float64. Float and complex inputs keep their own loop.
+    """
+    if resolved.kind in "biu":
+        return _np.dtype(_np.float64)
+    return resolved
+
+
+def fft_billing_dtype(input_dtype: _np.dtype) -> _np.dtype:
+    """Compute dtype of an FFT: the complex working precision.
+
+    Half-width inputs (float16/float32/complex64) run the complex64 path;
+    everything else — float64, complex128, and ALL integer inputs — runs
+    complex128. The complex-arithmetic structure is already priced into the
+    5N*log2(N) formulas (complex_factor 1.0), so the rate axis carries the
+    component width: complex64 bills 1.0, complex128 bills 2.0.
+    """
+    kind, size = input_dtype.kind, input_dtype.itemsize
+    if (kind == "f" and size <= 4) or (kind == "c" and size <= 8):
+        return _np.dtype(_np.complex64)
+    return _np.dtype(_np.complex128)
+
+
+def linalg_compute_dtype(resolved: _np.dtype) -> _np.dtype:
+    """Compute dtype of a LAPACK-backed linalg op.
+
+    numpy.linalg maps integer/bool inputs to float64 (its _commonType);
+    float32/float64/complex inputs keep their own LAPACK driver precision.
+    """
+    if resolved.kind in "biu":
+        return _np.dtype(_np.float64)
+    return resolved
+
+
+def linalg_billing_dtypes(*dtypes) -> tuple:
+    """dtypes= tuple for a LAPACK-backed deduct site: one resolved compute dtype."""
+    return (linalg_compute_dtype(_np.result_type(*dtypes)),)
+
+
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
 # arithmetic is the base ufunc's, so they inherit its complex factor.
 _UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")
