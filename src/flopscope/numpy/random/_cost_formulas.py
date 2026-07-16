@@ -208,4 +208,26 @@ COST_FORMULAS: dict[str, Callable[[tuple[Any, ...], dict[str, Any], Any], int]] 
     "sort_cost(n)": _sort_cost_formula,
     "choice_cost": _choice_cost,
     "multivariate_normal": _multivariate_normal_cost,
+    # --- curated exact-formula aliases (cost-model sheet) -------------
+    # The registry's cost_formula field now carries the curated exact
+    # formula text for each method; every such string resolves to the
+    # same callable as its canonical key above, so dispatch and billing
+    # are unchanged.
+    "length (the requested byte count; max(length, 1))": _length,
+    "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p given; replace=False: n if p is None else sort_cost(n); n = pool's leading-axis length (int a, len(a), or a.shape[0]) regardless of the axis kwarg. Canonical (replace=True, p=None): size": _choice_cost,
+    "numel(output) = prod(size)*len(alpha)": _numel_output,
+    "numel(output) = prod(size)*k, k = pvals.shape[-1] (= len(pvals) only for 1-D pvals); size=None: leading shape is the broadcast of shape(n) with pvals.shape[:-1]": _numel_output,
+    "numel(output) = prod(size)*len(colors)": _numel_output,
+    "26*d^3 + 2*N*d^2 + 16*N*d  (d = trailing output dim, N = numel(output)/d; SVD of dxd cov = svd_cost(d,d,vectors)=26*d^3, affine transform 2*N*d^2, N*d normal draws at 16/draw)": _multivariate_normal_cost,
+    "shape[axis] of x (default axis=0) for ndarray input; int input n -> n; non-ndarray sequences bill len(x) regardless of axis  (Fisher-Yates draws; axis=None is rejected by numpy)": _shape_axis,
+    "numel(input) for ndarray input; non-ndarray sequences bill len(x) (outer length); axis does not change the cost": _numel_input,
+    "shape[axis] (axis defaults to 0); i.e. one RNG draw per slice along the shuffled axis, regardless of slice width": _shape_axis,
+    "numel(output) (1 for a scalar size=None draw)": _numel_output,
+    "argument-dependent (choice_cost): replace=True, p=None -> numel(output); replace=True with p -> numel(output) + 3*n + numel(output)*ceil(log2(n)) (CDF build + per-draw binary search, n = pool size); replace=False, p=None -> n (Fisher-Yates); replace=False with p -> n*ceil(log2(n)) (sort_cost floor). Canonical input (replace=True, p=None, size=1000) -> 1000": _choice_cost,
+    "numel(output) = numel(size) * len(alpha)": _numel_output,
+    "numel(output) = prod(size) * len(pvals)": _numel_output,
+    "26*d^3 + 2*N*d^2 + 16*N*d, d = dim(mean), N = numel(output)/d (SVD factorization of the dxd covariance + affine transform + N*d standard-normal draws at 16/draw)": _multivariate_normal_cost,
+    "x.shape[0] (Fisher-Yates draws; int input n costs n; axis fixed at 0 -- RandomState has no axis kwarg)": _shape_axis,
+    "numel(output) = prod(dims)": _numel_output,
+    "shape[0]": _shape_axis,
 }

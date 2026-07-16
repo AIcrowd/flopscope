@@ -1025,7 +1025,14 @@ def cost_for_op(name: str, category: str) -> tuple[str, str]:
         from flopscope._registry import REGISTRY
 
         formula = REGISTRY.get(name, {}).get("cost_formula", "")
-        return COST_FORMULA_LABELS.get(formula, ("per-method", "varies"))
+        if formula in COST_FORMULA_LABELS:
+            return COST_FORMULA_LABELS[formula]
+        if formula:
+            # Curated exact-formula string (cost-model sheet): pass it through
+            # verbatim. No LaTeX form exists; the renderer falls back to the
+            # plain text when the latex field is empty.
+            return (formula, "")
+        return ("per-method", "varies")
     if name in CUSTOM_COSTS:
         return CUSTOM_COSTS[name]
     return CATEGORY_COST_LATEX.get(category, ("unknown", "unknown"))

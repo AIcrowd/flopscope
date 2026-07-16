@@ -103,25 +103,45 @@ class TestSpecificCostFormulaAssignments:
     def test_shuffle_uses_shape_axis(self):
         # First-principles: Fisher-Yates does shape[axis] RNG draws,
         # regardless of slice width. See issue #18 follow-up.
-        assert REGISTRY["random.Generator.shuffle"]["cost_formula"] == "shape[axis]"
-        assert REGISTRY["random.RandomState.shuffle"]["cost_formula"] == "shape[axis]"
+        # Pins the curated exact-formula strings (cost-model sheet); both
+        # resolve to the _shape_axis callable in COST_FORMULAS.
+        assert REGISTRY["random.Generator.shuffle"]["cost_formula"] == (
+            "shape[axis] (axis defaults to 0); i.e. one RNG draw per slice along the "
+            "shuffled axis, regardless of slice width"
+        )
+        assert REGISTRY["random.RandomState.shuffle"]["cost_formula"] == "shape[0]"
 
     def test_permutation_uses_shape_axis(self):
         # Same Fisher-Yates internals as shuffle.
-        assert REGISTRY["random.Generator.permutation"]["cost_formula"] == "shape[axis]"
-        assert (
-            REGISTRY["random.RandomState.permutation"]["cost_formula"] == "shape[axis]"
+        assert REGISTRY["random.Generator.permutation"]["cost_formula"] == (
+            "shape[axis] of x (default axis=0) for ndarray input; int input n -> n; "
+            "non-ndarray sequences bill len(x) regardless of axis  (Fisher-Yates draws; "
+            "axis=None is rejected by numpy)"
+        )
+        assert REGISTRY["random.RandomState.permutation"]["cost_formula"] == (
+            "x.shape[0] (Fisher-Yates draws; int input n costs n; axis fixed at 0 -- "
+            "RandomState has no axis kwarg)"
         )
 
     def test_permuted_uses_numel_input(self):
         # Genuinely numel: independent shuffle per slice along the axis.
-        assert REGISTRY["random.Generator.permuted"]["cost_formula"] == "numel(input)"
+        assert REGISTRY["random.Generator.permuted"]["cost_formula"] == (
+            "numel(input) for ndarray input; non-ndarray sequences bill len(x) (outer "
+            "length); axis does not change the cost"
+        )
 
     def test_bytes_uses_length(self):
-        assert REGISTRY["random.Generator.bytes"]["cost_formula"] == "length"
+        assert REGISTRY["random.Generator.bytes"]["cost_formula"] == (
+            "length (the requested byte count; max(length, 1))"
+        )
 
     def test_choice_uses_choice_cost(self):
-        assert REGISTRY["random.Generator.choice"]["cost_formula"] == "choice_cost"
+        assert REGISTRY["random.Generator.choice"]["cost_formula"] == (
+            "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p "
+            "given; replace=False: n if p is None else sort_cost(n); n = pool's "
+            "leading-axis length (int a, len(a), or a.shape[0]) regardless of the axis "
+            "kwarg. Canonical (replace=True, p=None): size"
+        )
 
     def test_standard_normal_uses_numel_output(self):
         assert (
