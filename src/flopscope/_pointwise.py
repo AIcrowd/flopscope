@@ -18,9 +18,13 @@ from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
     billing_operand,
+    binary_float_loop_dtype,
+    heavier_billing_dtype,
     mean_compute_dtype,
     reduction_billing_dtype,
+    resolve_billing_dtype,
     sum_accumulator_dtype,
+    unary_float_loop_dtype,
 )
 from flopscope._flops import _ceil_log2
 from flopscope._flops import (
@@ -73,6 +77,83 @@ _INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
         "nancumprod",
     }
 )
+
+# Float-only ufuncs: numpy has no integer loops for these, so integer/bool
+# inputs promote to a float compute dtype (same-size float for unary ops,
+# float64 for binary ops). Billing the raw input dtype would undercharge the
+# actual arithmetic width. Membership is derived from numpy loop resolution
+# (an op belongs iff an int32 input yields a float result); the compute-dtype
+# conformance sweep enforces it stays complete.
+#
+# Includes NumPy 2.x array-API spelling aliases (acos/acosh/asin/asinh/
+# atan/atanh/atan2 -- literally the same ufunc object as arccos/arccosh/
+# arcsin/arcsinh/arctan/arctanh/arctan2, `np.acos is np.arccos` etc.) since
+# flopscope wraps each spelling under its own op_name; omitting the alias
+# would leave it undercharged while its canonical twin was fixed. Also
+# includes ``rint`` (no integer loop at all, same size-mapped promotion as
+# the rest of the family) and ``ldexp`` (no all-integer loop; an int32/int32
+# call promotes its first operand the same size-mapped way -- a mixed
+# float32/int-exponent call is a separate, pre-existing, out-of-scope
+# overcount unrelated to this undercount fix; see task-6-report.md).
+_UNARY_FLOAT_LOOP_OPS = frozenset(
+    {
+        "acos",
+        "acosh",
+        "arccos",
+        "arccosh",
+        "arcsin",
+        "arcsinh",
+        "arctan",
+        "arctanh",
+        "asin",
+        "asinh",
+        "atan",
+        "atanh",
+        "cbrt",
+        "cos",
+        "cosh",
+        "deg2rad",
+        "degrees",
+        "exp",
+        "exp2",
+        "expm1",
+        "fabs",
+        "log",
+        "log1p",
+        "log2",
+        "log10",
+        "rad2deg",
+        "radians",
+        "rint",
+        "sin",
+        "sinh",
+        "spacing",
+        "sqrt",
+        "tan",
+        "tanh",
+    }
+)
+_BINARY_FLOAT_LOOP_OPS = frozenset(
+    {
+        "arctan2",
+        "atan2",
+        "copysign",
+        "divide",
+        "heaviside",
+        "hypot",
+        "ldexp",
+        "logaddexp",
+        "logaddexp2",
+        "nextafter",
+        "true_divide",
+    }
+)
+# float_power computes in float64 minimum even for float32 inputs. It is
+# deliberately NOT a member of _BINARY_FLOAT_LOOP_OPS: that set's resolver
+# (binary_float_loop_dtype) leaves float inputs unchanged, which would bill
+# float_power(f32, f32) at float32 -- wrong, since numpy always computes it
+# at float64 minimum regardless of input width.
+_BINARY_FLOAT64_MIN_OPS = frozenset({"float_power"})
 
 # ---------------------------------------------------------------------------
 # Signature helpers
@@ -402,6 +483,10 @@ def _counted_unary(np_func, op_name: str):
             billing_dtypes += (_np.dtype(kwargs["dtype"]),)
         if isinstance(out, _np.ndarray):
             billing_dtypes += (out.dtype,)
+        if op_name in _UNARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (unary_float_loop_dtype(resolved),)
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -566,6 +651,19 @@ def _counted_binary(np_func, op_name: str):
             billing_dtypes += (_np.dtype(kwargs["dtype"]),)
         if isinstance(out, _np.ndarray):
             billing_dtypes += (out.dtype,)
+        if op_name in _BINARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (binary_float_loop_dtype(resolved),)
+        elif op_name in _BINARY_FLOAT64_MIN_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None and resolved.kind != "c":
+                # complex float_power must keep resolving complex so its
+                # registry complex_factor (structure premium) is never
+                # silently discarded by folding into the real float64 floor.
+                billing_dtypes = (
+                    heavier_billing_dtype(resolved, _np.dtype(_np.float64)),
+                )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -710,6 +808,33 @@ def _counted_binary_multi(np_func, op_name: str):
 # ---------------------------------------------------------------------------
 
 
+def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype) -> _np.dtype:
+    """The physical loop/output dtype numpy resolves for ``ufunc`` on ``operand_dtypes``.
+
+    Shared by the four generic ufunc-method paths below (``outer`` /
+    ``reduce`` / ``accumulate`` / ``reduceat``) to bill a float-only ufunc's
+    actual compute dtype instead of its integer input dtype --
+    ``true_divide(int32, int32)`` runs entirely in float64; billing the raw
+    int32 label undercharges it 2x under production rates.
+
+    ``ufunc.resolve_dtypes`` asks numpy directly which loop it will select,
+    given the ``len(operand_dtypes)`` input dtypes and an unspecified (``None``)
+    output slot. On failure (``TypeError``/``ValueError`` -- the operand
+    combination has no valid loop for this ufunc) falls back to
+    ``np.result_type(*operand_dtypes)``, which recovers each call site's
+    pre-existing behavior exactly: ``reduce``/``accumulate``/``reduceat``
+    pass ``a.dtype`` twice (``result_type`` of a dtype with itself is
+    itself), and ``outer`` passes the two distinct operand dtypes
+    (``result_type`` is their common promoted dtype -- the same resolution
+    ``resolve_billing_dtype`` would have performed on the undifferentiated
+    tuple).
+    """
+    try:
+        return ufunc.resolve_dtypes((*operand_dtypes, None))[len(operand_dtypes)]
+    except (TypeError, ValueError):
+        return _np.result_type(*operand_dtypes)
+
+
 @_counted_wrapper
 def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     """Cost-tracked ``ufunc.outer(a, b)`` for any binary ufunc.
@@ -757,7 +882,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype, b.dtype)
+    billing_dtypes: tuple = (_ufunc_loop_dtype(ufunc, a.dtype, b.dtype),)
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -799,14 +924,11 @@ def _counted_ufunc_reduce_generic(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    try:
-        # The reduce/accumulate loop runs at the ufunc's own resolved loop
-        # dtype (true_divide(int32) -> float64, subtract(int32) -> int32,
-        # logical_* -> bool). add/multiply's extra integer widening never
-        # matters here: they are routed to sum/prod, not this generic path.
-        default_dtype = ufunc.resolve_dtypes((a.dtype, a.dtype, None))[2]
-    except (TypeError, ValueError):
-        default_dtype = a.dtype
+    # The reduce/accumulate loop runs at the ufunc's own resolved loop dtype
+    # (true_divide(int32) -> float64, subtract(int32) -> int32, logical_* ->
+    # bool). add/multiply's extra integer widening never matters here: they
+    # are routed to sum/prod, not this generic path.
+    default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
@@ -854,13 +976,10 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    try:
-        # Same loop resolution as the generic reduce path above: the
-        # accumulate loop runs at the ufunc's own resolved loop dtype
-        # (true_divide(int32) -> float64, subtract(int32) -> int32).
-        default_dtype = ufunc.resolve_dtypes((a.dtype, a.dtype, None))[2]
-    except (TypeError, ValueError):
-        default_dtype = a.dtype
+    # Same loop resolution as the generic reduce path above: the accumulate
+    # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
+    # -> float64, subtract(int32) -> int32).
+    default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
@@ -905,7 +1024,10 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     indices_stripped = (
         _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
     )
-    billing_dtypes: tuple = (a.dtype,)
+    # Same loop resolution as the generic reduce/accumulate paths: reduceat
+    # runs the ufunc's own resolved loop dtype (true_divide(int32) ->
+    # float64, subtract(int32) -> int32).
+    billing_dtypes: tuple = (_ufunc_loop_dtype(ufunc, a.dtype, a.dtype),)
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(

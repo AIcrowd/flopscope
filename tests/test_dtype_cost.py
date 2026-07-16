@@ -1057,3 +1057,119 @@ def test_float_only_ufunc_reduce_bills_its_float64_loop():
 def test_float_only_ufunc_accumulate_bills_its_float64_loop():
     assert _generic_ufunc_method_billed(lambda a: np.true_divide.accumulate(a)) == 198
     assert _generic_ufunc_method_billed(lambda a: np.subtract.accumulate(a)) == 99
+
+
+# ---------------------------------------------------------------------------
+# Task 6: elementwise wiring -- float-loop ufuncs bill their compute dtype
+# ---------------------------------------------------------------------------
+
+
+def test_int_transcendentals_bill_float64_compute():
+    import flopscope.numpy as fnp
+
+    x = np.arange(1, 1001, dtype=np.int32)
+    # exp weight is 16.0: 1000 * 16 * rate. Pre-fix rate 1.0 -> 16000.
+    assert _billed_with_production_rates(lambda: fnp.exp(x)) == (32000, "float64")
+    assert _billed_with_production_rates(lambda: fnp.sqrt(x))[1] == "float64"
+
+
+def test_int_divide_bills_float64_and_f32_stays_f32():
+    import flopscope.numpy as fnp
+
+    i = np.arange(1, 1001, dtype=np.int32)
+    g = np.ones(1000, dtype=np.float32)
+    assert _billed_with_production_rates(lambda: fnp.divide(i, i)) == (2000, "float64")
+    # f32-stays-f32 invariant: no blanket f64 fold.
+    assert _billed_with_production_rates(lambda: fnp.divide(g, g)) == (1000, "float32")
+
+
+def test_float_power_always_bills_float64_minimum():
+    import flopscope.numpy as fnp
+
+    g = np.ones(1000, dtype=np.float32)
+    billed, dt = _billed_with_production_rates(lambda: fnp.float_power(g, g))
+    assert dt == "float64"
+    billed64, _ = _billed_with_production_rates(
+        lambda: fnp.float_power(g.astype(np.float64), g.astype(np.float64))
+    )
+    assert billed == billed64
+
+
+def test_float_power_complex_keeps_registry_complex_factor():
+    # CORRECTED from the task brief's literal `..._still_fails_closed` name
+    # and assertion. Investigated first (see task-6-report.md): on this repo's
+    # numpy (2.2.6), np.float_power has native complex loops (its ``.types``
+    # includes ``'DD->D'``/``'GG->G'``) and the flopscope registry classifies
+    # float_power's complex_factor as 5.5 (a real transcendental factor, not
+    # "illegal") -- plain ``np.float_power(complex64_arr, complex64_arr)``
+    # computes and returns a value, it does not raise. A guard forcing a
+    # raise here would be a NEW error path for previously-working
+    # numpy-compatible code, contradicting this PR's own "no new error
+    # paths" design principle -- so this test pins the real (non-raising)
+    # behavior instead of the brief's mistaken premise.
+    #
+    # What DOES matter, and is the actual regression this test guards: the
+    # _BINARY_FLOAT64_MIN_OPS float64-floor coercion must special-case
+    # ``resolved.kind == "c"`` and leave complex operands alone. Without
+    # that guard, ``heavier_billing_dtype(complex64, float64)`` would pick
+    # float64 (its production rate 2.0 beats complex64's rate 1.0),
+    # silently discarding the complex dtype -- and the registry's 5.5
+    # complex_factor along with it -- undercounting float_power's true
+    # complex transcendental cost.
+    import flopscope.numpy as fnp
+
+    z = np.ones(4, dtype=np.complex64)
+    billed, dt = _billed_with_production_rates(lambda: fnp.float_power(z, z))
+    assert dt == "complex64"
+    # 4 elems * rate(complex64)=1.0 * complex_factor(float_power)=5.5 * weight=16.0
+    assert billed == 352
+
+
+def test_small_int_unary_keeps_rate_one():
+    import flopscope.numpy as fnp
+
+    x8 = np.ones(1000, dtype=np.int8)
+    # exp(int8) runs the float16 loop -> still rate 1.0; membership mapping
+    # must not overbill sub-32-bit inputs.
+    billed, dt = _billed_with_production_rates(lambda: fnp.exp(x8))
+    assert dt == "float16"
+    assert billed == 16000  # 1000 * weight 16 * rate 1.0
+
+
+# ---------------------------------------------------------------------------
+# Coordinator addendum: the same float-loop undercount class is live on
+# ufunc.outer / ufunc.reduceat (Task 4's Minor(8), folded into Task 6)
+# ---------------------------------------------------------------------------
+
+
+def test_outer_float_only_binary_bills_float64_and_int_stays_int():
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        a = fnp.asarray(np.ones(10, dtype=np.int32))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
+            np.hypot.outer(a, a)
+        billed_hypot = b.flops_used - before
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            np.add.outer(a, a)
+        billed_add = b.flops_used - before
+    assert billed_hypot == 200  # 10*10 dense numel * float64 rate 2.0
+    assert billed_add == 100  # 10*10 dense numel * int32 rate 1.0 (unaffected)
+
+
+def test_reduceat_float_only_binary_bills_float64_and_int_stays_int():
+    # true_divide has no integer loop (int32 reduceat runs entirely in
+    # float64); add keeps its native int32 loop -- contrast pins that the
+    # fix is narrowly scoped to float-only ufuncs, not a blanket widening.
+    assert (
+        _generic_ufunc_method_billed(lambda a: np.true_divide.reduceat(a, [0, 10]))
+        == 200
+    )
+    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 100
