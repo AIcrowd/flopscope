@@ -124,6 +124,15 @@ def compute_step_cost_from_joint_group(
     combined_sizes = tuple(sizes[lbl] for lbl in canonical_labels)
     M = size_aware_burnside(all_elems, combined_sizes)
 
+    if M == 0:
+        # Empty arithmetic domain: no multiply or accumulation events occur,
+        # and there is no first term to receive the free initial-copy
+        # correction. Without this guard ``M - num_v_orbits`` goes negative and,
+        # because this candidate competes in the min() selection, a zero-sized
+        # contraction would win with a negative charge. Mirror the zero-domain
+        # guard in ``aggregate_einsum``.
+        return 0
+
     v_elems = [_Perm(list(elem.array_form[:n_v])) for elem in all_elems]
     v_sizes = combined_sizes[:n_v]
     num_v_orbits = size_aware_burnside(v_elems, v_sizes)
