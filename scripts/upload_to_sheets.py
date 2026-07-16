@@ -51,6 +51,46 @@ _WEIGHTS_PRESERVE = frozenset(
 # not ship them; the uploader appends them as empty columns on upload.
 _COST_MODEL_ANNOTATIONS = ("looks-right?", "proposed-change", "reviewer-notes")
 
+# Presentation-only column order for the cost-model REVIEW sheet: identity
+# first, then the reviewer block where the eye lands, then the cost model,
+# its evidence, the billed matrix, and the provenance tail. Applied at load
+# time by the uploader; the committed CSV artifact keeps its own order.
+_COST_MODEL_COLUMN_ORDER = (
+    "op",
+    "module",
+    "status",
+    "category",
+    "looks-right?",
+    "proposed-change",
+    "reviewer-notes",
+    "weight",
+    "flop_cost_formula",
+    "complex_factor",
+    "dtype_rate_rule",
+    "example_input",
+    "raw_flop_cost",
+    "raw_flop_cost_2x",
+    "billed_int16",
+    "billed_fp32",
+    "billed_fp64",
+    "billed_complex128",
+    "complex_penalty",
+    "notes",
+    "numpy_range",
+    "registry_ref",
+    "cost_impl_ref",
+)
+
+# Billed-outcome columns: the per-dtype billing matrix plus the derived
+# penalty column. Cells hold numbers, "—" (not applicable) or "raises".
+_COST_MODEL_BILLED_COLUMNS = (
+    "billed_int16",
+    "billed_fp32",
+    "billed_fp64",
+    "billed_complex128",
+    "complex_penalty",
+)
+
 
 @dataclass(frozen=True)
 class SheetPreset:
@@ -72,6 +112,12 @@ class SheetPreset:
             time. Used when the CSV generator does not ship the reviewer
             columns itself; combined with preserve_columns this makes the
             sheet ship ready-to-annotate while keeping annotations safe.
+        column_order: Optional presentation-only column order, by header
+            name. Applied at load time (after ship_empty_columns) and to the
+            merged output on re-uploads, so fresh and update paths both land
+            in this order. Headers not named keep their relative order after
+            the named ones; named headers missing from the data are skipped.
+            The CSV artifact on disk is untouched.
         format_hook: Optional callable (headers, num_rows, num_cols,
             sheet_id) -> batchUpdate requests for preset-specific formatting
             (colors, widths, conditional rules), targeting the data tab
@@ -87,6 +133,7 @@ class SheetPreset:
     preserve_columns: frozenset[str]
     csv_path: Path
     ship_empty_columns: tuple[str, ...] = ()
+    column_order: tuple[str, ...] | None = None
     format_hook: Callable[[list[str], int, int, int], list[dict]] | None = None
     summary_builder: Callable[[list[list[str]]], list[list[str]]] | None = None
 
@@ -178,6 +225,39 @@ def _append_ship_empty_columns(
     new_header = header + missing
     width = len(new_header)
     return [new_header] + [row + [""] * (width - len(row)) for row in rows[1:]]
+
+
+def _reorder_columns(
+    rows: list[list[str]], column_order: Sequence[str] | None
+) -> list[list[str]]:
+    """Reorder columns by header name (a presentation-only permutation).
+
+    Headers named in ``column_order`` come first, in that order; names not
+    present in the data are skipped. All remaining headers follow, keeping
+    their existing relative order. Every row is permuted identically (short
+    rows are padded to header width first), so cell/column association is
+    preserved. No-op — returning ``rows`` unchanged — when ``column_order``
+    is falsy, ``rows`` is empty, or the data already matches the order.
+    """
+    if not column_order or not rows:
+        return rows
+    header = rows[0]
+    named: list[str] = []
+    for name in column_order:
+        if name in header and name not in named:
+            named.append(name)
+    named_set = set(column_order)
+    tail = [h for h in header if h not in named_set]
+    new_header = named + tail
+    if new_header == header:
+        return rows
+    perm = [header.index(h) for h in new_header]
+    width = len(header)
+    out: list[list[str]] = []
+    for row in rows:
+        padded = row + [""] * (width - len(row))
+        out.append([padded[i] for i in perm])
+    return out
 
 
 def create_spreadsheet(preset: SheetPreset) -> str:
@@ -316,8 +396,14 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
        shipped-empty reviewer placeholders).
     5. Write reviewer data back, aligned by key to match the new row order.
 
+    When the preset declares a ``column_order``, the merged output is
+    permuted into that order before upload, so update uploads land in the
+    declared layout even if the live sheet predates it. Reviewer alignment
+    is by header name + key, so annotations survive the permutation.
+
     Returns the header row actually written to the sheet.
     """
+    rows = _reorder_columns(rows, preset.column_order)
     csv_headers = rows[0]
     csv_data = rows[1:]
     print(f"Uploading {len(csv_data)} data rows ({len(csv_headers)} CSV columns)...")
@@ -458,7 +544,10 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
                     pass
         print(f"  Applied {applied} reviewer weights to Active Weight (locally).")
 
-    all_out = [out_headers] + out_data
+    # Permute the merged output into the preset's declared column order
+    # (no-op without one). Done after the merge so it applies uniformly to
+    # header and data rows — reviewer values stay glued to their columns.
+    all_out = _reorder_columns([out_headers] + out_data, preset.column_order)
     _upload_all_rows(sid, all_out)
 
     print(
@@ -467,7 +556,7 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
         f"{sum(1 for _, s in out_col_sources if s == 'reviewer')} reviewer), "
         f"aligned by {preset.key_column!r}."
     )
-    return out_headers
+    return all_out[0]
 
 
 def _upload_all_rows(sid: str, rows: list[list[str]]) -> None:
@@ -902,16 +991,89 @@ def _weights_format_requests(
     return requests
 
 
+def _contiguous_runs(indexes: Sequence[int]) -> list[tuple[int, int]]:
+    """Coalesce column indexes into sorted ``(start, end-exclusive)`` runs.
+
+    Purely an API-call reducer: adjacent columns share one repeatCell range
+    instead of one request each. Works on any index set, so name-resolved
+    groups stay correct even when the live sheet's columns are scattered.
+    """
+    runs: list[tuple[int, int]] = []
+    for i in sorted(set(indexes)):
+        if runs and runs[-1][1] == i:
+            runs[-1] = (runs[-1][0], i + 1)
+        else:
+            runs.append((i, i + 1))
+    return runs
+
+
+# Cost-model column groups: (headers, data-row fill, header-cell fill).
+# Pastel body under a saturated same-hue header; resolved by header NAME at
+# format time — never by position — so the styling follows the columns.
+_COST_MODEL_GROUPS: tuple[tuple[tuple[str, ...], dict, dict], ...] = (
+    # identity: what op is this row about
+    (
+        ("op", "module", "status", "category"),
+        _color(1.0, 1.0, 1.0),  # white
+        _color(0.85, 0.85, 0.87),  # light gray
+    ),
+    # reviewer block: the three columns reviewers fill in
+    (
+        _COST_MODEL_ANNOTATIONS,
+        _color(1.0, 0.973, 0.863),  # cornsilk (#FFF8DC)
+        _color(0.961, 0.843, 0.431),  # saturated gold (#F5D76E)
+    ),
+    # cost model: what we charge
+    (
+        ("weight", "flop_cost_formula", "complex_factor", "dtype_rate_rule"),
+        _color(0.875, 0.922, 0.973),  # light blue
+        _color(0.62, 0.77, 0.906),  # saturated blue
+    ),
+    # evidence: the measured example backing the formula
+    (
+        ("example_input", "raw_flop_cost", "raw_flop_cost_2x"),
+        _color(0.925, 0.906, 0.965),  # light lavender
+        _color(0.78, 0.729, 0.898),  # saturated lavender
+    ),
+    # billed matrix: per-dtype outcomes + derived penalty
+    (
+        _COST_MODEL_BILLED_COLUMNS,
+        _color(0.988, 0.925, 0.871),  # light peach
+        _color(0.953, 0.78, 0.62),  # saturated peach
+    ),
+    # provenance: prose + links back to the source
+    (
+        ("notes", "numpy_range", "registry_ref", "cost_impl_ref"),
+        _color(0.945, 0.945, 0.949),  # light gray
+        _color(0.82, 0.82, 0.839),  # saturated gray
+    ),
+)
+
+
 def _cost_model_format_requests(
     headers: list[str], num_rows: int, num_cols: int, sheet_id: int
 ) -> list[dict]:
-    """Cost-model-sheet formatting; columns are resolved by header name."""
+    """Cost-model-sheet formatting; columns are resolved by header name.
+
+    Reviewer-ergonomics layout: per-group background fills (pastel data
+    rows, saturated same-hue header cells), verdict/status/"raises"
+    conditional formats, per-column widths, wrapped prose columns, and a
+    basic filter over the whole data range so reviewers can sort/filter.
+    Headers missing from the sheet are skipped, so the hook stays correct
+    whatever order (or subset) the live sheet ends up with. The frozen
+    header row/key column comes from ``apply_formatting`` — not repeated
+    here.
+    """
     requests: list[dict] = []
+    full_width = max(len(headers), num_cols)
 
     def col_of(name: str) -> int | None:
         return headers.index(name) if name in headers else None
 
-    # ---- Header row: single dark section across all current columns ----
+    def cols_of(names: Sequence[str]) -> list[int]:
+        return [headers.index(n) for n in names if n in headers]
+
+    # ---- Header row: bold text (group hues below fill the backgrounds) ----
     requests.append(
         {
             "repeatCell": {
@@ -920,47 +1082,40 @@ def _cost_model_format_requests(
                     "startRowIndex": 0,
                     "endRowIndex": 1,
                     "startColumnIndex": 0,
-                    "endColumnIndex": max(len(headers), num_cols),
+                    "endColumnIndex": full_width,
                 },
                 "cell": {
                     "userEnteredFormat": {
-                        "backgroundColor": _color(0.2, 0.3, 0.4),
-                        "textFormat": {
-                            "foregroundColor": _color(1, 1, 1),
-                            "bold": True,
-                            "fontSize": 10,
-                        },
+                        "textFormat": {"bold": True, "fontSize": 10},
                     }
                 },
-                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat",
+                "fields": "userEnteredFormat.textFormat",
             }
         }
     )
 
-    # ---- Annotation columns: light yellow "fill me in" cue ----
-    for name in _COST_MODEL_ANNOTATIONS:
-        col = col_of(name)
-        if col is None:
-            continue
-        requests.append(
-            {
-                "repeatCell": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 1,
-                        "endRowIndex": num_rows,
-                        "startColumnIndex": col,
-                        "endColumnIndex": col + 1,
-                    },
-                    "cell": {
-                        "userEnteredFormat": {
-                            "backgroundColor": _color(1.0, 0.98, 0.8),
+    # ---- Group fills: pastel data rows + saturated header cells ----
+    for names, body_fill, header_fill in _COST_MODEL_GROUPS:
+        for start, end in _contiguous_runs(cols_of(names)):
+            for row_lo, row_hi, fill in (
+                (1, num_rows, body_fill),
+                (0, 1, header_fill),
+            ):
+                requests.append(
+                    {
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": row_lo,
+                                "endRowIndex": row_hi,
+                                "startColumnIndex": start,
+                                "endColumnIndex": end,
+                            },
+                            "cell": {"userEnteredFormat": {"backgroundColor": fill}},
+                            "fields": "userEnteredFormat.backgroundColor",
                         }
-                    },
-                    "fields": "userEnteredFormat.backgroundColor",
-                }
-            }
-        )
+                    }
+                )
 
     # ---- Conditional formatting: looks-right? verdicts ----
     verdict_col = col_of("looks-right?")
@@ -968,36 +1123,62 @@ def _cost_model_format_requests(
         verdict_rules = [
             ("yes", _color(0.72, 0.88, 0.72)),  # green
             ("no", _color(0.95, 0.7, 0.65)),  # red
-            ("unsure", _color(1.0, 0.95, 0.6)),  # yellow
+            ("unsure", _color(0.988, 0.867, 0.545)),  # amber
         ]
         for text, bg in verdict_rules:
             requests.append(_text_eq_rule(sheet_id, verdict_col, num_rows, text, bg))
 
+    # ---- Conditional formatting: status tiers ----
+    status_col = col_of("status")
+    if status_col is not None:
+        status_rules = [
+            ("free", _color(0.898, 0.957, 0.898)),  # pale green
+            ("blacklisted", _color(0.72, 0.72, 0.72)),  # mid gray
+        ]
+        for text, bg in status_rules:
+            requests.append(_text_eq_rule(sheet_id, status_col, num_rows, text, bg))
+
+    # ---- Conditional formatting: "raises" cells in the billed matrix ----
+    for name in _COST_MODEL_BILLED_COLUMNS:
+        col = col_of(name)
+        if col is None:
+            continue
+        requests.append(
+            _text_eq_rule(
+                sheet_id,
+                col,
+                num_rows,
+                "raises",
+                bg=_color(0.93, 0.93, 0.93),  # light gray
+                fg=_color(0.55, 0.55, 0.55),  # gray text
+            )
+        )
+
     # ---- Column widths (by header name) ----
     col_widths = {
-        "op": 190,
+        "op": 200,
         "module": 90,
         "status": 100,
-        "category": 160,
-        "flop_cost_formula": 240,
-        "weight": 80,
+        "category": 150,
+        "looks-right?": 160,
+        "proposed-change": 220,
+        "reviewer-notes": 220,
+        "weight": 110,
+        "flop_cost_formula": 420,
         "complex_factor": 110,
         "dtype_rate_rule": 120,
-        "example_input": 130,
+        "example_input": 220,
         "raw_flop_cost": 110,
-        "raw_flop_cost_2x": 120,
-        "billed_int16": 100,
-        "billed_fp32": 100,
-        "billed_fp64": 100,
+        "raw_flop_cost_2x": 110,
+        "billed_int16": 110,
+        "billed_fp32": 110,
+        "billed_fp64": 110,
         "billed_complex128": 130,
-        "complex_penalty": 120,
-        "notes": 380,
+        "complex_penalty": 110,
+        "notes": 320,
         "numpy_range": 110,
-        "registry_ref": 320,
-        "cost_impl_ref": 320,
-        "looks-right?": 110,
-        "proposed-change": 260,
-        "reviewer-notes": 320,
+        "registry_ref": 140,
+        "cost_impl_ref": 140,
     }
     for name, width in col_widths.items():
         col = col_of(name)
@@ -1038,6 +1219,25 @@ def _cost_model_format_requests(
                 }
             }
         )
+
+    # ---- Basic filter over the full data range (sort/filter per column) ----
+    # setBasicFilter replaces any existing basic filter, so re-uploads do
+    # not stack filters.
+    requests.append(
+        {
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": full_width,
+                    }
+                }
+            }
+        }
+    )
 
     return requests
 
@@ -1253,6 +1453,7 @@ PRESETS: dict[str, SheetPreset] = {
         preserve_columns=frozenset(_COST_MODEL_ANNOTATIONS),
         csv_path=REPO_ROOT / "docs" / "reference" / "cost-model-sheet.csv",
         ship_empty_columns=_COST_MODEL_ANNOTATIONS,
+        column_order=_COST_MODEL_COLUMN_ORDER,
         format_hook=_cost_model_format_requests,
     ),
 }
@@ -1289,6 +1490,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     rows = load_csv(csv_path)
     rows = _append_ship_empty_columns(rows, preset.ship_empty_columns)
+    rows = _reorder_columns(rows, preset.column_order)
     print(f"Loaded {len(rows)} rows, {len(rows[0])} columns from {csv_path}")
 
     if args.spreadsheet_id:
