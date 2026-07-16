@@ -19,6 +19,7 @@ from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
     billing_operand,
     mean_compute_dtype,
+    reduction_billing_dtype,
     sum_accumulator_dtype,
 )
 from flopscope._flops import _ceil_log2
@@ -994,6 +995,11 @@ def _counted_reduction(
         if "out" in _params and _params.index("out") >= _args_offset
         else None
     )
+    _dtype_args_idx = (
+        _params.index("dtype") - _args_offset
+        if "dtype" in _params and _params.index("dtype") >= _args_offset
+        else None
+    )
 
     @_counted_wrapper
     def wrapper(
@@ -1049,18 +1055,30 @@ def _counted_reduction(
             np_out_kwarg = out_for_np
             np_supports_out_for_call = supports_out
 
-        # Accumulating reductions widen a narrow-integer input to numpy's
-        # default 64-bit accumulator; bill that, not the input dtype.
-        base_dtype = (
+        # numpy computes the reduction in the explicit dtype= (positional or
+        # keyword) if given, else in out's dtype, else in the family default
+        # (integer-widening for the accumulating reductions). Bill that
+        # accumulator, floored at the input's own rate.
+        explicit_dtype = kwargs.get("dtype")
+        if (
+            explicit_dtype is None
+            and _dtype_args_idx is not None
+            and 0 <= _dtype_args_idx < len(args_list)
+        ):
+            explicit_dtype = args_list[_dtype_args_idx]
+        default_dtype = (
             sum_accumulator_dtype(a.dtype)
             if op_name in _INTEGER_ACCUMULATING_REDUCTIONS
             else a.dtype
         )
-        billing_dtypes: tuple = (base_dtype,)
-        if kwargs.get("dtype") is not None:
-            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
-        if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=explicit_dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=default_dtype,
+            ),
+        )
         with budget.deduct(
             op_name,
             flop_cost=cost,

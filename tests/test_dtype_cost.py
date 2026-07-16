@@ -897,3 +897,77 @@ def test_nonzero_complex_contractions_still_bill_exactly():
 
     z = np.ones((8, 8), dtype=np.complex128)
     assert _zero_work_charge(lambda: fnp.matmul(z, z)) == 7936
+
+
+# ---------------------------------------------------------------------------
+# Task 3: _counted_reduction bills the requested accumulator (positional + keyword)
+# ---------------------------------------------------------------------------
+
+
+def _billed_with_production_rates(fn) -> tuple[int, str | None]:
+    load_weights()
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        fn()
+        dt = b.op_log[-1].resolved_dtype if b.op_log else None
+        return b.flops_used, dt
+
+
+def test_explicit_narrow_reduction_dtype_bills_narrow():
+    import flopscope.numpy as fnp
+
+    x = np.arange(1000, dtype=np.int32)
+    # Implicit: numpy widens int32 sum to int64 -> rate 2.0 (existing behavior).
+    assert _billed_with_production_rates(lambda: fnp.sum(x)) == (1998, "int64")
+    # Explicit int32 accumulator: numpy runs 32-bit adds -> rate 1.0.
+    assert _billed_with_production_rates(
+        lambda: fnp.sum(x, dtype=np.int32)
+    ) == (999, "int32")
+
+
+def test_positional_reduction_dtype_is_billed():
+    import flopscope.numpy as fnp
+
+    x = np.ones(1000, dtype=np.float32)
+    # numpy signature sum(a, axis, dtype, ...): dtype passed positionally.
+    assert _billed_with_production_rates(
+        lambda: fnp.sum(x, None, np.float64)
+    ) == (1998, "float64")
+    # keyword spelling bills identically
+    assert _billed_with_production_rates(
+        lambda: fnp.sum(x, dtype=np.float64)
+    ) == (1998, "float64")
+
+
+def test_narrowing_reduction_dtype_floors_at_input_rate():
+    import flopscope.numpy as fnp
+
+    x = np.ones(1000, dtype=np.float64)
+    billed, dt = _billed_with_production_rates(lambda: fnp.sum(x, dtype=np.float32))
+    assert billed == 1998  # f64 floor: no narrow discount
+    assert dt == "float64"
+
+
+def test_reduction_out_dtype_sets_accumulator():
+    import flopscope.numpy as fnp
+
+    x = np.ones(1000, dtype=np.float32)
+    out = np.empty((), dtype=np.float64)
+    # ufunc.reduce semantics: out= without dtype= IS the accumulator dtype.
+    assert _billed_with_production_rates(
+        lambda: fnp.sum(x, out=out)
+    ) == (1998, "float64")
+
+
+def test_ufunc_reduce_protocol_bills_requested_accumulator():
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.arange(1000, dtype=np.int32))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
+            np.add.reduce(arr, dtype=np.int32)
+        assert b.flops_used - before == 999  # int32 accumulator, rate 1.0
