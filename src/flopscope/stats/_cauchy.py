@@ -24,11 +24,11 @@ class CauchyDistribution(ContinuousDistribution):
     Notes
     -----
     ``loc`` is the location parameter and ``scale`` is the half-width at
-    half-maximum. pdf deducts ``6 * numel(input)`` FLOPs (pure-arithmetic
+    half-maximum. pdf deducts ``6 * numel(broadcast(input, loc, scale))`` FLOPs (pure-arithmetic
     composite: z=(x-loc)/scale; 1/(pi*scale*(1+z^2)) = sub+div+mul+add+mul+div
     = 6 FLOPs/elem, weight 1.0; calibrated alpha 6.0). cdf deducts
-    ``20 * numel(input)`` FLOPs (composite: z(2) + arctan(16) + /pi(1) +
-    0.5+(1), FMA=2, weight 1.0). ppf deducts ``28 * numel(input)`` FLOPs
+    ``20 * numel(broadcast(input, loc, scale))`` FLOPs (composite: z(2) + arctan(16) + /pi(1) +
+    0.5+(1), FMA=2, weight 1.0). ppf deducts ``28 * numel(broadcast(input, loc, scale))`` FLOPs
     (composite: q-0.5(1) + pi*(1) + tan(16) + loc+scale*(2) + 3 where(8),
     FMA=2, weight 1.0).
     """
@@ -56,7 +56,7 @@ class CauchyDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.cauchy.pdf(x, loc, scale)``.
-        FLOP cost: ``6 * numel(x)`` (pure-arithmetic composite:
+        FLOP cost: ``6 * numel(broadcast(x, loc, scale))`` (pure-arithmetic composite:
         z=(x-loc)/scale; 1/(pi*scale*(1+z^2)) = 6 FLOPs/elem, weight 1.0).
 
         Examples
@@ -89,7 +89,7 @@ class CauchyDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.cauchy.cdf(x, loc, scale)``.
-        FLOP cost: ``20 * numel(x)`` (composite: z(2) + arctan(16) +
+        FLOP cost: ``20 * numel(broadcast(x, loc, scale))`` (composite: z(2) + arctan(16) +
         /pi(1) + 0.5+(1), FMA=2, weight 1.0).
 
         Examples
@@ -122,7 +122,7 @@ class CauchyDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.cauchy.ppf(q, loc, scale)``.
-        FLOP cost: ``28 * numel(q)`` (composite: q-0.5(1) + pi*(1) +
+        FLOP cost: ``28 * numel(broadcast(q, loc, scale))`` (composite: q-0.5(1) + pi*(1) +
         tan(16) + loc+scale*(2) + 3 where(8), FMA=2, weight 1.0).
 
         Examples

@@ -839,6 +839,9 @@ Source: `src/flopscope/numpy/random/_cost_formulas.py`.
 ### Stats
 
 Stats ops are composite (weight 1.0; all per-element factors in `flop_cost`).
+The billed element count is the numel of the broadcast of the input with the
+distribution parameters — array-valued `loc`/`scale` (or `a`/`b`/`s`) enlarge
+the output beyond `x` and are charged accordingly.
 
 | Op | flop_cost (per element) | basis |
 |---|---|---|

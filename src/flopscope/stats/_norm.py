@@ -57,7 +57,8 @@ class NormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.norm.pdf(x, loc, scale)``.
-        FLOP cost: ``27 * numel(x)`` (composite: exp + arithmetic, weight 1.0).
+        FLOP cost: ``27 * numel(broadcast(x, loc, scale))`` (composite:
+        exp + arithmetic, weight 1.0).
 
         Examples
         --------
@@ -89,7 +90,8 @@ class NormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.norm.cdf(x, loc, scale)``.
-        FLOP cost: ``48 * numel(x)`` (composite: erf rational approx + arithmetic, weight 1.0).
+        FLOP cost: ``48 * numel(broadcast(x, loc, scale))`` (composite:
+        erf rational approx + arithmetic, weight 1.0).
 
         Examples
         --------
@@ -121,7 +123,8 @@ class NormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.norm.ppf(q, loc, scale)``.
-        FLOP cost: ``83 * numel(q)`` (composite: Acklam rational ndtri + Newton polish with erf+exp, weight 1.0).
+        FLOP cost: ``83 * numel(broadcast(q, loc, scale))`` (composite:
+        Acklam rational ndtri + Newton polish with erf+exp, weight 1.0).
 
         Examples
         --------

@@ -31,12 +31,13 @@ class LognormDistribution(ContinuousDistribution):
     ``s`` is the shape parameter: the standard deviation of the underlying
     normal distribution. It is the first positional argument, ahead of
     ``loc`` and ``scale``, matching SciPy's ``lognorm`` signature. pdf
-    deducts ``62 * numel(input)`` FLOPs (composite: log + exp + arithmetic,
-    weight 1.0; audit-2 verified; calibration alpha 62.30). cdf deducts
-    ``70 * numel(input)`` FLOPs (composite: log + erf rational approx +
-    arithmetic, weight 1.0; audit-2 verified; calibration alpha 69.98). ppf
-    deducts ``106 * numel(input)`` FLOPs (composite: ndtri + exp, weight
-    1.0; audit-2 verified).
+    deducts ``62 * numel(broadcast(input, s, loc, scale))`` FLOPs (composite:
+    log + exp + arithmetic, weight 1.0; audit-2 verified; calibration alpha
+    62.30). cdf deducts ``70 * numel(broadcast(input, s, loc, scale))`` FLOPs
+    (composite: log + erf rational approx + arithmetic, weight 1.0; audit-2
+    verified; calibration alpha 69.98). ppf deducts
+    ``106 * numel(broadcast(input, s, loc, scale))`` FLOPs (composite:
+    ndtri + exp, weight 1.0; audit-2 verified).
     """
 
     def __init__(self):
@@ -64,8 +65,8 @@ class LognormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.lognorm.pdf(x, s, loc, scale)``.
-        FLOP cost: ``62 * numel(x)`` (composite: log + exp + arithmetic,
-        weight 1.0).
+        FLOP cost: ``62 * numel(broadcast(x, s, loc, scale))`` (composite:
+        log + exp + arithmetic, weight 1.0).
 
         Examples
         --------
@@ -99,8 +100,8 @@ class LognormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.lognorm.cdf(x, s, loc, scale)``.
-        FLOP cost: ``70 * numel(x)`` (composite: log + erf rational approx
-        + arithmetic, weight 1.0).
+        FLOP cost: ``70 * numel(broadcast(x, s, loc, scale))`` (composite:
+        log + erf rational approx + arithmetic, weight 1.0).
 
         Examples
         --------
@@ -134,7 +135,8 @@ class LognormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.lognorm.ppf(q, s, loc, scale)``.
-        FLOP cost: ``106 * numel(q)`` (composite: ndtri + exp, weight 1.0).
+        FLOP cost: ``106 * numel(broadcast(q, s, loc, scale))`` (composite:
+        ndtri + exp, weight 1.0).
 
         Examples
         --------

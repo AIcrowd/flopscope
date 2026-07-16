@@ -25,10 +25,10 @@ class LaplaceDistribution(ContinuousDistribution):
     -----
     ``loc`` is the center and ``scale`` controls the exponential decay away
     from that center. Per-method FLOP costs (weight 1.0): pdf deducts
-    ``22 * numel(input)`` (composite: |x-loc|(3) + exp(-z)(17) +
-    /(2*scale)(2), FMA=2), cdf deducts ``40 * numel(input)`` (composite:
+    ``22 * numel(broadcast(input, loc, scale))`` (composite: |x-loc|(3) + exp(-z)(17) +
+    /(2*scale)(2), FMA=2), cdf deducts ``40 * numel(broadcast(input, loc, scale))`` (composite:
     two eager exp branches + 8 arith/cmp/select; audit-2 verified), ppf
-    deducts ``51 * numel(input)`` (composite: two eager log branches + edge
+    deducts ``51 * numel(broadcast(input, loc, scale))`` (composite: two eager log branches + edge
     selects; audit-2 verified).
     """
 
@@ -55,7 +55,7 @@ class LaplaceDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.laplace.pdf(x, loc, scale)``.
-        FLOP cost: ``22 * numel(x)`` (composite: |x-loc|(3) + exp(-z)(17) +
+        FLOP cost: ``22 * numel(broadcast(x, loc, scale))`` (composite: |x-loc|(3) + exp(-z)(17) +
         /(2*scale)(2), FMA=2, weight 1.0).
 
         Examples
@@ -88,7 +88,7 @@ class LaplaceDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.laplace.cdf(x, loc, scale)``.
-        FLOP cost: ``40 * numel(x)`` (composite: two eager exp branches +
+        FLOP cost: ``40 * numel(broadcast(x, loc, scale))`` (composite: two eager exp branches +
         arithmetic/select, weight 1.0).
 
         Examples
@@ -121,7 +121,7 @@ class LaplaceDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.laplace.ppf(q, loc, scale)``.
-        FLOP cost: ``51 * numel(q)`` (composite: two eager log branches +
+        FLOP cost: ``51 * numel(broadcast(q, loc, scale))`` (composite: two eager log branches +
         edge selects, weight 1.0). Derivation (FMA=2): 2 eager log branches
         (2×16=32) + 19 arith/cmp/select (branch A: maximum+2 mul+add=4;
         branch B: sub+maximum+2 mul+sub=5; where#1 cmp+select=2; where#2
