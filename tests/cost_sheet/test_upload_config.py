@@ -3,8 +3,8 @@
 These tests assert preset configuration and pure row/column logic only.
 No real ``gws`` CLI invocation (and therefore no network) ever happens
 here: importing ``scripts.upload_to_sheets`` must be side-effect free, and
-the one test that drives ``upload_data`` does so against an in-memory
-``gws`` stub.
+the tests that drive ``upload_data`` / ``apply_formatting`` do so against
+an in-memory ``gws`` stub.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import scripts.upload_to_sheets as upload_mod
 from scripts.upload_to_sheets import (
     _COST_MODEL_BILLED_COLUMNS,
     _COST_MODEL_GROUPS,
+    _NOTE_MAX_LEN,
     PRESETS,
     SheetPreset,
     _append_ship_empty_columns,
@@ -26,7 +27,9 @@ from scripts.upload_to_sheets import (
     _cost_model_format_requests,
     _dropdown_requests,
     _find_reviewer_columns,
+    _note_tooltip_requests,
     _reorder_columns,
+    apply_formatting,
     upload_data,
 )
 
@@ -190,14 +193,20 @@ def test_contiguous_runs_coalesce() -> None:
 
 
 class _FakeGws:
-    """In-memory stand-in for the gws CLI wrapper used by upload_data."""
+    """In-memory stand-in for the gws wrapper (upload_data/apply_formatting)."""
 
     def __init__(self, sheet_rows: list[list[str]]) -> None:
         self.sheet_rows = sheet_rows
         self.uploaded: list[list[str]] = []
+        self.batch_requests: list[dict] = []
         self.cleared = False
 
     def __call__(self, *args: str, json_body: dict | None = None) -> dict:
+        if "batchUpdate" in args and json_body is not None:
+            # apply_formatting sends request chunks; concatenating them
+            # reconstructs the full formatting batch.
+            self.batch_requests.extend(json_body["requests"])
+            return {}
         if "get" in args:
             return {"values": self.sheet_rows}
         if "clear" in args:
@@ -249,9 +258,12 @@ def test_reviewer_annotations_survive_reorder(
     rows = _append_ship_empty_columns(rows, preset.ship_empty_columns)
     rows = _reorder_columns(rows, preset.column_order)
 
-    headers = upload_data("sheet-id", rows, preset)
+    uploaded = upload_data("sheet-id", rows, preset)
+    headers = uploaded[0]
 
     assert fake.cleared
+    # upload_data returns the exact grid it wrote (header row first).
+    assert uploaded == fake.uploaded
     # Named columns lead; unnamed CSV column ("notes") and the reviewer's
     # own sheet-only column ("scratch") follow, keeping relative order.
     assert headers == ["op", "looks-right?", "weight", "notes", "scratch"]
@@ -432,7 +444,8 @@ def test_reupload_restores_canonical_column_lost_to_drag_copy(
     fake = _FakeGws(sheet)
     monkeypatch.setattr(upload_mod, "gws", fake)
 
-    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add", "new"]), p)
+    ops = ["abs", "add", "new"]
+    headers = upload_data("sheet-id", _canonical_upload_rows(ops), p)[0]
 
     assert headers == canonical
     assert fake.uploaded[0] == canonical
@@ -474,7 +487,7 @@ def test_reupload_ships_annotation_columns_missing_from_live_sheet(
     fake = _FakeGws(sheet)
     monkeypatch.setattr(upload_mod, "gws", fake)
 
-    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)
+    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)[0]
 
     assert headers == canonical
     assert fake.uploaded[0] == canonical
@@ -507,7 +520,7 @@ def test_duplicate_reviewer_extra_column_keeps_first_and_warns(
     fake = _FakeGws(sheet)
     monkeypatch.setattr(upload_mod, "gws", fake)
 
-    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)
+    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)[0]
 
     # Canonical block leads in canonical order; the reviewer's extra column
     # survives exactly once, appended after it.
@@ -535,3 +548,162 @@ def test_dropdown_warning_kept_for_unknown_configured_columns(
     )
     assert _dropdown_requests(p, ["op", "weight"], num_rows=2, sheet_id=0) == []
     assert "dropdown column 'ghost' not on sheet" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Hover tooltips: the `notes` column mirrored as cell notes on the op column.
+# ---------------------------------------------------------------------------
+
+
+def test_note_tooltips_preset_config() -> None:
+    """cost-model mirrors `notes` onto `op` as hover notes; weights has none."""
+    assert PRESETS["cost-model"].note_tooltips == {"op": "notes"}
+    assert PRESETS["weights"].note_tooltips == {}
+    # An empty mapping builds no requests at all (weights stays untouched).
+    weights = PRESETS["weights"]
+    assert _note_tooltip_requests(weights, ["Operation"], [["add"]], sheet_id=0) == []
+
+
+def test_note_tooltip_request_shape_on_shuffled_headers() -> None:
+    """Exactly one updateCells on the op column, every row noted, fields=note."""
+    p = PRESETS["cost-model"]
+    headers = list(_REVIEW_LAYOUT)
+    random.Random(20260714).shuffle(headers)  # deterministic scramble
+    assert headers != list(_REVIEW_LAYOUT)
+
+    def row(op: str, note: str) -> list[str]:
+        vals = {h: f"{op}/{h}" for h in headers}
+        vals.update({"op": op, "notes": note})
+        return [vals[h] for h in headers]
+
+    data = [row("abs", "grad-safe"), row("add", ""), row("mul", "FMA=2")]
+    reqs = _note_tooltip_requests(p, headers, data, sheet_id=777)
+
+    assert len(reqs) == 1
+    upd = reqs[0]["updateCells"]
+    assert upd["fields"] == "note"
+    op_col = headers.index("op")
+    assert upd["range"] == {
+        "sheetId": 777,
+        "startRowIndex": 1,  # 3 data rows live on sheet rows 2..4
+        "endRowIndex": 4,
+        "startColumnIndex": op_col,
+        "endColumnIndex": op_col + 1,
+    }
+    # EVERY data row gets a note entry; the empty source cell writes an
+    # empty note, clearing a stale note left when rows shifted.
+    assert [r["values"][0]["note"] for r in upd["rows"]] == ["grad-safe", "", "FMA=2"]
+    assert all(len(r["values"]) == 1 for r in upd["rows"])
+
+
+def test_note_text_pairs_with_same_row_op_after_merge_reorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Notes read the FINAL uploaded grid: text pairs with its row's op.
+
+    The live sheet holds the ops in a different row order plus a reviewer
+    extra column (shifting the tail); the CSV adds a new op. Note requests
+    built from upload_data's returned grid must pair every op with ITS OWN
+    row's `notes` text, in the row order actually on the wire.
+    """
+    p = PRESETS["cost-model"]
+    canonical = list(_REVIEW_LAYOUT)
+    live = canonical + ["scratch"]
+
+    def live_row(op: str) -> list[str]:
+        vals = {h: f"stale-{op}/{h}" for h in canonical}
+        vals["op"] = op
+        return [vals[h] for h in canonical] + [f"scratch-{op}"]
+
+    sheet = [live, live_row("add"), live_row("abs")]  # reversed vs the CSV
+    fake = _FakeGws(sheet)
+    monkeypatch.setattr(upload_mod, "gws", fake)
+
+    ops = ["abs", "add", "new"]
+    uploaded = upload_data("sheet-id", _canonical_upload_rows(ops), p)
+    headers, data = uploaded[0], uploaded[1:]
+    # The returned grid IS the grid on the wire, reviewer extras included.
+    assert [headers] + data == fake.uploaded
+    assert headers == canonical + ["scratch"]
+
+    reqs = _note_tooltip_requests(p, headers, data, sheet_id=5)
+    assert len(reqs) == 1
+    upd = reqs[0]["updateCells"]
+    op_col = headers.index("op")
+    assert upd["range"]["startColumnIndex"] == op_col
+    assert upd["range"]["endRowIndex"] == 1 + len(data)
+    # Row-aligned: each note is the SAME row's notes cell ("<op>/notes").
+    for note_row, data_row in zip(upd["rows"], data, strict=True):
+        assert note_row["values"][0]["note"] == f"{data_row[op_col]}/notes"
+    # And the final row order is the CSV's, not the live sheet's.
+    assert [r[op_col] for r in data] == ops
+
+
+def test_note_tooltip_truncates_absurdly_long_notes() -> None:
+    """Defensive cap: a pathological source cell is cut at _NOTE_MAX_LEN."""
+    p = PRESETS["cost-model"]
+    headers = ["op", "notes"]
+    long_note = "y" + "x" * (_NOTE_MAX_LEN + 500)
+    reqs = _note_tooltip_requests(p, headers, [["abs", long_note]], sheet_id=0)
+    note = reqs[0]["updateCells"]["rows"][0]["values"][0]["note"]
+    assert note == long_note[:_NOTE_MAX_LEN]
+    assert len(note) == _NOTE_MAX_LEN == 2000
+
+
+def test_note_tooltip_missing_column_warns_and_skips(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A tooltip pair whose column is missing warns and builds nothing."""
+    p = SheetPreset(
+        title="t",
+        key_column="op",
+        dropdown_columns={},
+        preserve_columns=frozenset(),
+        csv_path=Path("unused.csv"),
+        note_tooltips={"op": "ghost"},
+    )
+    assert _note_tooltip_requests(p, ["op", "weight"], [["add", "1.0"]], 0) == []
+    assert "tooltip column(s) ['ghost'] not on sheet" in capsys.readouterr().out
+
+
+def test_apply_formatting_sends_notes_in_the_batch_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The note request rides the same chunked batchUpdate send as formatting."""
+    p = PRESETS["cost-model"]
+    headers = list(_REVIEW_LAYOUT)
+
+    def row(op: str) -> list[str]:
+        return [op if h == "op" else f"{op}/{h}" for h in headers]
+
+    data = [row("abs"), row("add")]
+    fake = _FakeGws([])
+    monkeypatch.setattr(upload_mod, "gws", fake)
+
+    apply_formatting(
+        "sheet-id",
+        p,
+        headers,
+        num_rows=len(data) + 1,
+        num_cols=len(headers),
+        sheet_id=42,
+        data_rows=data,
+    )
+
+    notes = [r["updateCells"] for r in fake.batch_requests if "updateCells" in r]
+    assert len(notes) == 1
+    assert notes[0]["fields"] == "note"
+    assert notes[0]["range"] == {
+        "sheetId": 42,
+        "startRowIndex": 1,
+        "endRowIndex": 3,
+        "startColumnIndex": headers.index("op"),
+        "endColumnIndex": headers.index("op") + 1,
+    }
+    assert [r["values"][0]["note"] for r in notes[0]["rows"]] == [
+        "abs/notes",
+        "add/notes",
+    ]
+    # The rest of the pipeline still rode along in the same batch send.
+    assert any("setDataValidation" in r for r in fake.batch_requests)
+    assert any("setBasicFilter" in r for r in fake.batch_requests)

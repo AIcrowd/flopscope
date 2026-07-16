@@ -28,7 +28,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +120,12 @@ class SheetPreset:
             in this order. Headers not named keep their relative order after
             the named ones; named headers missing from the data are skipped.
             The CSV artifact on disk is untouched.
+        note_tooltips: Mapping of target header -> source header. On every
+            data row, the SOURCE column's cell text is written as the cell
+            note (Sheets' native hover tooltip) on that row's TARGET-column
+            cell — e.g. hovering an op name shows the row's ``notes`` prose
+            without scrolling. Columns are resolved by header name on the
+            final uploaded layout; presentation-only, values untouched.
         format_hook: Optional callable (headers, num_rows, num_cols,
             sheet_id) -> batchUpdate requests for preset-specific formatting
             (colors, widths, conditional rules), targeting the data tab
@@ -136,6 +142,7 @@ class SheetPreset:
     csv_path: Path
     ship_empty_columns: tuple[str, ...] = ()
     column_order: tuple[str, ...] | None = None
+    note_tooltips: dict[str, str] = field(default_factory=dict)
     format_hook: Callable[[list[str], int, int, int], list[dict]] | None = None
     summary_builder: Callable[[list[list[str]]], list[list[str]]] | None = None
 
@@ -420,7 +427,9 @@ def _dedupe_headers(
     return names, indices
 
 
-def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[str]:
+def upload_data(
+    sid: str, rows: list[list[str]], preset: SheetPreset
+) -> list[list[str]]:
     """Upload CSV data to the data sheet, preserving reviewer-added columns.
 
     Algorithm:
@@ -444,7 +453,10 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
     declared layout even if the live sheet predates it. Reviewer alignment
     is by header name + key, so annotations survive the permutation.
 
-    Returns the header row actually written to the sheet.
+    Returns the full grid actually written to the sheet — header row first,
+    then every data row in final order. Downstream row-aligned presentation
+    (e.g. ``note_tooltips``) must read THIS grid, never the input CSV rows,
+    so it tracks the merged, reordered upload.
     """
     rows = _reorder_columns(rows, preset.column_order)
     csv_headers = rows[0]
@@ -457,7 +469,7 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
     if not sheet_headers:
         print("  Fresh sheet, uploading all columns...")
         _upload_all_rows(sid, rows)
-        return list(csv_headers)
+        return rows
 
     # --- Step 2: Identify reviewer columns ---
     # Work on a de-duplicated view of the live header row (first occurrence
@@ -614,7 +626,7 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
         f"{sum(1 for _, s in out_col_sources if s == 'reviewer')} reviewer), "
         f"aligned by {preset.key_column!r}."
     )
-    return all_out[0]
+    return all_out
 
 
 def _upload_all_rows(sid: str, rows: list[list[str]]) -> None:
@@ -803,6 +815,63 @@ def _dropdown_requests(
                         "showCustomUi": True,
                         "strict": False,
                     },
+                }
+            }
+        )
+    return requests
+
+
+# Defensive cap on note length. Sheets allows far longer notes; the registry
+# notes are short prose (a few hundred chars), so this only guards against a
+# pathological row bloating the batchUpdate payload.
+_NOTE_MAX_LEN = 2000
+
+
+def _note_tooltip_requests(
+    preset: SheetPreset,
+    headers: list[str],
+    data_rows: Sequence[Sequence[str]],
+    sheet_id: int,
+) -> list[dict]:
+    """updateCells requests that mirror source columns as hover notes.
+
+    For each ``target -> source`` pair in the preset's ``note_tooltips``,
+    one request stamps every data-row cell of the TARGET column with the
+    same row's SOURCE-column text as its cell note (Sheets' native hover
+    tooltip). Columns are resolved by header name; ``data_rows`` must be
+    the data grid ``upload_data`` actually wrote (header row excluded), so
+    notes stay row-aligned with the merged, reordered upload. EVERY data
+    row gets a note entry — an empty source cell writes an empty note,
+    clearing any stale note a previous upload left when rows shifted.
+    ``fields: "note"`` scopes the write to notes only; cell values and
+    formatting are untouched.
+    """
+    requests: list[dict] = []
+    if not data_rows:
+        return requests
+    for target, source in preset.note_tooltips.items():
+        missing = [name for name in (target, source) if name not in headers]
+        if missing:
+            print(f"  Warning: tooltip column(s) {missing} not on sheet; skipping.")
+            continue
+        target_col = headers.index(target)
+        source_col = headers.index(source)
+        note_rows: list[dict] = []
+        for row in data_rows:
+            text = row[source_col] if source_col < len(row) else ""
+            note_rows.append({"values": [{"note": text[:_NOTE_MAX_LEN]}]})
+        requests.append(
+            {
+                "updateCells": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1 + len(note_rows),
+                        "startColumnIndex": target_col,
+                        "endColumnIndex": target_col + 1,
+                    },
+                    "rows": note_rows,
+                    "fields": "note",
                 }
             }
         )
@@ -1307,6 +1376,7 @@ def apply_formatting(
     num_rows: int,
     num_cols: int,
     sheet_id: int,
+    data_rows: Sequence[Sequence[str]] = (),
 ) -> None:
     """Apply dropdowns and preset formatting to the data sheet.
 
@@ -1316,7 +1386,10 @@ def apply_formatting(
     the uploaded CSV dimensions, used by preset format hooks for ranges.
     ``sheet_id`` is the data tab's sheetId (0 on freshly created
     spreadsheets; whatever ``_ensure_data_sheet`` resolved on pre-existing
-    ones) — every structural request targets it.
+    ones) — every structural request targets it. ``data_rows`` is the data
+    grid ``upload_data`` returned (header row excluded); the preset's
+    ``note_tooltips`` read source-column text from it, row-aligned with
+    what was actually uploaded.
     """
     print("Applying formatting...")
     requests = []
@@ -1388,6 +1461,9 @@ def apply_formatting(
     # ---- Preset-specific formatting (colors, widths, conditional rules) ----
     if preset.format_hook is not None:
         requests += preset.format_hook(headers, num_rows, num_cols, sheet_id)
+
+    # ---- Hover notes: mirror source-column text as cell notes ----
+    requests += _note_tooltip_requests(preset, headers, data_rows, sheet_id)
 
     # ---- Send batch updates in chunks (avoid CLI arg length limits) ----
     CHUNK_SIZE = 10
@@ -1512,6 +1588,9 @@ PRESETS: dict[str, SheetPreset] = {
         csv_path=REPO_ROOT / "docs" / "reference" / "cost-model-sheet.csv",
         ship_empty_columns=_COST_MODEL_ANNOTATIONS,
         column_order=_COST_MODEL_COLUMN_ORDER,
+        # Hovering an op name shows that row's `notes` prose as a cell note,
+        # so reviewers read the caveats without scrolling to column T.
+        note_tooltips={"op": "notes"},
         format_hook=_cost_model_format_requests,
     ),
 }
@@ -1555,26 +1634,28 @@ def main(argv: Sequence[str] | None = None) -> None:
         sid = args.spreadsheet_id
         print(f"Updating existing spreadsheet: {sid}")
         data_sheet_id = _ensure_data_sheet(sid)
-        headers = upload_data(sid, rows, preset)
+        uploaded = upload_data(sid, rows, preset)
         apply_formatting(
             sid,
             preset,
-            headers,
+            uploaded[0],
             num_rows=len(rows),
             num_cols=len(rows[0]),
             sheet_id=data_sheet_id,
+            data_rows=uploaded[1:],
         )
     else:
         sid = create_spreadsheet(preset)
-        headers = upload_data(sid, rows, preset)
+        uploaded = upload_data(sid, rows, preset)
         apply_formatting(
             sid,
             preset,
-            headers,
+            uploaded[0],
             num_rows=len(rows),
             num_cols=len(rows[0]),
             # create_spreadsheet pins the data tab to sheetId 0.
             sheet_id=0,
+            data_rows=uploaded[1:],
         )
         create_summary_sheet(sid, rows, preset)
 
