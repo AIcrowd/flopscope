@@ -323,7 +323,13 @@ def aggregate_einsum(
             alpha_product *= c.alpha
             output_orbit_product *= c.num_output_orbits
         mu = (num_terms - 1) * m_total
-        total = mu + alpha_product - output_orbit_product
+        if alpha_product == 0:
+            # Empty arithmetic domain: no multiply or accumulation events
+            # occur, and there is no first term to receive the free initial
+            # copy, so the off-by-one correction must not apply.
+            total = 0
+        else:
+            total = mu + alpha_product - output_orbit_product
         return AccumulationCost(
             total=total,
             mu=mu,
@@ -1409,10 +1415,14 @@ def aggregate_reduction(
         assert c.alpha is not None  # for type narrowing
         alpha_product *= c.alpha
 
-    # Invariant: output_dense (num_output_orbits) <= alpha_product. The
-    # orchestrator computes both consistently. If you ever see a negative
-    # total here, the orchestrator passed an inconsistent output_dense.
-    total = op_factor * (alpha_product - output_dense) + extra_ops
+    # Invariant: output_dense (num_output_orbits) <= alpha_product for
+    # non-empty inputs. For a zero-sized arithmetic domain no term exists to
+    # receive the free initial copy, so only explicit output-side extra_ops
+    # are charged.
+    if alpha_product == 0:
+        total = extra_ops
+    else:
+        total = op_factor * (alpha_product - output_dense) + extra_ops
     return AccumulationCost(
         total=total,
         mu=0,  # k=1 single-operand reduction
