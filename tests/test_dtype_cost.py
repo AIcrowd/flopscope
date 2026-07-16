@@ -1026,3 +1026,34 @@ def test_generic_ufunc_reduce_bills_requested_dtype():
             np.subtract.reduce(arr2)
         baseline = b2.flops_used - before2
     assert billed == 2 * baseline  # f64-requested accumulation bills 2x f32
+
+
+def _generic_ufunc_method_billed(method_call) -> int:
+    """Delta-billed FLOPs for one generic ufunc-method call (production rates)."""
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.arange(1, 101, dtype=np.int32))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            method_call(arr)
+        return b.flops_used - before
+
+
+def test_float_only_ufunc_reduce_bills_its_float64_loop():
+    # true_divide is not whest-routed, so its .reduce hits the generic path.
+    # numpy has NO integer loop for it: an int32 reduce runs entirely in
+    # float64 with no explicit dtype= — the bill must follow that loop, not
+    # the int32 input (2x undercount otherwise). subtract on the same input
+    # keeps its int32 loop (pinned as the no-widening baseline).
+    assert _generic_ufunc_method_billed(lambda a: np.true_divide.reduce(a)) == 198
+    assert _generic_ufunc_method_billed(lambda a: np.subtract.reduce(a)) == 99
+
+
+def test_float_only_ufunc_accumulate_bills_its_float64_loop():
+    assert _generic_ufunc_method_billed(lambda a: np.true_divide.accumulate(a)) == 198
+    assert _generic_ufunc_method_billed(lambda a: np.subtract.accumulate(a)) == 99

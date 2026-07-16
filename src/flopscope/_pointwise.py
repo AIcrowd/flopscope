@@ -799,12 +799,20 @@ def _counted_ufunc_reduce_generic(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    try:
+        # The reduce/accumulate loop runs at the ufunc's own resolved loop
+        # dtype (true_divide(int32) -> float64, subtract(int32) -> int32,
+        # logical_* -> bool). add/multiply's extra integer widening never
+        # matters here: they are routed to sum/prod, not this generic path.
+        default_dtype = ufunc.resolve_dtypes((a.dtype, a.dtype, None))[2]
+    except (TypeError, ValueError):
+        default_dtype = a.dtype
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
             explicit_dtype=kwargs.get("dtype"),
             out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
-            default_dtype=a.dtype,
+            default_dtype=default_dtype,
         ),
     )
     with budget.deduct(
@@ -846,12 +854,19 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    try:
+        # Same loop resolution as the generic reduce path above: the
+        # accumulate loop runs at the ufunc's own resolved loop dtype
+        # (true_divide(int32) -> float64, subtract(int32) -> int32).
+        default_dtype = ufunc.resolve_dtypes((a.dtype, a.dtype, None))[2]
+    except (TypeError, ValueError):
+        default_dtype = a.dtype
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
             explicit_dtype=kwargs.get("dtype"),
             out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
-            default_dtype=a.dtype,
+            default_dtype=default_dtype,
         ),
     )
     with budget.deduct(
