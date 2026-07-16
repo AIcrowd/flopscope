@@ -294,3 +294,17 @@ def test_linalg_compute_dtype_and_tuple_helper():
         np.dtype(np.float64),
     )
     assert linalg_billing_dtypes(np.dtype(np.float32)) == (np.dtype(np.float32),)
+    # numpy.linalg._commonType: ANY int/bool operand forces the double driver.
+    assert linalg_billing_dtypes(np.dtype(np.bool_), np.dtype(np.float32)) == (
+        np.dtype(np.float64),
+    )
+    assert linalg_billing_dtypes(np.dtype(np.uint16), np.dtype(np.float32)) == (
+        np.dtype(np.float64),
+    )
+    assert linalg_billing_dtypes(np.dtype(np.int8), np.dtype(np.complex64)) == (
+        np.dtype(np.complex128),
+    )
+    # all-inexact operands keep the promoted single-precision driver
+    assert linalg_billing_dtypes(np.dtype(np.complex64), np.dtype(np.float32)) == (
+        np.dtype(np.complex64),
+    )

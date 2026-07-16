@@ -208,8 +208,21 @@ def linalg_compute_dtype(resolved: _np.dtype) -> _np.dtype:
 
 
 def linalg_billing_dtypes(*dtypes) -> tuple:
-    """dtypes= tuple for a LAPACK-backed deduct site: one resolved compute dtype."""
-    return (linalg_compute_dtype(_np.result_type(*dtypes)),)
+    """dtypes= tuple for a LAPACK-backed deduct site: one resolved compute dtype.
+
+    Mirrors ``numpy.linalg._commonType``: the moment ANY operand is
+    non-inexact (integer/bool), the driver runs in double precision --
+    regardless of the other operand's width -- so ``solve(bool_matrix,
+    float32_vector)`` computes float64 and ``solve(int8_matrix,
+    complex64_vector)`` computes complex128. Only all-inexact operand sets
+    keep their promoted single-precision drivers.
+    """
+    dts = [_np.dtype(d) for d in dtypes]
+    if any(dt.kind in "biu" for dt in dts):
+        if any(dt.kind == "c" for dt in dts):
+            return (_np.dtype(_np.complex128),)
+        return (_np.dtype(_np.float64),)
+    return (linalg_compute_dtype(_np.result_type(*dts)),)
 
 
 # Generic ufunc method names are "<ufunc>.<method>"; their per-element
