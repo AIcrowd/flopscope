@@ -3,8 +3,10 @@
 
 Schema-agnostic: each uploadable sheet is described by a ``SheetPreset``
 (title, key column, dropdown columns, reviewer-owned columns, CSV path).
-Re-uploads preserve reviewer-owned columns, realigned by the preset's key
-column so reviewer annotations survive row insertions/removals/reordering.
+Re-uploads anchor the output layout on the canonical columns (so canonical
+columns lost on the live sheet come back) and preserve reviewer-owned
+columns, realigned by the preset's key column so reviewer annotations
+survive row insertions/removals/reordering.
 
 Requires: gws CLI (https://github.com/googleworkspace/cli) authenticated via
 `gws auth login`.
@@ -383,17 +385,58 @@ def _find_reviewer_columns(
     return [i for i, h in enumerate(sheet_headers) if h not in csv_set or h in preserve]
 
 
+def _dedupe_headers(
+    sheet_headers: list[str], canonical: set[str]
+) -> tuple[list[str], list[int]]:
+    """Drop repeated live headers, keeping each name's first occurrence.
+
+    A stray duplicated header — e.g. a drag-copy slip that stamped one
+    column's header over a neighbour — must not corrupt the merge. Returns
+    the de-duplicated header names plus, for each, its column index on the
+    live sheet, so values are still read from the right cells. A repeated
+    canonical header is ignored (canonical data wins on re-upload); a
+    repeated reviewer-owned header keeps its first occurrence's values.
+    Both cases print a warning naming the column.
+    """
+    names: list[str] = []
+    indices: list[int] = []
+    seen: set[str] = set()
+    for i, name in enumerate(sheet_headers):
+        if name in seen:
+            if name in canonical:
+                print(
+                    f"  Warning: duplicate canonical column {name!r} on the "
+                    "live sheet; ignoring the duplicate (canonical data wins)."
+                )
+            else:
+                print(
+                    f"  Warning: duplicate reviewer column {name!r} on the "
+                    "live sheet; keeping the first occurrence."
+                )
+            continue
+        seen.add(name)
+        names.append(name)
+        indices.append(i)
+    return names, indices
+
+
 def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[str]:
     """Upload CSV data to the data sheet, preserving reviewer-added columns.
 
     Algorithm:
-    1. Read the sheet's current state (headers + all data).
+    1. Read the sheet's current state (headers + all data), de-duplicating
+       repeated live headers (first occurrence wins) so a drag-copy slip
+       cannot corrupt the merge.
     2. Identify reviewer-owned columns (headers not in our CSV, plus the
        preset's ``preserve_columns`` even when CSV-shipped).
     3. Build a map: key -> {reviewer_col_header: value, ...} keyed by the
        preset's key column so alignment is by key, not row position.
-    4. Clear the sheet and write our CSV data (all columns including any
-       shipped-empty reviewer placeholders).
+    4. Clear the sheet and write the merged grid, anchored on the CANONICAL
+       headers (CSV columns plus shipped-empty annotation columns): every
+       canonical column ships, whatever state the live sheet is in. A
+       canonical column missing from the live sheet comes back fresh —
+       empty for annotation (``preserve_columns``) columns, CSV data for
+       data columns. Reviewer-owned EXTRA live columns are kept.
     5. Write reviewer data back, aligned by key to match the new row order.
 
     When the preset declares a ``column_order``, the merged output is
@@ -417,10 +460,17 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
         return list(csv_headers)
 
     # --- Step 2: Identify reviewer columns ---
-    reviewer_col_indices = _find_reviewer_columns(
-        sheet_headers, csv_headers, preset.preserve_columns
+    # Work on a de-duplicated view of the live header row (first occurrence
+    # wins); ``live_indices`` maps every kept header back to its live
+    # column, so reviewer values are captured from the right cells even
+    # when the live sheet carries duplicated headers.
+    canonical_set = set(csv_headers)
+    live_headers, live_indices = _dedupe_headers(sheet_headers, canonical_set)
+    reviewer_positions = _find_reviewer_columns(
+        live_headers, csv_headers, preset.preserve_columns
     )
-    reviewer_col_names = [sheet_headers[i] for i in reviewer_col_indices]
+    reviewer_col_indices = [live_indices[i] for i in reviewer_positions]
+    reviewer_col_names = [live_headers[i] for i in reviewer_positions]
     reviewer_col_set = set(reviewer_col_names)
 
     if reviewer_col_names:
@@ -472,31 +522,39 @@ def upload_data(sid: str, rows: list[list[str]], preset: SheetPreset) -> list[st
         ),
     )
 
-    # Build output column order: preserve the sheet's original column layout.
-    # For each sheet column, either pull from CSV (by header name) or from
-    # the reviewer data (by key). This keeps reviewer columns in their
-    # original positions (e.g. F and G stay as F and G).
+    # Build the output layout anchored on the CANONICAL headers — the CSV
+    # columns plus shipped-empty annotation columns, with ``column_order``
+    # applied — never on whatever layout the live sheet ended up with.
+    # Live columns are consumed in their (de-duplicated) live order here;
+    # canonical columns the live sheet lost are re-added below; and the
+    # final ``_reorder_columns`` pass lands presets whose ``column_order``
+    # names every canonical column (cost-model) in the canonical layout,
+    # reviewer-owned extras appended after it. Presets without a
+    # ``column_order`` (weights) keep their live layout on an intact sheet
+    # and self-heal missing canonical columns at the tail.
     csv_header_to_idx = {h: i for i, h in enumerate(csv_headers)}
 
-    # Determine output columns: sheet's existing order, but skip the CSV's
-    # shipped-empty reviewer placeholders since the sheet has the real ones.
     out_col_sources: list[tuple[str, str]] = []  # (header, source: "csv"|"reviewer")
-    for sheet_col_name in sheet_headers:
-        if sheet_col_name in preset.preserve_columns:
-            out_col_sources.append((sheet_col_name, "reviewer"))
-        elif (
-            sheet_col_name in csv_header_to_idx
-            and sheet_col_name not in reviewer_col_set
-        ):
-            out_col_sources.append((sheet_col_name, "csv"))
+    for col_name in live_headers:
+        if col_name in preset.preserve_columns:
+            out_col_sources.append((col_name, "reviewer"))
+        elif col_name in canonical_set and col_name not in reviewer_col_set:
+            out_col_sources.append((col_name, "csv"))
         else:
-            out_col_sources.append((sheet_col_name, "reviewer"))
+            out_col_sources.append((col_name, "reviewer"))
 
-    # Add any CSV columns not already on the sheet (new columns)
-    sheet_header_set = set(sheet_headers)
-    for csv_h in csv_headers:
-        if csv_h not in sheet_header_set and csv_h not in preset.preserve_columns:
-            out_col_sources.append((csv_h, "csv"))
+    # Canonical columns missing from the live sheet ship fresh: annotation
+    # (preserve) columns come back EMPTY, data columns carry CSV data. This
+    # is the self-heal path — without it, a canonical column lost on the
+    # live sheet (e.g. its header drag-copied over) stayed lost on every
+    # re-upload, taking its dropdown with it.
+    live_header_set = set(live_headers)
+    healed = [h for h in csv_headers if h not in live_header_set]
+    if healed:
+        print(f"  Restoring canonical columns missing from the sheet: {healed}")
+    for csv_h in healed:
+        source = "reviewer" if csv_h in preset.preserve_columns else "csv"
+        out_col_sources.append((csv_h, source))
 
     # CSV key column index (falls back to the first column).
     try:

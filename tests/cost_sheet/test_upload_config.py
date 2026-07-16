@@ -382,3 +382,156 @@ def test_cost_model_format_hook_resolves_columns_by_name() -> None:
 
     # The hook must not re-freeze rows/columns (apply_formatting owns that).
     assert not any("updateSheetProperties" in req for req in requests)
+
+
+def _canonical_upload_rows(ops: list[str]) -> list[list[str]]:
+    """Build upload rows for the real cost-model preset, as ``main()`` loads them.
+
+    Data cells are ``f"{op}/{header}"`` so tests can tell fresh CSV data
+    from stale live-sheet values at a glance; the shipped-empty annotation
+    columns are appended and the preset's column_order applied, mirroring
+    the load path in ``main()``.
+    """
+    p = PRESETS["cost-model"]
+    ship_empty = set(p.ship_empty_columns)
+    csv_header = [h for h in _REVIEW_LAYOUT if h not in ship_empty]
+    rows = [csv_header] + [
+        [op if h == "op" else f"{op}/{h}" for h in csv_header] for op in ops
+    ]
+    rows = _append_ship_empty_columns(rows, p.ship_empty_columns)
+    return _reorder_columns(rows, p.column_order)
+
+
+def test_reupload_restores_canonical_column_lost_to_drag_copy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Incident replay: `category` drag-copied over `looks-right?` live.
+
+    The live sheet holds 23 cells with `category` twice and NO
+    `looks-right?`. The re-upload must anchor on the canonical layout: all
+    23 canonical columns in canonical order, `looks-right?` restored
+    (empty, dropdown-targetable again), `category` carrying CSV data
+    exactly once, and the reviewer's annotations in the other two
+    annotation columns preserved by op key.
+    """
+    p = PRESETS["cost-model"]
+    canonical = list(_REVIEW_LAYOUT)
+    damaged = list(canonical)
+    damaged[canonical.index("looks-right?")] = "category"
+
+    def live_row(op: str, proposed: str, note: str) -> list[str]:
+        vals = {h: f"stale-{op}/{h}" for h in canonical}
+        vals.update({"op": op, "proposed-change": proposed, "reviewer-notes": note})
+        return [vals[h] for h in damaged]  # both `category` cells alike
+
+    sheet = [
+        damaged,
+        live_row("add", "flip weight", "seen it"),
+        live_row("abs", "", "check complex"),
+    ]
+    fake = _FakeGws(sheet)
+    monkeypatch.setattr(upload_mod, "gws", fake)
+
+    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add", "new"]), p)
+
+    assert headers == canonical
+    assert fake.uploaded[0] == canonical
+    by_op = {r[0]: dict(zip(canonical, r, strict=True)) for r in fake.uploaded[1:]}
+    assert set(by_op) == {"abs", "add", "new"}
+    for op in ("abs", "add", "new"):
+        # The lost annotation column is back, shipped empty...
+        assert by_op[op]["looks-right?"] == ""
+        # ...and `category` (like every data column) is CSV data, once.
+        assert by_op[op]["category"] == f"{op}/category"
+        assert by_op[op]["weight"] == f"{op}/weight"
+    # Annotations in the surviving reviewer columns realigned by key.
+    assert by_op["add"]["proposed-change"] == "flip weight"
+    assert by_op["add"]["reviewer-notes"] == "seen it"
+    assert by_op["abs"]["reviewer-notes"] == "check complex"
+    assert by_op["new"]["proposed-change"] == ""
+    assert "duplicate canonical column 'category'" in capsys.readouterr().out
+    # The restored column is a dropdown target again — the incident's
+    # "dropdown column not on sheet; skipping" path is unreachable now.
+    reqs = _dropdown_requests(p, headers, num_rows=4, sheet_id=0)
+    assert len(reqs) == 1
+    rng = reqs[0]["setDataValidation"]["range"]
+    assert rng["startColumnIndex"] == canonical.index("looks-right?") == 4
+    assert "skipping" not in capsys.readouterr().out
+
+
+def test_reupload_ships_annotation_columns_missing_from_live_sheet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pre-ergonomics live sheet (no annotation columns) gains all three."""
+    p = PRESETS["cost-model"]
+    canonical = list(_REVIEW_LAYOUT)
+    data_only = [h for h in canonical if h not in p.preserve_columns]
+    assert len(data_only) == len(canonical) - 3
+    sheet = [data_only] + [
+        [op if h == "op" else f"old-{op}/{h}" for h in data_only]
+        for op in ("abs", "add")
+    ]
+    fake = _FakeGws(sheet)
+    monkeypatch.setattr(upload_mod, "gws", fake)
+
+    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)
+
+    assert headers == canonical
+    assert fake.uploaded[0] == canonical
+    assert len(fake.uploaded) == 3
+    for row in fake.uploaded[1:]:
+        vals = dict(zip(canonical, row, strict=True))
+        for col in ("looks-right?", "proposed-change", "reviewer-notes"):
+            assert vals[col] == ""  # shipped fresh, empty
+        assert vals["weight"] == f"{vals['op']}/weight"  # data refreshed from CSV
+
+
+def test_duplicate_reviewer_extra_column_keeps_first_and_warns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A duplicated reviewer-owned extra column: first kept, warned, no crash."""
+    p = PRESETS["cost-model"]
+    canonical = list(_REVIEW_LAYOUT)
+    live = canonical + ["scratch", "scratch"]
+
+    def live_row(op: str, first: str, second: str) -> list[str]:
+        vals = {h: f"stale-{op}/{h}" for h in canonical}
+        vals.update({"op": op, "looks-right?": f"verdict-{op}"})
+        return [vals[h] for h in canonical] + [first, second]
+
+    sheet = [
+        live,
+        live_row("add", "keep-me", "shadow"),
+        live_row("abs", "also-keep", "nope"),
+    ]
+    fake = _FakeGws(sheet)
+    monkeypatch.setattr(upload_mod, "gws", fake)
+
+    headers = upload_data("sheet-id", _canonical_upload_rows(["abs", "add"]), p)
+
+    # Canonical block leads in canonical order; the reviewer's extra column
+    # survives exactly once, appended after it.
+    assert headers == canonical + ["scratch"]
+    assert fake.uploaded[0] == headers
+    by_op = {r[0]: dict(zip(headers, r, strict=True)) for r in fake.uploaded[1:]}
+    assert by_op["add"]["scratch"] == "keep-me"  # FIRST occurrence's values win
+    assert by_op["abs"]["scratch"] == "also-keep"
+    # Canonical annotation values still preserved by key alongside the dupe.
+    assert by_op["add"]["looks-right?"] == "verdict-add"
+    assert by_op["abs"]["looks-right?"] == "verdict-abs"
+    assert "duplicate reviewer column 'scratch'" in capsys.readouterr().out
+
+
+def test_dropdown_warning_kept_for_unknown_configured_columns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Dropdown columns that genuinely never exist post-merge still warn."""
+    p = SheetPreset(
+        title="t",
+        key_column="op",
+        dropdown_columns={"ghost": ("a", "b")},
+        preserve_columns=frozenset(),
+        csv_path=Path("unused.csv"),
+    )
+    assert _dropdown_requests(p, ["op", "weight"], num_rows=2, sheet_id=0) == []
+    assert "dropdown column 'ghost' not on sheet" in capsys.readouterr().out
