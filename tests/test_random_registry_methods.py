@@ -138,9 +138,9 @@ class TestSpecificCostFormulaAssignments:
     def test_choice_uses_choice_cost(self):
         assert REGISTRY["random.Generator.choice"]["cost_formula"] == (
             "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p "
-            "given; replace=False: n if p is None else sort_cost(n); n = pool's "
-            "leading-axis length (int a, len(a), or a.shape[0]) regardless of the axis "
-            "kwarg. Canonical (replace=True, p=None): size"
+            "given; replace=False: n if p is None else sort_cost(n); n = pool length "
+            "along the sampled axis (`axis` kwarg, default 0; int a -> a). Canonical "
+            "(replace=True, p=None): size"
         )
 
     def test_standard_normal_uses_numel_output(self):

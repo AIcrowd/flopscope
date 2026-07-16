@@ -6389,7 +6389,7 @@
       "blocked": false,
       "canonical_path": "numpy/random/generator/choice",
       "category": "counted_random_method",
-      "cost_formula": "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p given; replace=False: n if p is None else sort_cost(n); n = pool's leading-axis length (int a, len(a), or a.shape[0]) regardless of the axis kwarg. Canonical (replace=True, p=None): size",
+      "cost_formula": "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p given; replace=False: n if p is None else sort_cost(n); n = pool length along the sampled axis (`axis` kwarg, default 0; int a -> a). Canonical (replace=True, p=None): size",
       "cost_formula_latex": "",
       "detail_href": "/docs/api/numpy/random/generator/choice/",
       "detail_json_href": "/api-data/ops/random-Generator-choice.json",

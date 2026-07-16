@@ -214,7 +214,7 @@ COST_FORMULAS: dict[str, Callable[[tuple[Any, ...], dict[str, Any], Any], int]] 
     # same callable as its canonical key above, so dispatch and billing
     # are unchanged.
     "length (the requested byte count; max(length, 1))": _length,
-    "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p given; replace=False: n if p is None else sort_cost(n); n = pool's leading-axis length (int a, len(a), or a.shape[0]) regardless of the axis kwarg. Canonical (replace=True, p=None): size": _choice_cost,
+    "replace=True: numel(output), plus 3*n + numel(output)*ceil(log2(n)) if p given; replace=False: n if p is None else sort_cost(n); n = pool length along the sampled axis (`axis` kwarg, default 0; int a -> a). Canonical (replace=True, p=None): size": _choice_cost,
     "numel(output) = prod(size)*len(alpha)": _numel_output,
     "numel(output) = prod(size)*k, k = pvals.shape[-1] (= len(pvals) only for 1-D pvals); size=None: leading shape is the broadcast of shape(n) with pvals.shape[:-1]": _numel_output,
     "numel(output) = prod(size)*len(colors)": _numel_output,
