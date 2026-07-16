@@ -201,6 +201,48 @@ def create_spreadsheet(preset: SheetPreset) -> str:
     return sid
 
 
+def _ensure_data_sheet(sid: str) -> None:
+    """Make sure the data tab exists on a pre-existing spreadsheet.
+
+    A user-created spreadsheet starts with a single default tab (``Sheet1``),
+    while every read/write here addresses ``DATA_SHEET_TITLE``. If the data
+    tab is absent: rename the lone existing tab (the common "fresh sheet
+    shared for review" case), otherwise add a new tab.
+    """
+    meta = gws(
+        "sheets",
+        "spreadsheets",
+        "get",
+        "--params",
+        json.dumps({"spreadsheetId": sid, "fields": "sheets.properties"}),
+    )
+    sheets = [s.get("properties", {}) for s in meta.get("sheets", [])]
+    if any(p.get("title") == DATA_SHEET_TITLE for p in sheets):
+        return
+    if len(sheets) == 1:
+        print(f"  Renaming tab {sheets[0].get('title')!r} -> {DATA_SHEET_TITLE!r}")
+        req = {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheets[0].get("sheetId", 0),
+                    "title": DATA_SHEET_TITLE,
+                },
+                "fields": "title",
+            }
+        }
+    else:
+        print(f"  Adding tab {DATA_SHEET_TITLE!r}")
+        req = {"addSheet": {"properties": {"title": DATA_SHEET_TITLE}}}
+    gws(
+        "sheets",
+        "spreadsheets",
+        "batchUpdate",
+        "--params",
+        json.dumps({"spreadsheetId": sid}),
+        json_body={"requests": [req]},
+    )
+
+
 def _read_sheet_all(
     sid: str, sheet_name: str = DATA_SHEET_TITLE
 ) -> tuple[list[str], list[list[str]]]:
@@ -1220,6 +1262,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.spreadsheet_id:
         sid = args.spreadsheet_id
         print(f"Updating existing spreadsheet: {sid}")
+        _ensure_data_sheet(sid)
         headers = upload_data(sid, rows, preset)
         apply_formatting(
             sid, preset, headers, num_rows=len(rows), num_cols=len(rows[0])
