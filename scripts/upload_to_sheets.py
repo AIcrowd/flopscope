@@ -26,7 +26,6 @@ import csv
 import json
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -148,30 +147,16 @@ class SheetPreset:
 
 
 def gws(*args: str, json_body: dict | None = None) -> dict:
-    """Run a gws CLI command and return parsed JSON output.
-
-    For large JSON bodies, writes to a temp file to avoid CLI arg length limits.
-    """
+    """Run a gws CLI command and return parsed JSON output."""
     cmd = ["gws"] + list(args)
-    tmp_file = None
     if json_body is not None:
-        body_str = json.dumps(json_body)
-        # If body is large, write to temp file and use @file syntax
-        if len(body_str) > 50_000:
-            tmp_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            )
-            tmp_file.write(body_str)
-            tmp_file.close()
-            cmd += ["--json", f"@{tmp_file.name}"]
-        else:
-            cmd += ["--json", body_str]
+        # Always inline: this gws build has no @file syntax (it would parse
+        # the literal "@/tmp/..." as JSON and fail). Callers keep individual
+        # bodies small (values writes chunk at 50 rows; note requests chunk
+        # at _NOTE_ROWS_PER_REQUEST), far below OS argument limits.
+        cmd += ["--json", json.dumps(json_body)]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-    finally:
-        if tmp_file:
-            Path(tmp_file.name).unlink(missing_ok=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     # Try stdout first, then stderr
     for output in [result.stdout, result.stderr]:
@@ -825,6 +810,9 @@ def _dropdown_requests(
 # notes are short prose (a few hundred chars), so this only guards against a
 # pathological row bloating the batchUpdate payload.
 _NOTE_MAX_LEN = 2000
+# Rows per updateCells note request: keeps each batchUpdate body well under
+# inline-argument limits (~200 rows x ~200 chars ~= 18 KB).
+_NOTE_ROWS_PER_REQUEST = 200
 
 
 def _note_tooltip_requests(
@@ -860,21 +848,25 @@ def _note_tooltip_requests(
         for row in data_rows:
             text = row[source_col] if source_col < len(row) else ""
             note_rows.append({"values": [{"note": text[:_NOTE_MAX_LEN]}]})
-        requests.append(
-            {
-                "updateCells": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 1,
-                        "endRowIndex": 1 + len(note_rows),
-                        "startColumnIndex": target_col,
-                        "endColumnIndex": target_col + 1,
-                    },
-                    "rows": note_rows,
-                    "fields": "note",
+        # Chunk rows per request so no single batchUpdate body balloons past
+        # what the gws CLI accepts as an inline --json argument.
+        for start in range(0, len(note_rows), _NOTE_ROWS_PER_REQUEST):
+            chunk = note_rows[start : start + _NOTE_ROWS_PER_REQUEST]
+            requests.append(
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 1 + start,
+                            "endRowIndex": 1 + start + len(chunk),
+                            "startColumnIndex": target_col,
+                            "endColumnIndex": target_col + 1,
+                        },
+                        "rows": chunk,
+                        "fields": "note",
+                    }
                 }
-            }
-        )
+            )
     return requests
 
 
