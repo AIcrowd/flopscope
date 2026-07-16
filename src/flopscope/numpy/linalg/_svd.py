@@ -7,6 +7,7 @@ from numpy.linalg._linalg import SVDResult
 from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._flops import svd_cost
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import maybe_check_nan_inf, require_budget
@@ -97,7 +98,7 @@ def svd(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         if compute_uv:
             # When k is specified, always use economy decomposition then slice.

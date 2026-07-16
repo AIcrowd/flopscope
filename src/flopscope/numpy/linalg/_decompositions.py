@@ -13,6 +13,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import require_budget
 from flopscope.numpy.linalg._solvers import _batch_size, _has_zero_dim
@@ -53,7 +54,7 @@ def cholesky(a: ArrayLike, /, *, upper: bool = False) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.cholesky, _to_base_ndarray(a), upper=upper)
     if isinstance(result, _np.ndarray) and inputs_were_whest:
@@ -106,7 +107,7 @@ def qr(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.qr, _to_base_ndarray(a), mode=mode)  # type: ignore[reportCallIssue]
     if mode in ("reduced", "complete"):
@@ -173,7 +174,7 @@ def eig(a: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eig, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -226,7 +227,7 @@ def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[FlopscopeArray, FlopscopeArray]
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -281,7 +282,7 @@ def eigvals(a: ArrayLike) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvals, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -334,7 +335,7 @@ def eigvalsh(a: ArrayLike, UPLO: str = "L") -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvalsh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -381,7 +382,7 @@ def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(x.shape,),
-        dtypes=(x.dtype,),
+        dtypes=linalg_billing_dtypes(x.dtype),
     ):
         result = _call_numpy(_np.linalg.svdvals, _to_base_ndarray(x))
     if k < min(m, n):

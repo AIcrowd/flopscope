@@ -1206,3 +1206,57 @@ def test_ufunc_at_float_only_bills_loop_dtype():
     assert _ufunc_at_billed(
         lambda a: np.bitwise_or.at(a, slice(None), vals)  # pyright: ignore[reportArgumentType]
     ) == (1000, "int32")
+
+
+# ---------------------------------------------------------------------------
+# Task 7: fft and linalg bill their compute dtype
+# ---------------------------------------------------------------------------
+
+
+def test_fft_bills_complex_working_precision():
+    import flopscope.numpy as fnp
+
+    sig_i = np.arange(1024, dtype=np.int32)
+    sig_f32 = np.arange(1024, dtype=np.float32)
+    sig_f64 = np.arange(1024, dtype=np.float64)
+    # 5 * 1024 * 10 = 51200 raw; int -> complex128 path bills rate 2.0.
+    assert _billed_with_production_rates(lambda: fnp.fft.fft(sig_i)) == (
+        102400,
+        "complex128",
+    )
+    # f32-stays-single invariant: complex64 path bills rate 1.0.
+    assert _billed_with_production_rates(lambda: fnp.fft.fft(sig_f32)) == (
+        51200,
+        "complex64",
+    )
+    assert _billed_with_production_rates(lambda: fnp.fft.fft(sig_f64))[1] == "complex128"
+
+
+def test_linalg_bills_lapack_compute_dtype():
+    import flopscope.numpy as fnp
+
+    a_i32 = (np.eye(8) * 3).astype(np.int32)
+    b_i32 = np.ones(8, dtype=np.int32)
+    a_f32 = a_i32.astype(np.float32)
+    b_f32 = b_i32.astype(np.float32)
+    # int inputs run LAPACK in float64: rate 2.0 (was 469 at int rate).
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.solve(a_i32, b_i32)
+    ) == (938, "float64")
+    # f32 keeps the single-precision driver: rate 1.0.
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.solve(a_f32, b_f32)
+    ) == (469, "float32")
+    assert _billed_with_production_rates(lambda: fnp.linalg.inv(a_i32))[1] == "float64"
+
+
+def test_integer_matmul_family_not_promoted():
+    import flopscope.numpy as fnp
+
+    a = np.eye(4, dtype=np.int32) * 2
+    # matmul/matrix_power run INTEGER arithmetic — no LAPACK, no promotion.
+    # Guard against over-eager linalg mapping (sweep only catches undercharge).
+    assert _billed_with_production_rates(lambda: fnp.matmul(a, a))[1] == "int32"
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.matrix_power(a, 2)
+    )[1] in ("int32", "int64")  # numpy computes integer matmuls here

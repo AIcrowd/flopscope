@@ -15,6 +15,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import fft_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
@@ -182,7 +183,11 @@ def fft(
         n = a.shape[axis]
     cost = _batch_count_1d(a, axis) * fft_cost(n)
     with budget.deduct(
-        "fft.fft", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+        "fft.fft",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.fft,
@@ -219,7 +224,7 @@ def ifft(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.ifft,
@@ -256,7 +261,7 @@ def rfft(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.rfft,
@@ -293,7 +298,7 @@ def irfft(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.irfft,
@@ -335,7 +340,7 @@ def fft2(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.fft2,
@@ -379,7 +384,7 @@ def ifft2(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.ifft2,
@@ -423,7 +428,7 @@ def rfft2(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.rfft2,
@@ -470,7 +475,7 @@ def irfft2(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.irfft2,
@@ -516,7 +521,7 @@ def fftn(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.fftn,
@@ -561,7 +566,7 @@ def ifftn(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.ifftn,
@@ -606,7 +611,7 @@ def rfftn(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.rfftn,
@@ -663,7 +668,7 @@ def irfftn(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.irfftn,
@@ -704,7 +709,7 @@ def hfft(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.hfft,
@@ -744,7 +749,7 @@ def ihfft(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(fft_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(
             _np.fft.ihfft,

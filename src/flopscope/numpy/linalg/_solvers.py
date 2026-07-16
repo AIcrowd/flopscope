@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._symmetric import SymmetricTensor, validate_symmetry_groups
 from flopscope._validation import require_budget
@@ -81,7 +82,7 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype, b.dtype),
+        dtypes=linalg_billing_dtypes(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.linalg.solve, _to_base_ndarray(a), _to_base_ndarray(b))
     if b_was_whest:
@@ -142,7 +143,7 @@ def inv(a: ArrayLike) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.inv, _to_base_ndarray(a))
     if is_symmetric:
@@ -255,7 +256,7 @@ def lstsq(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype, b_arr.dtype),
+        dtypes=linalg_billing_dtypes(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.lstsq, _to_base_ndarray(a), _to_base_ndarray(b), rcond=rcond
@@ -341,7 +342,7 @@ def pinv(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.pinv, _to_base_ndarray(a), **kwargs)
     if inputs_were_whest:
@@ -401,8 +402,9 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
         shapes=(a.shape,),
         # tensorsolve delegates to solve: a real `a` with a complex `b` yields a
         # complex result, so both operands must join the billing dtype tuple or
-        # the 4x complex factor is bypassed (mirrors solve/lstsq above).
-        dtypes=(a.dtype, b_arr.dtype),
+        # the 4x complex factor is bypassed (mirrors solve/lstsq above). It is
+        # also LAPACK-backed, so integer operands force the float64 driver.
+        dtypes=linalg_billing_dtypes(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.tensorsolve,
@@ -462,7 +464,7 @@ def tensorinv(a: ArrayLike, ind: int = 2) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.tensorinv, _to_base_ndarray(a), ind=ind)
     if inputs_were_whest:
