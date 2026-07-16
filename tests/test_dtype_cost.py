@@ -1096,33 +1096,29 @@ def test_float_power_always_bills_float64_minimum():
 
 
 def test_float_power_complex_keeps_registry_complex_factor():
-    # CORRECTED from the task brief's literal `..._still_fails_closed` name
-    # and assertion. Investigated first (see task-6-report.md): on this repo's
-    # numpy (2.2.6), np.float_power has native complex loops (its ``.types``
-    # includes ``'DD->D'``/``'GG->G'``) and the flopscope registry classifies
-    # float_power's complex_factor as 5.5 (a real transcendental factor, not
-    # "illegal") -- plain ``np.float_power(complex64_arr, complex64_arr)``
-    # computes and returns a value, it does not raise. A guard forcing a
-    # raise here would be a NEW error path for previously-working
-    # numpy-compatible code, contradicting this PR's own "no new error
-    # paths" design principle -- so this test pins the real (non-raising)
-    # behavior instead of the brief's mistaken premise.
-    #
-    # What DOES matter, and is the actual regression this test guards: the
-    # _BINARY_FLOAT64_MIN_OPS float64-floor coercion must special-case
-    # ``resolved.kind == "c"`` and leave complex operands alone. Without
-    # that guard, ``heavier_billing_dtype(complex64, float64)`` would pick
-    # float64 (its production rate 2.0 beats complex64's rate 1.0),
-    # silently discarding the complex dtype -- and the registry's 5.5
-    # complex_factor along with it -- undercounting float_power's true
-    # complex transcendental cost.
+    # The task brief expected complex float_power to fail closed; on this
+    # numpy (2.2.6) np.float_power has native complex loops (its ``.types``
+    # includes ``'DD->D'``/``'GG->G'``) and the registry classifies its
+    # complex_factor as 5.5 (a real transcendental factor, not "illegal"),
+    # so a plain call computes and returns -- adding a raise would be a new
+    # error path for numpy-compatible code. This test pins the honest
+    # billing instead, on both axes:
+    #  - KIND: complex stays complex-kind, so the registry 5.5
+    #    complex_factor applies (folding into a bare real float64 minimum
+    #    would silently drop it);
+    #  - WIDTH: float_power has no FF->F loop -- DD->D is its complex
+    #    minimum, so complex64 inputs compute (and must bill) complex128.
     import flopscope.numpy as fnp
 
     z = np.ones(4, dtype=np.complex64)
     billed, dt = _billed_with_production_rates(lambda: fnp.float_power(z, z))
-    assert dt == "complex64"
-    # 4 elems * rate(complex64)=1.0 * complex_factor(float_power)=5.5 * weight=16.0
-    assert billed == 352
+    assert dt == "complex128"  # no FF->F loop; DD->D minimum
+    # 4 elems * rate(complex128)=2.0 * complex_factor(float_power)=5.5 * weight=16.0
+    assert billed == 704
+    billed128, _ = _billed_with_production_rates(
+        lambda: fnp.float_power(z.astype(np.complex128), z.astype(np.complex128))
+    )
+    assert billed == billed128  # c64 pair bills exactly its true c128 compute
 
 
 def test_small_int_unary_keeps_rate_one():
@@ -1173,3 +1169,40 @@ def test_reduceat_float_only_binary_bills_float64_and_int_stays_int():
         == 200
     )
     assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 100
+
+
+def _ufunc_at_billed(at_call) -> tuple[int, str | None]:
+    """Delta-billed FLOPs + resolved dtype for one ufunc.at call (production rates)."""
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.ones(1000, dtype=np.int32))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
+            at_call(arr)
+        return b.flops_used - before, b.op_log[-1].resolved_dtype
+
+
+def test_ufunc_at_float_only_bills_loop_dtype():
+    # ufunc.at applies float-only loops to integer arrays WITHOUT raising
+    # (numpy casts the float result back in place with unsafe casting), so
+    # the same compute-dtype rule as the other ufunc-method paths applies:
+    # exp.at / true_divide.at on int32 run entirely in float64 and must
+    # bill it. bitwise_or keeps its native int32 loop -- the contrast pins
+    # that the fix stays scoped to float-only loops, not a blanket widening.
+    # (slice indices are runtime-supported by ufunc.at; numpy's stubs type
+    # the parameter narrower than the implementation accepts.)
+    vals = np.ones(1000, dtype=np.int32)
+    assert _ufunc_at_billed(
+        lambda a: np.exp.at(a, slice(None))  # pyright: ignore[reportArgumentType]
+    ) == (2000, "float64")
+    assert _ufunc_at_billed(
+        lambda a: np.true_divide.at(a, slice(None), vals)  # pyright: ignore[reportArgumentType]
+    ) == (2000, "float64")
+    assert _ufunc_at_billed(
+        lambda a: np.bitwise_or.at(a, slice(None), vals)  # pyright: ignore[reportArgumentType]
+    ) == (1000, "int32")
