@@ -198,7 +198,14 @@ def run_ladder_per_component(
         # that reduction_accumulation_cost already applies.
         v_sizes = tuple(c.sizes[p] for p in c.visible_positions)
         if not v_sizes:
-            num_output_orbits = 1
+            # A full reduction to a scalar has exactly one output cell --
+            # UNLESS the component's own index space is empty (some summed
+            # dimension has size 0, so dense_count == alpha == 0). A fully
+            # empty contraction has no first element to call a free copy;
+            # crediting one here is what drove aggregate_einsum's
+            # ``alpha_product - output_orbit_product`` negative (0 - 1) for
+            # e.g. an empty-vector dot product.
+            num_output_orbits = 1 if dense_count > 0 else 0
         elif c.elements and len(c.elements) > 0:
             h_elements = restrict_stabilizer_to_positions(
                 c.elements, c.visible_positions
@@ -383,6 +390,22 @@ def complex_real_total(acc: AccumulationCost) -> int:
     if adds < 0:  # degenerate corner (heavy symmetry savings): stay conservative
         return 6 * acc.total
     return 6 * mults + 2 * adds
+
+
+def contraction_complex_override(accumulation, resolved) -> float | None:
+    """Exact complex-factor override for a contraction deduct site.
+
+    ``None`` for real (or undeclared) dtypes — the registry factor path
+    applies. For a complex resolved dtype, the exact real-FLOP ratio when the
+    contraction does work, and 1.0 when it does none (a transpose/diagonal/
+    empty contraction has no complex arithmetic; the charge is 0 either way,
+    but the "exact" guard in complex_factor_for must not fire).
+    """
+    if resolved is None or resolved.kind != "c":
+        return None
+    if accumulation.total > 0:
+        return complex_real_total(accumulation) / accumulation.total
+    return 1.0
 
 
 # ── End-to-end orchestrator ──────────────────────────────────────────

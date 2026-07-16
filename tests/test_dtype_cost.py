@@ -851,3 +851,49 @@ def test_scalar_rng_draw_bills_output_dtype():
     size1 = _cost(lambda: fnp.random.default_rng(0).standard_normal(1))
     arr = _cost(lambda: fnp.random.default_rng(0).standard_normal(1000))
     assert scalar == size1 == arr // 1000
+
+
+# ---------------------------------------------------------------------------
+# Task 1: zero-work complex contractions charge cleanly
+# ---------------------------------------------------------------------------
+
+
+def _zero_work_charge(fn) -> int:
+    load_weights()
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        fn()
+        return b.flops_used
+
+
+def test_complex_einsum_transpose_charges_zero():
+    z = (np.ones((8, 8)) + 1j * np.ones((8, 8))).astype(np.complex128)
+    import flopscope.numpy as fnp
+
+    assert _zero_work_charge(lambda: fnp.einsum("ij->ji", z)) == 0
+    assert _zero_work_charge(lambda: fnp.einsum("i->i", z[0])) == 0
+    assert _zero_work_charge(lambda: fnp.einsum("ii->i", z)) == 0
+
+
+def test_empty_complex_contractions_charge_zero():
+    import flopscope.numpy as fnp
+
+    z = np.ones((8, 8), dtype=np.complex128)
+    z_empty = np.zeros((0, 8), dtype=np.complex128)
+    assert _zero_work_charge(lambda: fnp.matmul(z_empty, z)) == 0
+    assert (
+        _zero_work_charge(
+            lambda: fnp.dot(
+                np.zeros((0,), np.complex128), np.zeros((0,), np.complex128)
+            )
+        )
+        == 0
+    )
+
+
+def test_nonzero_complex_contractions_still_bill_exactly():
+    # Regression guard: the fix must not disturb exact complex billing.
+    # 8x8 complex128 matmul measured on this branch: 7936.
+    import flopscope.numpy as fnp
+
+    z = np.ones((8, 8), dtype=np.complex128)
+    assert _zero_work_charge(lambda: fnp.matmul(z, z)) == 7936

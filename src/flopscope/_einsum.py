@@ -595,14 +595,8 @@ def einsum(
     out_dtype = _dtype_of_ndarray_out(out)
     if out_dtype is not None:
         billing_dtypes += (out_dtype,)
-    complex_override = None
     resolved = _np.result_type(*billing_dtypes) if billing_dtypes else None
-    if resolved is not None and resolved.kind == "c" and accumulation_cost.total > 0:
-        from flopscope._accumulation._cost import complex_real_total
-
-        complex_override = (
-            complex_real_total(accumulation_cost) / accumulation_cost.total
-        )
+    complex_override = contraction_complex_override(accumulation_cost, resolved)
 
     with budget.deduct(
         "einsum",
@@ -706,6 +700,7 @@ from flopscope._accumulation._cache import (  # noqa: E402, F401
 from flopscope._accumulation._cache import (  # noqa: E402
     rebuild_accumulation_cache as _rebuild_accumulation_cache_fn,
 )
+from flopscope._accumulation._cost import contraction_complex_override  # noqa: E402
 from flopscope._accumulation._public import (  # noqa: E402
     _accumulation_fingerprint,
     _identity_pattern,
