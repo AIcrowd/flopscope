@@ -563,18 +563,6 @@
   "measured_raw_1x": 999,
   "measured_raw_2x": 1999
  },
- "einsum": {
-  "describe": "'ij,jk->ik' (64,64)",
-  "input_code": "def make(dt, s=1):\n    a = np.ones((64 * s, 64), dtype=dt)\n    b = np.ones((64, 64), dtype=dt)\n    return lambda: fnp.einsum(\"ij,jk->ik\", a, b)",
-  "scalable": true,
-  "raw_dtype": "float32",
-  "formula": "numel(output)*(2K-1) per pairwise contraction, K = product of contracted-axis extents (accumulation model (k-1)*prod(M) + prod(alpha)); multi-step optimized paths sum per-step costs. 'ij,jk->ik': M*N*(2K-1)",
-  "predicted_raw_expr": "64*s*64*(2*64 - 1)",
-  "notes": "Kept equivalent to existing resolver (scripts/cost_sheet/canonical_inputs.py); reproduces committed sheet raw 520192/1040384 exactly. Symmetry-aware discounts apply for SymmetricTensor operands.",
-  "verified_by": "agent",
-  "measured_raw_1x": 520192,
-  "measured_raw_2x": 1040384
- },
  "einsum_path": {
   "describe": "'ij,jk->ik' (64s,64)x(64,64)",
   "input_code": "def make(dt, s=1):\n    a = np.ones((64 * s, 64), dtype=dt)\n    b = np.ones((64, 64), dtype=dt)\n    return lambda: fnp.einsum_path(\"ij,jk->ik\", a, b)",
@@ -1223,18 +1211,6 @@
   "measured_raw_1x": 20000,
   "measured_raw_2x": 44000
  },
- "linalg.cholesky": {
-  "describe": "(64s,64s) PSD (n*ones + n*I)",
-  "input_code": "def make(dt, s=1):\n    n = 64 * s\n    a = fnp.asarray(n * np.ones((n, n), dtype=dt) + n * np.eye(n, dtype=dt))\n    return lambda: fnp.linalg.cholesky(a)",
-  "scalable": true,
-  "raw_dtype": "float32",
-  "formula": "n**3 // 3 per matrix (n = last-axis dim), x batch; 0 if a matrix dim is 0",
-  "predicted_raw_expr": "(64*s)**3 // 3",
-  "notes": "Same PSD construction as the existing resolver (_make_cholesky); reproduces committed measured 87381 / 699050 exactly.",
-  "verified_by": "controller-mechanical",
-  "measured_raw_1x": 87381,
-  "measured_raw_2x": 699050
- },
  "linalg.cond": {
   "describe": "(64s,64s) PSD (n*ones + n*I), p=None",
   "input_code": "def make(dt, s=1):\n    n = 64 * s\n    a = fnp.asarray(n * np.ones((n, n), dtype=dt) + n * np.eye(n, dtype=dt))\n    return lambda: fnp.linalg.cond(a)",
@@ -1475,18 +1451,6 @@
   "measured_raw_1x": 182954,
   "measured_raw_2x": 1430869
  },
- "linalg.svd": {
-  "describe": "(64,64)",
-  "input_code": "def make(dt, s=1):\n    a = fnp.asarray(np.ones((64 * s, 64), dtype=dt))\n    return lambda: fnp.linalg.svd(a)",
-  "scalable": true,
-  "raw_dtype": "float32",
-  "formula": "full U (full_matrices=True, m!=n): 4*a^2*b + 22*b^3; thin U/V (full_matrices=False, or m==n): 6*a*b^2 + 20*b^3; values-only (compute_uv=False): 2*a*b^2 + 2*b^3; top-k (1<=k<b): min(4*m*n*k, economy); a=max(m,n), b=min(m,n); x batch",
-  "predicted_raw_expr": "4*(64*s)**2*64 + 22*64**3",
-  "notes": "Existing resolver input kept; defaults full_matrices=True, compute_uv=True: the single expr 4a^2b+22b^3 equals the thin cost 26b^3 at the square s=1 case (branches coincide at m==n), matching committed 6815744/9961472.",
-  "verified_by": "controller-mechanical",
-  "measured_raw_1x": 6815744,
-  "measured_raw_2x": 9961472
- },
  "linalg.svdvals": {
   "describe": "(64s,64)",
   "input_code": "def make(dt, s=1):\n    x = fnp.asarray(np.ones((64 * s, 64), dtype=dt))\n    return lambda: fnp.linalg.svdvals(x)",
@@ -1606,18 +1570,6 @@
   "verified_by": "agent",
   "measured_raw_1x": 24832,
   "measured_raw_2x": 98816
- },
- "matmul": {
-  "describe": "(256,256)@(256,256)",
-  "input_code": "def make(dt, s=1):\n    a = fnp.asarray(np.ones((256 * s, 256), dtype=dt))\n    b = fnp.asarray(np.ones((256, 256 * s), dtype=dt))\n    return lambda: fnp.matmul(a, b)",
-  "scalable": true,
-  "raw_dtype": "float32",
-  "formula": "m*n*(2k-1) for (m,k)@(k,n) (einsum engine 2mkn - mn: mkn multiplies + m(k-1)n adds); vector and batched/broadcast forms bill the same einsum contraction summed per slice",
-  "predicted_raw_expr": "(2*256 - 1) * (256*s) * (256*s)",
-  "notes": "Same input as the existing resolver (scripts/cost_sheet/canonical_inputs.py _make_matmul; s scales m and n, k fixed at 256) \u2014 reproduces committed sheet values 33488896/133955584; complex dtypes bill exact via complex_factor_override from the einsum accumulation.",
-  "verified_by": "agent",
-  "measured_raw_1x": 33488896,
-  "measured_raw_2x": 133955584
  },
  "matvec": {
   "describe": "(64,64)@(64,)",

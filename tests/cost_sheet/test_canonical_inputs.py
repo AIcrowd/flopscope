@@ -6,10 +6,10 @@ from flopscope._registry import REGISTRY
 from scripts.cost_sheet.canonical_inputs import resolve
 from scripts.cost_sheet.measure import capture_cost_site
 
-# Known representatives, one per charged category. At this stage only the
-# explicit seeds and the category defaults resolve (the long tail is filled by
-# the later curation task), so sample well-known ops rather than whatever op
-# happens to appear first in the registry for a category.
+# Known representatives, one per charged category: a stable, readable smoke
+# sample rather than whatever op happens to appear first in the registry for
+# a category. Full charged-op coverage (curation is complete) is asserted
+# separately by test_every_charged_op_resolves_post_curation.
 REPRESENTATIVES = {
     "counted_unary": "abs",
     "counted_binary": "add",

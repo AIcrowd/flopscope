@@ -31,7 +31,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Name of the tab that holds the uploaded CSV data (sheetId 0 in every preset).
+# Name of the tab that holds the uploaded CSV data. Freshly created
+# spreadsheets pin it to sheetId 0; on pre-existing spreadsheets its actual
+# sheetId is resolved by _ensure_data_sheet and threaded through formatting.
 DATA_SHEET_TITLE = "All Operations"
 
 # Reviewer-owned columns of the weights sheet. "Reviewer Weight" ships (empty)
@@ -70,9 +72,10 @@ class SheetPreset:
             time. Used when the CSV generator does not ship the reviewer
             columns itself; combined with preserve_columns this makes the
             sheet ship ready-to-annotate while keeping annotations safe.
-        format_hook: Optional callable (headers, num_rows, num_cols) ->
-            batchUpdate requests for preset-specific formatting (colors,
-            widths, conditional rules).
+        format_hook: Optional callable (headers, num_rows, num_cols,
+            sheet_id) -> batchUpdate requests for preset-specific formatting
+            (colors, widths, conditional rules), targeting the data tab
+            identified by sheet_id.
         summary_builder: Optional callable (csv rows) -> summary rows. When
             set, a "Review Summary" tab is created and populated on initial
             spreadsheet creation.
@@ -84,7 +87,7 @@ class SheetPreset:
     preserve_columns: frozenset[str]
     csv_path: Path
     ship_empty_columns: tuple[str, ...] = ()
-    format_hook: Callable[[list[str], int, int], list[dict]] | None = None
+    format_hook: Callable[[list[str], int, int, int], list[dict]] | None = None
     summary_builder: Callable[[list[list[str]]], list[list[str]]] | None = None
 
 
@@ -201,13 +204,16 @@ def create_spreadsheet(preset: SheetPreset) -> str:
     return sid
 
 
-def _ensure_data_sheet(sid: str) -> None:
-    """Make sure the data tab exists on a pre-existing spreadsheet.
+def _ensure_data_sheet(sid: str) -> int:
+    """Make sure the data tab exists; return its sheetId.
 
     A user-created spreadsheet starts with a single default tab (``Sheet1``),
     while every read/write here addresses ``DATA_SHEET_TITLE``. If the data
     tab is absent: rename the lone existing tab (the common "fresh sheet
-    shared for review" case), otherwise add a new tab.
+    shared for review" case), otherwise add a new tab. The returned sheetId
+    (existing tab's id / rename target's id / the ``addSheet`` reply's new
+    id) is what formatting must target — on a multi-tab spreadsheet the data
+    tab is generally NOT sheetId 0.
     """
     meta = gws(
         "sheets",
@@ -217,23 +223,27 @@ def _ensure_data_sheet(sid: str) -> None:
         json.dumps({"spreadsheetId": sid, "fields": "sheets.properties"}),
     )
     sheets = [s.get("properties", {}) for s in meta.get("sheets", [])]
-    if any(p.get("title") == DATA_SHEET_TITLE for p in sheets):
-        return
+    for props in sheets:
+        if props.get("title") == DATA_SHEET_TITLE:
+            return int(props.get("sheetId", 0))
+    data_sheet_id: int | None
     if len(sheets) == 1:
+        data_sheet_id = int(sheets[0].get("sheetId", 0))
         print(f"  Renaming tab {sheets[0].get('title')!r} -> {DATA_SHEET_TITLE!r}")
         req = {
             "updateSheetProperties": {
                 "properties": {
-                    "sheetId": sheets[0].get("sheetId", 0),
+                    "sheetId": data_sheet_id,
                     "title": DATA_SHEET_TITLE,
                 },
                 "fields": "title",
             }
         }
     else:
+        data_sheet_id = None
         print(f"  Adding tab {DATA_SHEET_TITLE!r}")
         req = {"addSheet": {"properties": {"title": DATA_SHEET_TITLE}}}
-    gws(
+    resp = gws(
         "sheets",
         "spreadsheets",
         "batchUpdate",
@@ -241,6 +251,17 @@ def _ensure_data_sheet(sid: str) -> None:
         json.dumps({"spreadsheetId": sid}),
         json_body={"requests": [req]},
     )
+    if data_sheet_id is None:
+        replies = resp.get("replies") or [{}]
+        added = replies[0].get("addSheet", {}).get("properties", {})
+        data_sheet_id = added.get("sheetId")
+        if data_sheet_id is None:
+            print(
+                "ERROR: addSheet reply did not include the new tab's sheetId",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    return int(data_sheet_id)
 
 
 def _read_sheet_all(
@@ -642,7 +663,7 @@ def _dropdown_requests(
 
 
 def _weights_format_requests(
-    headers: list[str], num_rows: int, num_cols: int
+    headers: list[str], num_rows: int, num_cols: int, sheet_id: int
 ) -> list[dict]:
     """Weights-sheet formatting (unchanged legacy behavior).
 
@@ -650,7 +671,6 @@ def _weights_format_requests(
     weights sheet layout (which has reviewer-inserted columns H-J), exactly
     as the pre-preset version of this script did. ``headers`` is unused.
     """
-    sheet_id = 0
     requests: list[dict] = []
 
     # ---- Header row formatting ----
@@ -883,10 +903,9 @@ def _weights_format_requests(
 
 
 def _cost_model_format_requests(
-    headers: list[str], num_rows: int, num_cols: int
+    headers: list[str], num_rows: int, num_cols: int, sheet_id: int
 ) -> list[dict]:
     """Cost-model-sheet formatting; columns are resolved by header name."""
-    sheet_id = 0
     requests: list[dict] = []
 
     def col_of(name: str) -> int | None:
@@ -1029,6 +1048,7 @@ def apply_formatting(
     headers: list[str],
     num_rows: int,
     num_cols: int,
+    sheet_id: int,
 ) -> None:
     """Apply dropdowns and preset formatting to the data sheet.
 
@@ -1036,15 +1056,19 @@ def apply_formatting(
     columns plus shipped-empty and preserved reviewer columns); dropdown
     targets are resolved against it by name. ``num_rows``/``num_cols`` are
     the uploaded CSV dimensions, used by preset format hooks for ranges.
+    ``sheet_id`` is the data tab's sheetId (0 on freshly created
+    spreadsheets; whatever ``_ensure_data_sheet`` resolved on pre-existing
+    ones) — every structural request targets it.
     """
     print("Applying formatting...")
-    sheet_id = 0
     requests = []
 
-    # ---- Clear ALL existing conditional formatting first ----
+    # ---- Clear the data tab's existing conditional formatting first ----
     # Without this, rules accumulate across uploads and stale rules
     # override the new ones (Sheets evaluates top-down, first match wins).
-    # We read the current count and delete them all in reverse order.
+    # We locate the data tab in the metadata by sheetId — NOT sheets[0],
+    # which on a multi-tab spreadsheet may be an unrelated user tab — then
+    # read its rule count and delete them all in reverse order.
     try:
         sheet_meta = gws(
             "sheets",
@@ -1054,13 +1078,21 @@ def apply_formatting(
             json.dumps(
                 {
                     "spreadsheetId": sid,
-                    "fields": "sheets.conditionalFormats",
+                    "fields": "sheets(properties.sheetId,conditionalFormats)",
                 }
             ),
         )
         if isinstance(sheet_meta, str):
             sheet_meta = json.loads(sheet_meta)
-        existing_rules = sheet_meta["sheets"][0].get("conditionalFormats", [])
+        data_tab = next(
+            (
+                s
+                for s in sheet_meta.get("sheets", [])
+                if s.get("properties", {}).get("sheetId", 0) == sheet_id
+            ),
+            {},
+        )
+        existing_rules = data_tab.get("conditionalFormats", [])
         if existing_rules:
             # Delete in reverse order so indices stay valid
             for i in range(len(existing_rules) - 1, -1, -1):
@@ -1097,7 +1129,7 @@ def apply_formatting(
 
     # ---- Preset-specific formatting (colors, widths, conditional rules) ----
     if preset.format_hook is not None:
-        requests += preset.format_hook(headers, num_rows, num_cols)
+        requests += preset.format_hook(headers, num_rows, num_cols, sheet_id)
 
     # ---- Send batch updates in chunks (avoid CLI arg length limits) ----
     CHUNK_SIZE = 10
@@ -1262,16 +1294,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.spreadsheet_id:
         sid = args.spreadsheet_id
         print(f"Updating existing spreadsheet: {sid}")
-        _ensure_data_sheet(sid)
+        data_sheet_id = _ensure_data_sheet(sid)
         headers = upload_data(sid, rows, preset)
         apply_formatting(
-            sid, preset, headers, num_rows=len(rows), num_cols=len(rows[0])
+            sid,
+            preset,
+            headers,
+            num_rows=len(rows),
+            num_cols=len(rows[0]),
+            sheet_id=data_sheet_id,
         )
     else:
         sid = create_spreadsheet(preset)
         headers = upload_data(sid, rows, preset)
         apply_formatting(
-            sid, preset, headers, num_rows=len(rows), num_cols=len(rows[0])
+            sid,
+            preset,
+            headers,
+            num_rows=len(rows),
+            num_cols=len(rows[0]),
+            # create_spreadsheet pins the data tab to sheetId 0.
+            sheet_id=0,
         )
         create_summary_sheet(sid, rows, preset)
 
