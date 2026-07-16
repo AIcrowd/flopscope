@@ -449,6 +449,7 @@ REGISTRY: dict[str, dict] = {
     },
     "real": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": (
             "Return real part of complex array. Component extraction -- a "
@@ -457,6 +458,7 @@ REGISTRY: dict[str, dict] = {
     },
     "imag": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": (
             "Return imaginary part of complex array. Component extraction -- "
@@ -508,6 +510,7 @@ REGISTRY: dict[str, dict] = {
     },
     "isnat": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Element-wise test for NaT. Cost: numel(input). Un-blacklisted: comparison tier, benchmarked in SPECIAL_OPS.",
     },
@@ -541,11 +544,13 @@ REGISTRY: dict[str, dict] = {
     },
     "iscomplexobj": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if input is a complex type or array (dtype predicate, O(1)).",
     },
     "isrealobj": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if x is not a complex type or array (dtype predicate, O(1)).",
     },
@@ -1353,6 +1358,7 @@ REGISTRY: dict[str, dict] = {
     },
     "linalg.diagonal": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.linalg",
         "notes": "View of diagonal — delegates to flopscope.diagonal. Cost: 0 FLOPs.",
     },
@@ -1428,6 +1434,7 @@ REGISTRY: dict[str, dict] = {
     },
     "linalg.matrix_transpose": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.linalg",
         "notes": "Transpose view — delegates to flopscope.matrix_transpose. Cost: 0 FLOPs.",
     },
@@ -1562,6 +1569,7 @@ REGISTRY: dict[str, dict] = {
     },
     "fft.fftshift": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.fft",
         "notes": "Shift zero-frequency component to center. No arithmetic; index reordering only.",
     },
@@ -1595,6 +1603,7 @@ REGISTRY: dict[str, dict] = {
     },
     "fft.ifftshift": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.fft",
         "notes": "Inverse of fftshift. No arithmetic; index reordering only.",
     },
@@ -1666,11 +1675,13 @@ REGISTRY: dict[str, dict] = {
     },
     "zeros": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Create zero-filled array.",
     },
     "ones": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Create one-filled array.",
     },
@@ -1683,11 +1694,13 @@ REGISTRY: dict[str, dict] = {
     },
     "eye": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Create identity matrix.",
     },
     "identity": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Create square identity matrix.",
     },
@@ -1714,11 +1727,13 @@ REGISTRY: dict[str, dict] = {
     },
     "zeros_like": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Array of zeros with same shape/type as input.",
     },
     "ones_like": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Array of ones with same shape/type as input.",
     },
@@ -1731,31 +1746,37 @@ REGISTRY: dict[str, dict] = {
     },
     "empty": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Uninitialized array allocation.",
     },
     "empty_like": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Uninitialized array with same shape/type as input.",
     },
     "reshape": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Reshape array without copying.",
     },
     "transpose": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Permute array dimensions.",
     },
     "swapaxes": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Interchange two axes of an array.",
     },
     "moveaxis": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Move axes to new positions.",
     },
@@ -1789,36 +1810,43 @@ REGISTRY: dict[str, dict] = {
     },
     "split": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Split array into sub-arrays. Cost: numel(output).",
     },
     "hsplit": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Split array into columns.",
     },
     "vsplit": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Split array into rows. Cost: numel(output).",
     },
     "squeeze": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Remove size-1 dimensions.",
     },
     "expand_dims": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Insert new size-1 axis.",
     },
     "ravel": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return contiguous flattened array. Cost: numel(input).",
     },
     "copy": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return array copy.",
     },
@@ -1845,6 +1873,7 @@ REGISTRY: dict[str, dict] = {
     },
     "flip": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Reverse order of elements along axis.",
     },
@@ -1920,6 +1949,7 @@ REGISTRY: dict[str, dict] = {
     },
     "broadcast_to": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Broadcast array to new shape. Cost: numel(output).",
     },
@@ -1932,11 +1962,13 @@ REGISTRY: dict[str, dict] = {
     },
     "astype": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Cast array to specified type.",
     },
     "asarray": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Convert input to array. Cost: numel(input).",
     },
@@ -1971,31 +2003,37 @@ REGISTRY: dict[str, dict] = {
     # Additional free ops
     "rot90": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Rotate array 90 degrees.",
     },
     "fliplr": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Flip array left-right.",
     },
     "flipud": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Flip array up-down.",
     },
     "atleast_1d": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "View inputs as arrays with at least one dimension.",
     },
     "atleast_2d": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "View inputs as arrays with at least two dimensions.",
     },
     "atleast_3d": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "View inputs as arrays with at least three dimensions.",
     },
@@ -2142,26 +2180,31 @@ REGISTRY: dict[str, dict] = {
     },
     "shape": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return shape of array.",
     },
     "size": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return number of elements in array.",
     },
     "ndim": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return number of dimensions of array.",
     },
     "dsplit": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Split array into multiple sub-arrays depth-wise. Cost: numel(output).",
     },
     "array_split": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Split array into sub-arrays (possibly unequal). Cost: numel(output).",
     },
@@ -2181,46 +2224,55 @@ REGISTRY: dict[str, dict] = {
     },
     "broadcast_shapes": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Compute broadcast shape from input shapes.",
     },
     "broadcast_arrays": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Broadcast arrays against each other. Cost: numel(output).",
     },
     "result_type": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return type that results from applying NumPy type promotion.",
     },
     "can_cast": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Returns True if cast is safe.",
     },
     "common_type": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return scalar type common to all input arrays.",
     },
     "min_scalar_type": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return the minimum scalar type for a value.",
     },
     "promote_types": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return smallest type to which both types may be safely cast.",
     },
     "shares_memory": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Determine if two arrays share memory.",
     },
     "may_share_memory": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Determine if two arrays might share memory.",
     },
@@ -2256,26 +2308,31 @@ REGISTRY: dict[str, dict] = {
     },
     "frombuffer": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Interpret buffer as 1-D array. Cost: numel(output).",
     },
     "fromstring": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Create 1-D array from string data. Cost: numel(output).",
     },
     "fromfile": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Construct array from binary/text file. Cost: numel(output).",
     },
     "fromregex": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Construct array from text file using regex. Cost: numel(output).",
     },
     "from_dlpack": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Create ndarray from DLPack object (zero-copy). Cost: numel(output).",
     },
@@ -2386,6 +2443,7 @@ REGISTRY: dict[str, dict] = {
     },
     "unravel_index": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Convert flat index to multi-dimensional index.",
     },
@@ -2405,11 +2463,13 @@ REGISTRY: dict[str, dict] = {
     },
     "diag_indices": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return indices to access main diagonal of n-D array.",
     },
     "diag_indices_from": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return indices to access main diagonal of given array.",
     },
@@ -2429,21 +2489,25 @@ REGISTRY: dict[str, dict] = {
     },
     "tril_indices": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return lower-triangle indices for n x n array.",
     },
     "tril_indices_from": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return lower-triangle indices for given array.",
     },
     "triu_indices": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return upper-triangle indices for n x n array.",
     },
     "triu_indices_from": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return upper-triangle indices for given array.",
     },
@@ -2456,6 +2520,7 @@ REGISTRY: dict[str, dict] = {
     },
     "tri": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Array with ones at and below given diagonal.",
     },
@@ -2496,16 +2561,19 @@ REGISTRY: dict[str, dict] = {
     },
     "rollaxis": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Roll specified axis backwards. Cost: numel(output).",
     },
     "permute_dims": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Permute dimensions (NumPy 2.x array API).",
     },
     "matrix_transpose": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Transpose last two dimensions (NumPy 2.x array API).",
     },
@@ -2582,51 +2650,61 @@ REGISTRY: dict[str, dict] = {
     },
     "require": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return array that satisfies requirements.",
     },
     "issubdtype": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if first argument is lower in type hierarchy.",
     },
     "isdtype": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if array or dtype is of specified kind (NumPy 2.x).",
     },
     "isscalar": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if input is a scalar.",
     },
     "isfortran": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if array is Fortran contiguous.",
     },
     "iterable": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return True if object is iterable.",
     },
     "typename": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return description of given data type code.",
     },
     "mintypecode": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Return minimum data type character that can satisfy all given types.",
     },
     "base_repr": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return string representation of number in given base. Cost: len(output string).",
     },
     "binary_repr": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return binary string representation of the input number. Cost: len(output string).",
     },
@@ -2694,6 +2772,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.default_rng": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Construct a new Generator with default BitGenerator.",
     },
@@ -2734,6 +2813,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.get_state": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Return tuple representing internal state of generator.",
     },
@@ -2774,6 +2854,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.random_integers": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy.random",
         "notes": "Deprecated numpy alias; intentionally unsupported (raises AttributeError).",
     },
@@ -2912,11 +2993,13 @@ REGISTRY: dict[str, dict] = {
     },
     "random.seed": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Seed random number generator.",
     },
     "random.set_state": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Set internal state of generator.",
     },
@@ -3319,11 +3402,13 @@ REGISTRY: dict[str, dict] = {
     # Free (passthrough; counting happens at the sampler-method level)
     "random.Generator.bit_generator": {
         "category": "free_random_method",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Underlying BitGenerator; attribute access, no math.",
     },
     "random.Generator.spawn": {
         "category": "free_random_method",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Returns child Generators; subclass override wraps them as _CountedGenerator.",
     },
@@ -3655,16 +3740,19 @@ REGISTRY: dict[str, dict] = {
     # Free RandomState methods
     "random.RandomState.get_state": {
         "category": "free_random_method",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "State accessor; no math.",
     },
     "random.RandomState.seed": {
         "category": "free_random_method",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "Seed setter; no math.",
     },
     "random.RandomState.set_state": {
         "category": "free_random_method",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy.random",
         "notes": "State setter; no math.",
     },
@@ -3951,98 +4039,117 @@ REGISTRY: dict[str, dict] = {
     # blacklisted — IO
     "genfromtxt": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Load data from text file with missing values. Not supported.",
     },
     "loadtxt": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Load data from text file. Not supported.",
     },
     "load": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Load arrays from .npy/.npz files (pickle-free). Cost: 0 FLOPs.",
     },
     "save": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Save array to .npy file (pickle-free). Cost: 0 FLOPs.",
     },
     "savetxt": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Save array to text file. Not supported.",
     },
     "savez": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Save multiple arrays to .npz (pickle-free). Cost: 0 FLOPs.",
     },
     "savez_compressed": {
         "category": "free",
+        "cost_formula": "0 (free: no cost path in code; weight alone has no effect)",
         "module": "numpy",
         "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 0 FLOPs.",
     },
     # blacklisted — config / runtime
     "show_config": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Show NumPy build configuration. Not supported.",
     },
     "show_runtime": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Show runtime info. Not supported.",
     },
     "get_include": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return directory containing NumPy C header files. Not supported.",
     },
     "getbufsize": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return size of buffer used in ufuncs. Not supported.",
     },
     "setbufsize": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Set size of buffer used in ufuncs. Not supported.",
     },
     "geterr": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "FP-error-state get/set; pure numpy state management. 0 FLOPs.",
     },
     "seterr": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "FP-error-state get/set; pure numpy state management. 0 FLOPs.",
     },
     "geterrcall": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return current callback function for floating-point errors. Not supported.",
     },
     "seterrcall": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Set callback function for floating-point errors. Not supported.",
     },
     # blacklisted — advanced/meta
     "asmatrix": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Interpret input as matrix (deprecated). Not supported.",
     },
     "nested_iters": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Create nested iterators for multi-index broadcasting. Not supported.",
     },
     "frompyfunc": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Take arbitrary Python function and return NumPy ufunc. Not supported.",
     },
@@ -4073,103 +4180,123 @@ REGISTRY: dict[str, dict] = {
     # blacklisted — datetime
     "datetime_as_string": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Convert datetime array to string representation. Not supported.",
     },
     "datetime_data": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Get information about the step size of datetime dtype. Not supported.",
     },
     "busday_count": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Count valid days between begindate and enddate. Not supported.",
     },
     "busday_offset": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Apply offset to dates subject to valid day rules. Not supported.",
     },
     "is_busday": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Calculates which of given dates are valid days. Not supported.",
     },
     # blacklisted — print/string formatting
     "array2string": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return string representation of array. Not supported.",
     },
     "array_repr": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return string representation of array. Not supported.",
     },
     "array_str": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Return string representation of data in array. Not supported.",
     },
     "format_float_positional": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Format floating point scalar as decimal string. Not supported.",
     },
     "format_float_scientific": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Format floating point scalar as scientific notation. Not supported.",
     },
     # blacklisted — iterators / global state / dtype-info
     "ndindex": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Index iterator; not a remote-compute value op.",
     },
     "nditer": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Array iterator; not a remote-compute value op.",
     },
     "ndenumerate": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Index/value iterator; not a remote-compute value op.",
     },
     "broadcast": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Broadcast iterator object; not a remote-compute value op.",
     },
     "errstate": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Floating-point error-state context manager; global state, not remote.",
     },
     "printoptions": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Print-options context manager; global display state, not remote.",
     },
     "get_printoptions": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Read global print options; display state, not remote.",
     },
     "set_printoptions": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Set global print options; display state, not remote.",
     },
     "finfo": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Float dtype-info object; introspection, not a remote-compute value op.",
     },
     "iinfo": {
         "category": "blacklisted",
+        "cost_formula": "n/a (blacklisted: raises on use)",
         "module": "numpy",
         "notes": "Integer dtype-info object; introspection, not a remote-compute value op.",
     },
