@@ -11,7 +11,11 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
-from flopscope._dtype_billing import linalg_billing_dtypes
+from flopscope._dtype_billing import (
+    linalg_billing_dtypes,
+    reduction_billing_dtype,
+    sum_accumulator_dtype,
+)
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._symmetric import SymmetricTensor
 from flopscope._validation import require_budget
@@ -52,13 +56,17 @@ def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeAr
         n = min(n, x.shape[-2] + offset)
     n = max(n, 0)
     cost = trace_cost(n) * _batch_size(x.shape) if not _has_zero_dim(x.shape) else 0
-    # An explicit accumulator dtype= produces its own (possibly complex) result,
-    # so fold it into the billing tuple or it bypasses the complex/fp64 factor.
-    # Not routed through linalg_billing_dtypes: trace is a plain diagonal sum,
-    # not LAPACK-backed, so integer input keeps (widened) integer arithmetic
-    # rather than forcing float64 -- confirmed live (np.linalg.trace(int32) ->
-    # int64, not float64).
-    _trace_dtypes = (x.dtype,) if dtype is None else (x.dtype, _np.dtype(dtype))
+    # trace is a diagonal sum, NOT a LAPACK op, so it is not routed through
+    # linalg_billing_dtypes (integer input never forces float64). It DOES widen
+    # its accumulator exactly like sum -- trace(int32) runs int64 -- so bill the
+    # accumulator dtype (floored at the input rate), honoring an explicit dtype=.
+    _trace_dtypes = (
+        reduction_billing_dtype(
+            x.dtype,
+            explicit_dtype=dtype,
+            default_dtype=sum_accumulator_dtype(x.dtype),
+        ),
+    )
     with budget.deduct(
         "linalg.trace",
         flop_cost=cost,

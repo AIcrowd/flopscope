@@ -1260,3 +1260,54 @@ def test_integer_matmul_family_not_promoted():
     assert _billed_with_production_rates(
         lambda: fnp.linalg.matrix_power(a, 2)
     )[1] in ("int32", "int64")  # numpy computes integer matmuls here
+
+
+def test_linalg_trace_bills_integer_accumulator():
+    import flopscope.numpy as fnp
+
+    a_i32 = (np.eye(8) * 3).astype(np.int32)
+    a_f32 = np.eye(8, dtype=np.float32)
+    # numpy widens the trace accumulator like sum: trace(int32) runs int64.
+    assert _billed_with_production_rates(lambda: fnp.linalg.trace(a_i32)) == (
+        16,
+        "int64",
+    )
+    # float input keeps its own dtype (no widening): PIN.
+    assert _billed_with_production_rates(lambda: fnp.linalg.trace(a_f32)) == (
+        8,
+        "float32",
+    )
+
+
+def test_top_level_trace_bills_integer_accumulator():
+    import flopscope.numpy as fnp
+
+    a_i32 = (np.eye(8) * 3).astype(np.int32)
+    a_f32 = np.eye(8, dtype=np.float32)
+    # fnp.trace is a SEPARATE wrapper from fnp.linalg.trace; same int widening,
+    # else a participant bypasses the fix by spelling `trace` without `linalg.`.
+    assert _billed_with_production_rates(lambda: fnp.trace(a_i32)) == (16, "int64")
+    # explicit narrow accumulator is honest at 32-bit (mirrors sum).
+    assert _billed_with_production_rates(
+        lambda: fnp.trace(a_i32, dtype=np.int32)
+    ) == (8, "int32")
+    assert _billed_with_production_rates(lambda: fnp.trace(a_f32)) == (8, "float32")
+
+
+def test_matrix_power_inversion_bills_float64():
+    import flopscope.numpy as fnp
+
+    a_i32 = (np.eye(4) * 2).astype(np.int32)
+    a_f32 = (np.eye(4) * 2).astype(np.float32)
+    # n<0 inverts via LAPACK first (int -> float64 driver): rate 2.0.
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.matrix_power(a_i32, -1)
+    ) == (224, "float64")
+    # n>=0 runs integer matmul chain — no promotion: PIN.
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.matrix_power(a_i32, 2)
+    ) == (112, "int32")
+    # f32 keeps the single-precision driver even when inverting: PIN.
+    assert _billed_with_production_rates(
+        lambda: fnp.linalg.matrix_power(a_f32, -1)
+    ) == (112, "float32")

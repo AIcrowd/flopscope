@@ -17,6 +17,7 @@ from numpy.typing import ArrayLike, DTypeLike
 
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import reduction_billing_dtype, sum_accumulator_dtype
 from flopscope._flops import _ceil_log2
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray, _to_base_ndarray_tree
 from flopscope._validation import require_budget
@@ -63,11 +64,17 @@ def trace(
     else:
         cost = 0
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype,)
-    if dtype is not None:
-        billing_dtypes += (_np.dtype(dtype),)
-    if out_stripped is not None:
-        billing_dtypes += (out_stripped.dtype,)
+    # numpy widens the trace accumulator like sum (trace(int32) runs int64);
+    # bill that accumulator, floored at the input rate, honoring explicit
+    # dtype= then out='s dtype. Mirrors the reduction wrappers exactly.
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=dtype,
+            out_dtype=out_stripped.dtype if out_stripped is not None else None,
+            default_dtype=sum_accumulator_dtype(a.dtype),
+        ),
+    )
     with budget.deduct(
         "trace",
         flop_cost=cost,
