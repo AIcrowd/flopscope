@@ -32,17 +32,17 @@ from flopscope._weights import get_weight, load_weights, reset_weights
 
 # --- probe inputs: int32 (the discriminating dtype), built at module import,
 # --- outside any BudgetContext.
-V = np.arange(1, 9, dtype=np.int32)            # 1-D, len 8, strictly positive
-V01 = (np.arange(8) % 2).astype(np.int32)      # zeros and ones
-M = (np.eye(4, dtype=np.int32) * 3 + 1)        # 4x4, nonsingular
+V = np.arange(1, 9, dtype=np.int32)  # 1-D, len 8, strictly positive
+V01 = (np.arange(8) % 2).astype(np.int32)  # zeros and ones
+M = np.eye(4, dtype=np.int32) * 3 + 1  # 4x4, nonsingular
 COND = np.array([True, False] * 4)
 
 # Extra shared probe inputs for calls the seed set didn't need.
-V3 = V[:3]                                      # length-3 (cross-product domain)
-V4 = V[:4]                                      # matches M's contracted dimension
-SHIFT = (V01 % 2).astype(np.int32) + 1          # 1s and 2s: safe int shift amounts
-XF = V.astype(np.float32)                       # generic real-domain float32 probe
-Q01 = XF / 10.0                                 # 0.1..0.8: valid probability domain (ppf)
+V3 = V[:3]  # length-3 (cross-product domain)
+V4 = V[:4]  # matches M's contracted dimension
+SHIFT = (V01 % 2).astype(np.int32) + 1  # 1s and 2s: safe int shift amounts
+XF = V.astype(np.float32)  # generic real-domain float32 probe
+Q01 = XF / 10.0  # 0.1..0.8: valid probability domain (ppf)
 
 # Two on-disk fixtures for the from{file,string} family (module-scoped, built
 # once outside any BudgetContext; cleaned up isn't required for CI workers).
@@ -67,7 +67,9 @@ def _shift(name: str) -> Callable[[], Any]:
     return lambda: getattr(fnp, name)(V, SHIFT)
 
 
-def _stats_call(dist_module: Any, method: str, arg: np.ndarray, kwargs: dict) -> Callable[[], Any]:
+def _stats_call(
+    dist_module: Any, method: str, arg: np.ndarray, kwargs: dict
+) -> Callable[[], Any]:
     return lambda: getattr(dist_module, method)(arg, **kwargs)
 
 
@@ -104,15 +106,68 @@ PROBES: dict[str, Callable[[], Any]] = {
 # the dtype the call resolves to does not depend on producing finite values.
 # ---------------------------------------------------------------------------
 _UNARY_OPS = [
-    "abs", "absolute", "acos", "acosh", "angle", "arccos", "arccosh", "arcsin",
-    "arcsinh", "arctan", "arctanh", "around", "asin", "asinh", "atan", "atanh",
-    "bitwise_count", "bitwise_invert", "bitwise_not", "cbrt", "ceil", "conj",
-    "conjugate", "cos", "cosh", "deg2rad", "degrees", "exp2", "expm1", "fabs",
-    "fix", "floor", "i0", "invert", "iscomplex", "isneginf", "isposinf",
-    "isreal", "log", "log10", "log1p", "log2", "logical_not", "nan_to_num",
-    "negative", "positive", "rad2deg", "radians", "real_if_close",
-    "reciprocal", "rint", "round", "sign", "signbit", "sin", "sinc", "sinh",
-    "spacing", "square", "tan", "tanh", "trunc",
+    "abs",
+    "absolute",
+    "acos",
+    "acosh",
+    "angle",
+    "arccos",
+    "arccosh",
+    "arcsin",
+    "arcsinh",
+    "arctan",
+    "arctanh",
+    "around",
+    "asin",
+    "asinh",
+    "atan",
+    "atanh",
+    "bitwise_count",
+    "bitwise_invert",
+    "bitwise_not",
+    "cbrt",
+    "ceil",
+    "conj",
+    "conjugate",
+    "cos",
+    "cosh",
+    "deg2rad",
+    "degrees",
+    "exp2",
+    "expm1",
+    "fabs",
+    "fix",
+    "floor",
+    "i0",
+    "invert",
+    "iscomplex",
+    "isneginf",
+    "isposinf",
+    "isreal",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "logical_not",
+    "nan_to_num",
+    "negative",
+    "positive",
+    "rad2deg",
+    "radians",
+    "real_if_close",
+    "reciprocal",
+    "rint",
+    "round",
+    "sign",
+    "signbit",
+    "sin",
+    "sinc",
+    "sinh",
+    "spacing",
+    "square",
+    "tan",
+    "tanh",
+    "trunc",
 ]
 for _name in _UNARY_OPS:
     PROBES[_name] = _unary(_name)
@@ -128,12 +183,42 @@ PROBES["frexp"] = lambda: fnp.frexp(V)
 # operand) and the matrix-vector contraction trio.
 # ---------------------------------------------------------------------------
 _BINARY_OPS = [
-    "arctan2", "atan2", "bitwise_and", "bitwise_or", "bitwise_xor", "copysign",
-    "divmod", "equal", "floor_divide", "fmax", "fmin", "fmod", "gcd",
-    "greater", "greater_equal", "heaviside", "hypot", "lcm", "ldexp", "less",
-    "less_equal", "logaddexp", "logaddexp2", "logical_and", "logical_or",
-    "logical_xor", "maximum", "minimum", "mod", "nextafter", "not_equal",
-    "pow", "power", "remainder", "subtract", "true_divide",
+    "arctan2",
+    "atan2",
+    "bitwise_and",
+    "bitwise_or",
+    "bitwise_xor",
+    "copysign",
+    "divmod",
+    "equal",
+    "floor_divide",
+    "fmax",
+    "fmin",
+    "fmod",
+    "gcd",
+    "greater",
+    "greater_equal",
+    "heaviside",
+    "hypot",
+    "lcm",
+    "ldexp",
+    "less",
+    "less_equal",
+    "logaddexp",
+    "logaddexp2",
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "maximum",
+    "minimum",
+    "mod",
+    "nextafter",
+    "not_equal",
+    "pow",
+    "power",
+    "remainder",
+    "subtract",
+    "true_divide",
 ]
 for _name in _BINARY_OPS:
     PROBES[_name] = _binary(_name)
@@ -153,10 +238,32 @@ PROBES["vecdot"] = lambda: fnp.vecdot(V4, V4)
 # except the percentile/quantile quartet (needs a q argument).
 # ---------------------------------------------------------------------------
 _REDUCTION_OPS = [
-    "all", "amax", "amin", "any", "argmax", "argmin", "count_nonzero",
-    "cumprod", "cumsum", "cumulative_prod", "cumulative_sum", "max", "min",
-    "nanargmax", "nanargmin", "nancumprod", "nancumsum", "nanmax", "nanmean",
-    "nanmedian", "nanmin", "nanprod", "nanstd", "nansum", "nanvar", "prod",
+    "all",
+    "amax",
+    "amin",
+    "any",
+    "argmax",
+    "argmin",
+    "count_nonzero",
+    "cumprod",
+    "cumsum",
+    "cumulative_prod",
+    "cumulative_sum",
+    "max",
+    "min",
+    "nanargmax",
+    "nanargmin",
+    "nancumprod",
+    "nancumsum",
+    "nanmax",
+    "nanmean",
+    "nanmedian",
+    "nanmin",
+    "nanprod",
+    "nanstd",
+    "nansum",
+    "nanvar",
+    "prod",
     "ptp",
 ]
 for _name in _REDUCTION_OPS:
@@ -262,7 +369,13 @@ PROBES.update(
 # probability in (0, 1), so it uses the scaled float32 probe (Q01).
 # ---------------------------------------------------------------------------
 _STATS_DISTS = [
-    "cauchy", "expon", "laplace", "logistic", "norm", "truncnorm", "uniform",
+    "cauchy",
+    "expon",
+    "laplace",
+    "logistic",
+    "norm",
+    "truncnorm",
+    "uniform",
 ]
 for _dist in _STATS_DISTS:
     _mod = getattr(fstats, _dist)
@@ -353,7 +466,9 @@ PROBES.update(
 PROBES.update(
     {
         "fromfile": lambda: fnp.fromfile(_FROMFILE_PATH, dtype=np.int32),
-        "fromstring": lambda: fnp.fromstring("1 2 3 4 5 6 7 8", dtype=np.int32, sep=" "),
+        "fromstring": lambda: fnp.fromstring(
+            "1 2 3 4 5 6 7 8", dtype=np.int32, sep=" "
+        ),
     }
 )
 
@@ -475,41 +590,135 @@ _SAMPLER_REASON = (
     "this sweep targets."
 )
 _GENERATOR_SAMPLERS = [
-    "beta", "binomial", "chisquare", "dirichlet", "exponential", "f", "gamma",
-    "geometric", "gumbel", "hypergeometric", "integers", "laplace", "logistic",
-    "lognormal", "logseries", "multinomial", "multivariate_hypergeometric",
-    "multivariate_normal", "negative_binomial", "noncentral_chisquare",
-    "noncentral_f", "normal", "pareto", "poisson", "power", "random",
-    "rayleigh", "standard_cauchy", "standard_exponential", "standard_gamma",
-    "standard_normal", "standard_t", "triangular", "uniform", "vonmises",
-    "wald", "weibull", "zipf",
+    "beta",
+    "binomial",
+    "chisquare",
+    "dirichlet",
+    "exponential",
+    "f",
+    "gamma",
+    "geometric",
+    "gumbel",
+    "hypergeometric",
+    "integers",
+    "laplace",
+    "logistic",
+    "lognormal",
+    "logseries",
+    "multinomial",
+    "multivariate_hypergeometric",
+    "multivariate_normal",
+    "negative_binomial",
+    "noncentral_chisquare",
+    "noncentral_f",
+    "normal",
+    "pareto",
+    "poisson",
+    "power",
+    "random",
+    "rayleigh",
+    "standard_cauchy",
+    "standard_exponential",
+    "standard_gamma",
+    "standard_normal",
+    "standard_t",
+    "triangular",
+    "uniform",
+    "vonmises",
+    "wald",
+    "weibull",
+    "zipf",
 ]
-SKIPPED.update(
-    {f"random.Generator.{m}": _SAMPLER_REASON for m in _GENERATOR_SAMPLERS}
-)
+SKIPPED.update({f"random.Generator.{m}": _SAMPLER_REASON for m in _GENERATOR_SAMPLERS})
 _RANDOMSTATE_SAMPLERS = [
-    "beta", "binomial", "chisquare", "dirichlet", "exponential", "f", "gamma",
-    "geometric", "gumbel", "hypergeometric", "laplace", "logistic",
-    "lognormal", "logseries", "multinomial", "multivariate_normal",
-    "negative_binomial", "noncentral_chisquare", "noncentral_f", "normal",
-    "pareto", "poisson", "power", "rand", "randint", "randn", "random",
-    "random_integers", "random_sample", "rayleigh", "standard_cauchy",
-    "standard_exponential", "standard_gamma", "standard_normal",
-    "standard_t", "tomaxint", "triangular", "uniform", "vonmises", "wald",
-    "weibull", "zipf",
+    "beta",
+    "binomial",
+    "chisquare",
+    "dirichlet",
+    "exponential",
+    "f",
+    "gamma",
+    "geometric",
+    "gumbel",
+    "hypergeometric",
+    "laplace",
+    "logistic",
+    "lognormal",
+    "logseries",
+    "multinomial",
+    "multivariate_normal",
+    "negative_binomial",
+    "noncentral_chisquare",
+    "noncentral_f",
+    "normal",
+    "pareto",
+    "poisson",
+    "power",
+    "rand",
+    "randint",
+    "randn",
+    "random",
+    "random_integers",
+    "random_sample",
+    "rayleigh",
+    "standard_cauchy",
+    "standard_exponential",
+    "standard_gamma",
+    "standard_normal",
+    "standard_t",
+    "tomaxint",
+    "triangular",
+    "uniform",
+    "vonmises",
+    "wald",
+    "weibull",
+    "zipf",
 ]
 SKIPPED.update(
     {f"random.RandomState.{m}": _SAMPLER_REASON for m in _RANDOMSTATE_SAMPLERS}
 )
 _TOPLEVEL_SAMPLERS = [
-    "beta", "binomial", "chisquare", "dirichlet", "exponential", "f", "gamma",
-    "geometric", "gumbel", "hypergeometric", "laplace", "logistic",
-    "lognormal", "logseries", "multinomial", "multivariate_normal",
-    "negative_binomial", "noncentral_chisquare", "noncentral_f", "normal",
-    "pareto", "poisson", "power", "rand", "randint", "randn", "random",
-    "random_sample", "ranf", "rayleigh", "sample", "standard_cauchy",
-    "standard_exponential", "standard_gamma", "standard_normal",
-    "standard_t", "triangular", "uniform", "vonmises", "wald", "weibull",
+    "beta",
+    "binomial",
+    "chisquare",
+    "dirichlet",
+    "exponential",
+    "f",
+    "gamma",
+    "geometric",
+    "gumbel",
+    "hypergeometric",
+    "laplace",
+    "logistic",
+    "lognormal",
+    "logseries",
+    "multinomial",
+    "multivariate_normal",
+    "negative_binomial",
+    "noncentral_chisquare",
+    "noncentral_f",
+    "normal",
+    "pareto",
+    "poisson",
+    "power",
+    "rand",
+    "randint",
+    "randn",
+    "random",
+    "random_sample",
+    "ranf",
+    "rayleigh",
+    "sample",
+    "standard_cauchy",
+    "standard_exponential",
+    "standard_gamma",
+    "standard_normal",
+    "standard_t",
+    "triangular",
+    "uniform",
+    "vonmises",
+    "wald",
+    "weibull",
     "zipf",
 ]
 SKIPPED.update({f"random.{m}": _SAMPLER_REASON for m in _TOPLEVEL_SAMPLERS})
@@ -611,12 +820,29 @@ _UNREACHABLE_REASON = (
     "access, verified) -- no deduct() call is possible."
 )
 for _name in (
-    "array2string", "array_repr", "array_str", "asmatrix", "busday_count",
-    "busday_offset", "datetime_as_string", "datetime_data",
-    "format_float_positional", "format_float_scientific", "frompyfunc",
-    "genfromtxt", "get_include", "getbufsize", "geterrcall", "is_busday",
-    "loadtxt", "nested_iters", "savetxt", "setbufsize", "seterrcall",
-    "show_config", "show_runtime",
+    "array2string",
+    "array_repr",
+    "array_str",
+    "asmatrix",
+    "busday_count",
+    "busday_offset",
+    "datetime_as_string",
+    "datetime_data",
+    "format_float_positional",
+    "format_float_scientific",
+    "frompyfunc",
+    "genfromtxt",
+    "get_include",
+    "getbufsize",
+    "geterrcall",
+    "is_busday",
+    "loadtxt",
+    "nested_iters",
+    "savetxt",
+    "setbufsize",
+    "seterrcall",
+    "show_config",
+    "show_runtime",
 ):
     SKIPPED[_name] = _UNREACHABLE_REASON
 
@@ -629,8 +855,17 @@ _NO_DEDUCT_REASON = (
     "never calls deduct() -- no billed dtype to conform."
 )
 for _name in (
-    "broadcast", "errstate", "finfo", "get_printoptions", "geterr", "iinfo",
-    "ndenumerate", "ndindex", "nditer", "printoptions", "set_printoptions",
+    "broadcast",
+    "errstate",
+    "finfo",
+    "get_printoptions",
+    "geterr",
+    "iinfo",
+    "ndenumerate",
+    "ndindex",
+    "nditer",
+    "printoptions",
+    "set_printoptions",
     "seterr",
 ):
     SKIPPED[_name] = _NO_DEDUCT_REASON
@@ -664,9 +899,22 @@ SKIPPED["fromregex"] = (
 # direct probes above), so exempting the tuple-as-a-whole here does not hide
 # an unverified path.
 INDEX_OUTPUT_OPS = {
-    "argmax", "argmin", "nanargmax", "nanargmin", "argsort", "argpartition",
-    "nonzero", "flatnonzero", "argwhere", "searchsorted", "count_nonzero",
-    "digitize", "lexsort", "unique_all", "unique_counts", "unique_inverse",
+    "argmax",
+    "argmin",
+    "nanargmax",
+    "nanargmin",
+    "argsort",
+    "argpartition",
+    "nonzero",
+    "flatnonzero",
+    "argwhere",
+    "searchsorted",
+    "count_nonzero",
+    "digitize",
+    "lexsort",
+    "unique_all",
+    "unique_counts",
+    "unique_inverse",
 }
 
 

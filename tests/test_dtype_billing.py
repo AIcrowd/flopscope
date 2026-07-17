@@ -205,6 +205,7 @@ def test_resolve_promotion_failure_falls_back_to_heaviest():
 
 def test_reduction_billing_dtype_resolution_order():
     from flopscope._dtype_billing import reduction_billing_dtype
+
     load_weights()
 
     i32, i64 = np.dtype(np.int32), np.dtype(np.int64)
@@ -213,17 +214,22 @@ def test_reduction_billing_dtype_resolution_order():
     # No explicit/out: the implicit default accumulator wins.
     assert reduction_billing_dtype(i32, default_dtype=i64) == i64
     # Explicit dtype REPLACES the implicit default (mattmotoki's case).
-    assert reduction_billing_dtype(i32, explicit_dtype=np.int32, default_dtype=i64) == i32
+    assert (
+        reduction_billing_dtype(i32, explicit_dtype=np.int32, default_dtype=i64) == i32
+    )
     # Explicit wide dtype is honored (positional-dtype case feeds this too).
     assert reduction_billing_dtype(f32, explicit_dtype=np.float64) == f64
     # out= without dtype= sets the accumulator (numpy ufunc.reduce semantics).
     assert reduction_billing_dtype(f32, out_dtype=f64) == f64
     # dtype-like inputs (type objects, strings) are normalized.
-    assert reduction_billing_dtype(i32, explicit_dtype="int32", default_dtype=i64) == i32
+    assert (
+        reduction_billing_dtype(i32, explicit_dtype="int32", default_dtype=i64) == i32
+    )
 
 
 def test_reduction_billing_dtype_floors_at_input_rate():
     from flopscope._dtype_billing import reduction_billing_dtype
+
     load_weights()
 
     f32, f64 = np.dtype(np.float32), np.dtype(np.float64)
@@ -233,7 +239,8 @@ def test_reduction_billing_dtype_floors_at_input_rate():
     # mean-family: integer input computing in f32 per explicit dtype is honest.
     assert (
         reduction_billing_dtype(
-            np.dtype(np.int32), explicit_dtype=np.float32,
+            np.dtype(np.int32),
+            explicit_dtype=np.float32,
             default_dtype=np.dtype(np.float64),
         )
         == f32

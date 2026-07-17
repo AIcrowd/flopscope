@@ -930,9 +930,10 @@ def test_explicit_narrow_reduction_dtype_bills_narrow():
     # Implicit: numpy widens int32 sum to int64 -> rate 2.0 (existing behavior).
     assert _billed_with_production_rates(lambda: fnp.sum(x)) == (1998, "int64")
     # Explicit int32 accumulator: numpy runs 32-bit adds -> rate 1.0.
-    assert _billed_with_production_rates(
-        lambda: fnp.sum(x, dtype=np.int32)
-    ) == (999, "int32")
+    assert _billed_with_production_rates(lambda: fnp.sum(x, dtype=np.int32)) == (
+        999,
+        "int32",
+    )
 
 
 def test_positional_reduction_dtype_is_billed():
@@ -940,13 +941,15 @@ def test_positional_reduction_dtype_is_billed():
 
     x = np.ones(1000, dtype=np.float32)
     # numpy signature sum(a, axis, dtype, ...): dtype passed positionally.
-    assert _billed_with_production_rates(
-        lambda: fnp.sum(x, None, np.float64)
-    ) == (1998, "float64")
+    assert _billed_with_production_rates(lambda: fnp.sum(x, None, np.float64)) == (
+        1998,
+        "float64",
+    )
     # keyword spelling bills identically
-    assert _billed_with_production_rates(
-        lambda: fnp.sum(x, dtype=np.float64)
-    ) == (1998, "float64")
+    assert _billed_with_production_rates(lambda: fnp.sum(x, dtype=np.float64)) == (
+        1998,
+        "float64",
+    )
 
 
 def test_narrowing_reduction_dtype_floors_at_input_rate():
@@ -964,9 +967,10 @@ def test_reduction_out_dtype_sets_accumulator():
     x = np.ones(1000, dtype=np.float32)
     out = np.empty((), dtype=np.float64)
     # ufunc.reduce semantics: out= without dtype= IS the accumulator dtype.
-    assert _billed_with_production_rates(
-        lambda: fnp.sum(x, out=out)
-    ) == (1998, "float64")
+    assert _billed_with_production_rates(lambda: fnp.sum(x, out=out)) == (
+        1998,
+        "float64",
+    )
 
 
 def test_ufunc_reduce_protocol_bills_requested_accumulator():
@@ -997,9 +1001,10 @@ def test_mean_variance_explicit_dtype_replaces_float64_default():
     # Implicit float64 compute (existing behavior — pins Task 4 didn't break it).
     assert _billed_with_production_rates(lambda: fnp.mean(x)) == (2000, "float64")
     # Explicit float32 compute: numpy honors it; bill rate 1.0.
-    assert _billed_with_production_rates(
-        lambda: fnp.mean(x, dtype=np.float32)
-    ) == (1000, "float32")
+    assert _billed_with_production_rates(lambda: fnp.mean(x, dtype=np.float32)) == (
+        1000,
+        "float32",
+    )
     billed, dt = _billed_with_production_rates(lambda: fnp.var(x, dtype=np.float32))
     assert dt == "float32"
     billed64, _ = _billed_with_production_rates(lambda: fnp.var(x))
@@ -1011,7 +1016,10 @@ def test_mean_positional_dtype_is_billed():
 
     x = np.ones(1000, dtype=np.float32)
     # np.mean(a, axis, dtype): positional dtype binds the wrapper's named param.
-    assert _billed_with_production_rates(lambda: fnp.mean(x, None, np.float64))[1] == "float64"
+    assert (
+        _billed_with_production_rates(lambda: fnp.mean(x, None, np.float64))[1]
+        == "float64"
+    )
 
 
 def test_generic_ufunc_reduce_bills_requested_dtype():
@@ -1240,7 +1248,9 @@ def test_fft_bills_complex_working_precision():
         51200,
         "complex64",
     )
-    assert _billed_with_production_rates(lambda: fnp.fft.fft(sig_f64))[1] == "complex128"
+    assert (
+        _billed_with_production_rates(lambda: fnp.fft.fft(sig_f64))[1] == "complex128"
+    )
 
 
 def test_linalg_bills_lapack_compute_dtype():
@@ -1251,13 +1261,15 @@ def test_linalg_bills_lapack_compute_dtype():
     a_f32 = a_i32.astype(np.float32)
     b_f32 = b_i32.astype(np.float32)
     # int inputs run LAPACK in float64: rate 2.0 (was 469 at int rate).
-    assert _billed_with_production_rates(
-        lambda: fnp.linalg.solve(a_i32, b_i32)
-    ) == (938, "float64")
+    assert _billed_with_production_rates(lambda: fnp.linalg.solve(a_i32, b_i32)) == (
+        938,
+        "float64",
+    )
     # f32 keeps the single-precision driver: rate 1.0.
-    assert _billed_with_production_rates(
-        lambda: fnp.linalg.solve(a_f32, b_f32)
-    ) == (469, "float32")
+    assert _billed_with_production_rates(lambda: fnp.linalg.solve(a_f32, b_f32)) == (
+        469,
+        "float32",
+    )
     assert _billed_with_production_rates(lambda: fnp.linalg.inv(a_i32))[1] == "float64"
 
 
@@ -1268,9 +1280,10 @@ def test_integer_matmul_family_not_promoted():
     # matmul/matrix_power run INTEGER arithmetic — no LAPACK, no promotion.
     # Guard against over-eager linalg mapping (sweep only catches undercharge).
     assert _billed_with_production_rates(lambda: fnp.matmul(a, a))[1] == "int32"
-    assert _billed_with_production_rates(
-        lambda: fnp.linalg.matrix_power(a, 2)
-    )[1] in ("int32", "int64")  # numpy computes integer matmuls here
+    assert _billed_with_production_rates(lambda: fnp.linalg.matrix_power(a, 2))[1] in (
+        "int32",
+        "int64",
+    )  # numpy computes integer matmuls here
 
 
 def test_linalg_trace_bills_integer_accumulator():
@@ -1299,9 +1312,10 @@ def test_top_level_trace_bills_integer_accumulator():
     # else a participant bypasses the fix by spelling `trace` without `linalg.`.
     assert _billed_with_production_rates(lambda: fnp.trace(a_i32)) == (16, "int64")
     # explicit narrow accumulator is honest at 32-bit (mirrors sum).
-    assert _billed_with_production_rates(
-        lambda: fnp.trace(a_i32, dtype=np.int32)
-    ) == (8, "int32")
+    assert _billed_with_production_rates(lambda: fnp.trace(a_i32, dtype=np.int32)) == (
+        8,
+        "int32",
+    )
     assert _billed_with_production_rates(lambda: fnp.trace(a_f32)) == (8, "float32")
 
 
@@ -1315,9 +1329,10 @@ def test_matrix_power_inversion_bills_float64():
         lambda: fnp.linalg.matrix_power(a_i32, -1)
     ) == (224, "float64")
     # n>=0 runs integer matmul chain — no promotion: PIN.
-    assert _billed_with_production_rates(
-        lambda: fnp.linalg.matrix_power(a_i32, 2)
-    ) == (112, "int32")
+    assert _billed_with_production_rates(lambda: fnp.linalg.matrix_power(a_i32, 2)) == (
+        112,
+        "int32",
+    )
     # f32 keeps the single-precision driver even when inverting: PIN.
     assert _billed_with_production_rates(
         lambda: fnp.linalg.matrix_power(a_f32, -1)
