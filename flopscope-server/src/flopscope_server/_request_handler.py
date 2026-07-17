@@ -479,6 +479,12 @@ class RequestHandler:
             if b"__slice__" in raw_key:
                 parts = raw_key[b"__slice__"]
                 return slice(*[None if p is None else int(p) for p in parts])
+            # Tagged list: a genuine Python list key (fancy indexing, e.g.
+            # x[[0, 1]]) -- decode to a list, never a tuple.
+            if "__list__" in raw_key:
+                return [self._decode_index_key(item) for item in raw_key["__list__"]]
+            if b"__list__" in raw_key:
+                return [self._decode_index_key(item) for item in raw_key[b"__list__"]]
         if isinstance(raw_key, list):
             decoded = [self._decode_index_key(item) for item in raw_key]
             # A one-element key like ``arr[..., ]`` arrives as ``(Ellipsis,)`` ->
@@ -635,6 +641,7 @@ def _decode_index_key(raw_key):
     Supports:
     - int / float -> int
     - ``{"__slice__": [start, stop, step]}`` -> slice
+    - ``{"__list__": [...]}`` -> list (fancy indexing, e.g. ``x[[0, 1]]``)
     - list of the above -> tuple (for multi-dimensional indexing)
     """
     if isinstance(raw_key, dict):
@@ -646,6 +653,10 @@ def _decode_index_key(raw_key):
         if b"__slice__" in raw_key:
             parts = raw_key[b"__slice__"]
             return slice(*[None if p is None else int(p) for p in parts])
+        if "__list__" in raw_key:
+            return [_decode_index_key(item) for item in raw_key["__list__"]]
+        if b"__list__" in raw_key:
+            return [_decode_index_key(item) for item in raw_key[b"__list__"]]
     if isinstance(raw_key, list):
         decoded = [_decode_index_key(item) for item in raw_key]
         # A list of slices/ints (or a one-element Ellipsis like ``arr[..., ]``)
