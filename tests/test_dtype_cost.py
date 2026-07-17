@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from numpy.typing import DTypeLike
 
 import flopscope as f
 from flopscope._weights import load_weights
@@ -1228,15 +1229,17 @@ def test_outer_float_only_binary_bills_float64_and_int_stays_int():
     assert billed_add == 100  # 10*10 dense numel * int32 rate 1.0 (unaffected)
 
 
-def test_reduceat_float_only_binary_bills_float64_and_int_stays_int():
-    # true_divide has no integer loop (int32 reduceat runs entirely in
-    # float64); add keeps its native int32 loop -- contrast pins that the
-    # fix is narrowly scoped to float-only ufuncs, not a blanket widening.
+def test_reduceat_float_only_binary_bills_float64_and_add_widens_too():
+    # true_divide has no integer loop at all (int32 reduceat runs entirely
+    # in float64); add keeps its native int32 PAIRWISE loop, but reduceat --
+    # like reduce/sum -- runs add through numpy's integer-widening
+    # accumulator, so an int32 input still bills int64 (see the dedicated
+    # add/subtract accumulator pins below for that story in isolation).
     assert (
         _generic_ufunc_method_billed(lambda a: np.true_divide.reduceat(a, [0, 10]))
         == 200
     )
-    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 100
+    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 200
 
 
 def _i64_method_billed(method_call) -> tuple[int, str | None]:
@@ -1284,6 +1287,109 @@ def test_outer_float_widening_survives_the_floor():
 def test_reduceat_float_widening_survives_the_floor():
     assert _i64_method_billed(lambda a: np.true_divide.reduceat(a, [0, 5]))[1] == (
         "float64"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Final review: reduceat resolves its accumulator like reduce/sum; outer
+# honors an explicit dtype=; a bool dtype= on a value-testing loop still
+# bills the operands, not the bool output
+# ---------------------------------------------------------------------------
+
+
+def _reduceat_billed(method_call, *, n=1000, dtype: DTypeLike = np.int32) -> int:
+    """Delta-billed FLOPs for one ``ufunc.reduceat`` call (production rates).
+
+    Parametrized sibling of :func:`_generic_ufunc_method_billed` for the
+    accumulator pins below, which need a longer array and non-default
+    dtypes.
+    """
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.ones(n, dtype=dtype))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
+            method_call(arr)
+        return b.flops_used - before
+
+
+def test_reduceat_add_multiply_use_sum_accumulator_dtype():
+    # add/multiply.reduceat -- like sum/prod -- run through numpy's
+    # integer-widening accumulator by default, regardless of the segment
+    # indices: an int32 input bills int64. subtract has no such accumulator
+    # and keeps its native int32 loop -- the contrast pin.
+    assert _reduceat_billed(lambda a: np.add.reduceat(a, [0])) == 2000
+    assert _reduceat_billed(lambda a: np.subtract.reduceat(a, [0])) == 1000
+
+
+def test_reduceat_explicit_dtype_is_the_accumulator_not_a_discount():
+    # An explicit dtype= on reduceat IS the accumulator numpy runs -- billed
+    # exactly as requested, wider or narrower, mirroring reduce/sum.
+    assert (
+        _reduceat_billed(
+            lambda a: np.add.reduceat(a, [0], dtype=np.float64), dtype=np.float32
+        )
+        == 2000
+    )
+    assert (
+        _reduceat_billed(
+            lambda a: np.subtract.reduceat(a, [0], dtype=np.float32), dtype=np.float64
+        )
+        == 1000
+    )
+
+
+def test_outer_explicit_dtype_resolves_like_the_pointwise_factories():
+    # An explicit dtype= on outer forces the loop the same way it does for
+    # the plain pointwise factories (Task 6): billed as requested, replacing
+    # the operand-promoted default rather than discounting it.
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    def _outer_billed(dtype=None):
+        with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+            load_weights()
+            arr = fnp.asarray(np.ones(32, dtype=np.int32))
+            before = b.flops_used
+            kwargs = {} if dtype is None else {"dtype": dtype}
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                np.multiply.outer(arr, arr, **kwargs)
+            return b.flops_used - before, b.op_log[-1].resolved_dtype
+
+    default_billed, default_dtype = _outer_billed()
+    assert default_dtype == "int32"
+    explicit_billed, explicit_dtype = _outer_billed(np.float64)
+    assert explicit_dtype == "float64"
+    assert explicit_billed == 2 * default_billed
+
+
+def test_bool_dtype_kwarg_on_value_testing_ufuncs_bills_operand_width():
+    # dtype=bool on less/logical_and/equal names the output of a
+    # value-testing loop -- the loop still reads full-width operands, so it
+    # must not discount to the bool rate. Same principle as the input-rate
+    # floor above, applied to the plain pointwise factories instead of the
+    # generic ufunc-method paths.
+    import flopscope.numpy as fnp
+
+    i64 = fnp.asarray(np.ones(10, dtype=np.int64))
+    f64 = fnp.asarray(np.ones(10, dtype=np.float64))
+    assert _billed_with_production_rates(lambda: fnp.less(i64, i64, dtype=bool)) == (
+        20,
+        "int64",
+    )
+    assert _billed_with_production_rates(
+        lambda: fnp.logical_and(i64, i64, dtype=bool)
+    ) == (20, "int64")
+    assert _billed_with_production_rates(lambda: fnp.equal(f64, f64, dtype=bool)) == (
+        20,
+        "float64",
     )
 
 

@@ -503,9 +503,12 @@ def _counted_unary(np_func, op_name: str):
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop.
-        if kwargs.get("dtype") is not None:
-            billing_dtypes: tuple = (_np.dtype(kwargs["dtype"]),)
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (x.dtype,)
             if isinstance(out, _np.ndarray):
@@ -624,9 +627,12 @@ def _counted_unary_multi(np_func, op_name: str):
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop.
-        if kwargs.get("dtype") is not None:
-            billing_dtypes: tuple = (_np.dtype(kwargs["dtype"]),)
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (x.dtype,)
             if out is not None:
@@ -698,9 +704,12 @@ def _counted_binary(np_func, op_name: str):
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop.
-        if kwargs.get("dtype") is not None:
-            billing_dtypes = (_np.dtype(kwargs["dtype"]),)
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
             if isinstance(out, _np.ndarray):
@@ -814,9 +823,12 @@ def _counted_binary_multi(np_func, op_name: str):
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop.
-        if kwargs.get("dtype") is not None:
-            billing_dtypes = (_np.dtype(kwargs["dtype"]),)
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
             if out is not None:
@@ -956,16 +968,28 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    # Floor at the input rate (mirrors the reduce/accumulate/at siblings):
-    # a comparison/logical ufunc's loop OUTPUT is bool, which for wide-int
-    # inputs would bill NARROWER than the input -- never charge below it.
-    # heavier_billing_dtype keeps the loop dtype on a rate tie, so float
-    # widening (float64 >= int rate) is unaffected.
-    billing_dtypes: tuple = (
-        heavier_billing_dtype(
-            _ufunc_loop_dtype(ufunc, a.dtype, b.dtype), a.dtype, b.dtype
-        ),
-    )
+    # An explicit dtype= forces the loop numpy actually runs (both
+    # directions), the same as the plain pointwise factories -- it replaces
+    # the operand-promoted default rather than discounting it. A bool
+    # dtype= is excluded: it names the output of a value-testing loop
+    # (comparison/logical), which still reads full-width operands, so it
+    # falls through to the default path below instead of billing the
+    # (lighter) bool rate.
+    explicit_dtype = kwargs.get("dtype")
+    if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+        billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+    else:
+        # This default path shares the operand-width behavior of the
+        # reduce/accumulate/reduceat/at siblings: a comparison/logical
+        # ufunc's loop OUTPUT is bool, which for wide-int inputs would bill
+        # NARROWER than the input -- never charge below it.
+        # heavier_billing_dtype keeps the loop dtype on a rate tie, so float
+        # widening (float64 >= int rate) is unaffected.
+        billing_dtypes = (
+            heavier_billing_dtype(
+                _ufunc_loop_dtype(ufunc, a.dtype, b.dtype), a.dtype, b.dtype
+            ),
+        )
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -1107,14 +1131,26 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     indices_stripped = (
         _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
     )
-    # Same loop resolution as the generic reduce/accumulate paths: reduceat
-    # runs the ufunc's own resolved loop dtype (true_divide(int32) ->
-    # float64, subtract(int32) -> int32). reduction_billing_dtype supplies
-    # the input-rate floor -- a comparison/logical ufunc's bool loop OUTPUT
-    # must never bill narrower than a wide-int input.
+    # This default path (no explicit dtype=) shares the operand-width
+    # behavior of the generic reduce/accumulate paths: reduceat runs the
+    # ufunc's own resolved loop dtype by default (true_divide(int32) ->
+    # float64, subtract(int32) -> int32) -- except add/multiply, which numpy
+    # runs through the same integer-widening sum/prod accumulator, regardless
+    # of the segment indices. reduction_billing_dtype supplies the
+    # input-rate floor -- a comparison/logical ufunc's bool loop OUTPUT must
+    # never bill narrower than a wide-int input. An explicit dtype= now
+    # resolves per numpy's accumulator semantics instead (billed exactly as
+    # requested, wider or narrower).
+    default_dtype = (
+        sum_accumulator_dtype(a.dtype)
+        if ufunc.__name__ in ("add", "multiply")
+        else _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    )
     billing_dtypes: tuple = (
         reduction_billing_dtype(
-            a.dtype, default_dtype=_ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            default_dtype=default_dtype,
         ),
     )
     if isinstance(out, _np.ndarray):

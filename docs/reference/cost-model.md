@@ -404,9 +404,17 @@ and boolean inputs widen to the platform default integer for `sum`/`prod`/`cumsu
 `cumprod` (and their `nan`-prefixed variants), and to `float64` for `mean`/`var`/`std`,
 never billed below the input's own rate. Both `numpy.trace` and `linalg.trace` widen the
 same way `sum` does — a batched diagonal sum is still a sum — and the generic
-`ufunc.reduce` / `accumulate` paths resolve their accumulator through the identical
-rule: `np.add.reduce` is the same machinery `sum` runs on, so
+`ufunc.reduce` / `accumulate` / `reduceat` paths resolve their accumulator through the
+identical rule: `np.add.reduce` is the same machinery `sum` runs on, so
 `np.add.reduce(int32_arr, dtype=int32)` bills exactly like `sum(int32_arr, dtype=int32)`.
+`reduceat`'s default accumulator widens the same way, regardless of the segment
+indices: a 1000-element `int32` input bills `np.add.reduceat` at the int64 rate
+(1000 × 2.0 = **2000**), while `np.subtract.reduceat` on the same input has no such
+accumulator and keeps the int32 loop (**1000**). `ufunc.outer` is not itself an
+accumulating reduction, but an explicit `dtype=` on it resolves through the same
+request-is-the-loop rule: the dtype names the loop numpy actually runs, not a discount,
+so `np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over
+the full outer-product grid — double the default int32-loop total.
 
 Worked examples (production rates, 1000-element input, `sum`):
 
