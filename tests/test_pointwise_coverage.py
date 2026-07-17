@@ -516,8 +516,12 @@ class TestSortComplex:
         a = numpy.array([42.0])
         with BudgetContext(flop_budget=10**6) as budget:
             result = sort_complex(a)
-        # n=1 => log2n=1, cost=1
-        assert budget.flops_used == 1
+        # n=1 => base cost floored to 1, times the registry complex_factor
+        # (2.0) since a real float64 input still computes a complex128
+        # result (np.sort_complex always returns complex; Task 8's
+        # compute-dtype conformance sweep fixed sort_complex to resolve
+        # that real output dtype instead of the input's real dtype).
+        assert budget.flops_used == 2
 
     def test_sort_complex_from_list(self):
         """sort_complex should handle non-ndarray input (list)."""

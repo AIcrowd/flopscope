@@ -160,12 +160,18 @@ def symmetrize(
     n = array.size
     cost = max((group.order() + 1) * n, 1)
     budget = require_budget()
+    # _project_core always accumulates in np.result_type(array, float64) --
+    # the "/ group.order()" scaling pass needs float precision even from
+    # float32 input (verified: symmetrize(float32).dtype == float64,
+    # symmetrize(complex64).dtype == complex128) -- so the float64 sentinel
+    # must join the resolve rather than replace it (result_type preserves
+    # kind: result_type(complex64, float64) == complex128).
     with budget.deduct(
         "symmetrize",
         flop_cost=cost,
         subscripts=None,
         shapes=(array.shape,),
-        dtypes=(array.dtype,),
+        dtypes=(array.dtype, np.dtype(np.float64)),
     ):
         projected = _project_core(array, group)
         # D1: internal validation runs but is NOT billed — build the tensor

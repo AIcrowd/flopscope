@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_compute_dtype, resolve_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
@@ -228,8 +229,20 @@ def polyder(p: ArrayLike, m: int = 1) -> FlopscopeArray:
     p = _np.asarray(p)
     n = len(p)
     cost = polyder_cost(n, int(m))
+    # np.polyder multiplies each coefficient by an arange-derived exponent
+    # array, whose dtype is the platform default int (int64 on 64-bit
+    # platforms) -- so the billed dtype is p's dtype promoted against that
+    # default int, exactly like numpy's own arithmetic (verified:
+    # polyder(int8/16/32/64) -> int64, polyder(float32) -> float64,
+    # polyder(complex64) -> complex128; result_type(X, platform_int)
+    # reproduces every case).
+    billing_dtypes = (p.dtype, _np.dtype(_np.int_))
     with budget.deduct(
-        "polyder", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+        "polyder",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.polyder, p, m=m)
     return result  # type: ignore[return-value]
@@ -253,8 +266,11 @@ def polyint(p: ArrayLike, m: int = 1, k: ArrayLike | None = None) -> FlopscopeAr
     cost = polyint_cost(n, m_int)
     # ``k`` (integration constants) is a genuine second operand: complex k
     # yields a complex result, so its dtype must join the billing tuple or the
-    # complex factor is bypassed.
-    billing_dtypes = (p.dtype,)
+    # complex factor is bypassed. np.polyint's coefficient division also
+    # always runs in (at least) float64 -- even from float32 p (verified:
+    # polyint(float32).dtype == float64) and complex64 -> complex128 -- so a
+    # float64 sentinel joins the resolve too (kind-preserving, see polyfit).
+    billing_dtypes = (p.dtype, _np.dtype(_np.float64))
     if k is not None:
         billing_dtypes += (_np.asarray(k).dtype,)
     with budget.deduct(
@@ -316,12 +332,22 @@ def polydiv(u: ArrayLike, v: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]
     n1 = len(u)
     n2 = len(v)
     cost = polydiv_cost(n1, n2)
+    # np.polydiv's per-step scale-divide always runs in (at least) float64
+    # for integer/bool operands (verified: polydiv(int, int) -> float64) but
+    # preserves float32/complex64 precision otherwise (polydiv(f32, f32) ->
+    # float32, polydiv(c64, c64) -> c64) -- combine u/v's own promotion
+    # first, then apply the same kind-conditional float64 floor as an
+    # eigvals-backed linalg op (int/bool -> float64, float/complex kept).
+    combined = resolve_billing_dtype((u.dtype, v.dtype))
+    billing_dtypes = (
+        linalg_compute_dtype(combined) if combined is not None else u.dtype,
+    )
     with budget.deduct(
         "polydiv",
         flop_cost=cost,
         subscripts=None,
         shapes=(u.shape, v.shape),
-        dtypes=(u.dtype, v.dtype),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.polydiv, u, v)
     return result  # type: ignore[return-value]
@@ -354,7 +380,13 @@ def polyfit(
         kwargs["w"] = _to_base_ndarray(_np.asarray(kwargs["w"]))
     m = len(x_arr)
     cost = polyfit_cost(m, deg)
-    billing_dtypes = (x_arr.dtype, y_arr.dtype)
+    # np.polyfit's least-squares solve always runs in (at least) float64 --
+    # even from float32 x/y (verified: polyfit(f32, f32, deg).dtype ==
+    # float64) -- and complex64 y computes complex128, so the float64
+    # sentinel must join the resolve rather than replace it (result_type
+    # preserves the complex/real kind: result_type(complex64, float64) ==
+    # complex128, not float64).
+    billing_dtypes = (x_arr.dtype, y_arr.dtype, _np.dtype(_np.float64))
     if kwargs.get("w") is not None:
         billing_dtypes += (kwargs["w"].dtype,)
     with budget.deduct(
@@ -386,12 +418,22 @@ def poly(seq_of_zeros: ArrayLike) -> FlopscopeArray:
     else:
         n = len(seq)
         cost = poly_cost(n)
+    # The 2-D branch delegates to eigvals (LAPACK _commonType: int/bool ->
+    # float64, float/complex kept), same as roots. The 1-D branch instead
+    # casts through np.mintypecode, whose *default* typeset is only
+    # {float32, float64, complex64, complex128} -- anything else, including
+    # integers AND float16 (verified: poly(float16_roots) -> float64, NOT
+    # float16), falls back to float64. linalg_compute_dtype already covers
+    # every case except float16, which it would otherwise leave unchanged.
+    poly_dtype = linalg_compute_dtype(seq.dtype)
+    if poly_dtype.kind == "f" and poly_dtype.itemsize < 4:
+        poly_dtype = _np.dtype(_np.float64)
     with budget.deduct(
         "poly",
         flop_cost=cost,
         subscripts=None,
         shapes=(seq.shape,),
-        dtypes=(seq.dtype,),
+        dtypes=(poly_dtype,),
     ):
         result = _call_numpy(_np.poly, _to_base_ndarray(seq))
     return result  # type: ignore[return-value]
@@ -420,8 +462,17 @@ def roots(p: ArrayLike) -> FlopscopeArray:
     else:
         n = (len(_p_flat) - 1 - _last) - _first  # trimmed companion dimension
     cost = roots_cost(n)
+    # np.roots delegates to np.linalg.eigvals on the companion matrix, so its
+    # compute dtype follows the exact same LAPACK _commonType rule: integer/
+    # bool input always computes in float64, float/complex input keeps its
+    # own precision (verified: roots(int32) -> float64, roots(float32) ->
+    # float32, roots(complex64) -> complex64 -- NOT widened to complex128).
     with budget.deduct(
-        "roots", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+        "roots",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=(linalg_compute_dtype(p.dtype),),
     ):
         result = _call_numpy(_np.roots, p)
     return result  # type: ignore[return-value]

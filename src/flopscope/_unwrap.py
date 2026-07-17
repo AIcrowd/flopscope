@@ -8,6 +8,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import mean_compute_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
@@ -80,8 +81,17 @@ def unwrap(
     kwargs = {"axis": axis, "period": period}
     if discont is not None:
         kwargs["discont"] = discont
+    # np.unwrap's mod/compare chain always runs in float64 for integer/bool
+    # input (verified: unwrap(int32) -> float64) but preserves float16/32/64
+    # precision otherwise -- the same rule as mean/median/gradient's compute
+    # dtype (the `period` kwarg is a weak python-float default/override that
+    # never forces float64 on its own: NEP 50 keeps a float32 `p` at float32).
     with budget.deduct(
-        "unwrap", flop_cost=cost, subscripts=None, shapes=(p.shape,), dtypes=(p.dtype,)
+        "unwrap",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=(mean_compute_dtype(p.dtype),),
     ):
         result = _call_numpy(_np.unwrap, _to_base_ndarray(p), **kwargs)
     return result  # type: ignore[return-value]

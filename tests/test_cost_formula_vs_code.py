@@ -720,7 +720,16 @@ class TestSorting:
         assert _cost_of(we.argsort, numpy.random.rand(100)) == 700
 
     def test_sort_complex_nlogn(self, we):
-        assert _cost_of(we.sort_complex, numpy.random.rand(100)) == 700
+        # np.sort_complex ALWAYS returns a complex array (its own docstring:
+        # "Always returns a sorted complex array") -- it lexicographically
+        # compares real-then-imaginary parts even for a real float64 input,
+        # so the registry's complex_factor=2.0 (ordering compare) applies
+        # unconditionally: base cost 700 (n=100 * ceil(log2 100)=7) * factor
+        # 2.0 = 1400. Compute-dtype conformance sweep (Task 8) fixed
+        # sort_complex to resolve its real numpy output dtype (complex64/128,
+        # never the raw real input dtype), closing the undercount this test
+        # used to pin (base cost alone, at rate/factor 1.0 = 700).
+        assert _cost_of(we.sort_complex, numpy.random.rand(100)) == 1400
 
     def test_partition_n(self, we):
         assert _cost_of(we.partition, numpy.random.rand(100), 50) == 100

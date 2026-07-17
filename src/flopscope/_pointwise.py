@@ -95,10 +95,20 @@ _INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
 # call promotes its first operand the same size-mapped way -- a mixed
 # float32/int-exponent call is a separate, pre-existing, out-of-scope
 # overcount unrelated to this undercount fix; see task-6-report.md).
+#
+# Also includes ``angle`` (arctan2(0, x) internally -- same size-mapped
+# promotion for every integer/unsigned width; a python-int-vs-bool-array NEP
+# 50 quirk means angle(bool_) actually computes float64 rather than the
+# float16 this mapping would predict, a narrow pre-existing gap this fix does
+# not chase) and the ``_counted_unary_multi`` pair ``modf``/``frexp`` (real
+# multi-output ufuncs with the identical same-size float loop for their
+# primary output; ``frexp``'s exponent output is handled separately, see
+# ``_counted_unary_multi``).
 _UNARY_FLOAT_LOOP_OPS = frozenset(
     {
         "acos",
         "acosh",
+        "angle",
         "arccos",
         "arccosh",
         "arcsin",
@@ -118,10 +128,12 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
         "exp2",
         "expm1",
         "fabs",
+        "frexp",
         "log",
         "log1p",
         "log2",
         "log10",
+        "modf",
         "rad2deg",
         "radians",
         "rint",
@@ -133,6 +145,15 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
         "tanh",
     }
 )
+# Unary ops with NO size-mapped integer loop: numpy always computes them in
+# (at least) float64 for integer/bool input regardless of the input's own
+# width -- unlike the size-mapped _UNARY_FLOAT_LOOP_OPS family (i0(int8) ->
+# float64, not float16, matching numpy's Chebyshev-polynomial/sin-ratio
+# implementations that don't have narrower loops). Float/complex inputs keep
+# their own width. binary_float_loop_dtype's "any int kind -> float64,
+# float/complex unchanged" mapping already expresses exactly this rule (it
+# doesn't care about arity), so it is reused here instead of a new helper.
+_UNARY_FLOAT64_MIN_OPS = frozenset({"i0", "sinc"})
 _BINARY_FLOAT_LOOP_OPS = frozenset(
     {
         "arctan2",
@@ -489,6 +510,10 @@ def _counted_unary(np_func, op_name: str):
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
                 billing_dtypes = (unary_float_loop_dtype(resolved),)
+        elif op_name in _UNARY_FLOAT64_MIN_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (binary_float_loop_dtype(resolved),)
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -571,6 +596,14 @@ def _counted_unary_multi(np_func, op_name: str):
     allocation) — per-slot stripping and identity preservation are routed
     through :func:`_call_with_optional_multi_out`. Symmetry of the input
     is inherited by every output (elementwise ufuncs).
+
+    Both ``modf`` and ``frexp`` are true ufuncs with the same same-size float
+    loop as the ``_UNARY_FLOAT_LOOP_OPS`` family (``modf``/``frexp`` on int8
+    input compute float16, same as ``sin``), so they share that membership
+    set and resolver. ``frexp``'s second output (the exponent) is always
+    int32 regardless of the mantissa's size-mapped precision -- a narrow
+    mantissa (float16, from an int8 input) would otherwise undercount the
+    fixed-width exponent, so its billed dtype is floored at int32's rate too.
     """
     nout = getattr(np_func, "nout", 2)
 
@@ -592,6 +625,13 @@ def _counted_unary_multi(np_func, op_name: str):
             for o in out:
                 if isinstance(o, _np.ndarray):
                     billing_dtypes += (o.dtype,)
+        if op_name in _UNARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                mapped = unary_float_loop_dtype(resolved)
+                if op_name == "frexp":
+                    mapped = heavier_billing_dtype(mapped, _np.dtype(_np.int32))
+                billing_dtypes = (mapped,)
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1541,6 +1581,30 @@ sinc = _counted_unary(_np.sinc, "sinc")
 sinh = _counted_unary(_np.sinh, "sinh")
 
 
+def _sort_complex_billing_dtype(dtype: _np.dtype) -> _np.dtype:
+    """np.sort_complex's exact output dtype -- a hardcoded 3-way table in
+    numpy's own source, not a `result_type`-style promotion:
+
+        if b.dtype.char in 'bhBH': return b.astype('F')   # int8/16, uint8/16 -> complex64
+        elif b.dtype.char == 'g':  return b.astype('G')   # longdouble -> clongdouble
+        else:                      return b.astype('D')   # everything else -> complex128
+
+    So bool/int32/int64/uint32/uint64/float16/float32/float64 all compute in
+    complex128 (verified: sort_complex(float32) -> complex128, NOT
+    complex64), only the narrow bhBH integer kinds get the complex64 loop.
+    Already-complex input is returned unchanged.
+    """
+    if dtype.kind == "c":
+        return dtype
+    if dtype.char in "bhBH":
+        return _np.dtype(_np.complex64)
+    if dtype.char == "g":
+        if hasattr(_np, "complex256"):
+            return _np.dtype(_np.complex256)
+        return _np.dtype(_np.complex128)
+    return _np.dtype(_np.complex128)
+
+
 @_counted_wrapper
 def sort_complex(a: ArrayLike) -> FlopscopeArray:
     """Counted version of np.sort_complex.
@@ -1561,7 +1625,7 @@ def sort_complex(a: ArrayLike) -> FlopscopeArray:
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
-        dtypes=(a.dtype,),
+        dtypes=(_sort_complex_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(_np.sort_complex, _to_base_ndarray(a))
     return result  # type: ignore[return-value]  # wrapped at fnp.sort_complex import time
@@ -2044,7 +2108,11 @@ def average(
     weights_raw = (
         _to_base_ndarray(weights) if isinstance(weights, _np.ndarray) else weights
     )
-    billing_dtypes: tuple = (a.dtype,)
+    # np.average is mean-shaped: integer/bool `a` always computes in float64
+    # (average(int32) -> float64), float `a` keeps its own precision unless
+    # explicit weights widen it (average(f32, weights=f64) -> float64) --
+    # the same rule as mean/median/percentile's compute dtype.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
     if weights is not None:
         weights_arr = (
             weights if isinstance(weights, _np.ndarray) else _np.asarray(weights)
@@ -2195,7 +2263,11 @@ def median(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype,)
+    # numpy's median always computes in float64 for integer/bool input (the
+    # partition-based selection still runs the interpolating mean-of-two for
+    # even-length axes) and preserves the input's own float precision
+    # otherwise -- the same rule as mean/var/std's compute dtype.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -2265,7 +2337,9 @@ def nanmedian(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (a.dtype,)
+    # Same compute-dtype rule as median: float64 for integer/bool input,
+    # the input's own float precision otherwise.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -2327,8 +2401,17 @@ def nanpercentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # numpy's percentile family always divides q by 100 first (an implicit
+    # true_divide, "q = np.true_divide(q, a.dtype.type(100) if a.dtype.kind
+    # == 'f' else 100)" in numpy's own source), so an integer/bool `a` always
+    # computes in float64 -- even an exact-integer q like 50 -- unlike
+    # quantile, whose q is used directly with no such division and so can
+    # stay at `a`'s own dtype for an exact q of 0 or 1. mean_compute_dtype
+    # captures that "int/bool -> float64, float preserved" half; q still
+    # participates so an explicitly wider q array (e.g. float64 q against a
+    # float32 `a`) still raises the bill to match numpy's actual widening.
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -2454,8 +2537,10 @@ def percentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # Same "always divides q by 100 first" rule as nanpercentile: integer/
+    # bool `a` always computes in float64, regardless of q's own dtype.
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -3307,13 +3392,16 @@ def gradient(
 
     # varargs (spacing/coordinate arrays) never change np.gradient's output
     # dtype (verified: gradient(f32, spacing=np.float64(...)) stays float32),
-    # so only f's dtype prices the call.
+    # so only f's dtype prices the call. np.gradient is mean-shaped on that
+    # dtype: integer/bool input always computes in float64 (the central-
+    # difference division needs float precision), float input keeps its own
+    # width (gradient(float32) -> float32).
     with budget.deduct(
         "gradient",
         flop_cost=cost,
         subscripts=None,
         shapes=(f.shape,),
-        dtypes=(f.dtype,),
+        dtypes=(mean_compute_dtype(f.dtype),),
     ):
         result = _call_numpy(
             _np.gradient,
