@@ -119,9 +119,10 @@ class TestFix2FancyIndexEncoding:
         from flopscope._remote_array import RemoteArray, _encode_index_key
 
         idx = RemoteArray(handle_id="a3", shape=(5,), dtype="int64")
-        # list fancy index containing a RemoteArray
+        # list fancy index containing a RemoteArray; list keys are tagged so
+        # the server can tell them apart from tuple keys (bare lists on wire)
         result = _encode_index_key([idx])
-        assert result == [{"__handle__": "a3"}]
+        assert result == {"__list__": [{"__handle__": "a3"}]}
 
 
 # =========================================================================
