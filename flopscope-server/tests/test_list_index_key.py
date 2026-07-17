@@ -47,6 +47,39 @@ class TestDecodeListKeyModuleLevel:
         assert _decode_index_key(raw) == (slice(None), [0, 1])
 
 
+class TestDecodeBooleanMask:
+    # bool is a subclass of int; the int() coercion in the scalar branch must
+    # not turn a boolean mask [True, False] into the integer indices [1, 0].
+    def test_module_level_preserves_bools(self):
+        decoded = _decode_index_key({"__list__": [True, False]})
+        assert decoded == [True, False]
+        assert all(type(d) is bool for d in decoded)
+
+    def test_instance_method_preserves_bools(self, handler):
+        decoded = handler._decode_index_key({"__list__": [True, False]})
+        assert decoded == [True, False]
+        assert all(type(d) is bool for d in decoded)
+
+    def test_bare_bool_key_preserved(self):
+        assert _decode_index_key(True) is True
+
+    def test_getitem_with_bool_mask_selects_rows(self, handler, session):
+        handle = session.store_array(np.array([[1.0, 2.0], [3.0, 4.0]]))
+        resp = handler.handle(
+            {
+                "op": "__getitem__",
+                "args": [{"__handle__": handle}, {"__list__": [True, False]}],
+                "kwargs": {},
+            }
+        )
+        assert resp["status"] == "ok"
+        # Mask selects only row 0 -> shape (1, 2). Int coercion would instead
+        # reorder rows as x[[1, 0]] -> shape (2, 2).
+        assert resp["result"]["shape"] == [1, 2]
+        result = session.get_array(resp["result"]["id"])
+        assert result.tolist() == [[1.0, 2.0]]
+
+
 class TestDecodeListKeyInstanceMethod:
     def test_tagged_list_decodes_to_list(self, handler):
         assert handler._decode_index_key({"__list__": [0, 1]}) == [0, 1]

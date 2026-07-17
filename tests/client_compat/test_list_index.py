@@ -41,6 +41,18 @@ def test_nested_list_key():
     ]
 
 
+def test_bool_mask_list_2d():
+    a = fnp.array([[1.0, 2.0], [3.0, 4.0]])
+    # Boolean mask selects row 0 only; int coercion of the bools would
+    # instead reorder rows as a[[1, 0]].
+    assert a[[True, False]].tolist() == [[1.0, 2.0]]
+
+
+def test_bool_mask_list_1d():
+    a = fnp.array([10.0, 20.0, 30.0])
+    assert a[[False, True, True]].tolist() == [20.0, 30.0]
+
+
 def test_tuple_key_still_element_access():
     a = fnp.array([[1.0, 2.0], [3.0, 4.0]])
     assert float(a[0, 1]) == 2.0

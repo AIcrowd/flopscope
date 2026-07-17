@@ -496,6 +496,10 @@ class RequestHandler:
             ):
                 return tuple(decoded)
             return decoded
+        # bool before int: bool subclasses int, and coercing a boolean-mask
+        # element True -> 1 would turn mask indexing into integer indexing.
+        if isinstance(raw_key, bool):
+            return raw_key
         if isinstance(raw_key, (int, float)):
             return int(raw_key)
         return raw_key
@@ -669,6 +673,10 @@ def _decode_index_key(raw_key):
         # Single-element list: could be the key itself being a list
         # (e.g., fancy indexing) -- keep as list
         return decoded
+    # bool before int: bool subclasses int, and coercing a boolean-mask
+    # element True -> 1 would turn mask indexing into integer indexing.
+    if isinstance(raw_key, bool):
+        return raw_key
     if isinstance(raw_key, (int, float)):
         return int(raw_key)
     return raw_key
