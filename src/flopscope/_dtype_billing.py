@@ -238,10 +238,10 @@ def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
     on complex) or ``"exact"`` (contraction family — the call site must supply
     an override) fail closed. Ops with NO classification are free /
     data-movement / blacklisted / unknown: they relocate or allocate whole
-    complex values without doing complex arithmetic, so their factor is 1.0
-    (one relocation per value). Charged ops are guaranteed an explicit factor
-    by ``test_complex_factor_completeness``, so a missing classification here
-    is never a charged op silently defaulting.
+    complex values, and a complex value is two real components, so their
+    factor is 2.0 (one unit per component). Charged ops are guaranteed an
+    explicit factor by ``test_complex_factor_completeness``, so a missing
+    classification here is never a charged op silently defaulting.
 
     A generic ufunc-method name (``"<ufunc>.<method>"``, e.g.
     ``"multiply.reduce"``) that is not itself a registry key falls back to
@@ -274,6 +274,6 @@ def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:
         )
     if factor is None:
         # Free / data-movement / blacklisted / unknown op: relocates or
-        # allocates whole complex values, no complex arithmetic -> factor 1.0.
-        return 1.0
+        # allocates whole complex values -- two real components per value.
+        return 2.0
     return float(factor)

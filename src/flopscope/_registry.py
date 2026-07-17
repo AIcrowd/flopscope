@@ -16,9 +16,12 @@ complex_factor
 Each charged op carries a ``complex_factor``: the real-FLOP count at component
 precision that the op executes per billed unit when the resolved calculation
 dtype is complex. It is 1.0 for real dtypes and is applied multiplicatively in
-the bill ``int(flop_cost * dtype_rate * complex_factor * weight)``. Values are a
-float >= 1.0, ``"exact"`` (contraction family — computed per call from the
-einsum accumulation decomposition), or ``"illegal"`` (numpy raises on complex).
+the bill ``int(flop_cost * dtype_rate * complex_factor * weight)``. A complex
+value is two real components, so every numeric classification prices at least
+one unit per component (float >= 2.0); the FFT family is the sole exception,
+staying at 1.0 because its cost formulas already count the complex real-FLOPs.
+Other values are ``"exact"`` (contraction family — computed per call from the
+einsum accumulation decomposition) or ``"illegal"`` (numpy raises on complex).
 Free/blacklisted ops carry no key.
 
 Atom table (FMA=2 convention; z = a + bi):
@@ -33,9 +36,11 @@ Atom table (FMA=2 convention; z = a + bi):
 
 Classification by the op's billed unit: add/compare/sort/set/reduce -> 2;
 multiply/pure-product -> 6; divide -> 11; contraction (FMA) -> "exact";
-transcendental -> (16*T + F)/16 per op; FFT and other complex-native formulas
-(angle/conj) -> 1 (already count complex real-flops); pure movement of whole
-complex values -> 1 (relocation, not arithmetic).
+transcendental -> (16*T + F)/16 per op; movement/creation of complex values
+(stacking, indexing, random selection, angle/conj, dtype casts, ...) -> 2 (two
+real components: at least one unit per component). The FFT family is the sole
+exception, staying at 1 because its cost formulas already count the complex
+real-FLOPs.
 """
 
 from __future__ import annotations
@@ -376,19 +381,19 @@ REGISTRY: dict[str, dict] = {
     "conj": {
         "category": "counted_unary",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Complex conjugate element-wise.",
     },
     "conjugate": {
         "category": "counted_unary",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Complex conjugate element-wise.",
     },
     "angle": {
         "category": "counted_unary",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return angle of complex argument element-wise.",
     },
     "real": {
@@ -1034,7 +1039,7 @@ REGISTRY: dict[str, dict] = {
     "einsum_path": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Optimize einsum contraction path (no numeric output).",
     },
     "clip": {
@@ -1442,7 +1447,7 @@ REGISTRY: dict[str, dict] = {
     "array": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Create array from data. Cost: numel(input).",
     },
     "zeros": {
@@ -1458,7 +1463,7 @@ REGISTRY: dict[str, dict] = {
     "full": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Create array filled with scalar value. Cost: num copied.",
     },
     "eye": {
@@ -1474,7 +1479,7 @@ REGISTRY: dict[str, dict] = {
     "diag": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Extract diagonal or construct diagonal array. Cost: len(diagonal).",
     },
     "arange": {
@@ -1502,7 +1507,7 @@ REGISTRY: dict[str, dict] = {
     "full_like": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Array filled with scalar, same shape/type as input. Cost: numel(output).",
     },
     "empty": {
@@ -1538,25 +1543,25 @@ REGISTRY: dict[str, dict] = {
     "concatenate": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Join arrays along axis. Cost: numel(output).",
     },
     "stack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Join arrays along new axis. Cost: numel(output).",
     },
     "vstack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Stack arrays vertically. Cost: numel(output).",
     },
     "hstack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Stack arrays horizontally. Cost: numel(output).",
     },
     "split": {
@@ -1603,13 +1608,13 @@ REGISTRY: dict[str, dict] = {
     "tile": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Repeat array by tiling. Cost: numel(output).",
     },
     "repeat": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Repeat elements of an array. Cost: numel(output).",
     },
     "flip": {
@@ -1620,7 +1625,7 @@ REGISTRY: dict[str, dict] = {
     "roll": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Roll array elements along axis. Cost: numel(output).",
     },
     "sort": {
@@ -1656,19 +1661,19 @@ REGISTRY: dict[str, dict] = {
     "triu": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Upper triangle of array. Cost: numel(output) (masked-select copy).",
     },
     "tril": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Lower triangle of array. Cost: numel(output) (masked-select copy).",
     },
     "diagonal": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return specified diagonals. Cost: numel(input).",
     },
     "trace": {
@@ -1685,12 +1690,13 @@ REGISTRY: dict[str, dict] = {
     "meshgrid": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Coordinate matrices from coordinate vectors. Cost: numel(output).",
     },
     "astype": {
         "category": "free",
         "module": "numpy",
+        "complex_factor": 2.0,
         "notes": "Cast array to specified type.",
     },
     "asarray": {
@@ -1756,19 +1762,19 @@ REGISTRY: dict[str, dict] = {
     "column_stack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Stack 1-D arrays as columns into 2-D array. Cost: numel(output).",
     },
     "dstack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Stack arrays depth-wise (along third axis). Cost: numel(output).",
     },
     "row_stack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Stack arrays vertically (alias for vstack). Cost: numel(output).",
     },
     "flatnonzero": {
@@ -1805,61 +1811,61 @@ REGISTRY: dict[str, dict] = {
     "select": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return array from list of choices based on conditions. Cost: numel(output), gather tier ×4.",
     },
     "extract": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return elements satisfying condition. Cost: numel(input).",
     },
     "place": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Change elements satisfying condition. Cost: numel(input).",
     },
     "put": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Replace elements at given flat indices. Cost: numel(indices).",
     },
     "put_along_axis": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None); gather tier weight 4.0.",
     },
     "putmask": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Change elements of array based on condition and input values. Cost: numel(input).",
     },
     "take": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Take elements from array along axis. Cost: numel(output).",
     },
     "take_along_axis": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Take values from input array by matching 1-D index. Cost: numel(output).",
     },
     "choose": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Construct array from index array and choices. Cost: numel(output).",
     },
     "compress": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return selected slices along axis. Cost: numel(input).",
     },
     "array_equal": {
@@ -1908,7 +1914,7 @@ REGISTRY: dict[str, dict] = {
     "resize": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return new array with given shape by repeating. Cost: numel(output).",
     },
     "broadcast_shapes": {
@@ -1972,14 +1978,14 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "local_callback": True,
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Construct array by executing function over each coordinate. Cost: numel(output).",
     },
     "fromiter": {
         "category": "counted_custom",
         "local_callback": True,
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Create array from an iterable. Cost: numel(output).",
     },
     "frombuffer": {
@@ -2010,13 +2016,13 @@ REGISTRY: dict[str, dict] = {
     "block": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Assemble ndarray from nested list of blocks. Cost: numel(output).",
     },
     "bmat": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Build matrix from nested list of matrices. Cost: numel(output).",
     },
     "lexsort": {
@@ -2111,7 +2117,7 @@ REGISTRY: dict[str, dict] = {
     "indices": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return array representing indices of a grid. Cost: numel of materialized output (dense N*prod(dims); sparse sum(dims)).",
     },
     "diag_indices": {
@@ -2127,13 +2133,13 @@ REGISTRY: dict[str, dict] = {
     "diagflat": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Create diagonal array from flattened input. Cost: len(v).",
     },
     "mask_indices": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return indices of mask for n x n array. Cost: numel(output).",
     },
     "tril_indices": {
@@ -2159,7 +2165,7 @@ REGISTRY: dict[str, dict] = {
     "fill_diagonal": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Fill main diagonal of given array. Cost: min(m,n).",
     },
     "tri": {
@@ -2182,7 +2188,7 @@ REGISTRY: dict[str, dict] = {
     "concat": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Join arrays along axis (NumPy 2.x array API alias for concatenate). Cost: numel(output).",
     },
     "vander": {
@@ -2194,7 +2200,7 @@ REGISTRY: dict[str, dict] = {
     "ix_": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Construct open mesh from multiple sequences. Cost: numel(output).",
     },
     "rollaxis": {
@@ -2215,26 +2221,26 @@ REGISTRY: dict[str, dict] = {
     "unstack": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "min_numpy": "2.1",
         "notes": "Unstack array along axis into tuple of arrays (NumPy 2.x). Cost: numel(output).",
     },
     "delete": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Return array with sub-arrays deleted along axis. Cost: numel(output) (surviving elements copied).",
     },
     "insert": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Insert values along axis before given indices. Cost: numel(output).",
     },
     "append": {
         "category": "counted_custom",
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Append values to end of array. Cost: numel(output) = arr.size + values.size (np.append = concatenate).",
     },
     "copyto": {
@@ -2374,7 +2380,7 @@ REGISTRY: dict[str, dict] = {
     "random.choice": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Sampling; cost = numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; n*ceil(log2(n)) conservative floor if replace=False with p.",
     },
     "random.default_rng": {
@@ -2503,7 +2509,7 @@ REGISTRY: dict[str, dict] = {
     "random.permutation": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Shuffle; cost = n*ceil(log2(n)).",
     },
     "random.poisson": {
@@ -2579,7 +2585,7 @@ REGISTRY: dict[str, dict] = {
     "random.shuffle": {
         "category": "counted_custom",
         "module": "numpy.random",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Shuffle; cost = n*ceil(log2(n)).",
     },
     "random.standard_cauchy": {
@@ -2688,7 +2694,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.choice": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
         "notes": "n = pool length along the sampled axis (`axis`, default 0). numel(output) if replace (+ CDF build 3n + ceil(log2(n)) binary search per draw when p given); n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
@@ -2835,14 +2841,14 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.permutation": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Random permutation; cost = shape[axis] (Fisher-Yates draws).",
     },
     "random.Generator.permuted": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "numel(input)",
         "notes": "Permute along axis; cost from input array size.",
@@ -2877,7 +2883,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.Generator.shuffle": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "In-place shuffle; cost = shape[axis] (Fisher-Yates draws).",
@@ -3003,7 +3009,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.choice": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
         "notes": "Legacy choice sampler; numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
@@ -3136,7 +3142,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.permutation": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Legacy permutation; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
@@ -3206,7 +3212,7 @@ REGISTRY: dict[str, dict] = {
     },
     "random.RandomState.shuffle": {
         "category": "counted_random_method",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
         "notes": "Legacy in-place shuffle; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
@@ -3525,31 +3531,31 @@ REGISTRY: dict[str, dict] = {
     "bartlett": {
         "category": "counted_custom",
         "module": "flopscope._window",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Bartlett window. Cost: 4*n (compare + divide + add + select per sample; single branch of numpy where-based evaluation).",
     },
     "blackman": {
         "category": "counted_custom",
         "module": "flopscope._window",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Blackman window. Cost: 40*n composite (two cosine evals at transcendental rate + 8 arithmetic per sample; the 0.42 term is a constant, not a third cosine).",
     },
     "hamming": {
         "category": "counted_custom",
         "module": "flopscope._window",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Hamming window. Cost: n (one cosine per sample).",
     },
     "hanning": {
         "category": "counted_custom",
         "module": "flopscope._window",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Hanning window. Cost: n (one cosine per sample).",
     },
     "kaiser": {
         "category": "counted_custom",
         "module": "flopscope._window",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Kaiser window. Cost: 23*n (per sample: 1 Bessel I0 at transcendental tier 16 + 7 arithmetic FLOPs, FMA=2).",
     },
     # blacklisted — IO
@@ -3654,21 +3660,21 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "local_callback": True,
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Piecewise function. Cost: numel(input).",
     },
     "apply_along_axis": {
         "category": "counted_custom",
         "local_callback": True,
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Apply function along axis. Cost: numel(output). Inner function costs tracked separately.",
     },
     "apply_over_axes": {
         "category": "counted_custom",
         "local_callback": True,
         "module": "numpy",
-        "complex_factor": 1.0,
+        "complex_factor": 2.0,
         "notes": "Apply function over multiple axes. Cost: numel(output).",
     },
     # blacklisted — datetime

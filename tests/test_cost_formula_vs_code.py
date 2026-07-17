@@ -144,14 +144,15 @@ def test_unary_numel(name, we):
     fn = getattr(we, name)
     inp = _unary_input(name)
     cost = _cost_of(fn, inp)
-    # real_if_close takes complex input (see _unary_input) and its registry
-    # complex_factor is 2.0 (test-and-patch: checks the imaginary part
-    # against a tolerance and conditionally copies the real component,
-    # structurally matching isnan/isfinite) -- unit dtype rates here, so only
-    # the complex factor applies: 100 * 2.0 = 200. Every other op in this
-    # list bills numel(input) = 100 unchanged (real input, or "angle" whose
-    # complex_factor is 1.0 -- priced-in).
-    expected = 200 if name == "real_if_close" else 100
+    # real_if_close and angle both take complex input (see _unary_input).
+    # real_if_close's registry complex_factor is 2.0 (test-and-patch: checks
+    # the imaginary part against a tolerance and conditionally copies the real
+    # component, structurally matching isnan/isfinite); angle's is likewise
+    # 2.0 (a complex value is two real components, one unit per component) --
+    # unit dtype rates here, so only the complex factor applies: 100 * 2.0 =
+    # 200. Every other op in this list bills numel(input) = 100 unchanged
+    # (real input).
+    expected = 200 if name in ("real_if_close", "angle") else 100
     assert cost == expected, f"{name}: expected {expected}, got {cost}"
 
 

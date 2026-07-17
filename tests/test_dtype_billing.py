@@ -90,17 +90,19 @@ def test_complex_factor_reads_registry():
 def test_complex_factor_fails_closed_when_illegal():
     # Ops explicitly marked "illegal" (numpy raises on complex) fail closed.
     # This is distinct from an UNCLASSIFIED op (factor None), which now returns
-    # 1.0 -- see test_complex_factor_free_op_is_one_not_raise below.
+    # 2.0 -- see test_complex_factor_free_op_is_two_not_raise below.
     with pytest.raises(UnsupportedDtypeError):
         complex_factor_for("left_shift", np.dtype("complex128"))  # complex-illegal op
 
 
-def test_complex_factor_free_op_is_one_not_raise():
+def test_complex_factor_free_op_is_two_not_raise():
     # Free / data-movement / blacklisted ops carry no complex_factor; they
-    # relocate whole complex values (no arithmetic) -> factor 1.0, never raise.
-    assert complex_factor_for("reshape", np.dtype("complex128")) == 1.0
-    assert complex_factor_for("asarray", np.dtype("complex128")) == 1.0
-    assert complex_factor_for("some_unknown_op_xyz", np.dtype("complex128")) == 1.0
+    # relocate or allocate whole complex values, and a complex value is two
+    # real components, so the default factor is 2.0 (one unit per component),
+    # never raise.
+    assert complex_factor_for("reshape", np.dtype("complex128")) == 2.0
+    assert complex_factor_for("asarray", np.dtype("complex128")) == 2.0
+    assert complex_factor_for("some_unknown_op_xyz", np.dtype("complex128")) == 2.0
 
 
 def test_complex_factor_exact_requires_override():

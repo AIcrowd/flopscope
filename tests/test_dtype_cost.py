@@ -310,26 +310,32 @@ def test_astype_bills_heavier_of_src_and_dst_rate():
     # source pricier than dest:
     assert _cost(lambda: fnp.astype(a64, np.int32)) == 2000
     assert _cost(lambda: fnp.astype(a32, np.int32)) == 1000  # no over-charge
-    # dest pricier than source (the fixed under-bill): complex64->float64 must
-    # match complex128->float64 -- same float64 output, same work.
+    # dest pricier than source (the fixed under-bill): complex64->float64 bills
+    # at the real float64 rate (complex64's rate loses the tie to float64).
     assert _cost(lambda: fnp.astype(c64, np.float64)) == 2000
-    assert _cost(lambda: fnp.astype(c128, np.float64)) == 2000
+    # complex128->float64 ties on rate (both 2.0); the tie keeps the source
+    # (complex128, listed first), so the resolved dtype stays complex and
+    # astype's own complex_factor (two real components) applies on top:
+    # 1000 * 2.0 * 2.0 = 4000.
+    assert _cost(lambda: fnp.astype(c128, np.float64)) == 4000
     assert _cost(lambda: fnp.astype(a32, np.int64)) == 2000  # real-only dst pricier
 
 
 def test_complex_movement_and_creation_do_not_raise():
     # Free / data-movement ops on complex values must not fail closed; they
-    # bill at factor 1.0 (weight 0 -> 0 FLOPs), never raise UnsupportedDtypeError.
+    # relocate whole complex values without raising UnsupportedDtypeError.
     load_weights()
     zc = fnp.asarray(np.ones(100, dtype=np.complex128))
     assert _cost(lambda: fnp.asarray(np.ones(50, dtype=np.complex128))) == 0
     assert _cost(lambda: fnp.ravel(zc)) == 0
     assert _cost(lambda: fnp.broadcast_to(zc, (2, 100))) == 0
     # astype complex->real is value-changing (cost=numel) billed at the heavier
-    # of the complex128 / float64 rates (both 2.0), factor 1.0: 100 * 2.0 = 200.
-    # Both the function form and the .astype() method form must not raise.
-    assert _cost(lambda: fnp.astype(zc, np.float64)) == 200
-    assert _cost(lambda: zc.astype(np.float64)) == 200
+    # of the complex128 / float64 rates (tied at 2.0, so the source complex128
+    # wins the tie) times astype's own complex_factor (two real components):
+    # 100 * 2.0 * 2.0 = 400. Both the function form and the .astype() method
+    # form must not raise.
+    assert _cost(lambda: fnp.astype(zc, np.float64)) == 400
+    assert _cost(lambda: zc.astype(np.float64)) == 400
 
 
 # ---------------------------------------------------------------------------
@@ -695,17 +701,13 @@ def test_astype_to_complex_charges_and_back_charges():
     z = fnp.asarray(np.ones(100, dtype=np.complex128))
     assert _cost(lambda: r.astype(np.complex128)) == 0  # widening: safe cast
     back = _cost(lambda: z.astype(np.float64))  # lossy: numel * rate * factor
-    # astype's registry entry declares no complex_factor classification, so
-    # complex_factor_for()'s default of 1.0 applies (relocation, not
-    # arithmetic); the dtype rate is the heavier of source/dest
-    # (heavier_billing_dtype(complex128, float64), tied at rate 2.0) ->
-    # 100 * 2.0 * 1.0 = 200. (The brief's draft literal was
-    # int(100 * 2.0 * 2.0) == 400, assuming a second dtype-like 2x factor
-    # stacked on top of the rate; the implemented astype has no such factor.
-    # 200 also matches the existing sibling pin in
-    # test_complex_movement_and_creation_do_not_raise, so this isn't a new
-    # number -- it's consistent with billing already locked in by Task 8a.)
-    assert back == 200
+    # astype's registry entry declares complex_factor 2.0 (a complex value is
+    # two real components, one unit per component); the dtype rate is the
+    # heavier of source/dest (heavier_billing_dtype(complex128, float64),
+    # tied at rate 2.0 -- the tie keeps the source, complex128) -> resolved
+    # dtype stays complex, so astype's factor applies: 100 * 2.0 * 2.0 = 400.
+    # Matches the sibling pin in test_complex_movement_and_creation_do_not_raise.
+    assert back == 400
 
 
 # ---------------------------------------------------------------------------
@@ -749,12 +751,14 @@ def test_mixed_unpromotable_operands_bill_without_raising():
 
 
 def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
-    # shuffle/permutation/choice relocate caller data (movement, factor 1.0).
-    # Their shape[axis] cost counts the dtype-INDEPENDENT Fisher-Yates swap /
-    # selection work, so they bill dtype-neutral: a complex/fp64 population
-    # costs the SAME as fp32 (contrast a genuine sampler, which bills the width
-    # of the values it synthesizes). They must also (a) not crash on a
-    # FlopscopeArray operand and (b) accept complex.
+    # shuffle/permutation/choice relocate caller data (movement, registry
+    # factor 2.0). Their shape[axis] cost counts the dtype-INDEPENDENT
+    # Fisher-Yates swap / selection work and is billed via dtypes=(), so they
+    # bill dtype-neutral (rate 1.0, factor 1.0 -- the registry factor is never
+    # consulted): a complex/fp64 population costs the SAME as fp32 (contrast a
+    # genuine sampler, which bills the width of the values it synthesizes).
+    # They must also (a) not crash on a FlopscopeArray operand and (b) accept
+    # complex.
     from flopscope._registry import REGISTRY
 
     load_weights()
@@ -778,10 +782,10 @@ def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
             fnp.asarray(np.arange(8, dtype=np.complex128))
         )
         assert b.flops_used == 8  # neutral: NOT 16
-    # Registry hygiene: movement ops are classified 1.0 (numpy permutes complex
+    # Registry hygiene: movement ops are classified 2.0 (numpy permutes complex
     # fine), NOT "illegal" -- so a future dtype declaration cannot wrongly raise.
-    assert REGISTRY["random.shuffle"]["complex_factor"] == 1.0
-    assert REGISTRY["random.Generator.shuffle"]["complex_factor"] == 1.0
+    assert REGISTRY["random.shuffle"]["complex_factor"] == 2.0
+    assert REGISTRY["random.Generator.shuffle"]["complex_factor"] == 2.0
 
 
 def test_asarray_charges_value_changing_cast_like_astype():
@@ -1385,3 +1389,42 @@ def test_matrix_power_inversion_bills_float64():
     assert _billed_with_production_rates(
         lambda: fnp.linalg.matrix_power(a_f32, -1)
     ) == (112, "float32")
+
+
+def test_complex_movement_prices_both_components():
+    import flopscope.numpy as fnp
+
+    z64 = np.ones(1000, dtype=np.complex64)
+    z128 = np.ones(1000, dtype=np.complex128)
+    f32 = np.ones(1000, dtype=np.float32)
+    # conj / array on complex: one unit per real component.
+    assert _billed_with_production_rates(lambda: fnp.conj(z64)) == (2000, "complex64")
+    assert _billed_with_production_rates(lambda: fnp.conj(z128)) == (4000, "complex128")
+    assert _billed_with_production_rates(lambda: fnp.conjugate(z64)) == (
+        2000,
+        "complex64",
+    )
+    assert _billed_with_production_rates(lambda: fnp.array(z64)) == (2000, "complex64")
+    # the float32 baseline these are measured against
+    assert _billed_with_production_rates(lambda: fnp.array(f32)) == (1000, "float32")
+
+
+def test_complex_angle_prices_both_components():
+    import flopscope.numpy as fnp
+
+    z64 = np.ones(1000, dtype=np.complex64)
+    f32 = np.ones(1000, dtype=np.float32)
+    billed_angle = _billed_with_production_rates(lambda: fnp.angle(z64))
+    billed_atan2 = _billed_with_production_rates(lambda: fnp.arctan2(f32, f32))
+    assert billed_atan2 == (16000, "float32")
+    assert billed_angle == (32000, "complex64")  # component convention: 2x
+
+
+def test_fft_complex_billing_unchanged_by_the_floor():
+    import flopscope.numpy as fnp
+
+    sig64 = np.ones(1024, dtype=np.complex64)
+    assert _billed_with_production_rates(lambda: fnp.fft.fft(sig64)) == (
+        51200,
+        "complex64",
+    )
