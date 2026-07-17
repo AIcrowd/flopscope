@@ -3005,11 +3005,11 @@ attach_docstring(rot90, _np.rot90, "free", "0 FLOPs")
 
 
 def row_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
-    """Stack arrays vertically (alias for vstack). Cost: numel(output)."""
+    """Stack arrays vertically. Cost: 0 (data-movement alias for vstack; free tier)."""
     return vstack(tup)
 
 
-attach_docstring(row_stack, _np.row_stack, "counted_custom", "numel(output) FLOPs")
+attach_docstring(row_stack, _np.row_stack, "free", "0 FLOPs (alias for vstack)")
 
 
 @_counted_wrapper

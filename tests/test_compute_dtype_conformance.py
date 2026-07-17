@@ -581,12 +581,12 @@ for _name in ("matmul", "outer", "tensordot", "vecdot"):
         f"'{_name}' op_name (verified), whose own probe above covers this "
         f"arithmetic."
     )
-SKIPPED["row_stack"] = (
-    "alias for vstack (registry note: 'alias for vstack'); no deduct() of "
-    "its own (return vstack(tup), not @_counted_wrapper-decorated) -- "
-    "billing happens under 'vstack' (weight 0, not itself in the charged "
-    "set, so it needs no separate probe/skip entry here)."
-)
+# NOTE: `row_stack` is deliberately NOT listed here. It is a bare
+# `return vstack(tup)` alias (pure data movement, no deduct() of its own) and
+# is now weight 0.0 in default_weights.json, alongside its
+# column_stack/dstack/hstack/vstack siblings -- so it is not in _charged_ops()
+# and correctly falls outside this sweep entirely. (It carried a stale
+# weight 1.0 that billed nothing; fixed when it joined the free tier.)
 
 # --- dtype-neutral by design, non-random: verified individually.
 SKIPPED["where"] = (
@@ -686,7 +686,21 @@ def test_probe_accounting():
         f"{len(missing)} charged ops have neither a probe nor a documented "
         f"skip: {missing[:40]}{' ...' if len(missing) > 40 else ''}"
     )
-    stale = sorted((set(PROBES) | set(SKIPPED)) - set(REGISTRY))
+    # Every probe/skip entry must reference a currently-CHARGED op. A stale
+    # entry for an op whose weight later drops to 0 (moving it out of the
+    # charged set — e.g. reclassified into the data-movement free tier) is a
+    # correctness signal, not harmless dead code: it means the sweep is
+    # asserting coverage for something it no longer needs to, and hides that
+    # the op silently stopped billing. Checking against `charged` rather than
+    # the full `REGISTRY` makes that a hard failure (a REGISTRY-only check
+    # would pass, since a de-charged op stays registered).
+    non_charged = sorted(covered - charged)
+    assert not non_charged, (
+        f"probe/skip entries for ops that are no longer charged (weight 0) — "
+        f"remove them; the op is now free-tier and outside the sweep: "
+        f"{non_charged}"
+    )
+    stale = sorted(covered - set(REGISTRY))
     assert not stale, f"probe/skip entries for unknown ops: {stale}"
 
 

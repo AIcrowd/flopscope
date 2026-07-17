@@ -371,7 +371,7 @@
     "rollaxis": 0.0,
     "roots": 1.0,
     "rot90": 0.0,
-    "row_stack": 1.0,
+    "row_stack": 0.0,
     "searchsorted": 1.0,
     "select": 0.0,
     "setdiff1d": 1.0,

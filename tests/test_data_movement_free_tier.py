@@ -14,6 +14,7 @@ from flopscope._weights import get_weight, load_weights, reset_weights
 FREE_DATA_MOVEMENT_OPS = [
     "hstack",
     "vstack",
+    "row_stack",  # bare `return vstack(tup)` alias; joins the free tier
     "column_stack",
     "dstack",
     "concatenate",
@@ -66,6 +67,24 @@ def production_weights(monkeypatch):
 @pytest.mark.parametrize("op", FREE_DATA_MOVEMENT_OPS)
 def test_data_movement_op_is_weight_zero(production_weights, op):
     assert get_weight(op) == 0.0, f"{op} should be free (weight 0.0)"
+
+
+def test_row_stack_bills_zero_under_production_rates(production_weights):
+    """row_stack is a bare `return vstack(tup)` alias — pure data movement.
+
+    It has no deduct() of its own (billing happens under `vstack`), so its
+    own weight was inert and previously carried a stale 1.0. Now weight 0.0,
+    it bills 0 under production rates, exactly like vstack.
+    """
+    a = fnp.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
+        fnp.row_stack([a, a])
+        row_stack_cost = ctx.flops_used
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
+        fnp.vstack([a, a])
+        vstack_cost = ctx.flops_used
+    assert row_stack_cost == 0
+    assert row_stack_cost == vstack_cost
 
 
 def _mk1d():
