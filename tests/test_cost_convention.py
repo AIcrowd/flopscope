@@ -754,7 +754,7 @@ DEFERRED: dict[str, str] = {
     "delete": "numel(output); surviving elements copied",
     "insert": "numel(output); materializing copy",
     "append": "numel(output) = arr.size + values.size; concatenate family",
-    "copyto": "0 for a lossless copy (same dtype or safe widening); numel(dst) (or popcount where) for a value-changing (lossy) cast",
+    "copyto": "numel(dst) per element written (or popcount of where= when masked)",
     "trim_zeros": "numel(input); value scan, like nonzero",
     "ravel_multi_index": "2*(ndim-1)*N (+N for clip/wrap); one stride is unity",
     "ix_": "numel(output)",

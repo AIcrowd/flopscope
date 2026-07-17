@@ -173,10 +173,10 @@ Charged: `where(cond)` (1-arg, ≡ `nonzero`), `nonzero`, `argwhere`, `flatnonze
 `count_nonzero`.  These **derive** the selector by testing values (`!= 0`), so the test
 is their compute — they are charged `numel(input)` at weight 1.0.
 
-Value-changing `astype` (to-bool `!=0`, float→int truncation, float-narrowing rounding)
-is also charged `numel` (weight 1.0) — a per-element value test.  Lossless width casts
-(e.g. `float32→float64`) stay free.  The method `a.nonzero()` is charged identically to
-`fnp.nonzero(a)`.
+`astype` is a representation change, not arithmetic: narrowing, widening, float→int
+truncation, and bool coercion all bill `0` in both directions — precision is the
+participant's own dial, not a billed event.  The method `a.nonzero()` is charged
+identically to `fnp.nonzero(a)`.
 
 **Refinement B — creation** (resolves init vs computed generators):
 
@@ -314,7 +314,7 @@ Every charged op is classified by the atom its **billed unit** reduces to:
 
 | class | factor | representative ops |
 |---|---|---|
-| add / compare / sort / set / reduce-sum | **2** | `add`, `subtract`, `sum`, `mean`, `cumsum`, `sort`, `unique`, `where`, comparisons (`less`/`greater`/`equal`), set ops |
+| add / compare / sort / set / reduce-sum | **2** | two real adds, two lexicographic compares, or two component relocations — a complex value is two real components, and every op prices at least one unit per component: `add`, `subtract`, `sum`, `mean`, `cumsum`, `sort`, `unique`, `where`, comparisons (`less`/`greater`/`equal`), set ops, `conj`, `angle`, `concatenate`, `take`, `random.shuffle`, and the wider copy/gather/creation family |
 | multiply / pure product | **6** | `multiply`, `prod` (`square` = 5) |
 | divide | **11** | `divide` (`reciprocal` = 6) |
 | variance family | **2.5** | `var`, `std` (square-and-sum: mostly adds, some multiplies) |
@@ -322,8 +322,7 @@ Every charged op is classified by the atom its **billed unit** reduces to:
 | transcendental | **per op** | `log` 2.25, `exp` 3.1, `sin`/`cos` 3.4, `tan` 3.6 — each from its complex closed form |
 | dense linalg | **4** | `inv`, `solve`, `svd`, `det`, `qr`, `eig`, … (complex factorization ≈ 4× the real arithmetic) |
 | contraction (FMA) | **exact** | `einsum`, `matmul`, `dot`, `inner`, `tensordot`, `vdot`, … — computed per call |
-| complex-native formula | **1** | `fft.*`, `conj`, `angle` — the formula already counts complex real-FLOPs |
-| movement / free | **1** | copy / gather / creation of whole complex values — relocation, not arithmetic |
+| FFT | **1** | no separate factor — the FFT formulas (`5N·log₂N`) already count the complex real-FLOPs: `fft.fft`, `fft.ifft`, `fft.rfft` |
 | complex-illegal | **raises** | `floor`/`ceil`/`trunc`, bitwise & shift ops, `mod`/`fmod`/`floor_divide`, real-only math (`cbrt`, `i0`, `unwrap`, …) and the real-only random samplers — anything numpy rejects on complex input |
 
 Composite `counted_custom` ops carry a per-op derived factor of the same kind (for example
@@ -353,8 +352,9 @@ FLOPs; `10 × (N/2)·log₂N = 5N·log₂N`. The complex structure is baked into
 **Guaranteed coverage.** Every charged op carries an explicit `complex_factor` (a number,
 `"exact"`, or `"illegal"`); `tests/test_complex_factor_completeness.py` fails the build if
 any charged op is unclassified. An op with no classification is necessarily
-free / movement / blacklisted and bills factor `1` — relocating a whole complex value is
-not arithmetic.
+free / movement / blacklisted and bills factor `2` — a complex value is two real
+components, and relocating one still prices one unit per component even though no
+arithmetic happens.
 
 ### Which dtype prices a call
 
@@ -368,15 +368,21 @@ Worked consequences:
 - **Mixed kinds promote up.** `matmul(int32_array, float32_array)` resolves to `float64`
   (numpy's promotion for that mix) and bills at the float64 rate — the same as a genuine
   float64 matmul. There is no discount for feeding narrow-looking operands.
-- **A narrow `dtype=` request is not a discount.** `result_type` keeps the wider operand,
-  so `multiply(f64, f64, dtype=float32)` still bills float64: the requested output width
-  does not change the precision the multiply runs at.
-- **`astype` bills the heavier of source and destination.** It reads the source and writes
-  the destination, so it is charged at whichever of the two dtypes has the higher rate
-  (`heavier_billing_dtype`, not `result_type` — which would over-promote a cross-kind cast
-  such as `float32 → int32` to float64). A lossless widening cast (for example
-  `float32 → float64` or `float64 → complex128`) stays free; a value-changing cast is
-  charged `numel` at that heavier rate.
+- **An explicit `dtype=` forces the loop.** `multiply(f64, f64, dtype=float32)` casts
+  both operands to float32 on read and runs the float32 loop — billed at the float32
+  rate it actually computes (`1000` for a 1000-element call), not the float64 operand
+  promotion. `out=` alone does not narrow the loop: `multiply(f64, f64, out=float32_arr)`
+  still runs the float64 loop and only casts the result into `out`, so it stays billed
+  at the float64 rate (`2000`).
+- **Changing representation is free.** `astype` and `asarray` conversions bill `0` in
+  both directions — narrowing, widening, or a value-changing cast (to-bool, float→int,
+  complex→real) all cost nothing, because precision is the participant's own dial, not a
+  billed event. The structural formula (`numel` at the heavier of source/destination
+  rate, via `heavier_billing_dtype` — not `result_type`, which would over-promote a
+  cross-kind cast such as `float32 → int32` to float64) is still tracked, so a future
+  re-weighting has a correct number to weight; at the current weight it bills `0`.
+  `copyto`, the in-place write primitive, is priced one unit per element written (per
+  selected element under `where=`), same-dtype or not.
 - **`real` / `imag` are free.** Extracting a component of a complex value is a
   view / constant-fill, not arithmetic — `flop_cost = 0`.
 - **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype at
@@ -388,17 +394,19 @@ Worked consequences:
 
 ### Reduction accumulators
 
-A reduction is billed at the dtype numpy actually accumulates in, floored at the
-input's own rate — the bill never drops below what the input alone would cost. The
-accumulator resolves in numpy's own order: an explicit `dtype=` argument (positional or
-keyword) if given; else `out`'s dtype if an output array is given; else the family
-default — integer and boolean inputs widen to the platform default integer for
-`sum`/`prod`/`cumsum`/`cumprod` (and their `nan`-prefixed variants), and to `float64` for
-`mean`/`var`/`std`. Both `numpy.trace` and `linalg.trace` widen the same way `sum` does —
-a batched diagonal sum is still a sum — and the generic `ufunc.reduce` / `accumulate`
-paths resolve their accumulator through the identical rule: `np.add.reduce` is the same
-machinery `sum` runs on, so `np.add.reduce(int32_arr, dtype=int32)` bills exactly like
-`sum(int32_arr, dtype=int32)`.
+A reduction is billed at the dtype numpy actually accumulates in. The accumulator
+resolves in numpy's own order: an explicit `dtype=` argument (positional or keyword) if
+given — billed exactly as requested, wider or narrower, because that request *is* the
+accumulator numpy runs; else `out`'s dtype if an output array is given — this widens the
+accumulator when `out` is wider than the input, but a narrower `out` only casts the
+final store, so the loop keeps the input's own width; else the family default — integer
+and boolean inputs widen to the platform default integer for `sum`/`prod`/`cumsum`/
+`cumprod` (and their `nan`-prefixed variants), and to `float64` for `mean`/`var`/`std`,
+never billed below the input's own rate. Both `numpy.trace` and `linalg.trace` widen the
+same way `sum` does — a batched diagonal sum is still a sum — and the generic
+`ufunc.reduce` / `accumulate` paths resolve their accumulator through the identical
+rule: `np.add.reduce` is the same machinery `sum` runs on, so
+`np.add.reduce(int32_arr, dtype=int32)` bills exactly like `sum(int32_arr, dtype=int32)`.
 
 Worked examples (production rates, 1000-element input, `sum`):
 
@@ -407,17 +415,25 @@ Worked examples (production rates, 1000-element input, `sum`):
   999 × 1.0 = **999**.
 - `sum(float32_data, None, float64)` — a positional wide accumulator bills exactly like
   the keyword spelling `sum(float32_data, dtype=float64)` → 999 × 2.0 = **1998**.
-- `sum(float64_data, dtype=float32)` — numpy accumulates in float32, but reading float64
-  data into a narrower accumulator is a lossy per-element cast; like `astype`, the
-  pricier side wins, so the bill stays at the input's own float64 rate →
-  999 × 2.0 = **1998**. Requesting a narrower accumulator never discounts below the
-  input's own rate.
+- `sum(float64_data, dtype=float32)` — numpy genuinely accumulates in float32 (operands
+  cast to float32 on read), so the bill follows that narrower loop →
+  999 × 1.0 = **999**.
 
 `trace` follows the identical rule at its own, much smaller element count:
 `linalg.trace` on an `8×8` int32 matrix bills its 8-element diagonal sum at the int64
 rate (**16**); the same shape in float32 stays at float32 (**8** — floats never widen).
-The explicit-accumulator floor carries through the top-level wrapper too:
-`trace(int32_matrix, dtype=int32)` bills **8**, at int32.
+The explicit accumulator carries through the top-level wrapper too:
+`trace(int32_matrix, dtype=int32)` bills **8**, at int32 — the same rate as the input,
+because an explicit accumulator request is honored exactly.
+
+Two spellings resolve differently because they compute differently. Pointwise `dtype=`
+computes narrow: operands are cast to the requested dtype before the elementwise loop
+runs, so the bill is narrow too. Pointwise `out=` computes at the operand-promoted width
+and only casts the result on the way into `out`, so the bill stays wide. Reductions
+follow the same split one level up: `dtype=` sets the accumulator in both directions —
+narrower or wider, exactly as requested; `out=` widens the accumulator when `out` is
+wider than the input, while a narrower `out` only casts the final store, so it never
+bills below the input's own rate.
 
 ### Ops that compute wider than their inputs
 
@@ -539,10 +555,12 @@ Packing is **not banned and not judged** — it is priced so it does not pay:
   32-bit shares the `1.0` rate. That gain is bounded and small, is considered in-bounds,
   and the rate table deliberately does not chase it.
 
-The resolved-dtype rule closes the escape hatch that would otherwise reopen these: a
-participant cannot request a narrow output dtype to dodge the wide rate, because billing
-resolves the dtype the compute actually runs in (`np.result_type`), not the narrowest
-operand or an explicit narrow `dtype=`.
+Billing follows the loop numpy actually runs, in both directions: an explicit narrow
+`dtype=` — pointwise, or a reduction's accumulator — bills narrow because the arithmetic
+genuinely happens at that width, trading precision for a cheaper bill exactly as
+requested. `out=` alone never narrows a loop, so it cannot be used to buy a narrow bill
+for wide compute. The width-rate and complex-factor pricing above is what makes packing
+a loss or a break-even; there is no separate dtype-request rule needed to close it.
 
 ---
 
@@ -560,10 +578,10 @@ each backed by a CI-enforced test you can open and read:
 | **Weight-tier policy** | every active weight ∈ `{0, 1, 8, 16}`; arithmetic ops are 0 or 1; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
-| **Free-tier discipline** | only ops that perform no value arithmetic/comparison carry weight 0; a value-test is charged wherever it hides — including `a.nonzero()` (method), value-changing `astype`, `where(1-arg)`, `argwhere`, `flatnonzero`, and `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
+| **Free-tier discipline** | only ops that perform no value arithmetic/comparison carry weight 0, with one deliberate exception — representation changes (`astype`, `asarray`) are free even though they may test or truncate values, because precision is the participant's own dial, not a billed event. Every other value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **Memoization accepted** | free gather makes look-up-table reuse (precompute once with a charged op, then `take` for free) cheaper — this is deliberate: memoization is a legitimate optimization under a pure-compute metric | documented here; `test_data_movement_free_tier.py` |
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
-| **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; and the **resolved-dtype rule** (`np.result_type`) blocks downcast dodges — a narrow `dtype=` request cannot discount the wider compute precision | `tests/test_dtype_cost.py` (width-packing + resolved-dtype tests) |
+| **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
 | **End-to-end billing** | production billing is pinned per weight tier `{0,1,8,16}` (catches a silent weight regression) | `test_production_weight_billing.py` |
 
 An auditor can read this table top-to-bottom and, for each claim, open the named test
@@ -613,8 +631,8 @@ logaddexp2, floor_divide, mod/remainder, fmod, float_power.
 **Complex dtypes**: each op bills its per-op `complex_factor` from the class table in
 [Dtype and precision](#complex-arithmetic-from-first-principles) — `add`/comparisons 2,
 `multiply` 6, `divide` 11, `abs` 4, transcendentals per op (`sin` 3.4, `log` 2.25); `conj`
-and `angle` are complex-native (factor 1); rounding, bitwise, and `mod`-family ops are
-complex-illegal and raise.
+and `angle` price the same component floor (factor 2); rounding, bitwise, and
+`mod`-family ops are complex-illegal and raise.
 
 Source: `src/flopscope/_pointwise.py`.
 
@@ -903,8 +921,7 @@ Random ops are composite: the generation kernel cost and any setup cost
 (PRNG state update, rejection sampling) are folded into `flop_cost`; the
 weight tier **varies** by distribution family.  The full bill follows the
 four-factor formula — draws bill their output dtype's rate (numpy's samplers
-default to float64, rate 2.0), and complex output dtypes do not exist for
-random generation, so `complex_factor` is always 1 here.
+default to float64, rate 2.0); complex dtypes are covered below.
 
 Weight tiers:
 
@@ -940,8 +957,8 @@ Weight tiers:
 resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output
 dtype's** rate — `standard_normal(dtype=float64)` bills `2×` the float32 draw. The
 data-movement random ops (`shuffle`, `permutation`, `choice`, `Generator.permuted`) permute
-caller-supplied values of any dtype and are billed dtype-neutrally, so complex input does
-not raise.
+caller-supplied values of any dtype and are billed dtype-neutrally — their cost counts
+the selection work, which is width-independent — so complex input does not raise.
 
 Source: `src/flopscope/numpy/random/_cost_formulas.py`.
 
@@ -1087,13 +1104,14 @@ compute cost.  The predicate and the selection are the *same* step here — unli
 | `take(a, idx)` | free | index given; pure gather |
 | `hstack([a, b])` | free | copies existing values into a new buffer |
 | `sort(a)` | charged `n·⌈log₂ n⌉` | output order derived by comparing values |
-| `a.astype(float64)` | free | width cast = representation only (no value change) |
-| `a.astype(bool)` | charged `numel(a)` | per-element `!=0` test = value-comparison |
+| `a.astype(float64)` | free | representation change only — no value change |
+| `a.astype(bool)` | free | representation change — even though it computes a `!=0` test, precision is the participant's own dial (deliberate exception to the value-test rule) |
 
-**Complex dtypes**: relocating a whole complex value is one relocation, not arithmetic, so
-the free movement/gather ops carry `complex_factor = 1` and never raise on complex input
-(weight 0 ⇒ 0 FLOPs regardless). The charged selector-deriving siblings (`nonzero`,
-`argwhere`, `flatnonzero`) test `!= 0`, a value comparison, so they bill factor 2 on complex.
+**Complex dtypes**: the free movement/gather ops carry the component `complex_factor = 2`
+(the same floor as everywhere else) and never raise on complex input — weight 0 makes
+the factor structural only, billing 0 FLOPs regardless. The charged selector-deriving
+siblings (`nonzero`, `argwhere`, `flatnonzero`) test `!= 0`, a value comparison, so they
+also bill factor 2 on complex.
 
 Source: `src/flopscope/_array_ops.py`.
 
@@ -1109,7 +1127,7 @@ value-arithmetic or perform I/O work beyond pure relocation:
 | `diag` (extract, 2-D) | 0 (free — pure gather of diagonal elements) | DECLARED: no arithmetic | `_array_ops.py` |
 | `diag` (construct, 1-D) | 0 (free — copy into diagonal of new matrix) | DECLARED: no arithmetic | `_array_ops.py` |
 | `diagonal` | 0 (view) | DECLARED: `numpy.diagonal` returns a read-only view | `_array_ops.py` |
-| `copyto` | 0 for same-dtype / `where`-mask copy / lossless widening; `numel(dst)` (or popcount(`where`)) for a value-changing (lossy) cast | DERIVED: path-aware — pure scatter-write and lossless width casts are free, a value-changing (lossy) cast is charged (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
+| `copyto` | `numel(dst)` (or popcount(`where`) when masked) | DECLARED: priced per element written, unconditionally — same-dtype or not (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
 | `packbits` | `numel(input)` (weight 1.0) | DECLARED: per-bit test+shift; value-test per element | `_array_ops.py` |
 | `unpackbits` | `numel(output)` (weight 1.0) | DECLARED: unpacks 8 bits per input byte; proportional to output | `_array_ops.py` |
 | `mask_indices` | `2n² + 8k` (weight 1.0, `k` = selected pairs) | DECLARED: n² mask scan (value test) + gather of 2k index values | `_array_ops.py` |
@@ -1129,16 +1147,16 @@ is **rejected with a clear error**. These four ops carry weight **1.0** with a p
 | `pad` | `constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` (`reflect_type='even'`) | stat modes `maximum`/`minimum`/`mean`/`median`: `Σᵢ stats_i·stat_len_i·cross_i` (lanes from the input cross-section); `linear_ramp` and `reflect_type='odd'`: `2·(numel_out − numel_in)`; **`mode=<callable>` raises** |
 | `ravel_multi_index` | — | `2·(ndim − 1)·N` (one unit stride), `+N` for `mode='clip'/'wrap'` |
 | `trim_zeros` | — | `numel(input)` (value scan for the nonzero boundary) |
-| `copyto` | same-dtype copy, `where`-mask copy, lossless widening | `numel(dst)` (or popcount(`where`)) for a value-changing (lossy) cast; lossless width casts are free |
+| `copyto` | — | `numel(dst)` (or popcount(`where`) when masked) — every write is priced, same-dtype or not |
 
 For `pad` stat modes: `cross_i = numel_in // in_shape[i]`, `stat_len_i = min(stat_length_i,
 in_shape[i])` (default = full axis), summed over padded axes only; a full-axis stat serves
 both sides (one reduction). `mean` adds one divide per stat output cell.
 
 **Complex dtypes**: the charged `pad` stat modes and `trim_zeros` bill factor 2 (value
-scan / reduction); `ravel_multi_index` is integer index math and is complex-illegal. A
-value-changing `copyto` (like `astype`) is billed at the **heavier** of the source and
-destination rate — see [Which dtype prices a call](#which-dtype-prices-a-call).
+scan / reduction); `ravel_multi_index` is integer index math and is complex-illegal.
+`copyto` resolves its billed dtype the general way — `np.result_type` over its source
+and destination operands — see [Which dtype prices a call](#which-dtype-prices-a-call).
 
 ---
 
@@ -1168,8 +1186,9 @@ Weight 0 now covers *four* sub-families (see [§The unifying philosophy](#the-un
 in the Billing model section for the full rule and both refinements):
 
 - **Views / metadata**: `reshape`, `ravel`, `flatten`, `transpose`, `squeeze`,
-  `expand_dims`, `broadcast_to`, `atleast_1d/2d/3d`, `asarray` (no copy),
-  `asfortranarray`, `ascontiguousarray`, `astype` (no copy / lossless-width),
+  `expand_dims`, `broadcast_to`, `atleast_1d/2d/3d`, `asarray` (free —
+  representation change), `asfortranarray`, `ascontiguousarray`, `astype`
+  (free — representation change, both directions),
   `view`, `diagonal` (view), `moveaxis`, `swapaxes`, `real`, `imag`,
   `ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`,
   `data`, `ctypes`, `strides`, `T`, `linalg.diagonal`, `linalg.matrix_transpose`,

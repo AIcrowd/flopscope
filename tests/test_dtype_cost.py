@@ -1000,7 +1000,9 @@ def test_reduction_out_dtype_sets_accumulator():
 
     x = np.ones(1000, dtype=np.float32)
     out = np.empty((), dtype=np.float64)
-    # ufunc.reduce semantics: out= without dtype= IS the accumulator dtype.
+    # ufunc.reduce semantics: out= without dtype= widens the accumulator
+    # when out is wider than the input (a narrower out would only cast the
+    # final store -- see the next test).
     assert _billed_with_production_rates(lambda: fnp.sum(x, out=out)) == (
         1998,
         "float64",

@@ -1702,7 +1702,7 @@ REGISTRY: dict[str, dict] = {
     "asarray": {
         "category": "free",
         "module": "numpy",
-        "notes": "Convert input to array. Cost: numel(input).",
+        "notes": "Convert input to array. Cost: 0 -- representation change.",
     },
     "isnan": {
         "category": "counted_custom",
@@ -2247,7 +2247,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Copy values into dst. Cost: 0 for a lossless copy (same dtype or safe widening); numel(dst) (or popcount where) for a value-changing (lossy) cast.",
+        "notes": "Copy values into dst. Cost: one unit per element written (popcount of where= when masked).",
     },
     "unique_all": {
         "category": "counted_custom",

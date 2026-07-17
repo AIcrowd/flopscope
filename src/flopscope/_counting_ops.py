@@ -69,9 +69,11 @@ def trace(
     else:
         cost = 0
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    # numpy widens the trace accumulator like sum (trace(int32) runs int64);
-    # bill that accumulator, floored at the input rate, honoring explicit
-    # dtype= then out='s dtype. Mirrors the reduction wrappers exactly.
+    # numpy widens the trace accumulator like sum (trace(int32) runs int64).
+    # An explicit dtype= bills as the accumulator numpy runs, in both
+    # directions; out= widens it, and a narrower out only casts the final
+    # store; the default never bills below the input rate. Mirrors the
+    # reduction wrappers exactly.
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,

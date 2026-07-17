@@ -1324,8 +1324,10 @@ def _counted_reduction(
 
         # numpy computes the reduction in the explicit dtype= (positional or
         # keyword) if given, else in out's dtype, else in the family default
-        # (integer-widening for the accumulating reductions). Bill that
-        # accumulator, floored at the input's own rate.
+        # (integer-widening for the accumulating reductions). An explicit
+        # dtype= bills as the accumulator numpy runs, in both directions;
+        # out= widens the accumulator, and a narrower out only casts the
+        # final store; the default never bills below the operand width.
         explicit_dtype = kwargs.get("dtype")
         if (
             explicit_dtype is None
@@ -1958,7 +1960,10 @@ def _counted_mean(np_func, op_name: str):
         out_for_np = None if isinstance(out, SymmetricTensor) else out
 
         # numpy computes an integer mean in float64 unless an explicit dtype
-        # overrides the accumulator; bill that, floored at the input's rate.
+        # or out= overrides the accumulator. An explicit dtype= bills as the
+        # accumulator numpy runs, in both directions; out= widens it, and a
+        # narrower out only casts the final store; the family default never
+        # bills below the operand width.
         billing_dtypes: tuple = (
             reduction_billing_dtype(
                 a.dtype,
@@ -2043,8 +2048,10 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
         # numpy computes an integer var/std in float64 unless an explicit
-        # dtype overrides the accumulator; bill that, floored at the
-        # input's rate.
+        # dtype or out= overrides the accumulator. An explicit dtype= bills
+        # as the accumulator numpy runs, in both directions; out= widens it,
+        # and a narrower out only casts the final store; the family default
+        # never bills below the operand width.
         billing_dtypes: tuple = (
             reduction_billing_dtype(
                 a.dtype,

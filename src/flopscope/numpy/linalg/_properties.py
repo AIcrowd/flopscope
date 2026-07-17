@@ -58,8 +58,9 @@ def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeAr
     cost = trace_cost(n) * _batch_size(x.shape) if not _has_zero_dim(x.shape) else 0
     # trace is a diagonal sum, NOT a LAPACK op, so it is not routed through
     # linalg_billing_dtypes (integer input never forces float64). It DOES widen
-    # its accumulator exactly like sum -- trace(int32) runs int64 -- so bill the
-    # accumulator dtype (floored at the input rate), honoring an explicit dtype=.
+    # its accumulator exactly like sum -- trace(int32) runs int64. An explicit
+    # dtype= bills as the accumulator numpy runs, in both directions; the
+    # default never bills below the input rate.
     _trace_dtypes = (
         reduction_billing_dtype(
             x.dtype,
