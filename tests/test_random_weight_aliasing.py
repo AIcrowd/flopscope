@@ -109,8 +109,9 @@ class TestOutlierExplicitEntries:
 
     def test_permuted_pinned(self):
         load_weights()
-        # Pinned to closest-analog (random.permutation, 1.0)
-        assert get_weight("random.Generator.permuted") == 1.0
+        # Explicit access-tier entry (no module-level analog to alias from);
+        # matches random.permutation's own weight, 4.0.
+        assert get_weight("random.Generator.permuted") == 4.0
 
     def test_tomaxint_pinned(self):
         load_weights()

@@ -453,8 +453,9 @@ def test_histogram_array_bins_dtype_is_billed():
     # int bins is a count, not data -> dtype irrelevant. Pin the exact value so
     # a future change to the int-bins path can't silently drift:
     # 100 elems * ceil(log2(10))=4 = 400 base cost, at the int64-floored
-    # rate 2.0 (counts are always platform-default-int) = 800.
-    assert _cost(lambda: fnp.histogram(d, bins=10)) == 800
+    # rate 2.0 (counts are always platform-default-int) and weight 4.0
+    # (access tier, see cost-model repricing) = 3200.
+    assert _cost(lambda: fnp.histogram(d, bins=10)) == 3200
 
 
 def test_histogram2d_histogramdd_array_bins_dtype_is_billed():
@@ -788,10 +789,11 @@ def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
     fr = fnp.asarray(np.arange(10, dtype=np.float32))
     fd = fnp.asarray(np.arange(10, dtype=np.float64))
     # in-place shuffle must not raise (regression: empty_like reentry) and
-    # bills shape[0]=10 flat, with no 2x for the complex width.
+    # bills shape[0]=10 flat (x weight 4.0 access tier = 40), with no 2x for
+    # the complex width.
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
         fnp.random.shuffle(zc)
-        assert b.flops_used == 10  # neutral: NOT 20
+        assert b.flops_used == 40  # neutral: NOT 80
     # complex == fp64 == fp32 (all shape-based, dtype-blind).
     assert (
         _cost(lambda: fnp.random.permutation(zc))
@@ -803,7 +805,7 @@ def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
         fnp.random.default_rng(0).shuffle(
             fnp.asarray(np.arange(8, dtype=np.complex128))
         )
-        assert b.flops_used == 8  # neutral: NOT 16
+        assert b.flops_used == 32  # neutral: NOT 64
     # Registry hygiene: movement ops are classified 2.0 (numpy permutes complex
     # fine), NOT "illegal" -- so a future dtype declaration cannot wrongly raise.
     assert REGISTRY["random.shuffle"]["complex_factor"] == 2.0

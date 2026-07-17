@@ -218,8 +218,8 @@ class TestCrossApiFlopParity:
             merandom.default_rng(42).shuffle(a.copy())
         with BudgetContext(flop_budget=10**6, quiet=True) as b3:
             merandom.RandomState(42).shuffle(a.copy())
-        # All charge shape[0]=5 × weight 1.0 = 5
-        assert b1.flops_used == b2.flops_used == b3.flops_used == 5, (
+        # All charge shape[0]=5 × weight 4.0 (access tier) = 20
+        assert b1.flops_used == b2.flops_used == b3.flops_used == 20, (
             f"shuffle 2D asymmetry: module={b1.flops_used}, "
             f"default_rng={b2.flops_used}, RandomState={b3.flops_used}"
         )
@@ -247,5 +247,6 @@ class TestCrossApiFlopParity:
             merandom.default_rng(42).shuffle(a.copy(), 1)
         with BudgetContext(flop_budget=10**6, quiet=True) as b2:
             merandom.default_rng(42).shuffle(a.copy(), axis=1)
-        # Positional and keyword forms charge identically; both should be shape[1]=10
-        assert b1.flops_used == b2.flops_used == 10
+        # Positional and keyword forms charge identically; both should be
+        # shape[1]=10 × weight 4.0 (access tier) = 40
+        assert b1.flops_used == b2.flops_used == 40
