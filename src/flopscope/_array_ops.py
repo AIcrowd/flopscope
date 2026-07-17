@@ -1395,8 +1395,10 @@ def astype(
 ) -> FlopscopeArray:
     """Cast array to *dtype*. Wraps ``np.astype(x, dtype)``.
 
-    Cost: ``numel`` when the cast changes values (to-bool, float->int,
-    narrowing, complex->real); 0 for a lossless width cast.
+    Cost: 0 -- a representation change (weight 0); every cast is free,
+    lossy or lossless. The structural cost (``numel`` when the cast changes
+    values: to-bool, float->int, narrowing, complex->real) is still tracked
+    internally and stays available if the weight is ever raised.
     """
     budget = require_budget()
     x_arr = _np.asarray(x)
@@ -1432,7 +1434,10 @@ def _astype_counted(
     ``np.ndarray.astype`` so unsafe casts raise ``TypeError`` just as they do
     on plain ndarrays.
 
-    Cost: ``numel`` when the cast changes values; 0 for a lossless width cast.
+    Cost: 0 -- a representation change (weight 0); every cast is free, lossy
+    or lossless. The structural cost (``numel`` when the cast changes
+    values) is still tracked internally and stays available if the weight
+    is ever raised.
     """
     budget = require_budget()
     arr_np = _np.asarray(arr)
@@ -1462,13 +1467,13 @@ def asarray(
     dtype: DTypeLike | None = None,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Convert to array. Cost: numel on a value-changing dtype cast, else 0."""
+    """Convert to array. Cost: 0 -- representation change (weight 0)."""
     budget = require_budget()
     _probe = _np.asarray(a)
     # asarray is a view/no-op unless an explicit dtype= forces a value-changing
-    # cast; then it does the same work as astype and is charged identically
-    # (numel at the heavier of source/target rate), so it is not a free
-    # alternative to astype for conversions. A lossless widening stays free.
+    # cast; then it does the same structural work as astype (numel at the
+    # heavier of source/target rate) tracked internally, but both are weight
+    # 0 -- a value-changing asarray(dtype=) is free, same as astype.
     if dtype is not None and _cast_changes_values(_probe.dtype, dtype):
         cost = _probe.size
         _asarray_dtypes: tuple = (
@@ -1491,8 +1496,8 @@ def asarray(
 attach_docstring(
     asarray,
     _np.asarray,
-    "counted_custom",
-    "numel on a value-changing dtype cast (like astype), else 0",
+    "free",
+    "0 FLOPs (representation change; structural cost retained at weight 0)",
 )
 
 

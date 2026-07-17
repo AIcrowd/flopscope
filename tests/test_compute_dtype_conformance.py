@@ -483,16 +483,15 @@ PROBES["isnat"] = lambda: fnp.isnat(
 )
 
 # ---------------------------------------------------------------------------
-# astype/asarray ("free" registry category, but individually weighted
-# nonzero — a value-changing cast bills numel at the heavier of source/dest).
-# int32->float64 is a SAFE/lossless widening cast (float64 exactly
-# represents every int32 value), so both ops price it at 0 FLOPs (rate is
-# irrelevant to a 0 charge either way, not an exploit); int32->int8 is a
-# genuine narrowing (value-changing) cast that actually exercises the
-# charged, dtype-rate-sensitive path.
+# astype/asarray are deliberately NOT probed or skipped here (compare the
+# row_stack note below, same pattern). Both are now weight 0.0 in
+# default_weights.json: a free representation change -- conversion computes
+# no values; the structural cost formula (numel at the heavier of
+# source/dest for a value-changing cast) and astype's complex factor are
+# still tracked internally, inert until a weight makes them matter again,
+# but neither op bills. So neither is in _charged_ops() and both correctly
+# fall outside this sweep entirely.
 # ---------------------------------------------------------------------------
-PROBES["astype"] = lambda: fnp.astype(V, np.int8)
-PROBES["asarray"] = lambda: fnp.asarray(V, dtype=np.int8)
 
 # ---------------------------------------------------------------------------
 # Everything else: simple composites/manipulation ops that already resolve
