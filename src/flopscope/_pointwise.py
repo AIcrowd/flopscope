@@ -501,11 +501,15 @@ def _counted_unary(np_func, op_name: str):
         symmetry = _symmetry_of(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        billing_dtypes: tuple = (x.dtype,)
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop.
         if kwargs.get("dtype") is not None:
-            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
-        if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+            billing_dtypes: tuple = (_np.dtype(kwargs["dtype"]),)
+        else:
+            billing_dtypes = (x.dtype,)
+            if isinstance(out, _np.ndarray):
+                billing_dtypes += (out.dtype,)
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -618,13 +622,17 @@ def _counted_unary_multi(np_func, op_name: str):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        billing_dtypes: tuple = (x.dtype,)
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop.
         if kwargs.get("dtype") is not None:
-            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
-        if out is not None:
-            for o in out:
-                if isinstance(o, _np.ndarray):
-                    billing_dtypes += (o.dtype,)
+            billing_dtypes: tuple = (_np.dtype(kwargs["dtype"]),)
+        else:
+            billing_dtypes = (x.dtype,)
+            if out is not None:
+                for o in out:
+                    if isinstance(o, _np.ndarray):
+                        billing_dtypes += (o.dtype,)
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -688,11 +696,15 @@ def _counted_binary(np_func, op_name: str):
         out_symmetry = _prepare_symmetric_out(out, out_symmetry)
 
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
-        billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop.
         if kwargs.get("dtype") is not None:
-            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
-        if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+            billing_dtypes = (_np.dtype(kwargs["dtype"]),)
+        else:
+            billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+            if isinstance(out, _np.ndarray):
+                billing_dtypes += (out.dtype,)
         if op_name in _BINARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -800,13 +812,17 @@ def _counted_binary_multi(np_func, op_name: str):
                 output_shape,
             )
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
-        billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop.
         if kwargs.get("dtype") is not None:
-            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
-        if out is not None:
-            for o in out:
-                if isinstance(o, _np.ndarray):
-                    billing_dtypes += (o.dtype,)
+            billing_dtypes = (_np.dtype(kwargs["dtype"]),)
+        else:
+            billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+            if out is not None:
+                for o in out:
+                    if isinstance(o, _np.ndarray):
+                        billing_dtypes += (o.dtype,)
         with budget.deduct(
             op_name,
             flop_cost=cost,

@@ -692,18 +692,23 @@ def test_output_downcast_does_not_discount():
     assert plain == via_f64  # no discount for the int32/float32-looking mix
 
 
-def test_requested_output_downcast_does_not_discount():
-    # The other half of the resolved-dtype rule: an EXPLICIT narrow dtype=
-    # request must not discount the bill. multiply folds dtype= into the
-    # billing tuple, and np.result_type still resolves the wider operand
-    # dtype, so asking for float32 output on float64 operands still bills at
-    # the float64 rate (the real compute precision), not float32's.
+def test_requested_narrow_dtype_bills_the_loop_numpy_actually_runs():
+    # Task 5 revision of "the other half of the resolved-dtype rule": an
+    # explicit dtype= FORCES the ufunc loop (numpy casts operands on read
+    # and computes at that width -- plain np.multiply(f64, f64,
+    # dtype=np.float32) genuinely returns a float32 result), so billing the
+    # requested float32 rate is the honest compute cost, not a discount --
+    # the participant traded precision for a cheaper bill, which is exactly
+    # what an explicit dtype= asks for.
+    # (Contrast test_output_downcast_does_not_discount above: matmul takes
+    # no dtype= kwarg at all, so it has no equivalent "requested narrower
+    # loop" and that invariant is untouched by this revision.)
     load_weights()
     w = fnp.asarray(np.ones(100, dtype=np.float64))
     plain = _cost(lambda: fnp.multiply(w, w))
-    downcast_requested = _cost(lambda: fnp.multiply(w, w, dtype=np.float32))
+    narrow_requested = _cost(lambda: fnp.multiply(w, w, dtype=np.float32))
     assert plain == 200
-    assert downcast_requested == plain  # requesting a narrow dtype= is not a discount
+    assert narrow_requested == 100  # float32 rate 1.0 vs float64 rate 2.0: half
 
 
 def test_astype_to_complex_and_back_is_free():
@@ -1516,3 +1521,96 @@ def test_copyto_prices_elements_written():
     assert run(np.complex64, z64) == (2000, "complex64")
     # 64-bit copy: rate axis unchanged
     assert run(np.float64, np.ones(1000)) == (2000, "float64")
+
+
+# ---------------------------------------------------------------------------
+# Task 5: pointwise dtype= forces the ufunc loop (replaces the operand
+# promotion for billing, both narrowing and widening); out= alone still
+# leaves the loop at the operand width (compute wide, store narrow).
+# ---------------------------------------------------------------------------
+
+
+def test_pointwise_dtype_forces_the_loop_billing():
+    import flopscope.numpy as fnp
+
+    f64 = np.ones(1000, dtype=np.float64)
+    f32 = np.ones(1000, dtype=np.float32)
+    i32 = np.arange(1, 1001, dtype=np.int32)
+    # dtype= selects the narrow loop: operands cast on read, f32 arithmetic.
+    assert _billed_with_production_rates(
+        lambda: fnp.add(f64, f64, dtype=np.float32)
+    ) == (1000, "float32")
+    # widening dtype= unchanged
+    assert _billed_with_production_rates(
+        lambda: fnp.add(f32, f32, dtype=np.float64)
+    ) == (2000, "float64")
+    # out= alone keeps the wide loop (compute wide, store narrow)
+    out32 = np.empty(1000, dtype=np.float32)
+    assert _billed_with_production_rates(
+        lambda: fnp.add(f64, f64, out=out32)  # pyright: ignore[reportArgumentType]
+    ) == (2000, "float64")
+    # transcendental: requested f32 loop bills f32 (weight 16)
+    assert _billed_with_production_rates(lambda: fnp.exp(i32, dtype=np.float32)) == (
+        16000,
+        "float32",
+    )
+
+
+def test_float_power_forced_narrow_dtype_matches_numpys_own_rejection():
+    # float_power has no float32 loop at all -- np.float_power.types is
+    # ['dd->d', 'gg->g', 'DD->D', 'GG->G'], no 'ff->f' / 'FF->F' entry -- so
+    # requesting dtype=float32 has no loop to select regardless of operand
+    # width: plain np.float_power(f32, f32, dtype=np.float32) itself raises
+    # TypeError ("No loop matching the specified signature and casting was
+    # found") on this numpy (2.2.6).
+    # The dtype=-replaces-promotion change only touches the BILLING tuple;
+    # kwargs still reach the real numpy call unchanged, so flopscope raises
+    # the identical error rather than silently succeeding at a loop numpy
+    # itself refuses to run. (Whether a raised call's already-charged FLOPs
+    # get rolled back is a separate, pre-existing deduct() concern this task
+    # does not touch -- deduct() charges before the wrapped call runs, so
+    # they do not; out of scope here.)
+    # The reachable half of "the f64 minimum still applies" -- an
+    # unrequested float32 operand pair still floors at float64 -- is already
+    # locked by test_float_power_always_bills_float64_minimum above (the
+    # family-mapping block that enforces it is untouched by this task, and
+    # still runs downstream of the dtype=-replacement on the implicit-dtype
+    # path); this pin covers the explicit-dtype=-requested half, which numpy
+    # itself never allows to succeed at this width.
+    import flopscope.numpy as fnp
+
+    f32 = np.ones(1000, dtype=np.float32)
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        with pytest.raises(TypeError):
+            fnp.float_power(f32, f32, dtype=np.float32)
+
+
+def test_modf_dtype_forces_the_loop_billing():
+    # _counted_unary_multi (modf/frexp) reads kwargs.get("dtype") with the
+    # same append-vs-replace shape as _counted_unary; the fix must apply
+    # there too. Ratio-based: robust to the exact pointwise flop_cost/weight.
+    import flopscope.numpy as fnp
+
+    f64 = np.ones(1000, dtype=np.float64)
+    wide = _billed_with_production_rates(lambda: fnp.modf(f64))
+    narrow = _billed_with_production_rates(lambda: fnp.modf(f64, dtype=np.float32))
+    assert wide[1] == "float64"
+    assert narrow[1] == "float32"
+    assert narrow[0] * 2 == wide[0]  # rate 1.0 vs 2.0 on the same flop_cost
+
+
+def test_divmod_dtype_forces_the_loop_billing():
+    # _counted_binary_multi (divmod) reads kwargs.get("dtype") with the same
+    # append-vs-replace shape as _counted_binary; the fix must apply there
+    # too.
+    import flopscope.numpy as fnp
+
+    f64a = np.ones(1000, dtype=np.float64)
+    f64b = np.ones(1000, dtype=np.float64) * 3
+    wide = _billed_with_production_rates(lambda: fnp.divmod(f64a, f64b))
+    narrow = _billed_with_production_rates(
+        lambda: fnp.divmod(f64a, f64b, dtype=np.float32)
+    )
+    assert wide[1] == "float64"
+    assert narrow[1] == "float32"
+    assert narrow[0] * 2 == wide[0]  # rate 1.0 vs 2.0 on the same flop_cost
