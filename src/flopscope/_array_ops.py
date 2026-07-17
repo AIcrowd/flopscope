@@ -188,7 +188,7 @@ def full(
     return result
 
 
-attach_docstring(full, _np.full, "free", "0 FLOPs")
+attach_docstring(full, _np.full, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -409,7 +409,7 @@ def full_like(
     return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
 
 
-attach_docstring(full_like, _np.full_like, "free", "0 FLOPs")
+attach_docstring(full_like, _np.full_like, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -618,7 +618,7 @@ def concatenate(
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(concatenate, _np.concatenate, "free", "0 FLOPs")
+attach_docstring(concatenate, _np.concatenate, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -657,7 +657,7 @@ def stack(
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(stack, _np.stack, "free", "0 FLOPs")
+attach_docstring(stack, _np.stack, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -695,7 +695,7 @@ def vstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(vstack, _np.vstack, "free", "0 FLOPs")
+attach_docstring(vstack, _np.vstack, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -733,7 +733,7 @@ def hstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(hstack, _np.hstack, "free", "0 FLOPs")
+attach_docstring(hstack, _np.hstack, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1023,7 +1023,7 @@ def tile(A: ArrayLike, reps: int | Sequence[int]) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(tile, _np.tile, "free", "0 FLOPs")
+attach_docstring(tile, _np.tile, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1056,7 +1056,7 @@ def repeat(
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(repeat, _np.repeat, "free", "0 FLOPs")
+attach_docstring(repeat, _np.repeat, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1124,7 +1124,7 @@ def roll(
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(roll, _np.roll, "free", "0 FLOPs")
+attach_docstring(roll, _np.roll, "counted_custom", "numel(output) FLOPs")
 
 
 _PAD_FREE_MODES = frozenset({"constant", "edge", "empty", "wrap"})
@@ -1599,7 +1599,7 @@ def append(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(append, _np.append, "free", "0 FLOPs")
+attach_docstring(append, _np.append, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1835,7 +1835,7 @@ def block(*args, **kwargs):
     return result
 
 
-attach_docstring(block, _np.block, "free", "0 FLOPs")
+attach_docstring(block, _np.block, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1859,7 +1859,7 @@ def bmat(*args, **kwargs):
     return result
 
 
-attach_docstring(bmat, _np.bmat, "free", "0 FLOPs")
+attach_docstring(bmat, _np.bmat, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -1970,7 +1970,9 @@ def column_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(column_stack, _np.column_stack, "free", "0 FLOPs")
+attach_docstring(
+    column_stack, _np.column_stack, "counted_custom", "numel(output) FLOPs"
+)
 
 
 def common_type(*args, **kwargs):
@@ -2044,7 +2046,7 @@ def concat(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(concat, _np.concat, "free", "0 FLOPs")
+attach_docstring(concat, _np.concat, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -2108,7 +2110,7 @@ def delete(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(delete, _np.delete, "free", "0 FLOPs")
+attach_docstring(delete, _np.delete, "counted_custom", "numel(output) FLOPs")
 
 
 def diag_indices(*args, **kwargs):
@@ -2196,7 +2198,7 @@ def dstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(dstack, _np.dstack, "free", "0 FLOPs")
+attach_docstring(dstack, _np.dstack, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -2421,7 +2423,7 @@ def fromiter(*args, **kwargs):
     return result
 
 
-attach_docstring(fromiter, _np.fromiter, "free", "0 FLOPs")
+attach_docstring(fromiter, _np.fromiter, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -2515,7 +2517,7 @@ def insert(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(insert, _np.insert, "free", "0 FLOPs")
+attach_docstring(insert, _np.insert, "counted_custom", "numel(output) FLOPs")
 
 
 def isdtype(*args, **kwargs):
@@ -2958,7 +2960,7 @@ def resize(*args, **kwargs):
     return result
 
 
-attach_docstring(resize, _np.resize, "free", "0 FLOPs")
+attach_docstring(resize, _np.resize, "counted_custom", "numel(output) FLOPs")
 
 
 def result_type(*args, **kwargs):
@@ -3006,11 +3008,17 @@ attach_docstring(rot90, _np.rot90, "free", "0 FLOPs")
 
 
 def row_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
-    """Stack arrays vertically. Cost: 0 (data-movement alias for vstack; free tier)."""
+    """Stack arrays vertically. Cost: numel(output) (alias for vstack; no
+    ``deduct()`` of its own -- billed under vstack's op_name)."""
     return vstack(tup)
 
 
-attach_docstring(row_stack, _np.row_stack, "free", "0 FLOPs (alias for vstack)")
+attach_docstring(
+    row_stack,
+    _np.row_stack,
+    "counted_custom",
+    "numel(output) FLOPs (billed under vstack)",
+)
 
 
 @_counted_wrapper

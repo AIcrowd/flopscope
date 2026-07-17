@@ -174,3 +174,62 @@ def test_extract_and_compress_bill_scan_plus_gather():
         billed(lambda: fnp.compress(fnp.asarray(mask), fnp.asarray(a)))
         == 1000 + 4 * 250
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3: x1 materializing-copy tier -- array assembly & replication
+# ---------------------------------------------------------------------------
+
+
+def test_creation_and_copy_family_bills_output():
+    a = np.arange(500, dtype=np.float32)
+    b = np.arange(300, dtype=np.float32)
+    assert billed(lambda: fnp.concatenate([fnp.asarray(a), fnp.asarray(b)])) == 800
+    assert billed(lambda: fnp.vstack([fnp.asarray(a), fnp.asarray(a)])) == 1000
+    assert billed(lambda: fnp.tile(fnp.asarray(b), 4)) == 1200
+    assert billed(lambda: fnp.repeat(fnp.asarray(b), 3)) == 900
+    assert billed(lambda: fnp.roll(fnp.asarray(a), 7)) == 500
+    assert billed(lambda: fnp.full((20, 25), 3.0, dtype=np.float32)) == 500
+    assert billed(lambda: fnp.delete(fnp.asarray(a), [0, 1])) == 498
+    assert billed(lambda: fnp.append(fnp.asarray(a), fnp.asarray(b))) == 800
+    assert billed(lambda: fnp.resize(fnp.asarray(b), (2, 300))) == 600
+
+
+def test_creation_and_copy_family_remaining_ops_bill_output():
+    """The rest of the 21 flipped keys, same x1 materializing-copy tier as
+    ``test_creation_and_copy_family_bills_output`` above: concat/stack/hstack/
+    dstack/column_stack (concatenate's siblings), row_stack (no ``deduct()``
+    of its own -- bills exact parity with vstack), block/bmat (dtype-neutral:
+    their ``deduct_after()`` declares ``dtypes=()``, so they always resolve at
+    rate 1.0 regardless of the actual input dtype -- a pre-existing formula
+    gap out of scope for a weight-only task, noted not fixed), insert,
+    fromiter, full_like, and meshgrid's dense case.
+    """
+    a = np.arange(500, dtype=np.float32)
+    b = np.arange(300, dtype=np.float32)
+    assert billed(lambda: fnp.concat([fnp.asarray(a), fnp.asarray(b)])) == 800
+    assert billed(lambda: fnp.stack([fnp.asarray(a), fnp.asarray(a)])) == 1000
+    assert billed(lambda: fnp.hstack([fnp.asarray(a), fnp.asarray(b)])) == 800
+    assert billed(lambda: fnp.dstack([fnp.asarray(a), fnp.asarray(a)])) == 1000
+    assert billed(lambda: fnp.column_stack([fnp.asarray(a), fnp.asarray(a)])) == 1000
+    # row_stack is a bare `return vstack(tup)`; the op_log record it produces
+    # is literally vstack's, so its billed cost is vstack's by construction.
+    row_stack_cost = billed(lambda: fnp.row_stack([fnp.asarray(a), fnp.asarray(a)]))
+    vstack_cost = billed(lambda: fnp.vstack([fnp.asarray(a), fnp.asarray(a)]))
+    assert row_stack_cost == vstack_cost == 1000
+    # block/bmat: dtypes=() means rate is pinned to 1.0 regardless of dtype;
+    # these values would be identical even on float64 inputs.
+    assert billed(lambda: fnp.block([fnp.asarray(a), fnp.asarray(b)])) == 800
+    m = np.arange(600, dtype=np.float32).reshape(20, 30)
+    assert billed(lambda: fnp.bmat([[fnp.asarray(m), fnp.asarray(m)]])) == 1200
+    ins_vals = np.array([9.0, 9.0], dtype=np.float32)  # built outside the thunk
+    assert (
+        billed(lambda: fnp.insert(fnp.asarray(a), [0, 1], fnp.asarray(ins_vals))) == 502
+    )
+    assert billed(lambda: fnp.fromiter(range(500), dtype=np.float32)) == 500
+    assert billed(lambda: fnp.full_like(fnp.asarray(a), 3.0)) == 500
+    # meshgrid: dense case only (sparse=True / copy=False are separate
+    # argument-conditional branches of the same formula, unpinned here).
+    x20 = np.arange(20, dtype=np.float32)
+    y25 = np.arange(25, dtype=np.float32)
+    assert billed(lambda: fnp.meshgrid(fnp.asarray(x20), fnp.asarray(y25))) == 1000

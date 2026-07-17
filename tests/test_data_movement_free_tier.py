@@ -12,37 +12,22 @@ from flopscope._weights import get_weight, load_weights, reset_weights
 
 # Ops that must bill 0 FLOPs under production weights (data movement / select).
 FREE_DATA_MOVEMENT_OPS = [
-    "hstack",
-    "vstack",
-    "row_stack",  # bare `return vstack(tup)` alias; joins the free tier
-    "column_stack",
-    "dstack",
-    "concatenate",
-    "stack",
-    "block",
-    "bmat",
-    "tile",
-    "repeat",
-    "resize",
-    "roll",
     "tril",
     "triu",
-    "insert",
-    "append",
-    "delete",
     "diag",
     "diagflat",
-    "meshgrid",
-    "fromiter",
-    "full",
-    "full_like",
     # take/take_along_axis/choose (gather x4), put/place/putmask/put_along_axis/
     # fill_diagonal/extract/compress (scatter x1) left the free tier -- see
     # tests/test_triage_price_pins.py::test_gather_tier_bills_4x_output,
     # test_scatter_ops_bill_elements_touched, test_extract_and_compress_bill_scan_plus_gather.
+    # concatenate/concat/stack/vstack/hstack/dstack/column_stack/row_stack/
+    # block/bmat/tile/repeat/roll/resize/delete/insert/append/fromiter/full/
+    # full_like/meshgrid left the free tier too -- the array-assembly and
+    # replication family now bills numel(output) at weight 1.0, see
+    # tests/test_triage_price_pins.py::test_creation_and_copy_family_bills_output,
+    # test_creation_and_copy_family_remaining_ops_bill_output.
     "select",
     "unstack",
-    "concat",
     "ix_",
 ]
 
@@ -63,12 +48,14 @@ def test_data_movement_op_is_weight_zero(production_weights, op):
     assert get_weight(op) == 0.0, f"{op} should be free (weight 0.0)"
 
 
-def test_row_stack_bills_zero_under_production_rates(production_weights):
+def test_row_stack_bills_same_as_vstack_under_production_rates(production_weights):
     """row_stack is a bare `return vstack(tup)` alias — pure data movement.
 
     It has no deduct() of its own (billing happens under `vstack`), so its
-    own weight was inert and previously carried a stale 1.0. Now weight 0.0,
-    it bills 0 under production rates, exactly like vstack.
+    own weight in default_weights.json is inert: the array-assembly and
+    replication family (including row_stack, for consistency) now carries
+    weight 1.0, but row_stack's billed cost is always exactly vstack's,
+    by construction, regardless of that key's value.
     """
     a = fnp.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
@@ -77,7 +64,8 @@ def test_row_stack_bills_zero_under_production_rates(production_weights):
     with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
         fnp.vstack([a, a])
         vstack_cost = ctx.flops_used
-    assert row_stack_cost == 0
+    # a is float64 (2,3): numel(output)=12 * dtype_rate 2.0 * weight 1.0 = 24.
+    assert row_stack_cost == 24
     assert row_stack_cost == vstack_cost
 
 

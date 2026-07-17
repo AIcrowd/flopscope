@@ -591,6 +591,38 @@ PROBES.update(
     }
 )
 
+# ---------------------------------------------------------------------------
+# array assembly & replication family (weight-flipped from free -> 1.0):
+# each resolves its billing dtype from its own array input(s), same as the
+# "everything else" group above. `insert` is a documented exception: its
+# scalar `values=9` argument widens to platform int64 via `_np.asarray(9)`
+# before `result_type` combines it with V's int32, so it bills int64 (rate
+# 2.0) even though the actual OUTPUT stays int32 -- an over-bill, not an
+# under-bill, so it still satisfies the `billed_rate >= floor` oracle.
+# ---------------------------------------------------------------------------
+PROBES.update(
+    {
+        "concatenate": lambda: fnp.concatenate([V, V3]),
+        "concat": lambda: fnp.concat([V, V3]),
+        "stack": lambda: fnp.stack([V, V]),
+        "vstack": lambda: fnp.vstack([V, V]),
+        "hstack": lambda: fnp.hstack([V, V3]),
+        "dstack": lambda: fnp.dstack([V, V]),
+        "column_stack": lambda: fnp.column_stack([V, V]),
+        "tile": lambda: fnp.tile(V, 2),
+        "repeat": lambda: fnp.repeat(V, 2),
+        "roll": lambda: fnp.roll(V, 1),
+        "resize": lambda: fnp.resize(V, (2, 8)),
+        "delete": lambda: fnp.delete(V, 0),
+        "insert": lambda: fnp.insert(V, 0, 9),
+        "append": lambda: fnp.append(V, V3),
+        "fromiter": lambda: fnp.fromiter(range(8), dtype=np.int32),
+        "full": lambda: fnp.full((2, 2), 3, dtype=np.int32),
+        "full_like": lambda: fnp.full_like(V, 3),
+        "meshgrid": lambda: fnp.meshgrid(V3, V3),
+    }
+)
+
 
 def _copyto_probe() -> np.ndarray:
     dst = np.zeros(8, dtype=np.int32)
@@ -819,12 +851,19 @@ for _name in ("matmul", "outer", "tensordot", "vecdot"):
         f"'{_name}' op_name (verified), whose own probe above covers this "
         f"arithmetic."
     )
-# NOTE: `row_stack` is deliberately NOT listed here. It is a bare
-# `return vstack(tup)` alias (pure data movement, no deduct() of its own) and
-# is now weight 0.0 in default_weights.json, alongside its
-# column_stack/dstack/hstack/vstack siblings -- so it is not in _charged_ops()
-# and correctly falls outside this sweep entirely. (It carried a stale
-# weight 1.0 that billed nothing; fixed when it joined the free tier.)
+# `row_stack` is a bare `return vstack(tup)` alias (pure data movement) with
+# NO deduct() of its own: calling it logs an op_log record under `vstack`,
+# not `row_stack`, so a probe here would always fail with "did not log an op
+# record under that name" -- same shape as the linalg aliases above. Its own
+# weight in default_weights.json is 1.0 (matches its vstack/column_stack/
+# dstack/hstack siblings, for consistency), but that key is inert: billing
+# always happens under vstack's op_name and vstack's own probe covers it.
+SKIPPED["row_stack"] = (
+    "bare `return vstack(tup)` alias, no deduct() of its own (verified); "
+    "billing happens under the top-level 'vstack' op_name, whose own probe "
+    "above covers this arithmetic -- same shape as the linalg.{matmul,...} "
+    "aliases above."
+)
 
 # --- dtype-neutral by design, non-random: verified individually.
 SKIPPED["where"] = (
@@ -855,6 +894,20 @@ SKIPPED["choose"] = (
     "`choices` arrays' dtype -- a known gap (see comment above), not a "
     "verified-safe design; out of scope for a weight/label-only task."
 )
+# block/bmat: the same dtypes=() gap as choose above, surfaced by the Task 3
+# weight flip (0.0 -> 1.0 made them charged for the first time). Both
+# declare dtypes=() in their own deduct_after() (verified, resolved_dtype=
+# None), so they bill rate 1.0 regardless of the assembled blocks' actual
+# dtype -- a float64 nested-block call would still bill at the int32 rate.
+# A wrapper-formula change, out of scope for a weight/label-only task.
+for _name in ("block", "bmat"):
+    SKIPPED[_name] = (
+        "bills dtype-neutrally: its own deduct_after() passes dtypes=() "
+        "(verified, resolved_dtype=None), so rate is always 1.0 regardless "
+        "of the assembled blocks' actual dtype -- a known gap (see comment "
+        "above, same shape as choose), not a verified-safe design; out of "
+        "scope for a weight/label-only task."
+    )
 
 # --- blacklisted category, unreachable: raises AttributeError on access
 # (verified individually via flopscope.numpy.__getattr__'s "does not

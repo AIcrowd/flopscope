@@ -1434,17 +1434,19 @@ def test_diag_diagonal_view_vs_copy():
 
 def test_gather_tier_consistency():
     """take_along_axis is back in the gather tier (weight 4.0); bmat/fromiter
-    stay in the data-movement free tier. argwhere remains at weight 1.0
-    (search op, not pure data-movement)."""
+    are in the array-assembly/replication tier (weight 1.0). argwhere remains
+    at weight 1.0 (search op, not pure data-movement)."""
     load_weights()
     try:
         # take_along_axis: gather tier → weight=4.0 → numel(output)=100 (result
         # shape (100,1)) * dtype_rate(_A100 is float64 -> 2.0) * 4.0 = 800
         assert cost(lambda: fnp.take_along_axis(_A100, _idx100, axis=1)) == 800
-        # bmat: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.bmat([[_A_bmat, _A_bmat], [_A_bmat, _A_bmat]])) == 0
-        # fromiter: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.fromiter(range(100), dtype=float)) == 0
+        # bmat: weight=1.0, but its deduct_after() declares dtypes=() (dtype-
+        # neutral) -> rate is always 1.0 regardless of _A_bmat's actual dtype.
+        # Nested 2x2 blocks of a (2,2) matrix -> output (4,4)=16 * 1.0 * 1.0 = 16.
+        assert cost(lambda: fnp.bmat([[_A_bmat, _A_bmat], [_A_bmat, _A_bmat]])) == 16
+        # fromiter: weight=1.0 -> numel(output)=100 * dtype_rate(float64 -> 2.0) = 200
+        assert cost(lambda: fnp.fromiter(range(100), dtype=float)) == 200
         # argwhere: search op, weight 1.0 → numel(input)=100 → 100
         assert cost(lambda: fnp.argwhere(_z100)) == 100
     finally:
