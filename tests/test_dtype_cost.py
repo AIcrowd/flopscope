@@ -1190,6 +1190,54 @@ def test_reduceat_float_only_binary_bills_float64_and_int_stays_int():
     assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 100
 
 
+def _i64_method_billed(method_call) -> tuple[int, str | None]:
+    """Delta-billed FLOPs + resolved dtype for one ufunc-method call on int64.
+
+    int64 (rate 2.0) discriminates the input-rate floor: a comparison/logical
+    ufunc whose loop OUTPUT is bool (rate 1.0) must still bill the int64 input
+    rate, not the narrower bool rate.
+    """
+    import warnings
+
+    import flopscope.numpy as fnp
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        load_weights()
+        arr = fnp.asarray(np.ones(10, dtype=np.int64))
+        before = b.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
+            method_call(arr)
+        return b.flops_used - before, b.op_log[-1].resolved_dtype
+
+
+def test_outer_bool_loop_floors_at_input_rate():
+    # less.outer's loop OUTPUT is bool, but the input is int64 -- billing the
+    # bool rate would be NARROWER than the input (a 2x undercharge that
+    # regresses pre-delta behavior). The floor pins it to int64.
+    # add.outer (native int64 loop) is the matching baseline.
+    assert _i64_method_billed(lambda a: np.less.outer(a, a)) == (200, "int64")
+    assert _i64_method_billed(lambda a: np.add.outer(a, a)) == (200, "int64")
+
+
+def test_reduceat_bool_loop_floors_at_input_rate():
+    # logical_and.reduceat's loop OUTPUT is bool; the int64 input rate floors it.
+    _, dt = _i64_method_billed(lambda a: np.logical_and.reduceat(a, [0, 5]))
+    assert dt == "int64"
+
+
+def test_outer_float_widening_survives_the_floor():
+    # The floor is a MAX, so float-widening cases (float64 rate 2.0 >= int64
+    # rate 2.0, and strictly > narrower int rates) are never lowered by it.
+    assert _i64_method_billed(lambda a: np.hypot.outer(a, a)) == (200, "float64")
+
+
+def test_reduceat_float_widening_survives_the_floor():
+    assert _i64_method_billed(lambda a: np.true_divide.reduceat(a, [0, 5]))[1] == (
+        "float64"
+    )
+
+
 def _ufunc_at_billed(at_call) -> tuple[int, str | None]:
     """Delta-billed FLOPs + resolved dtype for one ufunc.at call (production rates)."""
     import warnings

@@ -940,7 +940,16 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    billing_dtypes: tuple = (_ufunc_loop_dtype(ufunc, a.dtype, b.dtype),)
+    # Floor at the input rate (mirrors the reduce/accumulate/at siblings):
+    # a comparison/logical ufunc's loop OUTPUT is bool, which for wide-int
+    # inputs would bill NARROWER than the input -- never charge below it.
+    # heavier_billing_dtype keeps the loop dtype on a rate tie, so float
+    # widening (float64 >= int rate) is unaffected.
+    billing_dtypes: tuple = (
+        heavier_billing_dtype(
+            _ufunc_loop_dtype(ufunc, a.dtype, b.dtype), a.dtype, b.dtype
+        ),
+    )
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(
@@ -1084,8 +1093,14 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     )
     # Same loop resolution as the generic reduce/accumulate paths: reduceat
     # runs the ufunc's own resolved loop dtype (true_divide(int32) ->
-    # float64, subtract(int32) -> int32).
-    billing_dtypes: tuple = (_ufunc_loop_dtype(ufunc, a.dtype, a.dtype),)
+    # float64, subtract(int32) -> int32). reduction_billing_dtype supplies
+    # the input-rate floor -- a comparison/logical ufunc's bool loop OUTPUT
+    # must never bill narrower than a wide-int input.
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype, default_dtype=_ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+        ),
+    )
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
     with budget.deduct(

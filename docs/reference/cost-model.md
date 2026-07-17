@@ -488,7 +488,11 @@ exactly](#complex-arithmetic-from-first-principles)).
 registry op with a discriminating int32 input (or records why it is exempt) and asserts
 the billed rate is at least the rate of both the NEP-50-promoted input dtype and numpy's
 actual result dtype — an op that quietly starts computing in a wider dtype than it bills
-fails the build instead of shipping an undercount.
+fails the build instead of shipping an undercount. The sweep covers charged *registry*
+ops; the dynamic ufunc-method surface (`.outer`, `.reduceat`, `.at`, `.reduce`,
+`.accumulate`, which bill under per-call op names like `hypot.outer` rather than registry
+keys) is out of its reach and is locked by targeted tests in `tests/test_dtype_cost.py`
+instead, including the same input-rate floor.
 
 Reproduce any of these yourself: run the call inside a `BudgetContext` and read
 `op_log[-1].resolved_dtype` alongside `flops_used`.
