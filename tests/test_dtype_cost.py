@@ -1476,3 +1476,30 @@ def test_casts_are_free_in_both_directions():
         _billed_with_production_rates(lambda: fnp.asarray(f64, dtype=np.float32))[0]
         == 0
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3: copyto — priced per element written
+# ---------------------------------------------------------------------------
+
+
+def test_copyto_prices_elements_written():
+    import flopscope.numpy as fnp
+
+    src32 = np.ones(1000, dtype=np.float32)
+    z64 = np.ones(1000, dtype=np.complex64)
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = True
+
+    def run(dst_dtype, src, **kw):
+        dst = np.empty(1000, dtype=dst_dtype)
+        return _billed_with_production_rates(lambda: fnp.copyto(dst, src, **kw))
+
+    # same-dtype full copy: one unit per element written
+    assert run(np.float32, src32) == (1000, "float32")
+    # masked copy: per element selected
+    assert run(np.float32, src32, where=mask) == (250, "float32")
+    # complex copy: two real components per value
+    assert run(np.complex64, z64) == (2000, "complex64")
+    # 64-bit copy: rate axis unchanged
+    assert run(np.float64, np.ones(1000)) == (2000, "float64")

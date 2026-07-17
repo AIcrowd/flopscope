@@ -902,11 +902,12 @@ class TestFreeOps:
 
     def test_copyto_same_dtype_where_free(self, we):
         mask = numpy.array([True, False] * 5)
-        # same-dtype copy is data movement -> free even with a where mask
-        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10), where=mask) == 0
+        # copyto bills per element selected by where mask -> popcount(mask) = 5
+        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10), where=mask) == 5
 
     def test_copyto_same_dtype_free(self, we):
-        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10)) == 0
+        # copyto bills per element written -> numel(dst) = 10
+        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10)) == 10
 
     def test_copyto_value_changing_cast(self, we):
         # float -> int cast computes per element -> numel(dst)
