@@ -213,46 +213,27 @@ def test_reduction_billing_dtype_resolution_order():
     i32, i64 = np.dtype(np.int32), np.dtype(np.int64)
     f32, f64 = np.dtype(np.float32), np.dtype(np.float64)
 
-    # No explicit/out: the implicit default accumulator wins.
+    # No explicit/out: the implicit default accumulator wins...
     assert reduction_billing_dtype(i32, default_dtype=i64) == i64
-    # Explicit dtype REPLACES the implicit default (mattmotoki's case).
+    # ...and never bills below the operand width (value-testing loops).
+    assert reduction_billing_dtype(i64, default_dtype=np.dtype(np.bool_)) == i64
+    # An explicit dtype IS the accumulator numpy runs -- both directions.
     assert (
         reduction_billing_dtype(i32, explicit_dtype=np.int32, default_dtype=i64) == i32
     )
-    # Explicit wide dtype is honored (positional-dtype case feeds this too).
     assert reduction_billing_dtype(f32, explicit_dtype=np.float64) == f64
-    # out= without dtype= sets the accumulator (numpy ufunc.reduce semantics).
+    assert reduction_billing_dtype(f64, explicit_dtype=np.float32) == f32
+    # out= wider than the input widens the intermediate.
     assert reduction_billing_dtype(f32, out_dtype=f64) == f64
-    # dtype-like inputs (type objects, strings) are normalized.
+    # out= narrower does not narrow the loop -- it only casts the final
+    # store, so the input width still carries the bill.
+    assert reduction_billing_dtype(f64, out_dtype=f32) == f64
+    # explicit dtype beats out for the compute width.
+    assert reduction_billing_dtype(i32, explicit_dtype=np.int32, out_dtype=f64) == i32
+    # dtype-like normalization
     assert (
         reduction_billing_dtype(i32, explicit_dtype="int32", default_dtype=i64) == i32
     )
-
-
-def test_reduction_billing_dtype_floors_at_input_rate():
-    from flopscope._dtype_billing import reduction_billing_dtype
-
-    load_weights()
-
-    f32, f64 = np.dtype(np.float32), np.dtype(np.float64)
-    # Narrowing below the input does NOT discount: sum(f64, dtype=f32)
-    # bills the f64 rate (per-element lossy downcast is astype-priced).
-    assert reduction_billing_dtype(f64, explicit_dtype=np.float32) == f64
-    # mean-family: integer input computing in f32 per explicit dtype is honest.
-    assert (
-        reduction_billing_dtype(
-            np.dtype(np.int32),
-            explicit_dtype=np.float32,
-            default_dtype=np.dtype(np.float64),
-        )
-        == f32
-    )
-    # Max-by-rate, not result_type: int64 + float32 out must NOT promote to
-    # a third dtype (result_type would say float64).
-    got = reduction_billing_dtype(
-        np.dtype(np.int64), explicit_dtype=np.float32, out_dtype=f32
-    )
-    assert got == np.dtype(np.int64)
 
 
 def test_unary_float_loop_dtype_maps_ints_by_size():

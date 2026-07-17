@@ -981,13 +981,13 @@ def test_positional_reduction_dtype_is_billed():
     )
 
 
-def test_narrowing_reduction_dtype_floors_at_input_rate():
+def test_narrowing_reduction_dtype_bills_the_requested_accumulator():
     import flopscope.numpy as fnp
 
     x = np.ones(1000, dtype=np.float64)
     billed, dt = _billed_with_production_rates(lambda: fnp.sum(x, dtype=np.float32))
-    assert billed == 1998  # f64 floor: no narrow discount
-    assert dt == "float64"
+    assert billed == 999  # explicit dtype IS the accumulator numpy runs
+    assert dt == "float32"
 
 
 def test_reduction_out_dtype_sets_accumulator():
@@ -996,6 +996,19 @@ def test_reduction_out_dtype_sets_accumulator():
     x = np.ones(1000, dtype=np.float32)
     out = np.empty((), dtype=np.float64)
     # ufunc.reduce semantics: out= without dtype= IS the accumulator dtype.
+    assert _billed_with_production_rates(lambda: fnp.sum(x, out=out)) == (
+        1998,
+        "float64",
+    )
+
+
+def test_reduction_out_narrower_does_not_narrow_the_accumulator():
+    import flopscope.numpy as fnp
+
+    # out= narrower than the input does not narrow numpy's loop -- the
+    # intermediate keeps the input's width and only the final store casts.
+    x = np.ones(1000, dtype=np.float64)
+    out = np.empty((), dtype=np.float32)
     assert _billed_with_production_rates(lambda: fnp.sum(x, out=out)) == (
         1998,
         "float64",

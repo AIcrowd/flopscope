@@ -124,31 +124,26 @@ def reduction_billing_dtype(
     out_dtype: _np.dtype | None = None,
     default_dtype: _np.dtype | None = None,
 ) -> _np.dtype:
-    """Billed dtype for a reduction, mirroring numpy's accumulator resolution.
+    """Billed dtype for a reduction: the accumulator numpy actually runs.
 
-    numpy computes a reduction in the explicit ``dtype=`` if given, else in
-    ``out``'s dtype if given (``ufunc.reduce``: the intermediate dtype
-    defaults to the output array's), else in the op family's implicit default
-    (integer-widening for sum/prod, float64 for integer mean/var). The billed
-    dtype follows that accumulator but is floored at the input's own rate:
-    an explicit narrow accumulator on wider data embeds a per-element lossy
-    downcast, which is priced like ``astype`` (heavier side), so
-    ``sum(f64, dtype=f32)`` bills float64 while ``sum(i32, dtype=i32)`` bills
-    int32. ``heavier_billing_dtype`` (max-by-rate) deliberately avoids
-    ``result_type``'s promotion to a third dtype.
+    An explicit ``dtype=`` (positional or keyword) IS numpy's accumulator --
+    billed as requested, wider or narrower. ``out=`` without ``dtype=``
+    widens the intermediate when it is wider than the input; a narrower
+    ``out`` only casts the final store, so the loop keeps the input's own
+    width. With neither, the family default applies (integer widening for
+    sum/prod, float64 for integer mean/var, the ufunc loop dtype for
+    generic methods), never billed below the operand width: a value-testing
+    loop (comparison, logical) reads full-width operands even though its
+    output is bool.
     """
     if explicit_dtype is not None:
-        accumulator = _np.dtype(explicit_dtype)
-    elif out_dtype is not None:
-        accumulator = out_dtype
-    elif default_dtype is not None:
-        accumulator = default_dtype
-    else:
-        accumulator = a_dtype
-    candidates = [accumulator, a_dtype]
-    if out_dtype is not None:
-        candidates.append(out_dtype)
-    return heavier_billing_dtype(*candidates)
+        return _np.dtype(explicit_dtype)
+    accumulator = (
+        out_dtype
+        if out_dtype is not None
+        else (default_dtype if default_dtype is not None else a_dtype)
+    )
+    return heavier_billing_dtype(accumulator, a_dtype)
 
 
 def unary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
