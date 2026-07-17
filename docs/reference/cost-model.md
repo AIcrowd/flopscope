@@ -386,6 +386,113 @@ Worked consequences:
   their output dtype (numpy produces float64 for all of these), so their real float64
   arithmetic bills at the float64 rate like everything else.
 
+### Reduction accumulators
+
+A reduction is billed at the dtype numpy actually accumulates in, floored at the
+input's own rate — the bill never drops below what the input alone would cost. The
+accumulator resolves in numpy's own order: an explicit `dtype=` argument (positional or
+keyword) if given; else `out`'s dtype if an output array is given; else the family
+default — integer and boolean inputs widen to the platform default integer for
+`sum`/`prod`/`cumsum`/`cumprod` (and their `nan`-prefixed variants), and to `float64` for
+`mean`/`var`/`std`. Both `numpy.trace` and `linalg.trace` widen the same way `sum` does —
+a batched diagonal sum is still a sum — and the generic `ufunc.reduce` / `accumulate`
+paths resolve their accumulator through the identical rule: `np.add.reduce` is the same
+machinery `sum` runs on, so `np.add.reduce(int32_arr, dtype=int32)` bills exactly like
+`sum(int32_arr, dtype=int32)`.
+
+Worked examples (production rates, 1000-element input, `sum`):
+
+- `sum(int32_data)` — implicit int64 accumulator → 999 × 2.0 = **1998**.
+- `sum(int32_data, dtype=int32)` — explicit 32-bit accumulation is real 32-bit work →
+  999 × 1.0 = **999**.
+- `sum(float32_data, None, float64)` — a positional wide accumulator bills exactly like
+  the keyword spelling `sum(float32_data, dtype=float64)` → 999 × 2.0 = **1998**.
+- `sum(float64_data, dtype=float32)` — numpy accumulates in float32, but reading float64
+  data into a narrower accumulator is a lossy per-element cast; like `astype`, the
+  pricier side wins, so the bill stays at the input's own float64 rate →
+  999 × 2.0 = **1998**. Requesting a narrower accumulator never discounts below the
+  input's own rate.
+
+`trace` follows the identical rule at its own, much smaller element count:
+`linalg.trace` on an `8×8` int32 matrix bills its 8-element diagonal sum at the int64
+rate (**16**); the same shape in float32 stays at float32 (**8** — floats never widen).
+The explicit-accumulator floor carries through the top-level wrapper too:
+`trace(int32_matrix, dtype=int32)` bills **8**, at int32.
+
+### Ops that compute wider than their inputs
+
+Outside the accumulator machinery above, several numpy kernels simply run their
+arithmetic at a wider dtype than the input's own — the bill follows where the
+computation actually happens, not the input's label:
+
+| family | integer / bool inputs compute in | float inputs |
+|---|---|---|
+| unary float-only ufuncs (`exp`, `sin`, `sqrt`, …) | the same-size float (`int8`/`uint8`/`bool` → `float16`; `int16`/`uint16` → `float32`; `int32`/`int64`/`uint32`/`uint64` → `float64`) | unchanged |
+| binary float-only ufuncs (`divide`, `arctan2`, `hypot`, …) | `float64` | unchanged |
+| `float_power` | `float64` minimum | `float64` minimum — `float32` has no narrower loop either; `complex64` still promotes to `complex128` |
+| FFT family | `complex128` (no size-mapping — even `int8` runs the `complex128` path) | `float16`/`float32` → `complex64`; `float64` → `complex128` |
+| LAPACK-backed `linalg.*` | `float64` | unchanged — single-precision drivers stay single |
+| mean-shaped composites (`average`, `median`, `gradient`, `percentile`, `nanmedian`, `nanpercentile`, …) | `float64`, regardless of the integer's own width (no size-mapping, unlike the unary-ufunc row above) | unchanged |
+| always-float64 composites (`polyfit`, `polyint`, …) | `float64` | `float64` — forced even from `float32` |
+
+`exp` prices its size-mapped loop directly: on a 1000-element input, `int8` and `int16`
+both still bill the `1.0` rate (**16000** — float16 and float32 share the baseline rate),
+while `int32`/`int64` bill the `2.0` float64 rate (**32000**). `divide(int32, int32)`
+bills 2.0 per element (numpy true-divides in float64); `divide(float32, float32)` still
+bills 1.0 — the promotion only fires for the operand mixes numpy itself promotes, not a
+blanket float64 fold. `fft.fft` of a length-1024 (`N`) signal has a `5N·log₂N` = 51200
+real-FLOP count before the dtype rate; an int32 signal bills that count at the
+complex128 rate (**102400**), while a float32 signal keeps the complex64 rate and bills
+the raw **51200** unscaled.
+
+A single non-inexact operand forces `linalg.*`'s promotion, regardless of how wide the
+*other* operand is: an `8×8` `linalg.solve(int32_matrix, int32_vector)` bills float64
+(**938**), and so does mixing kinds — `solve(bool_matrix, float32_vector)` on the same
+shape bills the identical **938**, exactly as if the matrix were genuinely float64. The
+all-float32 system keeps the single-precision driver and bills half that (**469**).
+
+Integer contractions keep their input's own rate: `matmul`, `dot`, `einsum`, and
+`matrix_power` with a non-negative exponent genuinely run integer arithmetic
+(`matmul(int32, int32)` stays int32). `matrix_power` with a *negative* exponent is the
+exception — numpy inverts the matrix first, which routes through the same LAPACK
+float64 promotion as `linalg.inv`: a `4×4` `matrix_power(int32_matrix, -1)` bills
+float64 (**224**) while `matrix_power(int32_matrix, 2)` stays int32 (**112**), and
+`matrix_power(float32_matrix, -1)` keeps the single-precision driver (**112**) even
+while inverting.
+
+Not every widening composite forces float64 unconditionally, and not every one lands on
+float64 at all — the billed dtype is always whatever `resolved_dtype` records for that
+specific call, not one fixed target per op family. `roots` builds a companion matrix and
+finds its eigenvalues, so it inherits `linalg.eig`'s dtype rule directly: an integer
+input computes float64, but a float32 input keeps its own single-precision driver.
+`poly` (rebuilding coefficients from roots) runs a different algorithm — iterative
+convolution, not eigendecomposition — but resolves its dtype the same preserve-if-inexact
+way. Neither belongs in the always-float64 row above. `vander` promotes through
+`numpy.promote_types(x.dtype, int)`, the same kind of rule a reduction accumulator uses:
+a narrow integer lands on the platform `int64` (`vander(int32_x)` bills its int64 rate,
+not float64), while float and complex inputs still land on `float64` / `complex128`.
+
+The generic `ufunc.outer` and `ufunc.at` methods apply this same per-element promotion
+to their base ufunc, so there is no method-shaped way around it:
+`np.hypot.outer(int32_arr, int32_arr)` bills the float64 rate over its full
+outer-product grid, and `np.exp.at(int32_arr, ...)` bills the float64 rate over the
+indices it touches — identical to calling `hypot` or `exp` directly.
+
+Zero-work contractions charge **0** regardless of dtype. `einsum('ij->ji', z)` is a pure
+transpose — no multiply-adds happen — and a `matmul` with an empty operand has no terms
+to sum, so both bill 0 even when `z` is complex128; a same-shape *non-empty* complex128
+matmul still bills its exact contraction total (see [Contraction is billed
+exactly](#complex-arithmetic-from-first-principles)).
+
+**Guaranteed coverage.** `tests/test_compute_dtype_conformance.py` probes every charged
+registry op with a discriminating int32 input (or records why it is exempt) and asserts
+the billed rate is at least the rate of both the NEP-50-promoted input dtype and numpy's
+actual result dtype — an op that quietly starts computing in a wider dtype than it bills
+fails the build instead of shipping an undercount.
+
+Reproduce any of these yourself: run the call inside a `BudgetContext` and read
+`op_log[-1].resolved_dtype` alongside `flops_used`.
+
 ### Worked examples
 
 Billed FLOPs for an `N = 100` elementwise call under production rates (`multiply`: weight
