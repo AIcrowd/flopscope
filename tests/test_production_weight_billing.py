@@ -14,9 +14,11 @@ op per weight tier {0, 1, 8, 16}. A silent weight regression (e.g. a
 transcendental sampler dropping from 16x to 1x) or a tier mislabel now fails
 here — not only in the (unenforced) ``docs/reference/cost-model.md`` table.
 
-Note: the former 4.0 "gather" tier (take/put/take_along_axis/put_along_axis etc.)
-was replaced by the data-movement free tier (weight=0.0) in the cost-model
-data-movement-free-tier change.
+Note: the 4.0 "gather" tier (take/take_along_axis/choose) was briefly replaced
+by the data-movement free tier (weight=0.0) in the cost-model
+data-movement-free-tier change, then reinstated by the explicit-indexing-ops
+triage task (put/place/putmask/put_along_axis/fill_diagonal/extract/compress
+landed in the 1.0 scatter tier instead of returning to gather).
 """
 
 import numpy as np
@@ -44,17 +46,20 @@ def _billed(call):
 # label, weight_key, call, expected_billed (= flop_cost x dtype_rate x weight),
 # expected_weight.
 # One op per tier; expected_billed verified against the live model at 100 elems.
-# Tiers: {0, 1, 8, 16}. The old 4.0 gather tier is gone (data-movement free).
+# Tiers: {0, 1, 4, 8, 16}. The 4.0 gather tier (see module docstring) is
+# represented by take.
 #
 # _A/_B are float64 (np.random.default_rng(...).standard_normal's default
-# dtype), so add/exp resolve dtype_rate 2.0. random.randn has no dtype=
+# dtype), so add/exp/take resolve dtype_rate 2.0. random.randn has no dtype=
 # parameter and always draws float64, so it is also dtype_rate 2.0. reshape
-# and take are weight 0.0 (billed 0 regardless of dtype_rate). hanning takes
-# no array operand but always produces a float64 window, so it declares that
-# output dtype and bills dtype_rate 2.0 — consistent with the samplers.
+# is weight 0.0 (billed 0 regardless of dtype_rate). hanning takes no array
+# operand but always produces a float64 window, so it declares that output
+# dtype and bills dtype_rate 2.0 — consistent with the samplers.
 _TIER_CASES = [
     ("free: reshape", "reshape", lambda: fnp.reshape(_A, (10, 10)), 0, 0.0),
-    ("free: take (was gather)", "take", lambda: fnp.take(_A, _IDX), 0, 0.0),
+    # gather tier: numel(output)=100 (take(_A, _IDX) with axis=None flattens
+    # to _IDX's shape) * dtype_rate 2.0(f64, take's own declared dtype) * 4.0
+    ("gather: take", "take", lambda: fnp.take(_A, _IDX), 800, 4.0),
     (
         "arithmetic: add",
         "add",
@@ -84,7 +89,7 @@ _TIER_CASES = [
 # the invariant test below. See the derivations in the _TIER_CASES comment.
 _DTYPE_RATE_BY_WEIGHT_KEY = {
     "reshape": 1.0,
-    "take": 1.0,
+    "take": 2.0,
     "add": 2.0,
     "hanning": 2.0,  # fixed float64 output window
     "exp": 2.0,

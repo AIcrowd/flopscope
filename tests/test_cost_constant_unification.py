@@ -600,12 +600,14 @@ def test_put_bills_numel_indices():
     assert cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap")) == 1000
     # must NOT scale with destination size (was: a.size; now: ind.size)
     assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 7
-    # Data-movement free tier: with packaged weights loaded, put bills 0
+    # Scatter tier (weight 1.0): with packaged weights loaded, put bills
+    # numel(indices) * dtype_rate(a's own dtype, float64 here -> 2.0) * 1.0.
     try:
         load_weights()
-        assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 0
+        assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 14
         assert (
-            cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap")) == 0
+            cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap"))
+            == 2000
         )
     finally:
         reset_weights()
@@ -633,17 +635,18 @@ def test_put_along_axis_bills_scattered_elements():
         )
         == 1_000_000
     )
-    # Data-movement free tier: with packaged weights loaded, put_along_axis bills 0
+    # Scatter tier (weight 1.0): with packaged weights loaded, put_along_axis
+    # bills elements-scattered * dtype_rate(arr's own dtype, float64 -> 2.0) * 1.0.
     try:
         load_weights()
-        assert cost(lambda: fnp.put_along_axis(dest, np.arange(5), np.ones(5), 0)) == 0
+        assert cost(lambda: fnp.put_along_axis(dest, np.arange(5), np.ones(5), 0)) == 10
         assert (
             cost(
                 lambda: fnp.put_along_axis(
                     dest2d, np.zeros((1, 5), dtype=int), 1.0, axis=1
                 )
             )
-            == 0
+            == 1000
         )
         assert (
             cost(
@@ -651,7 +654,7 @@ def test_put_along_axis_bills_scattered_elements():
                     dest_small, np.zeros(1_000_000, dtype=np.int64), 1.0, 0
                 )
             )
-            == 0
+            == 2_000_000
         )
     finally:
         reset_weights()
@@ -1430,12 +1433,14 @@ def test_diag_diagonal_view_vs_copy():
 
 
 def test_gather_tier_consistency():
-    """Data-movement free tier: take_along_axis/put/put_along_axis/bmat/fromiter bill 0.
-    argwhere remains at weight 1.0 (search op, not pure data-movement)."""
+    """take_along_axis is back in the gather tier (weight 4.0); bmat/fromiter
+    stay in the data-movement free tier. argwhere remains at weight 1.0
+    (search op, not pure data-movement)."""
     load_weights()
     try:
-        # take_along_axis: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.take_along_axis(_A100, _idx100, axis=1)) == 0
+        # take_along_axis: gather tier → weight=4.0 → numel(output)=100 (result
+        # shape (100,1)) * dtype_rate(_A100 is float64 -> 2.0) * 4.0 = 800
+        assert cost(lambda: fnp.take_along_axis(_A100, _idx100, axis=1)) == 800
         # bmat: data-movement free tier → weight=0.0 → 0
         assert cost(lambda: fnp.bmat([[_A_bmat, _A_bmat], [_A_bmat, _A_bmat]])) == 0
         # fromiter: data-movement free tier → weight=0.0 → 0

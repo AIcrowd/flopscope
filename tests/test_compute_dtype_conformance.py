@@ -298,6 +298,36 @@ PROBES.update(
 )
 
 # ---------------------------------------------------------------------------
+# gather/scatter (explicit-indexing weight flip, cost-model triage Task 2):
+# take/take_along_axis (gather tier) and put/place/putmask/put_along_axis/
+# fill_diagonal/extract/compress (scatter tier) all declare dtypes=() on the
+# array being read from or written to (NOT the index/condition operand), so
+# billing scales with that array's own dtype. The mutators copy V/M first --
+# each lambda makes its own fresh copy on every call, so no cross-probe
+# state leaks. (choose is NOT probed here: its own deduct() declares
+# dtypes=() -- see SKIPPED.)
+# ---------------------------------------------------------------------------
+PROBES.update(
+    {
+        "take": lambda: fnp.take(V, V01),
+        "take_along_axis": lambda: fnp.take_along_axis(V, V01, axis=0),
+        "put": lambda: fnp.put(
+            V.copy(),
+            np.array([0, 1], dtype=np.int32),
+            np.array([9, 10], dtype=np.int32),
+        ),
+        "place": lambda: fnp.place(V.copy(), COND, np.array([9], dtype=np.int32)),
+        "putmask": lambda: fnp.putmask(V.copy(), COND, np.array([9], dtype=np.int32)),
+        "put_along_axis": lambda: fnp.put_along_axis(
+            V.copy(), V01, np.full(8, 9, dtype=np.int32), 0
+        ),
+        "fill_diagonal": lambda: fnp.fill_diagonal(M.copy(), 9),
+        "extract": lambda: fnp.extract(COND, V),
+        "compress": lambda: fnp.compress(COND, V),
+    }
+)
+
+# ---------------------------------------------------------------------------
 # linalg — LAPACK-backed decompositions/solvers on M (4x4, nonsingular).
 # linalg.matmul/outer/tensordot/vecdot are pure aliases with no deduct() of
 # their own (see SKIPPED) so they are not probed here.
@@ -809,6 +839,21 @@ SKIPPED["einsum_path"] = (
     "returns a contraction PLAN, not a value (registry note: 'no numeric "
     "output'); verified 0 FLOPs / resolved_dtype=None -- a planning "
     "utility, not an arithmetic op this sweep targets."
+)
+# NOT a verified-safe design like where/einsum_path above: choose's own
+# deduct() passes dtypes=() (resolved_dtype=None, verified), so it bills
+# rate 1.0 regardless of the `choices` arrays' actual dtype -- unlike its
+# gather-tier sibling `take` (dtype-aware via the array it reads from), a
+# choose(idx, choices) with float64/complex choices bills the same as int32
+# ones. This is a known formula gap surfaced by the Task 2 weight flip
+# (0.0 -> 4.0 made it a charged op for the first time); fixing the dtypes=
+# declaration is a wrapper-formula change outside that task's scope
+# (weight/label flips only) -- flagged here, not silently accepted.
+SKIPPED["choose"] = (
+    "bills dtype-neutrally: its own deduct() passes dtypes=() (verified, "
+    "resolved_dtype=None), so rate is always 1.0 regardless of the "
+    "`choices` arrays' dtype -- a known gap (see comment above), not a "
+    "verified-safe design; out of scope for a weight/label-only task."
 )
 
 # --- blacklisted category, unreachable: raises AttributeError on access

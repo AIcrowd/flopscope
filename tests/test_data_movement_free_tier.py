@@ -34,19 +34,13 @@ FREE_DATA_MOVEMENT_OPS = [
     "diagflat",
     "meshgrid",
     "fromiter",
-    "compress",
     "full",
     "full_like",
-    "take",
-    "take_along_axis",
-    "put",
-    "put_along_axis",
-    "choose",
-    "place",
-    "putmask",
+    # take/take_along_axis/choose (gather x4), put/place/putmask/put_along_axis/
+    # fill_diagonal/extract/compress (scatter x1) left the free tier -- see
+    # tests/test_triage_price_pins.py::test_gather_tier_bills_4x_output,
+    # test_scatter_ops_bill_elements_touched, test_extract_and_compress_bill_scan_plus_gather.
     "select",
-    "extract",
-    "fill_diagonal",
     "unstack",
     "concat",
     "ix_",

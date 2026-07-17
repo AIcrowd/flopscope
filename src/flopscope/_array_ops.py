@@ -1932,7 +1932,7 @@ def choose(*args, **kwargs):
     return result
 
 
-attach_docstring(choose, _np.choose, "free", "0 FLOPs")
+attach_docstring(choose, _np.choose, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -2020,7 +2020,9 @@ def compress(
     return result
 
 
-attach_docstring(compress, _np.compress, "free", "0 FLOPs")
+attach_docstring(
+    compress, _np.compress, "counted_custom", "len(condition) + 4*numel(output) FLOPs"
+)
 
 
 @_counted_wrapper
@@ -2225,7 +2227,7 @@ def extract(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(extract, _np.extract, "free", "0 FLOPs")
+attach_docstring(extract, _np.extract, "counted_custom", "numel(input) FLOPs")
 
 
 @_counted_wrapper
@@ -2254,7 +2256,7 @@ def fill_diagonal(
     return result
 
 
-attach_docstring(fill_diagonal, _np.fill_diagonal, "free", "0 FLOPs")
+attach_docstring(fill_diagonal, _np.fill_diagonal, "counted_custom", "min(m,n) FLOPs")
 
 
 @_counted_wrapper
@@ -2767,7 +2769,7 @@ def place(
     return result
 
 
-attach_docstring(place, _np.place, "free", "0 FLOPs")
+attach_docstring(place, _np.place, "counted_custom", "numel(input) FLOPs")
 
 
 def promote_types(*args, **kwargs):
@@ -2812,7 +2814,7 @@ def put(
     return result
 
 
-attach_docstring(put, _np.put, "free", "0 FLOPs")
+attach_docstring(put, _np.put, "counted_custom", "numel(indices) FLOPs")
 
 
 @_counted_wrapper
@@ -2824,7 +2826,7 @@ def put_along_axis(
     *args: Any,
     **kwargs: Any,
 ) -> None:
-    """Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None); gather tier weight 4.0."""
+    """Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None)."""
     budget = require_budget()
     arr_np = _np.asarray(arr)
     idx_np = _np.asarray(indices)
@@ -2856,10 +2858,7 @@ def put_along_axis(
 
 
 attach_docstring(
-    put_along_axis,
-    _np.put_along_axis,
-    "counted_custom",
-    "elements scattered x gather-tier weight 4.0 FLOPs",
+    put_along_axis, _np.put_along_axis, "counted_custom", "elements scattered FLOPs"
 )
 
 
@@ -2893,7 +2892,7 @@ def putmask(
     return result
 
 
-attach_docstring(putmask, _np.putmask, "free", "0 FLOPs")
+attach_docstring(putmask, _np.putmask, "counted_custom", "numel(input) FLOPs")
 
 
 @_counted_wrapper
@@ -3098,7 +3097,7 @@ def take(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(take, _np.take, "free", "0 FLOPs")
+attach_docstring(take, _np.take, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -3127,7 +3126,9 @@ def take_along_axis(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(take_along_axis, _np.take_along_axis, "free", "0 FLOPs")
+attach_docstring(
+    take_along_axis, _np.take_along_axis, "counted_custom", "numel(output) FLOPs"
+)
 
 
 @_counted_wrapper

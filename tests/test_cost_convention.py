@@ -749,7 +749,7 @@ DEFERRED: dict[str, str] = {
     "extract": "numel(input) gather",
     "place": "numel(input) scatter",
     "put": "numel(indices) scatter at gather tier",
-    "put_along_axis": "elements scattered; gather tier weight 4.0",
+    "put_along_axis": "elements scattered; scatter tier weight 1.0",
     "putmask": "numel(input) scatter",
     "delete": "numel(output); surviving elements copied",
     "insert": "numel(output); materializing copy",

@@ -1836,7 +1836,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None); gather tier weight 4.0.",
+        "notes": "Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None).",
     },
     "putmask": {
         "category": "counted_custom",
@@ -1866,7 +1866,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Return selected slices along axis. Cost: numel(input).",
+        "notes": "Return selected slices along axis. Cost: len(condition) + 4*numel(output).",
     },
     "array_equal": {
         "category": "counted_custom",

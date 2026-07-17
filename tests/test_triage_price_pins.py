@@ -122,3 +122,55 @@ def test_random_reorder_bills_4x():
     assert billed(lambda: rs.choice(N, size=N)) == 4 * N
     assert billed(lambda: rs.permutation(N)) == 4 * N
     assert billed(lambda: rs.shuffle(fnp.asarray(arr.copy()))) == 4 * N
+
+
+# ---------------------------------------------------------------------------
+# Task 2: explicit indexing -- gathers x4 access tier; scatters/extract/
+# compress x1 (elements touched)
+# ---------------------------------------------------------------------------
+
+
+def test_gather_tier_bills_4x_output():
+    a = np.arange(1000, dtype=np.float32)
+    idx = np.arange(0, 1000, 10)
+    # built OUTSIDE the thunk as a plain numpy array: idx % 2 must not itself
+    # be billed (it isn't -- plain numpy -- but keeping it out of the probe
+    # matches this file's "inputs built outside the thunk" convention).
+    idx_mod2 = idx % 2
+    assert billed(lambda: fnp.take(fnp.asarray(a), fnp.asarray(idx))) == 4 * 100
+    assert (
+        billed(
+            lambda: fnp.choose(
+                fnp.asarray(idx_mod2),
+                [fnp.asarray(a[:100]), fnp.asarray(a[100:200])],
+            )
+        )
+        == 4 * 100
+    )
+
+
+def test_scatter_ops_bill_elements_touched():
+    a = np.zeros(1000, dtype=np.float32)
+    idx = np.arange(50, dtype=np.int32)
+    vals = np.ones(50, dtype=np.float32)
+    assert (
+        billed(
+            lambda: fnp.put(fnp.asarray(a.copy()), fnp.asarray(idx), fnp.asarray(vals))
+        )
+        == 50
+    )
+    sq = np.zeros((30, 40), dtype=np.float32)
+    assert billed(lambda: fnp.fill_diagonal(fnp.asarray(sq.copy()), 7.0)) == 30
+
+
+def test_extract_and_compress_bill_scan_plus_gather():
+    a = np.zeros(1000, dtype=np.float32)
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = (
+        True  # built OUTSIDE the budget: the > comparison must not run in the thunk
+    )
+    assert billed(lambda: fnp.extract(fnp.asarray(mask), fnp.asarray(a))) == 1000
+    assert (
+        billed(lambda: fnp.compress(fnp.asarray(mask), fnp.asarray(a)))
+        == 1000 + 4 * 250
+    )
