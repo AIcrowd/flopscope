@@ -1955,6 +1955,12 @@ def block(*args, **kwargs):
         result = _call_numpy(
             _np.block, *[_to_base_ndarray_tree(a) for a in args], **kwargs
         )
+        # The billed dtype is the promoted dtype of the (possibly deeply
+        # nested) leaf blocks -- exactly what ``result.dtype`` already is, so
+        # read it off the output instead of re-walking the nested structure.
+        # Leaving dtypes=() above would resolve to the dtype-neutral rate 1.0
+        # / complex factor 1.0, discounting float64/complex blocks.
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result
 
@@ -1979,6 +1985,11 @@ def bmat(*args, **kwargs):
             stripped_args.append(arg)
     with budget.deduct_after("bmat", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(_np.bmat, *stripped_args, **kwargs)
+        # See block() above: bill the promoted dtype read off the output --
+        # cheaper and more robust than re-deriving it from the raw arguments,
+        # which for bmat may be a string referencing named matrices rather
+        # than arrays at all.
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result
 
@@ -2070,6 +2081,13 @@ def choose(*args, **kwargs):
             stripped_args.append(arg)
     with budget.deduct_after("choose", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(_np.choose, *stripped_args, **kwargs)
+        # Bill the promoted dtype of the choices, read off the output rather
+        # than re-derived from *args/**kwargs (choices can arrive positional
+        # or keyword, as a list/tuple/array). Leaving dtypes=() above would
+        # resolve to the dtype-neutral rate 1.0 / complex factor 1.0,
+        # discounting float64/complex choices -- e.g. a complex128 choose
+        # would bill 1/4 of an equivalent take.
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result
 

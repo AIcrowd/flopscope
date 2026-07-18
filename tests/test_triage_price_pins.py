@@ -246,11 +246,12 @@ def test_creation_and_copy_family_remaining_ops_bill_output():
     """The rest of the 21 flipped keys, same x1 materializing-copy tier as
     ``test_creation_and_copy_family_bills_output`` above: concat/stack/hstack/
     dstack/column_stack (concatenate's siblings), row_stack (no ``deduct()``
-    of its own -- bills exact parity with vstack), block/bmat (dtype-neutral:
-    their ``deduct_after()`` declares ``dtypes=()``, so they always resolve at
-    rate 1.0 regardless of the actual input dtype -- a pre-existing formula
-    gap out of scope for a weight-only task, noted not fixed), insert,
-    fromiter, full_like, and meshgrid's dense case.
+    of its own -- bills exact parity with vstack), block/bmat (dtype-aware as
+    of the final-review fix below: ``deduct_after()`` reads the promoted
+    output dtype via ``set_dtypes()`` instead of declaring ``dtypes=()``, so
+    they resolve at the real dtype rate -- see
+    ``test_choose_block_bmat_bill_wide_dtypes`` for the float64/complex128
+    proof), insert, fromiter, full_like, and meshgrid's dense case.
     """
     a = np.arange(500, dtype=np.float32)
     b = np.arange(300, dtype=np.float32)
@@ -264,8 +265,9 @@ def test_creation_and_copy_family_remaining_ops_bill_output():
     row_stack_cost = billed(lambda: fnp.row_stack([fnp.asarray(a), fnp.asarray(a)]))
     vstack_cost = billed(lambda: fnp.vstack([fnp.asarray(a), fnp.asarray(a)]))
     assert row_stack_cost == vstack_cost == 1000
-    # block/bmat: dtypes=() means rate is pinned to 1.0 regardless of dtype;
-    # these values would be identical even on float64 inputs.
+    # These two stay float32 (rate 1.0), so the values below are unaffected by
+    # the dtype-awareness fix; test_choose_block_bmat_bill_wide_dtypes below
+    # is what actually exercises the fixed rate/complex-factor path.
     assert billed(lambda: fnp.block([fnp.asarray(a), fnp.asarray(b)])) == 800
     m = np.arange(600, dtype=np.float32).reshape(20, 30)
     assert billed(lambda: fnp.bmat([[fnp.asarray(m), fnp.asarray(m)]])) == 1200
@@ -780,3 +782,41 @@ def test_getitem_top_level_tuple_key_still_splits_to_basic_parts():
     # genuine advanced gather, matching the list form bit-exact.
     assert billed(lambda: v[(0, 2, 4),]) == 4 * 3 * 2
     assert billed(lambda: v[(0, 2, 4),]) == billed(lambda: v[[0, 2, 4]])
+
+
+# ---------------------------------------------------------------------------
+# Task 13 (final-review fix, IMPORTANT): choose/block/bmat activate their
+# dtype rate + complex factor. Their deduct_after() used to declare
+# dtypes=(), which resolves to the dtype-neutral rate 1.0 / complex factor
+# 1.0 regardless of the registry's declared complex_factor=2.0 -- silently
+# discounting every float64 or complex call. They now read the promoted
+# dtype off the actual result via set_dtypes(), matching take's (choose) and
+# concatenate's (block/bmat) sibling formulas exactly at every dtype.
+# ---------------------------------------------------------------------------
+
+
+def test_choose_block_bmat_bill_wide_dtypes():
+    idx = fnp.asarray(np.zeros(100, dtype=np.int64))
+    c_f32 = [fnp.asarray(np.ones(100, dtype=np.float32))] * 2
+    c_f64 = [fnp.asarray(np.ones(100, dtype=np.float64))] * 2
+    c_c128 = [fnp.asarray(np.ones(100, dtype=np.complex128))] * 2
+    # choose: 4*numel(output) at weight 4.0, matching take exactly at every
+    # dtype (100-elem gather).
+    assert billed(lambda: fnp.choose(idx, c_f32)) == 4 * 100
+    assert billed(lambda: fnp.choose(idx, c_f64)) == 4 * 100 * 2
+    assert billed(lambda: fnp.choose(idx, c_c128)) == 4 * 100 * 2 * 2
+
+    a_f32 = fnp.asarray(np.ones((10, 10), dtype=np.float32))
+    b_f32 = fnp.asarray(np.ones((10, 10), dtype=np.float32))
+    a_f64 = fnp.asarray(np.ones((10, 10), dtype=np.float64))
+    b_f64 = fnp.asarray(np.ones((10, 10), dtype=np.float64))
+    a_c128 = fnp.asarray(np.ones((10, 10), dtype=np.complex128))
+    b_c128 = fnp.asarray(np.ones((10, 10), dtype=np.complex128))
+    # block/bmat: numel(output) at weight 1.0, matching concatenate exactly
+    # at every dtype (200-elem assembly).
+    assert billed(lambda: fnp.block([[a_f32, b_f32]])) == 200
+    assert billed(lambda: fnp.block([[a_f64, b_f64]])) == 400
+    assert billed(lambda: fnp.block([[a_c128, b_c128]])) == 800
+    assert billed(lambda: fnp.bmat([[a_f32, b_f32]])) == 200
+    assert billed(lambda: fnp.bmat([[a_f64, b_f64]])) == 400
+    assert billed(lambda: fnp.bmat([[a_c128, b_c128]])) == 800

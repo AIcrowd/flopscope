@@ -138,6 +138,11 @@ class _DeferredOpTimer:
     existing run-then-charge behavior of these ops (they already ran numpy
     before the budget check), so a single-op overshoot still raises
     ``BudgetExhaustedError`` without recording the op.
+
+    ``dtypes`` can likewise only be known after the call for ops whose billed
+    dtype is the *output's* promoted dtype (e.g. an assembly op fed
+    heterogeneous inputs) -- call ``op.set_dtypes(...)`` to override the
+    ``deduct_after()``-time declaration before the block exits.
     """
 
     __slots__ = (
@@ -176,6 +181,20 @@ class _DeferredOpTimer:
 
     def set_cost(self, flop_cost: int) -> None:
         self._cost = flop_cost
+
+    def set_dtypes(self, dtypes: tuple) -> None:
+        """Override the ``dtypes`` declared at ``deduct_after()`` call time.
+
+        Use when the billed dtype is only known once the numpy call has
+        run -- e.g. an assembly op (``choose``/``block``/``bmat``) whose
+        output dtype is the promoted dtype of its (possibly deeply nested)
+        inputs, cheaper to read off the produced result than to re-derive
+        from the call's raw arguments. Without this, such ops would have to
+        declare ``dtypes=()`` up front, which resolves to the dtype-neutral
+        rate 1.0 / complex factor 1.0 -- silently discounting float64 and
+        complex inputs regardless of what the registry declares for the op.
+        """
+        self._dtypes = dtypes
 
     def __enter__(self) -> _DeferredOpTimer:
         self._block_t0 = time.perf_counter()
