@@ -2228,11 +2228,13 @@ REGISTRY: dict[str, dict] = {
         "notes": "Transpose last two dimensions (NumPy 2.x array API).",
     },
     "unstack": {
-        "category": "counted_custom",
+        "category": "free",
         "module": "numpy",
-        "complex_factor": 2.0,
         "min_numpy": "2.1",
-        "notes": "Unstack array along axis into tuple of arrays (NumPy 2.x). Cost: numel(output).",
+        "notes": (
+            "Unstack array along axis into tuple of arrays (NumPy 2.x). "
+            "View — no elements copied. Cost: 0 FLOPs."
+        ),
     },
     "delete": {
         "category": "counted_custom",

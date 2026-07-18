@@ -14,6 +14,7 @@ calls ``load_weights()`` itself, so every assertion here reads as
 import math
 
 import numpy as np
+import pytest
 from test_dtype_cost import _billed_with_production_rates
 
 import flopscope.numpy as fnp
@@ -280,3 +281,26 @@ def test_conditional_view_copies_bill_numel():
         )
         == 2000
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 5: views stay free -- split family, broadcast_to, diagonal, unstack
+# ---------------------------------------------------------------------------
+
+
+def test_split_broadcast_and_diagonal_stay_free():
+    a = np.arange(24, dtype=np.float32).reshape(4, 6)
+    v = np.arange(24, dtype=np.float32)
+    sq = np.arange(16, dtype=np.float32).reshape(4, 4)
+    assert billed(lambda: fnp.split(fnp.asarray(a), 2, axis=0)) == 0
+    assert billed(lambda: fnp.hsplit(fnp.asarray(a), 2)) == 0
+    assert billed(lambda: fnp.vsplit(fnp.asarray(a), 2)) == 0
+    assert billed(lambda: fnp.array_split(fnp.asarray(v), 7)) == 0
+    assert billed(lambda: fnp.broadcast_to(fnp.asarray(v[:6]), (4, 6))) == 0
+    assert billed(lambda: fnp.diagonal(fnp.asarray(sq))) == 0
+
+
+@pytest.mark.skipif(not hasattr(np, "unstack"), reason="requires numpy >= 2.1")
+def test_unstack_stays_free():
+    a = np.arange(24, dtype=np.float32).reshape(4, 6)
+    assert billed(lambda: fnp.unstack(fnp.asarray(a))) == 0

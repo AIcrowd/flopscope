@@ -608,7 +608,7 @@ FUNCTION_CATEGORIES: dict[str, str] = {
     "unique_values": "counted_custom",
     "unpackbits": "counted_custom",
     "unravel_index": "free",
-    "unstack": "counted_custom",
+    "unstack": "free",
     "unwrap": "counted_custom",
     "vander": "counted_custom",
     "var": "counted_reduction",

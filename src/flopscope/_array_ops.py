@@ -3325,16 +3325,11 @@ if hasattr(_np, "unstack"):
 
     @_counted_wrapper
     def unstack(x: ArrayLike, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # pyright: ignore[reportRedeclaration]
-        """Split array into sequence of arrays along an axis. Cost: numel(input)."""
+        """Split array into sequence of arrays along an axis. Wraps ``numpy.unstack``. Cost: 0 FLOPs."""
         budget = require_budget()
         x_arr = _np.asarray(x)
-        cost = x_arr.size
         with budget.deduct(
-            "unstack",
-            flop_cost=cost,
-            subscripts=None,
-            shapes=(x_arr.shape,),
-            dtypes=(x_arr.dtype,),
+            "unstack", flop_cost=0, subscripts=None, shapes=(x_arr.shape,), dtypes=()
         ):
             result = _call_numpy(_np.unstack, _to_base_ndarray(x), *args, **kwargs)
         return result  # type: ignore[return-value]

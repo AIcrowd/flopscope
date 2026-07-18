@@ -775,7 +775,9 @@ DEFERRED: dict[str, str] = {
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
     "unpackbits": "8*n",
     "unwrap": "pinned in OP_EXPECTATIONS (11*numel(input) weight 1.0; steps 8/12 are free 3-arg where)",
-    "unstack": "numel(output); NumPy 2.1+",
+    # unstack left this dict in Task 5 -- it now bills 0 FLOPs (free-tier
+    # view, NumPy 2.1+); see tests/test_triage_price_pins.py::test_unstack_stays_free
+    # and tests/test_view_semantics_lock.py.
     "unique_all": "n*ceil(log2(n)); unique family",
     "unique_counts": "n*ceil(log2(n)); unique family",
     "unique_inverse": "n*ceil(log2(n)); unique family",
