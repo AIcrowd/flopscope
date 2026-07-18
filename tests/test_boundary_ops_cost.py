@@ -101,17 +101,18 @@ def test_pad_constant_malformed_pad_width_raises_numpy_error():
 def test_ravel_multi_index_charged():
     rows = fnp.asarray(np.arange(100) % 10)
     cols = fnp.asarray(np.arange(100) % 10)
-    # ndim=2, N=100 -> 2*(2-1)*100 = 200
-    assert billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10))) == 200
+    # numel(output) = N = 100 (Task 8: replaces the old 2*(ndim-1)*N formula)
+    assert billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10))) == 100
 
 
-def test_ravel_multi_index_clip_adds_n():
+def test_ravel_multi_index_mode_does_not_change_cost():
+    """Task 8: cost is numel(output) regardless of mode -- clip/wrap no
+    longer add +N (the old 2*(ndim-1)*N(+N for clip/wrap) formula did)."""
     rows = fnp.asarray(np.arange(100) % 10)
     cols = fnp.asarray(np.arange(100) % 10)
-    # 200 + N(=100) for clip = 300
     assert (
         billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10), mode="clip"))
-        == 300
+        == 100
     )
 
 

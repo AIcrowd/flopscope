@@ -1474,12 +1474,12 @@ def test_packbits_formula():
 
 
 def test_mask_indices_formula():
-    """mask_indices: 2*n^2 + 8*k; n=50, triu → k=1275 pairs."""
+    """mask_indices: numel of returned index arrays (= 2*k); n=50, triu -> k=1275 pairs."""
     # np.triu of 50x50: upper triangle = 50*51//2 = 1275 index pairs
-    # formula: 2*50^2 + 8*1275 = 5000 + 10200 = 15200; weight=1.0 after fix
+    # formula (Task 8): 2*k = 2550; weight=1.0, dtype-neutral
     n = 50
     k = n * (n + 1) // 2  # 1275
-    expected = 2 * n * n + 8 * k  # 15200
+    expected = 2 * k  # 2550
     assert cost(lambda: fnp.mask_indices(n, np.triu)) == expected
 
 

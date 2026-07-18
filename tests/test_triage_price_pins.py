@@ -410,3 +410,81 @@ def test_triu_batch_leading_dims_multiply():
     than treat the whole stack as one flat triangle."""
     stacked = np.ones((3, 8, 8), dtype=np.float32)
     assert billed(lambda: fnp.triu(fnp.asarray(stacked))) == 3 * 36
+
+
+# ---------------------------------------------------------------------------
+# Task 8: index generators -- tri family, unravel/ravel_multi_index,
+# mask_indices, broadcast_shapes
+# ---------------------------------------------------------------------------
+
+
+def test_index_generators_bill_their_outputs():
+    assert billed(lambda: fnp.tri(20, 30, dtype=np.float32)) == 600
+    assert billed(lambda: fnp.tril_indices(8)) == 2 * 36
+    assert billed(lambda: fnp.triu_indices(8, k=2)) == 2 * 21
+    assert billed(lambda: fnp.diag_indices(9, ndim=3)) == 3 * 9
+    assert (
+        billed(lambda: fnp.unravel_index(fnp.asarray(np.arange(50)), (10, 20)))
+        == 2 * 50
+    )
+    assert (
+        billed(
+            lambda: fnp.ravel_multi_index(
+                (
+                    fnp.asarray(np.zeros(50, dtype=np.int64)),
+                    fnp.asarray(np.zeros(50, dtype=np.int64)),
+                ),
+                (10, 20),
+            )
+        )
+        == 50
+    )
+    # np.triu as mask_func: plain-numpy callable, NOT billed -> isolates mask_indices' own 2k
+    assert billed(lambda: fnp.mask_indices(8, np.triu)) == 2 * 36
+    # fnp.triu as mask_func: see test_mask_indices_fnp_mask_func_hits_preexisting_nonzero_bug
+    # below -- it does NOT reach a `> 2*36` bill (a separate, pre-existing crash).
+    assert billed(lambda: fnp.broadcast_shapes((4, 6), (6,))) == 3
+
+
+def test_mask_indices_fnp_mask_func_hits_preexisting_nonzero_bug():
+    """An fnp-wrapped mask_func (e.g. fnp.triu) does NOT reach a `> 2*k`
+    combined bill -- it raises instead. The ledger's IMPLEMENTATION CAVEAT
+    ("confirm the mask_func callable is restricted or its own fnp ops bill
+    separately ... flag before committing (do not fix here)") anticipated an
+    fnp callable "billing separately"; this pins the ACTUAL observed
+    behavior instead, which is worse: numpy's own ``mask_indices`` body ends
+    with a bare top-level ``nonzero(a != 0)`` call, and ``a`` (mask_func's
+    FlopscopeArray return value, auto-wrapped by ``wrap_module_returns``)
+    hits it. ``nonzero`` is NOT in ``FlopscopeArray._get_array_function_
+    dispatch``'s map (unlike the ``.nonzero()`` METHOD, which IS overridden,
+    and unlike ``fnp.nonzero`` itself, which exists) -- so this always
+    raises, independent of Task 8's changes here (reproduced against the
+    pre-Task-8 HEAD, commit c76ec237f, via `git stash`). Flagged per the
+    ledger instruction, not fixed -- out of this task's "index generators
+    pricing" scope; the underlying gap is in flopscope._ndarray's NEP-18
+    dispatch map, not in mask_indices' own cost formula.
+    """
+    with pytest.raises(RuntimeError, match="nonzero"):
+        billed(lambda: fnp.mask_indices(8, fnp.triu))
+
+
+def test_tril_indices_from_and_triu_indices_from_bill_their_outputs():
+    """*_from siblings take an array argument (only its shape matters) but
+    bill the same numel-of-returned-index-arrays formula as the non-_from
+    forms, dtype-neutral."""
+    a = np.ones((8, 8), dtype=np.float32)
+    assert billed(lambda: fnp.tril_indices_from(fnp.asarray(a))) == 2 * 36
+    assert billed(lambda: fnp.triu_indices_from(fnp.asarray(a), k=2)) == 2 * 21
+
+
+def test_diag_indices_from_bills_its_output():
+    a = np.ones((9, 9, 9), dtype=np.float32)
+    assert billed(lambda: fnp.diag_indices_from(fnp.asarray(a))) == 3 * 9
+
+
+def test_indices_already_charged_weight_one_no_change():
+    """indices was ALREADY counted_custom at weight 1.0 before Task 8 -- this
+    pin confirms no change. Unlike the index-generator family above, indices
+    bills its REAL output dtype (not dtype-neutral): dense (2,3,4) int64 grid
+    -> numel(output)=24 elements x dtype_rate(int64)=2.0 x weight 1.0 = 48."""
+    assert billed(lambda: fnp.indices((3, 4))) == 48

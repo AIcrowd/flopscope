@@ -562,16 +562,12 @@ PROBES.update(
         "lexsort": lambda: fnp.lexsort((V, V)),
         "linspace": lambda: fnp.linspace(0, 8, 5, dtype=np.int32),
         "logspace": lambda: fnp.logspace(0, 2, 4),
-        "mask_indices": lambda: fnp.mask_indices(4, np.triu),
         "matmul": lambda: fnp.matmul(M, M),
         "nonzero": lambda: fnp.nonzero(V - 4),
         "outer": lambda: fnp.outer(V, V),
         "packbits": lambda: fnp.packbits(V01.astype(np.uint8)),
         "pad": lambda: fnp.pad(V, 1),
         "partition": lambda: fnp.partition(V, 2),
-        "ravel_multi_index": lambda: fnp.ravel_multi_index(
-            (np.array([1, 2]), np.array([1, 2])), (4, 4)
-        ),
         "searchsorted": lambda: fnp.searchsorted(V, 4),
         "setdiff1d": lambda: fnp.setdiff1d(V, V3),
         "setxor1d": lambda: fnp.setxor1d(V, V3),
@@ -666,6 +662,14 @@ PROBES.update(
         "tril": lambda: fnp.tril(M),
     }
 )
+
+# ---------------------------------------------------------------------------
+# tri (weight-flipped from free -> 1.0, cost-model triage Task 8): unlike its
+# tril_indices/triu_indices/... index-generator siblings (all dtype-neutral,
+# see the SKIPPED block below), tri constructs a real matrix and declares its
+# own dtype= parameter (mirrors ones/eye/identity above) -- it does not widen.
+# ---------------------------------------------------------------------------
+PROBES["tri"] = lambda: fnp.tri(3, dtype=np.int32)
 
 
 def _copyto_probe() -> np.ndarray:
@@ -855,6 +859,42 @@ for _m in ("bytes", "choice", "permutation", "shuffle"):
 SKIPPED["random.random_integers"] = (
     "deprecated numpy alias, intentionally unsupported: raises AttributeError "
     "on access (verified), never reaches deduct()."
+)
+
+# --- dtype-neutral index bookkeeping (cost-model triage Task 8): the
+# returned index arrays are pure position bookkeeping (which cells to
+# select), independent of any input's value dtype -- same convention as
+# random.permutation above (dtypes=() in each op's own deduct(), verified,
+# resolved_dtype=None). tril_indices_from/triu_indices_from/diag_indices_from
+# take an array argument, but only its .shape is read, never its dtype/
+# values. mask_indices and ravel_multi_index were PROBES entries before
+# Task 8 flipped their formula to this same dtype-neutral convention; moved
+# here (their old probes would now fail the "bills dtype-neutrally" check).
+_INDEX_BOOKKEEPING_REASON = (
+    "dtype-neutral index bookkeeping: the returned index arrays are pure "
+    "position bookkeeping, independent of any input's value dtype "
+    "(resolved_dtype=None by design, verified) -- same convention as "
+    "random.permutation."
+)
+for _name in (
+    "tril_indices",
+    "tril_indices_from",
+    "triu_indices",
+    "triu_indices_from",
+    "diag_indices",
+    "diag_indices_from",
+    "unravel_index",
+    "mask_indices",
+    "ravel_multi_index",
+):
+    SKIPPED[_name] = _INDEX_BOOKKEEPING_REASON
+# broadcast_shapes: no array operands at all (its args are shape tuples/
+# ints), so there is no operand dtype to resolve in the first place --
+# dtype-neutral by construction, not merely by convention.
+SKIPPED["broadcast_shapes"] = (
+    "dtype-neutral: takes shape tuples/ints, not arrays -- there is no "
+    "operand dtype to resolve (dtypes=() in its own deduct(), verified, "
+    "resolved_dtype=None)."
 )
 
 # --- free_random_method: pure attribute/state accessors ("no math" per

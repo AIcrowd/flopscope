@@ -769,9 +769,22 @@ DEFERRED: dict[str, str] = {
     "append": "numel(output) = arr.size + values.size; concatenate family",
     "copyto": "numel(dst) per element written (or popcount of where= when masked)",
     "trim_zeros": "numel(input); value scan, like nonzero",
-    "ravel_multi_index": "2*(ndim-1)*N (+N for clip/wrap); one stride is unity",
+    # Task 8: index generators -- numel of the returned index arrays, weight
+    # 1.0, dtype-neutral (dtypes=()); pinned in
+    # tests/test_triage_price_pins.py::test_index_generators_bill_their_outputs
+    # and siblings.
+    "ravel_multi_index": "numel(output) = N; dtype-neutral",
+    "mask_indices": "numel(output) = 2*k; dtype-neutral (mask scan itself is unbilled -- see test_mask_indices_fnp_mask_func_hits_preexisting_nonzero_bug)",
+    "tri": "numel(output); NOT dtype-neutral, bills the actual (possibly requested) output dtype -- mirrors full/ones/eye/identity",
+    "tril_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "tril_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "triu_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "triu_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "diag_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "diag_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "unravel_index": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "broadcast_shapes": "sum of len(shape) across input shape tuples (floor 1); dtype-neutral, no array operands",
     "ix_": "numel(output)",
-    "mask_indices": "2*n^2 + 8*k; weight 1.0 (mask scan + gather index pairs)",
     "diagflat": "numel(v)",
     "fill_diagonal": "min(m,n)",
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",

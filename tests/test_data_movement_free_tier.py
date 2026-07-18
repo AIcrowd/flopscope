@@ -122,10 +122,12 @@ def test_view_op_is_time_accounted(name):
 # ones/eye/identity left this dict in Task 4: they now bill numel(output) /
 # diagonal length (weight 1.0) -- see
 # tests/test_triage_price_pins.py::test_writing_creation_bills_output_zeros_stay_free.
+# tri left this dict in Task 8: it now bills numel(output) at its actual
+# output dtype (weight 1.0) -- see
+# tests/test_triage_price_pins.py::test_index_generators_bill_their_outputs.
 INIT_OPS_126 = {
     "zeros": lambda: fnp.zeros((10, 10)),
     "empty": lambda: fnp.empty((10, 10)),
-    "tri": lambda: fnp.tri(10),
 }
 
 

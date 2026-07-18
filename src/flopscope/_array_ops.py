@@ -2002,12 +2002,30 @@ def broadcast_arrays(*args: ArrayLike, **kwargs: Any) -> tuple[FlopscopeArray, .
 attach_docstring(broadcast_arrays, _np.broadcast_arrays, "free", "0 FLOPs")
 
 
+@_counted_wrapper
 def broadcast_shapes(*args, **kwargs):
-    """Broadcast shapes to a common shape. Wraps ``numpy.broadcast_shapes``. Cost: 0 FLOPs."""
-    return _np.broadcast_shapes(*args, **kwargs)
+    """Broadcast shapes to a common shape. Cost: sum of len(shape) across the
+    input shape tuples (floor 1); a bare int argument counts as one axis."""
+    budget = require_budget()
+    cost = max(sum(len(s) if hasattr(s, "__len__") else 1 for s in args), 1)
+    with budget.deduct(
+        # dtype-neutral (dtypes=()): pure shape arithmetic, no array operands.
+        "broadcast_shapes",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(),
+    ):
+        result = _call_numpy(_np.broadcast_shapes, *args, **kwargs)
+    return result
 
 
-attach_docstring(broadcast_shapes, _np.broadcast_shapes, "free", "0 FLOPs")
+attach_docstring(
+    broadcast_shapes,
+    _np.broadcast_shapes,
+    "counted_custom",
+    "sum of len(shape) across inputs FLOPs",
+)
 
 
 def can_cast(*args, **kwargs):
@@ -2221,20 +2239,51 @@ def delete(
 attach_docstring(delete, _np.delete, "counted_custom", "numel(output) FLOPs")
 
 
+@_counted_wrapper
 def diag_indices(*args, **kwargs):
-    """Return indices to access main diagonal. Wraps ``numpy.diag_indices``. Cost: 0 FLOPs."""
-    return _np.diag_indices(*args, **kwargs)
+    """Return indices to access main diagonal. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    result = _np.diag_indices(*args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
+        # random.permutation / _counted_classes. Passing the int64 index dtype
+        # would double every bill via the 2.0 int64 rate.
+        "diag_indices",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(),
+    ):
+        pass
+    return result
 
 
-attach_docstring(diag_indices, _np.diag_indices, "free", "0 FLOPs")
+attach_docstring(
+    diag_indices, _np.diag_indices, "counted_custom", "numel(output) FLOPs"
+)
 
 
+@_counted_wrapper
 def diag_indices_from(*args, **kwargs):
-    """Return indices to access main diagonal of array. Wraps ``numpy.diag_indices_from``. Cost: 0 FLOPs."""
-    return _np.diag_indices_from(*args, **kwargs)
+    """Return indices to access main diagonal of array. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    stripped_args = _to_base_ndarray_tree(args)
+    result = _np.diag_indices_from(*stripped_args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        "diag_indices_from", flop_cost=cost, subscripts=None, shapes=(), dtypes=()
+    ):
+        pass
+    return result
 
 
-attach_docstring(diag_indices_from, _np.diag_indices_from, "free", "0 FLOPs")
+attach_docstring(
+    diag_indices_from,
+    _np.diag_indices_from,
+    "counted_custom",
+    "numel(output) FLOPs",
+)
 
 
 @_counted_wrapper
@@ -2712,37 +2761,32 @@ attach_docstring(ix_, _np.ix_, "free", "0 FLOPs")
 def mask_indices(*args, **kwargs):
     """Return indices to access main or off-diagonal of array.
 
-    Cost: ``2*n^2 + 8*k`` at weight 1.0, where *n* is the matrix dimension and
-    *k* is the number of selected index pairs (= len of each returned array).
-
-    Formula breakdown:
-    - ``2*n^2``: scan of the ``n×n`` boolean mask (mask_func allocates an ones
-      matrix and applies the mask; 1 FLOP/cell × 2 for the boolean eval pass).
-    - ``8*k``: gather of 2k index values at gather-tier cost (4 FLOPs each).
+    Cost: numel of the returned index arrays (= ``2*k``, where *k* is the
+    number of selected index pairs) at weight 1.0, dtype-neutral. ``numpy``
+    runs ``mask_func`` internally on its own plain (non-flopscope) probe
+    matrix: a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an
+    fnp callable (e.g. ``fnp.triu``) bills its own cost separately through
+    its own wrapper, on top of this op's own ``2*k``.
     """
     budget = require_budget()
-    # n is first positional arg; extract before calling numpy
-    n = args[0] if args else kwargs.get("n", 0)
     result = _np.mask_indices(*args, **kwargs)
-    k = result[0].size if isinstance(result, tuple) and result else 0
-    cost = 2 * int(n) * int(n) + 8 * int(k)
-    _mask_dtypes = (
-        tuple(a.dtype for a in result)
-        if isinstance(result, tuple) and result
-        else (_np.dtype(int),)
-    )
+    cost = max(sum(int(r.size) for r in result), 1)
     with budget.deduct(
+        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
+        # the tri*_indices family.
         "mask_indices",
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=_mask_dtypes,
+        dtypes=(),
     ):
         pass  # numpy call already executed above
     return result
 
 
-attach_docstring(mask_indices, _np.mask_indices, "counted_custom", "2*n^2 + 8*k FLOPs")
+attach_docstring(
+    mask_indices, _np.mask_indices, "counted_custom", "numel(output) FLOPs"
+)
 
 
 def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
@@ -3011,25 +3055,21 @@ attach_docstring(putmask, _np.putmask, "counted_custom", "numel(input) FLOPs")
 
 @_counted_wrapper
 def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
-    """Convert a multi-index to flat indices. Cost: 2*(ndim-1)*N (one stride is unity),
-    plus N for mode in {'clip','wrap'} (one clamp/mod per element). N = #output indices."""
+    """Convert a multi-index to flat indices. Cost: numel(output) (= N, the
+    number of index tuples), dtype-neutral."""
     budget = require_budget()
     stripped = _to_base_ndarray_tree(multi_index)
     idx_arrays = [_np.asarray(a) for a in stripped]
     n = int(_np.broadcast(*idx_arrays).size) if idx_arrays else 0
-    ndim = len(dims) if hasattr(dims, "__len__") else 1
-    cost = 2 * (ndim - 1) * n
-    if mode != "raise":
-        cost += n
-    _rmi_dtypes = (
-        tuple(a.dtype for a in idx_arrays) if idx_arrays else (_np.dtype(int),)
-    )
     with budget.deduct(
+        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
+        # the tri*_indices family -- passing the int64 index dtype would
+        # double the bill.
         "ravel_multi_index",
-        flop_cost=cost,
+        flop_cost=n,
         subscripts=None,
         shapes=(),
-        dtypes=_rmi_dtypes,
+        dtypes=(),
     ):
         result = _call_numpy(  # type: ignore[arg-type, call-overload]
             _np.ravel_multi_index, stripped, dims, mode=mode, order=order
@@ -3041,7 +3081,7 @@ attach_docstring(
     ravel_multi_index,
     _np.ravel_multi_index,
     "counted_custom",
-    "2*(ndim-1)*N (+N for clip/wrap)",
+    "numel(output) FLOPs",
 )
 
 
@@ -3277,31 +3317,73 @@ attach_docstring(
 
 @_counted_wrapper
 def tri(*args, **kwargs):
-    """Array with ones at and below the given diagonal. Wraps ``numpy.tri``. Cost: 0 FLOPs."""
+    """Array with ones at and below the given diagonal. Cost: numel(output)."""
     budget = require_budget()
-    with budget.deduct("tri", flop_cost=0, subscripts=None, shapes=(), dtypes=()):
-        result = _call_numpy(_np.tri, *args, **kwargs)
-    # A triangular matrix is not symmetric — do NOT infer constant-fill symmetry.
-    return _asplainflopscope(result)
+    result = _np.tri(*args, **kwargs)
+    cost = result.size if hasattr(result, "size") else 1
+    with budget.deduct(
+        # tri constructs a real float (or requested-dtype) matrix -- NOT
+        # dtype-neutral, unlike the sibling index-generator ops below. Bill
+        # its actual output dtype, mirroring full/ones/eye/identity.
+        "tri",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(result.dtype,),
+    ):
+        # A triangular matrix is not symmetric — do NOT infer constant-fill symmetry.
+        result = _asplainflopscope(result)
+    return result
 
 
-attach_docstring(tri, _np.tri, "free", "0 FLOPs")
+attach_docstring(tri, _np.tri, "counted_custom", "numel(output) FLOPs")
 
 
+@_counted_wrapper
 def tril_indices(*args, **kwargs):
-    """Return indices for lower-triangle of array. Wraps ``numpy.tril_indices``. Cost: 0 FLOPs."""
-    return _np.tril_indices(*args, **kwargs)
+    """Return indices for lower-triangle of array. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    result = _np.tril_indices(*args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
+        # random.permutation / _counted_classes. Passing the int64 index dtype
+        # would double every bill via the 2.0 int64 rate.
+        "tril_indices",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(),
+    ):
+        pass
+    return result
 
 
-attach_docstring(tril_indices, _np.tril_indices, "free", "0 FLOPs")
+attach_docstring(
+    tril_indices, _np.tril_indices, "counted_custom", "numel(output) FLOPs"
+)
 
 
+@_counted_wrapper
 def tril_indices_from(*args, **kwargs):
-    """Return indices for lower-triangle of given array. Wraps ``numpy.tril_indices_from``. Cost: 0 FLOPs."""
-    return _np.tril_indices_from(*args, **kwargs)
+    """Return indices for lower-triangle of given array. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    stripped_args = _to_base_ndarray_tree(args)
+    result = _np.tril_indices_from(*stripped_args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        "tril_indices_from", flop_cost=cost, subscripts=None, shapes=(), dtypes=()
+    ):
+        pass
+    return result
 
 
-attach_docstring(tril_indices_from, _np.tril_indices_from, "free", "0 FLOPs")
+attach_docstring(
+    tril_indices_from,
+    _np.tril_indices_from,
+    "counted_custom",
+    "numel(output) FLOPs",
+)
 
 
 @_counted_wrapper
@@ -3329,20 +3411,44 @@ attach_docstring(
 )
 
 
+@_counted_wrapper
 def triu_indices(*args, **kwargs):
-    """Return indices for upper-triangle of array. Wraps ``numpy.triu_indices``. Cost: 0 FLOPs."""
-    return _np.triu_indices(*args, **kwargs)
+    """Return indices for upper-triangle of array. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    result = _np.triu_indices(*args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        "triu_indices", flop_cost=cost, subscripts=None, shapes=(), dtypes=()
+    ):
+        pass
+    return result
 
 
-attach_docstring(triu_indices, _np.triu_indices, "free", "0 FLOPs")
+attach_docstring(
+    triu_indices, _np.triu_indices, "counted_custom", "numel(output) FLOPs"
+)
 
 
+@_counted_wrapper
 def triu_indices_from(*args, **kwargs):
-    """Return indices for upper-triangle of given array. Wraps ``numpy.triu_indices_from``. Cost: 0 FLOPs."""
-    return _np.triu_indices_from(*args, **kwargs)
+    """Return indices for upper-triangle of given array. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    stripped_args = _to_base_ndarray_tree(args)
+    result = _np.triu_indices_from(*stripped_args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        "triu_indices_from", flop_cost=cost, subscripts=None, shapes=(), dtypes=()
+    ):
+        pass
+    return result
 
 
-attach_docstring(triu_indices_from, _np.triu_indices_from, "free", "0 FLOPs")
+attach_docstring(
+    triu_indices_from,
+    _np.triu_indices_from,
+    "counted_custom",
+    "numel(output) FLOPs",
+)
 
 
 def typename(*args, **kwargs):
@@ -3375,12 +3481,30 @@ def unpackbits(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
 attach_docstring(unpackbits, _np.unpackbits, "counted_custom", "numel(output) FLOPs")
 
 
+@_counted_wrapper
 def unravel_index(*args, **kwargs):
-    """Convert flat indices to multi-dimensional index. Wraps ``numpy.unravel_index``. Cost: 0 FLOPs."""
-    return _np.unravel_index(*args, **kwargs)
+    """Convert flat indices to multi-dimensional index. Cost: numel of the returned index arrays."""
+    budget = require_budget()
+    stripped_args = _to_base_ndarray_tree(args)
+    result = _np.unravel_index(*stripped_args, **kwargs)
+    cost = max(sum(int(r.size) for r in result), 1)
+    with budget.deduct(
+        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
+        # random.permutation / _counted_classes. Passing the int64 index dtype
+        # would double every bill via the 2.0 int64 rate.
+        "unravel_index",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(),
+    ):
+        pass
+    return result
 
 
-attach_docstring(unravel_index, _np.unravel_index, "free", "0 FLOPs")
+attach_docstring(
+    unravel_index, _np.unravel_index, "counted_custom", "numel(output) FLOPs"
+)
 
 
 if hasattr(_np, "unstack"):
