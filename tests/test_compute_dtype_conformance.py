@@ -41,6 +41,14 @@ COND = np.array([True, False] * 4)
 V3 = V[:3]  # length-3 (cross-product domain)
 V4 = V[:4]  # matches M's contracted dimension
 SHIFT = (V01 % 2).astype(np.int32) + 1  # 1s and 2s: safe int shift amounts
+
+# float64 fixtures for the dtype-resolving gather/assembly ops (choose/block/
+# bmat). They read/assemble from these arrays, so a float64 probe drives the
+# result-dtype floor to 2.0 -- a passing billed rate proves they resolve the
+# promoted operand dtype, not the neutral 1.0 they billed before set_dtypes().
+CHOOSE_IDX = np.array([0, 1, 0, 1, 1, 0, 1, 0], dtype=np.intp)  # 8 gather indices
+F64_8 = np.arange(1, 9, dtype=np.float64)  # float64 len-8
+BLK64 = F64_8.reshape(2, 4)  # 2x4 float64 block
 XF = V.astype(np.float32)  # generic real-domain float32 probe
 Q01 = XF / 10.0  # 0.1..0.8: valid probability domain (ppf)
 
@@ -304,8 +312,8 @@ PROBES.update(
 # array being read from or written to (NOT the index/condition operand), so
 # billing scales with that array's own dtype. The mutators copy V/M first --
 # each lambda makes its own fresh copy on every call, so no cross-probe
-# state leaks. (choose is NOT probed here: its own deduct() declares
-# dtypes=() -- see SKIPPED.)
+# state leaks. (choose bills its promoted result dtype via set_dtypes -- see
+# the assembly/gather-resolving block just below.)
 # ---------------------------------------------------------------------------
 PROBES.update(
     {
@@ -328,6 +336,22 @@ PROBES.update(
         # declares dtypes=(self.dtype,) -- the array being gathered from, not
         # the fancy-index operand -- same convention as take/compress above.
         "getitem": lambda: fnp.asarray(V)[fnp.asarray(V01)],
+    }
+)
+
+# ---------------------------------------------------------------------------
+# choose / block / bmat -- deduct_after ops that declare their billed dtype
+# from the assembled result via set_dtypes((result.dtype,)). result.dtype is
+# numpy's promotion of the operands (np.result_type of the choices / blocks),
+# so they bill the widest operand's rate, matching take's dtype-awareness.
+# Probed with float64 operands (rate floor 2.0) so a passing rate proves the
+# promotion is billed, not the neutral 1.0 they discounted to before the fix.
+# ---------------------------------------------------------------------------
+PROBES.update(
+    {
+        "choose": lambda: fnp.choose(CHOOSE_IDX, [F64_8, F64_8 * 2]),
+        "block": lambda: fnp.block([[BLK64, BLK64]]),
+        "bmat": lambda: fnp.bmat([[BLK64, BLK64]]),
     }
 )
 
@@ -982,36 +1006,6 @@ SKIPPED["einsum_path"] = (
     "output'); verified 0 FLOPs / resolved_dtype=None -- a planning "
     "utility, not an arithmetic op this sweep targets."
 )
-# NOT a verified-safe design like where/einsum_path above: choose's own
-# deduct() passes dtypes=() (resolved_dtype=None, verified), so it bills
-# rate 1.0 regardless of the `choices` arrays' actual dtype -- unlike its
-# gather-tier sibling `take` (dtype-aware via the array it reads from), a
-# choose(idx, choices) with float64/complex choices bills the same as int32
-# ones. This is a known formula gap surfaced by the Task 2 weight flip
-# (0.0 -> 4.0 made it a charged op for the first time); fixing the dtypes=
-# declaration is a wrapper-formula change outside that task's scope
-# (weight/label flips only) -- flagged here, not silently accepted.
-SKIPPED["choose"] = (
-    "bills dtype-neutrally: its own deduct() passes dtypes=() (verified, "
-    "resolved_dtype=None), so rate is always 1.0 regardless of the "
-    "`choices` arrays' dtype -- a known gap (see comment above), not a "
-    "verified-safe design; out of scope for a weight/label-only task."
-)
-# block/bmat: the same dtypes=() gap as choose above, surfaced by the Task 3
-# weight flip (0.0 -> 1.0 made them charged for the first time). Both
-# declare dtypes=() in their own deduct_after() (verified, resolved_dtype=
-# None), so they bill rate 1.0 regardless of the assembled blocks' actual
-# dtype -- a float64 nested-block call would still bill at the int32 rate.
-# A wrapper-formula change, out of scope for a weight/label-only task.
-for _name in ("block", "bmat"):
-    SKIPPED[_name] = (
-        "bills dtype-neutrally: its own deduct_after() passes dtypes=() "
-        "(verified, resolved_dtype=None), so rate is always 1.0 regardless "
-        "of the assembled blocks' actual dtype -- a known gap (see comment "
-        "above, same shape as choose), not a verified-safe design; out of "
-        "scope for a weight/label-only task."
-    )
-
 # --- blacklisted category, unreachable: raises AttributeError on access
 # (verified individually via flopscope.numpy.__getattr__'s "does not
 # provide" guard) -- never reaches deduct().
