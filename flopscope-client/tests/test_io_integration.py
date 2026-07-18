@@ -118,3 +118,116 @@ def test_load_numpy_authored_file(tmp_path):
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "authored.npz"))
         assert out["W"].tolist() == [5.0, 6.0, 7.0]
+
+
+# ---------------------------------------------------------------------------
+# save/savez/savez_compressed billing round-trip (budget-bypass fix).
+#
+# Before the fix, `save`/`savez`/`savez_compressed` were fully local: `_as_triple`
+# fetched a RemoteArray's bytes via the existing FREE `_fetch_data` egress and
+# wrote the .npy/.npz file with the stdlib codec, never dispatching a request
+# the server could bill. A participant could compute an expensive lookup
+# table server-side, then `we.save` it to disk for 0 FLOPs. `save`/`savez`/
+# `savez_compressed` now round-trip to the server FIRST (handle refs only, no
+# array data) so the server -- sole owner of the budget -- deducts the same
+# 4*numel egress cost the in-process reference (`flops.save`) always charged.
+# ---------------------------------------------------------------------------
+
+
+def test_save_bills_egress_on_server(tmp_path):
+    """Exact repro: saving a 1000-element float32 RemoteArray now bills
+    4*1000 = 4000 FLOPs (dtype rate 1.0 keeps the arithmetic exact) -- was 0
+    before the fix."""
+    import flopscope as we
+
+    values = [float(i) for i in range(1000)]
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array(values, dtype="float32")
+        we.save(str(tmp_path / "x.npy"), a)
+    assert _flops_used(budget) == 4000
+
+    # Round-trip result is still correct: the local file write is unaffected.
+    with we.BudgetContext(flop_budget=1_000_000):
+        assert we.load(str(tmp_path / "x.npy")).tolist() == values
+
+
+def test_savez_bills_sum_of_egress_on_server(tmp_path):
+    """savez bills 4*(n1+n2) -- the sum across every array in the call, not
+    just one -- and the __meta__ block is excluded from billing."""
+    import flopscope as we
+
+    a_vals = [float(i) for i in range(300)]
+    b_vals = [float(i) for i in range(200)]
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array(a_vals, dtype="float32")
+        b = we.array(b_vals, dtype="float32")
+        we.savez(str(tmp_path / "wz.npz"), a=a, b=b, __meta__={"k": 1})
+    assert _flops_used(budget) == 4 * (300 + 200)
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        out = we.load(str(tmp_path / "wz.npz"))
+        assert out["a"].tolist() == a_vals
+        assert out["b"].tolist() == b_vals
+        assert out["__meta__"] == {"k": 1}
+
+
+def test_savez_compressed_bills_sum_of_egress_on_server(tmp_path):
+    """savez_compressed shares savez's exact billing formula."""
+    import flopscope as we
+
+    a_vals = [float(i) for i in range(300)]
+    b_vals = [float(i) for i in range(200)]
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array(a_vals, dtype="float32")
+        b = we.array(b_vals, dtype="float32")
+        we.savez_compressed(str(tmp_path / "wzc.npz"), a=a, b=b)
+    assert _flops_used(budget) == 4 * (300 + 200)
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        out = we.load(str(tmp_path / "wzc.npz"))
+        assert out["a"].tolist() == a_vals
+        assert out["b"].tolist() == b_vals
+
+
+def test_load_still_free_after_save_billing_fix(tmp_path):
+    """load stays 0 FLOPs -- the fix only touches save/savez/savez_compressed."""
+    import flopscope as we
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        a = we.array([1.0] * 50, dtype="float32")
+        we.save(str(tmp_path / "f.npy"), a)
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        we.load(str(tmp_path / "f.npy"))
+    assert _flops_used(budget) == 0
+
+
+def test_save_plain_value_bills_via_free_ingest_then_charges(tmp_path):
+    """A plain Python list passed straight to save() (not wrapped in
+    we.array() first) has no server handle yet. `_bill_save_on_server`'s
+    non-RemoteArray branch ingests it via the existing free `create_from_data`
+    path to get one, then bills exactly like every other save shape. Plain
+    values always ingest as float64 (see `_as_triple`), so the bill is
+    4*numel*dtype_rate(float64) = 4*numel*2, not 4*numel."""
+    import flopscope as we
+
+    values = [float(i) for i in range(100)]
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        we.save(str(tmp_path / "plain.npy"), values)
+    assert _flops_used(budget) == 4 * 100 * 2
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        assert we.load(str(tmp_path / "plain.npy")).tolist() == values
+
+
+def test_save_insufficient_budget_raises_and_writes_nothing(tmp_path):
+    """Server-owned counting closes the bypass end-to-end: a budget too small
+    to afford the egress raises BEFORE any local file is written, instead of
+    silently succeeding for free."""
+    import flopscope as we
+
+    target = tmp_path / "denied.npy"
+    with we.BudgetContext(flop_budget=100):
+        a = we.array([float(i) for i in range(1000)], dtype="float32")
+        with pytest.raises(we.BudgetExhaustedError):
+            we.save(str(target), a)
+    assert not target.exists()
