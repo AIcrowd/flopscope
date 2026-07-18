@@ -2998,12 +2998,18 @@ def require(*args: Any, **kwargs: Any) -> FlopscopeArray:
     a = args[0] if args else kwargs.get("a")
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
+    # numpy.require(a, dtype=...) casts/materializes at the REQUESTED dtype,
+    # so bill that width when given (mirrors full_like), else the input's.
+    # numpy signature: require(a, dtype=None, requirements=None, *, like=None)
+    # -- dtype is the second positional or the ``dtype=`` kwarg.
+    _dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
+    _billing_dtype = _np.dtype(_dtype) if _dtype is not None else a_arr.dtype
     with budget.deduct(
         "require",
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(a_arr.dtype,),
+        dtypes=(_billing_dtype,),
     ):
         result = _call_numpy(_np.require, *args, **kwargs)
     return result  # type: ignore[return-value]

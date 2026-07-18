@@ -269,3 +269,14 @@ def test_conditional_view_copies_bill_numel():
     assert billed(lambda: fnp.reshape(fnp.asarray(a), (20, 30))) == 600
     assert billed(lambda: fnp.ravel(fnp.asarray(a.reshape(20, 30)))) == 600
     assert billed(lambda: fnp.require(fnp.asarray(a), requirements=["C"])) == 600
+    # require with an explicit dtype= casts/materializes at the REQUESTED
+    # dtype (mirrors full_like's resolution): int32 input (rate 1.0)
+    # requested as float64 resolves rate 2.0 -- 1000 x 2.0(f64) x 1.0 = 2000,
+    # not the input width's 1000.
+    b = np.arange(1000, dtype=np.int32)
+    assert (
+        billed(
+            lambda: fnp.require(fnp.asarray(b), dtype=np.float64, requirements=["C"])
+        )
+        == 2000
+    )
