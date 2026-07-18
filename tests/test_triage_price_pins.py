@@ -13,6 +13,7 @@ calls ``load_weights()`` itself, so every assertion here reads as
 
 import array
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -490,31 +491,42 @@ def test_index_generators_bill_their_outputs():
     )
     # np.triu as mask_func: plain-numpy callable, NOT billed -> isolates mask_indices' own 2k
     assert billed(lambda: fnp.mask_indices(8, np.triu)) == 2 * 36
-    # fnp.triu as mask_func: see test_mask_indices_fnp_mask_func_hits_preexisting_nonzero_bug
-    # below -- it does NOT reach a `> 2*36` bill (a separate, pre-existing crash).
+    # fnp.triu as mask_func: see test_mask_indices_fnp_mask_func_bills_on_top below.
     assert billed(lambda: fnp.broadcast_shapes((4, 6), (6,))) == 3
 
 
-def test_mask_indices_fnp_mask_func_hits_preexisting_nonzero_bug():
-    """An fnp-wrapped mask_func (e.g. fnp.triu) does NOT reach a `> 2*k`
-    combined bill -- it raises instead. The ledger's IMPLEMENTATION CAVEAT
-    ("confirm the mask_func callable is restricted or its own fnp ops bill
-    separately ... flag before committing (do not fix here)") anticipated an
-    fnp callable "billing separately"; this pins the ACTUAL observed
-    behavior instead, which is worse: numpy's own ``mask_indices`` body ends
-    with a bare top-level ``nonzero(a != 0)`` call, and ``a`` (mask_func's
-    FlopscopeArray return value, auto-wrapped by ``wrap_module_returns``)
-    hits it. ``nonzero`` is NOT in ``FlopscopeArray._get_array_function_
-    dispatch``'s map (unlike the ``.nonzero()`` METHOD, which IS overridden,
-    and unlike ``fnp.nonzero`` itself, which exists) -- so this always
-    raises, independent of Task 8's changes here (reproduced against the
-    pre-Task-8 HEAD, commit c76ec237f, via `git stash`). Flagged per the
-    ledger instruction, not fixed -- out of this task's "index generators
-    pricing" scope; the underlying gap is in flopscope._ndarray's NEP-18
-    dispatch map, not in mask_indices' own cost formula.
+def test_mask_indices_fnp_mask_func_bills_on_top():
+    """An fnp-wrapped mask_func (e.g. fnp.triu) now bills its own cost on top
+    of mask_indices' own 2*k, per this op's docstring -- it no longer raises.
+
+    numpy's ``mask_indices`` body runs ``a = mask_func(m, k)`` (m = an (n,n)
+    int matrix) then ``nonzero(a != 0)``. Previously an fnp mask_func returned
+    a FlopscopeArray that leaked into that bare top-level ``nonzero`` and
+    tripped the wrapper-depth guard. The wrapper now strips mask_func's result
+    to a base ndarray, so numpy's own ``nonzero`` runs on a plain array while
+    the fnp mask_func still bills its own cost.
+
+    n=8, triu at offset 0 -> k = 8*9/2 = 36 selected pairs:
+      - mask_indices' own cost: 2*k = 72 (dtype-neutral index bookkeeping)
+      - fnp.triu on numpy's internal ``ones((8,8), int)`` (int64): kept upper
+        triangle = 36 elements at the int64 rate 2.0 = 72
+      total = 72 + 72 = 144.
     """
-    with pytest.raises(RuntimeError, match="nonzero"):
-        billed(lambda: fnp.mask_indices(8, fnp.triu))
+    k = 8 * 9 // 2  # 36
+    expected = 2 * k + k * 2  # mask_indices 2k + triu (36 kept * int64 rate 2)
+    assert expected == 144
+    assert billed(lambda: fnp.mask_indices(8, fnp.triu)) == expected
+
+
+def test_np_nonzero_top_level_routes_to_fnp():
+    """Top-level ``np.nonzero(FlopscopeArray)`` routes through fnp.nonzero
+    (billed numel(input)) instead of raising numpy's NEP-18 "no implementation
+    found" TypeError -- matching its set/unique dispatch siblings and the
+    already-overridden ``.nonzero()`` method."""
+    a = np.array([0, 1, 0, 2, 0, 3, 0], dtype=np.int32)  # built outside the thunk
+    with warnings.catch_warnings():  # auto-route emits a UserWarning by design
+        warnings.simplefilter("ignore")
+        assert billed(lambda: np.nonzero(fnp.asarray(a))) == a.size  # nonzero = numel(input)
 
 
 def test_tril_indices_from_and_triu_indices_from_bill_their_outputs():

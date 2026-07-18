@@ -2801,8 +2801,32 @@ def mask_indices(*args, **kwargs):
     matrix: a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an
     fnp callable (e.g. ``fnp.triu``) bills its own cost separately through
     its own wrapper, on top of this op's own ``2*k``.
+
+    numpy's ``mask_indices`` body ends with a bare top-level ``nonzero(a != 0)``
+    on ``a = mask_func(m, k)``. An fnp ``mask_func`` returns a FlopscopeArray,
+    which would leak into that internal ``nonzero`` and trip the wrapper-depth
+    guard. We coerce the mask_func's return value to a base ndarray before
+    numpy continues -- the fnp mask_func still runs and bills its own cost; only
+    its result is stripped so numpy's own ``nonzero`` sees a plain array.
     """
     budget = require_budget()
+
+    def _strip_mask_func(fn: Any) -> Any:
+        if not callable(fn):
+            return fn
+
+        def _wrapped(*a: Any, **kw: Any) -> Any:
+            return _to_base_ndarray(fn(*a, **kw))
+
+        return _wrapped
+
+    # numpy signature: mask_indices(n, mask_func, k=0) -- mask_func is the 2nd
+    # positional arg or the `mask_func=` keyword.
+    args = list(args)
+    if len(args) >= 2:
+        args[1] = _strip_mask_func(args[1])
+    elif "mask_func" in kwargs:
+        kwargs["mask_func"] = _strip_mask_func(kwargs["mask_func"])
     result = _np.mask_indices(*args, **kwargs)
     cost = max(sum(int(r.size) for r in result), 1)
     with budget.deduct(

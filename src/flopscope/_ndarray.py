@@ -387,6 +387,15 @@ class FlopscopeArray(_np.ndarray):
         ):
             _bind(name, name)
 
+        # ----- Counts / search -----
+        # nonzero: fnp.nonzero exists and is billed, and the ``.nonzero()``
+        # METHOD is already overridden below -- but top-level
+        # ``np.nonzero(FlopscopeArray)`` was unmapped, so it raised TypeError
+        # (NEP-18 "no implementation found") instead of routing like its
+        # set/unique siblings above. Bind it for parity.
+        for name in ("nonzero",):
+            _bind(name, name)
+
         # ----- Free / structural (asarray excluded) -----
         for name in (
             "where",
