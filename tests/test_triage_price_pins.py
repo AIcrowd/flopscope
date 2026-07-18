@@ -13,7 +13,6 @@ calls ``load_weights()`` itself, so every assertion here reads as
 
 import array
 import math
-import warnings
 
 import numpy as np
 import pytest
@@ -508,13 +507,15 @@ def test_mask_indices_fnp_mask_func_bills_on_top():
 
     n=8, triu at offset 0 -> k = 8*9/2 = 36 selected pairs:
       - mask_indices' own cost: 2*k = 72 (dtype-neutral index bookkeeping)
-      - fnp.triu on numpy's internal ``ones((8,8), int)`` (int64): kept upper
-        triangle = 36 elements at the int64 rate 2.0 = 72
-      total = 72 + 72 = 144.
+      - fnp.triu on numpy's internal ``ones((n,n), int)``: kept upper triangle
+        = 36 elements at that int dtype's rate (int64 -> 2.0 on Linux/mac,
+        int32 -> 1.0 on Windows)
+      total = 72 + (36 * int_rate)  ->  144 where default int is int64.
     """
     k = 8 * 9 // 2  # 36
-    expected = 2 * k + k * 2  # mask_indices 2k + triu (36 kept * int64 rate 2)
-    assert expected == 144
+    # numpy builds ones((n,n), int); triu bills 36 kept elements at that rate.
+    int_rate = 2 if np.dtype(int).itemsize == 8 else 1  # int64 -> 2.0, int32 -> 1.0
+    expected = 2 * k + k * int_rate  # mask_indices 2k + triu's own kept-triangle
     assert billed(lambda: fnp.mask_indices(8, fnp.triu)) == expected
 
 
@@ -522,11 +523,12 @@ def test_np_nonzero_top_level_routes_to_fnp():
     """Top-level ``np.nonzero(FlopscopeArray)`` routes through fnp.nonzero
     (billed numel(input)) instead of raising numpy's NEP-18 "no implementation
     found" TypeError -- matching its set/unique dispatch siblings and the
-    already-overridden ``.nonzero()`` method."""
+    already-overridden ``.nonzero()`` method. The auto-route emits the standard
+    UserWarning (nudging callers to fnp.nonzero), which we positively assert."""
     a = np.array([0, 1, 0, 2, 0, 3, 0], dtype=np.int32)  # built outside the thunk
-    with warnings.catch_warnings():  # auto-route emits a UserWarning by design
-        warnings.simplefilter("ignore")
-        assert billed(lambda: np.nonzero(fnp.asarray(a))) == a.size  # nonzero = numel(input)
+    with pytest.warns(UserWarning, match="nonzero"):
+        used = billed(lambda: np.nonzero(fnp.asarray(a)))
+    assert used == a.size  # nonzero = numel(input)
 
 
 def test_tril_indices_from_and_triu_indices_from_bill_their_outputs():
