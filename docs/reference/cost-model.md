@@ -48,10 +48,12 @@ read off and audited on its own:
   policy — a textbook decomposition fixed per op, and computed per call for the
   contraction family from the same accumulation that produces `flop_cost`.
 - **`weight`** — the hardware tier. A separate per-element factor for how much more one
-  element costs on real hardware: a plain add is `1`, while a transcendental element
-  (`sin`, `exp`, …) does many times more floating-point work. Rather than bill each op its
-  exact measured ratio — noisy, machine-specific, and hard to audit — we group operations
-  into a small fixed ladder of tiers (`{0, 1, 8, 16}`); that grouping is a deliberate
+  element costs on real hardware: a plain sequential add or write is `1`, a
+  non-sequential memory access (a sort's comparison order, a computed-index gather, a
+  random-reorder draw) is `4`, and a transcendental element (`sin`, `exp`, …) does many
+  times more floating-point work at `16`. Rather than bill each op its exact measured
+  ratio — noisy, machine-specific, and hard to audit — we group operations into a small
+  fixed ladder of tiers (`{0, 1, 4, 16}`); that grouping is a deliberate
   competition-design choice.
 
 For a real 32-bit workload `dtype_rate` and `complex_factor` are both `1`, so the bill is
@@ -103,93 +105,133 @@ A subset of moderate-cost binary ops (floor_divide, mod/remainder, fmod,
 arctan2, hypot, logaddexp, logaddexp2) is grouped into the same tier
 (weight 16.0).
 
-### Half-tier transcendentals (weight 8.0)
+### Access tier (weight 4.0)
 
-Ops whose per-element work is a single cosine evaluation amortized over a
-cheap window formula (`hamming`, `hanning`) are billed at weight 8.0.
+Operations whose per-element cost is dominated by a **non-sequential memory access** —
+comparison-sort order, binary search, a computed-index gather, or a random-reorder draw
+— are billed at weight 4.0. `flop_cost` stays the plain algorithmic count (comparisons,
+index dereferences, or draws); the 4× comes entirely from the weight, the same
+one-factor-does-one-job split the transcendental tier uses.
 
-### The unifying philosophy — compute, not logistics
+This tier covers four families, each detailed in its own section below:
 
-> **flopscope meters _computation on values_, not _data logistics_.**
-> An operation is **charged** for the floating-point arithmetic and value-comparisons
-> it performs to produce its output.  It is **free** (weight 0) if it only relocates,
-> replicates, selects-by-a-given-selector, or constant-fills values that already exist.
+- **Sort / search** — `sort`, `argsort`, `lexsort`, `partition`, `argpartition`,
+  `searchsorted` (see [Sort and select](#sort-and-select)).
+- **Set / histogram** — `unique` and its NumPy 2.x siblings, `union1d`, `intersect1d`,
+  `setdiff1d`, `setxor1d`, `histogram`, `histogram2d`, `histogramdd`,
+  `histogram_bin_edges`, `bincount`, `digitize` (see [Set ops](#set-ops) and [Interp and
+  histogram](#interp-and-histogram)).
+- **Gather** — `take`, `take_along_axis`, `choose`: a computed-index read is a
+  non-sequential memory access, unlike a materializing copy's sequential write (see
+  [Copy and gather](#copy-and-gather)).
+- **Random reorder** — `random.permutation`, `random.shuffle`, `random.sample`, and the
+  `Generator`/`RandomState` `.choice` / `.permutation` / `.permuted` / `.shuffle`
+  methods (see [Random](#random-module-level-generator-randomstate)).
 
-**The decision procedure** — apply these three steps in order to any op:
+A materializing copy or write (`concatenate`, `ones`, a scatter write) stays at weight
+1.0 — it touches memory sequentially, one write per element. The access tier prices the
+*pattern* of access, not merely the presence of a write.
 
-1. **View / metadata only** (returns a view, inspects shape/dtype, no new buffer)?
-   → **Free (0).**
-2. **Does it produce output values by doing floating-point arithmetic, *or* by
+### The unifying philosophy — every byte written is metered
+
+> **flopscope meters both computation on values and the memory traffic that produces
+> them.** A **view** is free — it creates no new buffer and touches no element. Any op
+> that **writes a new buffer** is charged at least `1` per element written, whether the
+> values it writes are computed (`sin(x)`), copied (`concatenate`), replicated
+> (`tile`), or a repeated constant (`ones`). Ops whose access pattern is
+> **non-sequential** — sorting, a computed-index gather, a random-reorder draw — are
+> charged more per element (`4`) than a straight sequential write (`1`), because that
+> is where real hardware actually spends more per element: cache-friendly sequential
+> writes are cheap, branchy/random-order accesses are not.
+
+**The decision procedure** — apply these steps in order to any op:
+
+1. **View / metadata only** (returns a view or read-only reinterpretation of existing
+   memory, inspects shape/dtype, allocates no new buffer)? → **Free (0).** Reshape,
+   ravel, and `copy` do **not** qualify even when NumPy happens to return a view —
+   flopscope bills them as if they always materialize, so the price cannot depend on a
+   layout coincidence (see [Views and metadata](#views-and-metadata-weight-00)).
+2. **Does it write a new buffer sequentially** — a materializing copy (`concatenate`,
+   `tile`, `roll`), a constant fill that isn't the zero-page default (`ones`, `full`,
+   `eye`'s diagonal), a scatter write at a *given* index (`put`, `putmask`,
+   `fill_diagonal`), or output-shaped selection (`select`, `where(cond, x, y)`,
+   `compress`, `extract`)? → **Charged at weight 1.0.** `flop_cost` is the count of
+   elements actually written (not the whole array when only part of it changes, e.g.
+   `eye`'s off-diagonal zeros are free).
+3. **Does it read via a *non-sequential* access pattern** — a computed-index gather
+   (`take`, `take_along_axis`, `choose`), a comparison-order derivation (`sort`,
+   `unique`, `searchsorted`), or a random-reorder draw (`shuffle`, `permutation`,
+   `choice`)? → **Charged at weight 4.0** (see [Access tier](#access-tier-weight-40)).
+4. **Does it produce output values by doing floating-point arithmetic, *or* by
    comparing element values?** → **Charged.** `flop_cost` = standard-algorithm op
-   count; `weight` = hardware tier.  This includes elementwise math, transcendentals,
+   count; `weight` = hardware tier. This includes elementwise math, transcendentals,
    reductions, contraction (matmul/einsum), FFT, polynomial, random generation, and
-   ops that *derive* a result by *testing values*: `sort`/`argsort`/`partition`/
-   `searchsorted`/`unique*`, `nonzero`/`argwhere`/`flatnonzero`/`count_nonzero`/
-   `where(1-arg)`, `clip`/`minimum`/`maximum`, set-ops, and *computed creators*
-   (`arange`/`linspace`/`geomspace`/`logspace`/`vander`).
-3. **Otherwise** it only relocates / replicates / selects-by-a-given-selector /
-   constant-fills existing values → **Free (0).**  This covers copy/concat/roll/
-   repeat/tile, gather/scatter & mask-select with a *given* selector, and constant init.
+   ops that *derive* a result by *testing values*: `nonzero`/`argwhere`/
+   `flatnonzero`/`count_nonzero`/`where(1-arg)`, `clip`/`minimum`/`maximum`, and
+   *computed creators* (`arange`/`linspace`/`geomspace`/`logspace`/`vander`).
+5. **Otherwise** — allocates a new buffer but writes nothing into it (`zeros`,
+   `empty`) → **Free (0).** The OS zero-page (or uninitialized allocation) costs
+   nothing to hand out; a participant only pays once real values land in it.
 
-**Key invariant:** any predicate or index feeding a step-3 op was itself produced by a
-step-2 op and charged there.  A free-tier op may **never bundle** value-arithmetic or
-value-comparison into its own cost.
+**Key invariant:** any predicate or index feeding a step-2/3 op was itself produced by
+an earlier charged step. A free-tier op may **never bundle** value-arithmetic,
+value-comparison, or a non-zero write into its own cost.
 
-After removing the gather tier, the only active weights are `{0, 1, 8, 16}`.
-Data-movement, selection-by-given-selector, and constant-init all carry weight 0.
-The only residual `4.0` entries are the submission-blocked callback ops
-(`piecewise`/`apply_along_axis`/`apply_over_axes`); they raise `RemoteCallbackError`
-on the grading backend and are left untouched.
+The active weights are `{0, 1, 4, 16}`. Weight 0 is now a narrow band — genuine views,
+metadata, and all-zero/uninitialized allocation. Almost everything that writes a new
+buffer bills at least weight 1.0; the historical "free data movement" framing (copy,
+gather, scatter, and select-with-a-given-selector all billed 0) has been replaced by
+this write-metered model, since a participant who can move arbitrary amounts of data
+for free can launder real compute through a materializing copy chain.
 
 ### Views and metadata (weight 0.0)
 
-Weight 0 now covers four categories:
+Weight 0 is now a narrow band — a new buffer is never allocated, or it is allocated
+but nothing is written into it:
 
 1. **Views / metadata** — operations that return a view of existing memory or inspect
-   metadata without touching element values: `reshape`, `ravel`, `flatten`,
-   `transpose`, `diagonal` (as a view), `squeeze`, `broadcast_to`, `astype` (no copy),
-   `fftshift`/`ifftshift`, `linalg.diagonal`, `linalg.matrix_transpose`, and all
-   other shape/stride/dtype introspection ops.
-2. **Copy / materialize** — data-movement ops that copy or rearrange existing values
-   into a new buffer: `concatenate`, `stack`, `hstack`, `vstack`, `column_stack`,
-   `dstack`, `tile`, `repeat`, `roll`, `tril`, `triu`, `copy`, and kin.
-3. **Gather / scatter & mask-select with a given selector** — ops whose mask or
-   index is an *input*: `take`, `take_along_axis`, `put`, `put_along_axis`, `choose`,
-   `where(cond, x, y)` (3-arg), `select`, `compress(mask, a)`, `extract(mask, a)`,
-   `place`, `putmask`.
-4. **Constant init** — ops that fill a new array with a fixed value (no per-element
-   arithmetic): `zeros`, `ones`, `empty`, `full`, `eye`, `identity`, `tri`,
-   `zeros_like`, `ones_like`, `empty_like`, `full_like`, `meshgrid`.
+   metadata without touching element values: `flatten`, `transpose`, `swapaxes`,
+   `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
+   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `astype` (both directions,
+   including value-changing casts — see below), `asarray`, `asfortranarray`,
+   `ascontiguousarray`, `view`, `real`/`imag` (component extraction), `split`,
+   `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal` (the 2-D view path — see
+   [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
+   1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
+   `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
+   (`ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`,
+   `ctypes`, `strides`, `T`, `isscalar`, `isfortran`).
+   **`reshape`, `ravel`, `copy`, and `require` do *not* belong here** — flopscope bills
+   them `numel(input)` at weight 1.0 unconditionally, even on the (common) call
+   pattern where NumPy itself returns a view. Billing the cautious, always-charged
+   price avoids a participant relying on a layout coincidence (contiguity, stride
+   pattern) to get a real copy for free.
+2. **All-zero / uninitialized allocation** — a new buffer whose contents are the
+   platform zero-page default, so nothing is actually written: `zeros`, `zeros_like`,
+   `empty`, `empty_like`. Any *other* constant fill (`ones`, `full`, `eye`'s diagonal,
+   `identity`, `tri`) writes real, non-zero values and is charged — see
+   [Copy and gather](#copy-and-gather).
 
-**Refinement A — selection** (resolves `where`/`compress`/`extract`/`choose`/`select`):
+**Refinement — representation vs. value change** (resolves `astype`/`asarray`):
 
-> **Selector given ⇒ free; selector derived by testing values ⇒ charged.**
+> **Changing how a value is stored is free; changing what a new buffer contains is
+> charged**, even when the new content is a repeated constant.
 
-Free: `where(cond, x, y)`, `choose`, `select`, `compress(mask, a)`, `extract(mask, a)`,
-`take`, `take_along_axis`.  The mask/index is an **input**; any predicate that built it
-(e.g. `a > 0.5` → `greater`) is a separate, separately-charged op.
+`astype` and `asarray` conversions bill `0` in both directions: narrowing, widening,
+float→int truncation, and bool coercion all cost nothing — precision is the
+participant's own dial, not a billed event (see [Which dtype prices a
+call](#which-dtype-prices-a-call)). This is the one deliberate exception to "every
+write is metered": the *number* of elements is unchanged, only their stored
+representation is, so there is no new value-per-element decision being priced.
+Contrast this with `ones`/`full`, which also touch every element but write an actual
+value into memory — those are charged (see [Views and metadata](#views-and-metadata-weight-00)
+category 2 above and [Copy and gather](#copy-and-gather)).
 
-Charged: `where(cond)` (1-arg, ≡ `nonzero`), `nonzero`, `argwhere`, `flatnonzero`,
-`count_nonzero`.  These **derive** the selector by testing values (`!= 0`), so the test
-is their compute — they are charged `numel(input)` at weight 1.0.
-
-`astype` is a representation change, not arithmetic: narrowing, widening, float→int
-truncation, and bool coercion all bill `0` in both directions — precision is the
-participant's own dial, not a billed event.  The method `a.nonzero()` is charged
-identically to `fnp.nonzero(a)`.
-
-**Refinement B — creation** (resolves init vs computed generators):
-
-> **Constant-fill / replicate ⇒ free; compute-a-value-per-element ⇒ charged.**
-
-Free: `zeros`, `ones`, `empty`, `full`, `eye`, `identity`, `tri`, `*_like`, and
-`meshgrid` (pure replication of coordinate vectors — no per-element arithmetic).
-
-Charged: `arange`, `linspace` (`2×numel`), `geomspace`, `logspace` (`16×numel`),
-`vander` (`N(N-2)`).  If these were free a participant could synthesize an affine/
-log-spaced ramp for free while the equivalent explicit `x*step+start` is charged — the
-substitution arbitrage the non-exploitability section forbids.  Constant-fill has no
-such arithmetic equivalent, so it is free.
+The method `a.nonzero()` is charged identically to `fnp.nonzero(a)`; `nonzero`,
+`argwhere`, `flatnonzero`, `count_nonzero`, and `where` (1-arg) remain charged
+`numel(input)` at weight 1.0 — they derive their result by testing element values
+(`!= 0`), and that test is real compute regardless of how "small" the eventual output
+is (see [Copy and gather](#copy-and-gather) for the full selector-family accounting).
 
 ### Composite ops (weight 1.0 with heterogeneous flop_cost)
 
@@ -583,14 +625,14 @@ each backed by a CI-enforced test you can open and read:
 | Invariant | What it guarantees | Enforced by |
 |---|---|---|
 | **Faithful cost** | each `flop_cost` is the real standard-algorithm op count, with every shape/algorithm constant inside `flop_cost` | per-op evidence in [§Cost by family](#cost-by-family); `test_cost_constant_unification.py`, `test_cost_formula_vs_code.py` |
-| **Weight-tier policy** | every active weight ∈ `{0, 1, 8, 16}`; arithmetic ops are 0 or 1; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
+| **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0, 1, or 4; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
-| **Free-tier discipline** | only ops that perform no value arithmetic/comparison carry weight 0, with one deliberate exception — representation changes (`astype`, `asarray`) are free even though they may test or truncate values, because precision is the participant's own dial, not a billed event. Every other value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
-| **Memoization accepted** | free gather makes look-up-table reuse (precompute once with a charged op, then `take` for free) cheaper — this is deliberate: memoization is a legitimate optimization under a pure-compute metric | documented here; `test_data_movement_free_tier.py` |
+| **Free-tier discipline** | weight 0 is limited to views/metadata and untouched (zero-page or uninitialized) allocation; any op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1, with one deliberate exception: representation changes (`astype`, `asarray`) are free even though they may test or truncate values, because precision is the participant's own dial, not a billed event. Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
+| **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
 | **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
-| **End-to-end billing** | production billing is pinned per weight tier `{0,1,8,16}` (catches a silent weight regression) | `test_production_weight_billing.py` |
+| **End-to-end billing** | production billing is pinned per weight tier `{0,1,4,16}` (catches a silent weight regression); the retired `8.0` tier is documented as retired rather than silently dropped | `test_production_weight_billing.py` |
 
 An auditor can read this table top-to-bottom and, for each claim, open the named test
 to see exactly what guarantees it. The first two rows are the load-bearing ones: an exact
@@ -758,34 +800,44 @@ full FMA=2 cost. Source: `_pointwise.py` (op wrappers), `_einsum.py`
 | Op | flop_cost | basis | source |
 |---|---|---|---|
 | `arange` | `2 × numel(output)` | DERIVED: `start + i×step` per element = 1 mul + 1 add (FMA=2) | `_array_ops.py`; numpy arraytypes.c.src |
-| `linspace` | `2 × numel(output)` (handles broadcast start/stop and `retstep=True`) | DERIVED: same affine model as arange | `_array_ops.py`; commit 790d19af + retstep fix |
+| `linspace` | `2 × numel(output)` (handles broadcast start/stop and `retstep=True`) | DERIVED: same affine model as arange | `_array_ops.py` |
 | `geomspace` | `numel(output)` (weight **16.0**) → billed `16 × numel(output)` | DERIVED: flop_cost = numel(output); transcendental weight 16.0 (log + exp path) | `_array_ops.py` |
 | `logspace` | `numel(output)` (weight **16.0**) → billed `16 × numel(output)` | DERIVED: same transcendental path as geomspace | `_array_ops.py` |
-| `zeros`, `ones`, `full`, `zeros_like`, `ones_like`, `full_like`, `eye`, `identity`, `empty`, `empty_like`, `tri` | 0 (allocation, no arithmetic) | DECLARED free: constant-fill / replicate (Refinement B) | `_array_ops.py` |
-| `meshgrid` | 0 (free) | DECLARED free: pure replication of coordinate vectors; no per-element arithmetic (Refinement B) | `_array_ops.py` |
+| `zeros`, `zeros_like`, `empty`, `empty_like` | 0 (allocation; the zero-page / uninitialized default — nothing is written) | DECLARED free: untouched allocation | `_array_ops.py` |
+| `ones`, `ones_like`, `full`, `full_like` | `numel(output)` | DECLARED: every cell is written a real, non-zero value | `_array_ops.py` |
+| `eye`, `identity` | diagonal length written (`max(0, min(N, M−k))` for `k≥0`, `max(0, min(N+k, M))` for `k<0`) | DECLARED: only the diagonal 1s are written; the off-diagonal zero background is free, same as `zeros` | `_array_ops.py` |
+| `tri` | `numel(output)` | DECLARED: bills the full output (unlike `eye`, the zero region above the diagonal is not billed separately as free) | `_array_ops.py` |
+| `meshgrid` | `numel(output)`, summed across the returned grids (dense default; `sparse=True`/`copy=False` are separate argument-conditional branches of the same formula) | DECLARED: replicates coordinate vectors into dense grids — a materializing copy, not arithmetic | `_array_ops.py` |
 
-Weight: **1.0** for `arange` and `linspace`; **16.0** for `geomspace` and
-`logspace` (transcendental path).  Source: `src/flopscope/_array_ops.py`.
+Weight: **1.0** for `arange`, `linspace`, `ones`/`ones_like`/`full`/`full_like`,
+`eye`/`identity`, `tri`, and `meshgrid`; **16.0** for `geomspace` and `logspace`
+(transcendental path); **0.0** for `zeros`/`zeros_like`/`empty`/`empty_like`.
+Source: `src/flopscope/_array_ops.py`.
 
 ---
 
 ### Sort and select
 
-**Family rule** (DECLARED):
+**Family rule** (DECLARED). Comparison-order derivation and binary search are
+**non-sequential access** — see [Access tier](#access-tier-weight-40) — so most of
+this family is billed at weight **4.0**; the two members that are not genuinely
+sort-based (`sort_complex` sorts one axis with a fixed comparator, `in1d`/`isin` keep
+their pre-existing weight) stay at weight **1.0**:
 
-| Op | flop_cost | basis |
-|---|---|---|
-| `sort`, `argsort` | `num_slices × n × ⌈log₂ n⌉` | DECLARED comparison sort (n = axis length) |
-| `unique`, `unique_counts`, `unique_inverse`, `unique_values`, `unique_all` | `n × ⌈log₂ n⌉` (axis=None); `num_slices × shape[axis] × ⌈log₂ shape[axis]⌉` (axis=k) | DECLARED sort-based; axis-aware per-slice |
-| `lexsort` | `k × n × ⌈log₂ n⌉` (k = number of keys, n = sequence length) | DECLARED |
-| `partition`, `argpartition` | `num_slices × n × len(kth)` | DECLARED quickselect O(n) expected |
-| `searchsorted` | `m × ⌈log₂ n⌉` (m = queries, n = sorted size) | DECLARED binary search |
-| `sort_complex` | `num_slices × n × ⌈log₂ n⌉`, `n = a.shape[-1]`, `num_slices = a.size // n` (sorts last axis; equals flat formula only for 1-D) | DECLARED |
-| `in1d`, `isin` | `(n + m) × ⌈log₂(n + m)⌉` (sort path); `max(sort_cost(n+m), 2nm)` when numpy's masked-loop path triggers (small integer ar2) | DECLARED algo-aware |
-| `intersect1d` | `sort_cost(n) + sort_cost(m) + sort_cost(n+m)` (default `assume_unique=False`); `sort_cost(n+m)` when `assume_unique=True` | DECLARED: numpy calls `unique()` on both inputs when `assume_unique` is falsy |
-| `setdiff1d`, `setxor1d`, `union1d` | `(n + m) × ⌈log₂(n + m)⌉` | DECLARED |
+| Op | flop_cost | weight | basis |
+|---|---|---|---|
+| `sort`, `argsort` | `num_slices × n × ⌈log₂ n⌉` | 4.0 | DECLARED comparison sort (n = axis length) |
+| `unique`, `unique_counts`, `unique_inverse`, `unique_values`, `unique_all` | `n × ⌈log₂ n⌉` (axis=None); `num_slices × shape[axis] × ⌈log₂ shape[axis]⌉` (axis=k) | 4.0 | DECLARED sort-based; axis-aware per-slice |
+| `lexsort` | `k × n × ⌈log₂ n⌉` (k = number of keys, n = sequence length) | 4.0 | DECLARED |
+| `partition`, `argpartition` | `num_slices × n × len(kth)` | 4.0 | DECLARED quickselect O(n) expected |
+| `searchsorted` | `m × ⌈log₂ n⌉` (m = queries, n = sorted size) | 4.0 | DECLARED binary search |
+| `intersect1d` | `sort_cost(n) + sort_cost(m) + sort_cost(n+m)` (default `assume_unique=False`); `sort_cost(n+m)` when `assume_unique=True` | 4.0 | DECLARED: numpy calls `unique()` on both inputs when `assume_unique` is falsy |
+| `setdiff1d`, `setxor1d`, `union1d` | `(n + m) × ⌈log₂(n + m)⌉` | 4.0 | DECLARED |
+| `sort_complex` | `num_slices × n × ⌈log₂ n⌉`, `n = a.shape[-1]`, `num_slices = a.size // n` (sorts last axis; equals flat formula only for 1-D) | 1.0 | DECLARED |
+| `in1d`, `isin` | `(n + m) × ⌈log₂(n + m)⌉` (sort path); `max(sort_cost(n+m), 2nm)` when numpy's masked-loop path triggers (small integer ar2) | 1.0 | DECLARED algo-aware |
 
-All sort/select ops use **weight 1.0**; comparison = 1 FLOP convention.
+None of the `flop_cost` formulas changed — only the weight moved for the rows marked
+`4.0`, from the same DECLARED comparison-sort / binary-search counts as before.
 
 **Complex dtypes**: comparisons are lexicographic (compare real parts, tie-break on
 imaginary), so the sort/select family bills factor 2.
@@ -933,9 +985,17 @@ default to float64, rate 2.0); complex dtypes are covered below.
 
 Weight tiers:
 
-- **weight 1.0** — uniform/integer/structural draws: `rand`, `random`,
-  `random_sample`, `ranf`, `sample`, `uniform`, `randint`, `integers`,
-  `choice`, `shuffle`, `permutation`, `multivariate_normal`.
+- **weight 1.0** — uniform/integer/structural draws that are not module-level
+  reorder ops: `rand`, `random`, `random_sample`, `ranf`, `uniform`, `randint`,
+  `integers`, module-level `random.choice`, `multivariate_normal`.
+- **weight 4.0** — reorder / resample ops, the same non-sequential [access
+  tier](#access-tier-weight-40) as sort and gather: module-level `random.sample`
+  (an alias of `random_sample`'s draw, priced independently — see [Sort and
+  select](#sort-and-select) for the sibling sort/set family), module-level
+  `random.permutation` and `random.shuffle`, and every `Generator`/`RandomState`
+  `.choice` / `.permutation` / `.permuted` / `.shuffle` method. A Fisher-Yates
+  reorder and a rejection-sampled choice both touch memory non-sequentially, the
+  same reason a sort does.
 - **weight 16.0** — transcendental samplers (every continuous/transformed
   distribution): `normal`, `standard_normal`, `randn`, `exponential`,
   `standard_exponential`, `poisson`, `binomial`, `geometric`,
@@ -945,21 +1005,24 @@ Weight tiers:
   `standard_t`, `triangular`, `vonmises`, `wald`, `weibull`, `zipf`, and all
   their Generator / RandomState counterparts.
 
-| Op / family | flop_cost | basis | source |
-|---|---|---|---|
-| `random.rand`, `random.random`, `random.random_sample`, `random.ranf`, `random.sample` | `numel(output)` | DECLARED: 1 FLOP per uniform draw | `_cost_formulas.py` |
-| `random.uniform` | `3 × numel(output)` | DERIVED: affine map `low + (high − low) × U` = 1 sub + 1 mul + 1 add per element (FMA=2, three ops) | `_cost_formulas.py` |
-| `random.randn`, `random.standard_normal`, `random.normal` | `numel(output)` (weight **16.0**) → billed `16 × numel` | DECLARED: flop_cost = numel(output); transcendental weight 16.0 from `default_weights.json` | `_cost_formulas.py` |
-| `random.randint`, `random.integers` | `numel(output)` | DECLARED | `_cost_formulas.py` |
-| `random.choice` (replace=True, p=None) | `numel(output)` | DECLARED | `_cost_formulas.py` |
-| `random.choice` (replace=True, p≠None) | `numel(output) + 3n + m×⌈log₂ n⌉` (n=population, m=size) | DERIVED: cumsum + normalize + searchsorted | `_cost_formulas.py` |
-| `random.choice` (replace=False, p=None) | `n` (O(n) shuffle-based sampling: conservative ceiling on tail-shuffle) | DECLARED | `_cost_formulas.py` |
-| `random.choice` (replace=False, p≠None) | `sort_cost(n) = n × ⌈log₂ n⌉` (data-dependent rejection loop with weights) | DECLARED | `_cost_formulas.py` |
-| `random.shuffle`, `random.permutation` | `numel(input)` | DECLARED: O(n) in-place shuffle | `_cost_formulas.py` |
-| `random.exponential` | `numel(output)` (weight **16.0**) → billed `16 × numel` | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
-| `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` (weight **16.0**) → billed `16 × numel` | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
-| `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
-| `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` (weight **16.0**) → `16 × numel` | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions | `_cost_formulas.py` |
+| Op / family | flop_cost | weight | basis | source |
+|---|---|---|---|---|
+| `random.rand`, `random.random`, `random.random_sample`, `random.ranf` | `numel(output)` | 1.0 | DECLARED: 1 FLOP per uniform draw | `_cost_formulas.py` |
+| `random.sample` | `numel(output)` | 4.0 | DECLARED: same draw as `random_sample`, priced at the reorder/resample tier instead of the plain-draw tier (accepted policy divergence) | `_cost_formulas.py` |
+| `random.uniform` | `3 × numel(output)` | 1.0 | DERIVED: affine map `low + (high − low) × U` = 1 sub + 1 mul + 1 add per element (FMA=2, three ops) | `_cost_formulas.py` |
+| `random.randn`, `random.standard_normal`, `random.normal` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 from `default_weights.json` | `_cost_formulas.py` |
+| `random.randint`, `random.integers` | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=True, p=None) | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=False, p=None) | `n` (Fisher-Yates, matches `permutation`) | 1.0 | DECLARED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=False, p≠None) | `sort_cost(n) = n × ⌈log₂ n⌉` (conservative floor for the data-dependent rejection loop) | 1.0 | DECLARED | `_cost_formulas.py` |
+| `Generator.choice`, `RandomState.choice` | same formula shape as module-level `random.choice` above (`Generator.choice` additionally adds `3n + m×⌈log₂ n⌉` — CDF build + binary search — when `p` is given and `replace=True`) | 4.0 | DECLARED/DERIVED | `_cost_formulas.py` |
+| `random.shuffle`, `random.permutation` (module-level) | `max(n, 1)`, `n = x.shape[0]` for array input or the int argument itself | 4.0 | DECLARED: in-place Fisher-Yates draws, dtype-neutral | `_cost_formulas.py` |
+| `Generator.permutation`, `Generator.shuffle`, `RandomState.permutation`, `RandomState.shuffle` | `max(shape[axis], 1)` (`axis` defaults to 0; `RandomState` has no `axis` kwarg) | 4.0 | DECLARED: Fisher-Yates draws | `_cost_formulas.py` |
+| `Generator.permuted` | cost from the input array's size along the permuted axis | 4.0 | DECLARED | `_cost_formulas.py` |
+| `random.exponential` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
+| `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
+| `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | 1.0 | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
+| `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` → `16 × numel` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions | `_cost_formulas.py` |
 
 **Complex dtypes**: the distribution samplers produce **real-only** outputs, so a complex
 resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output
@@ -1015,9 +1078,15 @@ Source: `src/flopscope/stats/`.
 |---|---|---|---|
 | `bartlett` | `4n` (weight 1.0) | DERIVED: compare + divide + add + select per sample (FMA=2, 4 ops/sample) | `_window.py:bartlett_cost` |
 | `blackman` | `40n` (weight 1.0) | DERIVED composite: 2 cosine evals at transcendental rate (16/elem each) + 8 mul/div/add per sample; all folded into flop_cost | `_window.py:blackman_cost` |
-| `hamming` | `2n` (weight 8.0) | DECLARED: cosine eval per sample at the half-transcendental tier | `_window.py:hamming_cost` |
-| `hanning` | `2n` (weight 8.0) | DECLARED: cosine eval per sample at the half-transcendental tier | `_window.py:hanning_cost` |
+| `hamming` | `18n` (weight 1.0) | DERIVED composite: 1 cosine eval at transcendental rate (16/elem) + multiply + subtract per sample; folded into flop_cost, kaiser-family convention | `_window.py:hamming_cost` |
+| `hanning` | `18n` (weight 1.0) | DERIVED composite: 1 cosine eval at transcendental rate (16/elem) + multiply + subtract per sample; folded into flop_cost, kaiser-family convention | `_window.py:hanning_cost` |
 | `kaiser` | `23n` (weight 1.0) | DERIVED composite: 1 Bessel I₀ eval at transcendental tier (16/elem) + 7 scalar FLOPs per sample; folded into flop_cost | `_window.py:kaiser_cost` |
+
+`hamming`/`hanning` used to be a separate half-transcendental weight-8.0 tier
+(`2n` flop_cost). That tier is retired: both now fold their cosine evaluation into
+`flop_cost` at weight 1.0, the same [composite-ops](#composite-ops-weight-10-with-heterogeneous-flop_cost)
+pattern `blackman`/`kaiser` already used — bringing the whole window family onto one
+consistent weight.
 
 Source: `src/flopscope/_window.py`.
 
@@ -1025,14 +1094,21 @@ Source: `src/flopscope/_window.py`.
 
 ### Interp and histogram
 
-| Op | flop_cost | basis | source |
-|---|---|---|---|
-| `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query) | DERIVED | `_counting_ops.py` |
-| `histogram` (integer bins) | `n × ⌈log₂(bins)⌉` (binary-search binning pass only) | DERIVED | `_counting_ops.py` |
-| `histogram` (string bins, e.g. `'auto'`) | `n × (2 + estimator_cost + ⌈log₂ resolved_bins⌉)` (deferred: resolved after the call; estimator costs: sturges/sqrt/rice=0, fd/auto=+1n, scott=+4n, doane=+6n, stone=+max(100,√n)n) | DERIVED | `_counting_ops.py` |
-| `histogram2d`, `histogramdd` | same as `histogram` per axis | DERIVED | `_counting_ops.py` |
-| `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
-| `trapezoid`, `trapz` | `4 × numel(y)` | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py`; fixed in this branch |
+The binning family (`histogram*`, `bincount`, `digitize`) derives its result by
+searching/counting against bin edges — a non-sequential access, so it sits in the
+[access tier](#access-tier-weight-40) at weight 4.0. `interp` and `trapezoid`/`trapz`
+are not bin-search ops and stay at weight 1.0.
+
+| Op | flop_cost | weight | basis | source |
+|---|---|---|---|---|
+| `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query) | 1.0 | DERIVED | `_counting_ops.py` |
+| `histogram` (integer bins) | `n × ⌈log₂(bins)⌉` (binary-search binning pass only) | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram` (string bins, e.g. `'auto'`) | `n × (2 + estimator_cost + ⌈log₂ resolved_bins⌉)` (deferred: resolved after the call; estimator costs: sturges/sqrt/rice=0, fd/auto=+1n, scott=+4n, doane=+6n, stone=+max(100,√n)n) | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram2d`, `histogramdd` | same as `histogram` per axis | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | 4.0 | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
+| `bincount` | `numel(x)` (floor 1) | 4.0 | DECLARED: one bucket increment per element | `_counting_ops.py` |
+| `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |
+| `trapezoid`, `trapz` | `4 × numel(y)` | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
 
 Source: `src/flopscope/_counting_ops.py`, `src/flopscope/_array_ops.py`.
 
@@ -1040,15 +1116,17 @@ Source: `src/flopscope/_counting_ops.py`, `src/flopscope/_array_ops.py`.
 
 ### Set ops
 
-| Op | flop_cost | basis |
-|---|---|---|
-| `unique`, `unique_all`, `unique_counts`, `unique_inverse`, `unique_values` | `n × ⌈log₂ n⌉` | DECLARED sort-based |
-| `in1d`, `isin` | `(n+m) × ⌈log₂(n+m)⌉` | DECLARED sort-based |
-| `intersect1d` | `sort_cost(n) + sort_cost(m) + sort_cost(n+m)` (default); `sort_cost(n+m)` when `assume_unique=True` | DECLARED: pre-sorts both inputs when `assume_unique` is falsy |
-| `setdiff1d`, `setxor1d`, `union1d` | `(n+m) × ⌈log₂(n+m)⌉` | DECLARED sort-based |
-| `searchsorted` | `m × ⌈log₂ n⌉` | DECLARED binary search |
+| Op | flop_cost | weight | basis |
+|---|---|---|---|
+| `unique`, `unique_all`, `unique_counts`, `unique_inverse`, `unique_values` | `n × ⌈log₂ n⌉` | 4.0 | DECLARED sort-based |
+| `in1d`, `isin` | `(n+m) × ⌈log₂(n+m)⌉` | 1.0 | DECLARED sort-based |
+| `intersect1d` | `sort_cost(n) + sort_cost(m) + sort_cost(n+m)` (default); `sort_cost(n+m)` when `assume_unique=True` | 4.0 | DECLARED: pre-sorts both inputs when `assume_unique` is falsy |
+| `setdiff1d`, `setxor1d`, `union1d` | `(n+m) × ⌈log₂(n+m)⌉` | 4.0 | DECLARED sort-based |
+| `searchsorted` | `m × ⌈log₂ n⌉` | 4.0 | DECLARED binary search |
 
-Comparison = 1 FLOP convention; weight 1.0.
+Comparison = 1 FLOP convention. Weight is 4.0 (the [access tier](#access-tier-weight-40))
+for every genuinely sort-based row above; `in1d`/`isin` are the one pair that kept their
+pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 
 ---
 
@@ -1074,21 +1152,66 @@ Comparison = 1 FLOP convention; weight 1.0.
 
 ### Copy and gather
 
-**Family rule: free — pure relocation/selection.**
+**Family rule: every write is metered; the access *pattern* sets the weight.**
 
-Data-movement ops that copy, rearrange, or select-by-a-given-selector carry **weight 0**
-and bill `flop_cost = 0`.  They produce no per-element arithmetic and derive no selector
-by testing values — they only move existing values into a new buffer or layout.  This
-covers: `concatenate`, `stack`, `hstack`, `vstack`, `column_stack`, `dstack`, `block`,
-`bmat`, `tile`, `repeat`, `resize`, `roll`, `tril`, `triu`, `insert`, `append`,
-`delete`, `diag` (both extract and construct), `diagflat`, `fill_diagonal`,
-`take`, `take_along_axis`, `put`, `put_along_axis`, `choose`, `compress`,
-`extract`, `select`, `place`, `putmask`, `where(cond, x, y)` (3-arg), `unstack`, and
-all other ops from the copy/materialize/gather/scatter families.  (`pad`, `copyto`, and
-`trim_zeros` are **not** unconditionally free — see
-[§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path).)
+This family used to be uniformly free (pure relocation/selection bought a 0 bill). It
+is not any more: a materializing copy writes real memory and is charged weight 1.0; a
+computed-index gather reads via a non-sequential pattern and is charged weight 4.0
+(the [access tier](#access-tier-weight-40)); only genuine views stay free. `flop_cost`
+is the count of elements actually **written** — for the triangular/diagonal family
+that is fewer than the whole array (e.g. `eye`'s off-diagonal zeros are free), not the
+whole buffer indiscriminately.
 
-**Selector-deriving siblings are charged** (they test values to produce the selector):
+**Materializing copy (weight 1.0, `flop_cost = numel(output)`)** — assembles a new
+buffer by copying or rearranging existing values sequentially: `concatenate`, `stack`,
+`hstack`, `vstack`, `column_stack`, `dstack`, `block`, `bmat`, `tile`, `repeat`,
+`resize`, `roll`, `insert`, `append`, `delete`, `concat`, `fromiter` (materializes an
+iterable into an array, one write per element). `row_stack` bills exactly `vstack`'s
+cost — it is a bare `return vstack(tup)` with no `deduct()` of its own, so its own
+weight entry is inert by construction. `reshape`, `ravel`, `copy`, and `require` are
+billed `numel(input)` regardless of whether NumPy itself returns a view or a copy for
+that call — see [Views and metadata](#views-and-metadata-weight-00) for why the
+cautious, always-charged price was chosen over trying to detect the view case.
+`fft.fftshift`/`fft.ifftshift` are `numpy.roll` under the hood — a data-movement
+reindex, not part of the FFT priced-in family (see [FFT](#fft)).
+
+**Triangular / diagonal writes (weight 1.0)** — bill only the cells that survive, not
+the whole array:
+
+| Op | flop_cost | basis |
+|---|---|---|
+| `triu` | elements at/above the kth diagonal (batch leading dims multiply in; floored at 1) | DECLARED |
+| `tril` | elements at/below the kth diagonal (batch leading dims multiply in; floored at 1) | DECLARED |
+| `diag` (2-D input, extract) | `0` — a view, no write at all | DECLARED |
+| `diag` (1-D input, construct) | `numel(v)` — the zero background is free | DECLARED |
+| `diagflat` | `numel(v)` — the zero background is free | DECLARED |
+| `fill_diagonal` | `min(m, n)` | DECLARED |
+
+**Gather — computed-index read (weight 4.0, `flop_cost = numel(output)`)** — a
+non-sequential memory access, the [access tier](#access-tier-weight-40): `take`,
+`take_along_axis`, `choose`.
+
+**Scatter / select-with-a-given-selector (weight 1.0)** — the mask or index is an
+*input*, not derived by testing values, but writing the selected cells is still a
+real write:
+
+| Op | flop_cost | basis |
+|---|---|---|
+| `put` | `numel(indices)` | DECLARED |
+| `put_along_axis` | `(numel(arr) / arr.shape[axis]) × indices.shape[axis]` (`indices.size` when `axis=None`) | DECLARED: elements actually scattered |
+| `putmask`, `place` | `numel(input)` | DECLARED |
+| `select` | `numel(output) × len(condlist)` | DECLARED: one scan per condition, applied across the whole broadcast output |
+| `where(cond, x, y)` (3-arg) | `4 × numel(broadcast output)` | DECLARED: gather-rate select — it dereferences a *different* source (`x` or `y`) per output element, the same access pattern as `take` |
+| `compress` | `len(condition) + 4 × numel(output)` | DECLARED: scan the condition (1/elem) + gather-rate copy of the kept slices |
+| `extract` | `numel(arr)` | DECLARED: scan every element of `arr` against the (already-built) mask |
+
+`where`'s 3-arg form used to be free; it is now the one member of this bucket billed
+at the gather rate (`4×`) rather than the plain write rate (`1×`) that `put`/`putmask`/
+`place` use, precisely because it *reads* non-sequentially (from whichever of `x`/`y`
+the mask picks) rather than writing a single given input through unchanged.
+
+**Selector-deriving ops are charged** (they *test* values to produce the selector,
+unlike the ops above whose selector is a given input):
 
 | Op | flop_cost | basis |
 |---|---|---|
@@ -1098,28 +1221,28 @@ all other ops from the copy/materialize/gather/scatter families.  (`pad`, `copyt
 | `count_nonzero` | `numel(input)` (weight 1.0) | DECLARED: comparison scan every element |
 
 These ops derive a selector by testing element values (`!= 0`), so the test is their
-compute cost.  The predicate and the selection are the *same* step here — unlike the
-3-arg `where(cond, x, y)` where the predicate (a separate charged op) is an *input*.
+compute cost. The predicate and the selection are the *same* step here — unlike the
+3-arg `where(cond, x, y)` above, where the predicate (a separate charged op) is an
+*input*.
 
 **Worked examples**:
 
 | Expression | Charge | Reasoning |
 |---|---|---|
-| `where(a > 0.5, x, y)` | pay `greater` = `numel(a)` for the predicate; the `where` (select) is free | predicate tests values (charged separately); selection by given mask is logistics |
+| `where(a > 0.5, x, y)` | `greater` = `numel(a)`, plus `where` itself = `4 × numel(a)` | the predicate is charged separately; the select is now also charged, at the gather rate |
 | `nonzero(a)` | charged `numel(a)` | derives the selector by testing `!=0` — value-test is its compute |
 | `arange(n)` | charged `2×numel` | computes `start + i·step` per element (1 mul + 1 add) |
-| `meshgrid(x, y)` | free | replicates `x`,`y` into grids; no per-element arithmetic |
-| `take(a, idx)` | free | index given; pure gather |
-| `hstack([a, b])` | free | copies existing values into a new buffer |
-| `sort(a)` | charged `n·⌈log₂ n⌉` | output order derived by comparing values |
+| `meshgrid(x, y)` | charged `numel(output)` | replicates `x`,`y` into grids — a materializing copy, not a view |
+| `take(a, idx)` | charged `4×numel(output)` | index given, but the read pattern is non-sequential — access-tier gather |
+| `hstack([a, b])` | charged `numel(output)` | copies existing values into a new buffer — a real, sequential write |
+| `sort(a)` | charged `4×n·⌈log₂ n⌉` | output order derived by comparing values — access-tier |
 | `a.astype(float64)` | free | representation change only — no value change |
 | `a.astype(bool)` | free | representation change — even though it computes a `!=0` test, precision is the participant's own dial (deliberate exception to the value-test rule) |
 
-**Complex dtypes**: the free movement/gather ops carry the component `complex_factor = 2`
-(the same floor as everywhere else) and never raise on complex input — weight 0 makes
-the factor structural only, billing 0 FLOPs regardless. The charged selector-deriving
-siblings (`nonzero`, `argwhere`, `flatnonzero`) test `!= 0`, a value comparison, so they
-also bill factor 2 on complex.
+**Complex dtypes**: the movement, gather, and scatter ops in this family carry the
+component `complex_factor = 2` (the same floor as everywhere else) and never raise on
+complex input; the charged selector-deriving siblings (`nonzero`, `argwhere`,
+`flatnonzero`) test `!= 0`, a value comparison, so they also bill factor 2 on complex.
 
 Source: `src/flopscope/_array_ops.py`.
 
@@ -1127,19 +1250,43 @@ Source: `src/flopscope/_array_ops.py`.
 
 #### Copy-and-gather: ops with distinct charged siblings
 
-The table below lists ops whose cost formula differs from 0 because they contain
-value-arithmetic or perform I/O work beyond pure relocation:
+The table below lists ops whose cost formula sits outside the family rules above
+because they perform per-bit/index work or I/O beyond pure relocation:
 
 | Op | flop_cost | basis | source |
 |---|---|---|---|
-| `diag` (extract, 2-D) | 0 (free — pure gather of diagonal elements) | DECLARED: no arithmetic | `_array_ops.py` |
-| `diag` (construct, 1-D) | 0 (free — copy into diagonal of new matrix) | DECLARED: no arithmetic | `_array_ops.py` |
-| `diagonal` | 0 (view) | DECLARED: `numpy.diagonal` returns a read-only view | `_array_ops.py` |
 | `copyto` | `numel(dst)` (or popcount(`where`) when masked) | DECLARED: priced per element written, unconditionally — same-dtype or not (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
 | `packbits` | `numel(input)` (weight 1.0) | DECLARED: per-bit test+shift; value-test per element | `_array_ops.py` |
 | `unpackbits` | `numel(output)` (weight 1.0) | DECLARED: unpacks 8 bits per input byte; proportional to output | `_array_ops.py` |
-| `mask_indices` | `2n² + 8k` (weight 1.0, `k` = selected pairs) | DECLARED: n² mask scan (value test) + gather of 2k index values | `_array_ops.py` |
+| `mask_indices` | `2k` (weight 1.0, `k` = selected pairs; numel of the returned index arrays) | DECLARED: dtype-neutral index-array output | `_array_ops.py` |
 | `getitem` (`arr[key]`) | basic indexing (int/slice/newaxis/Ellipsis, or a tuple thereof): `0` (view); advanced (fancy/boolean) indexing: `4·numel(output)` + `numel(mask)` per boolean-mask part (weight 1.0) | DECLARED: fancy gather billed at the `take` rate; boolean-mask parts additionally scan like `compress` | `_ndarray.py` |
+
+`getitem` is the one op in this table with no module-level `fnp.<name>` call form — it
+bills `FlopscopeArray.__getitem__`, i.e. `arr[key]` syntax, not a function call. See
+[the unifying philosophy](#the-unifying-philosophy--every-byte-written-is-metered) for
+the basic-vs-advanced-indexing distinction this formula rests on.
+
+---
+
+#### Index generators
+
+These ops return coordinate/index arrays rather than values, and price
+**dtype-neutrally** — the billed count is `numel` of the returned index array(s)
+regardless of the array's actual integer dtype, since the work (computing positions)
+does not depend on how wide the position values happen to be stored:
+
+| Op | flop_cost | basis |
+|---|---|---|
+| `unravel_index` | `numel` of the returned index arrays | DECLARED |
+| `ravel_multi_index` | `numel(output)` (= `N`, the number of index tuples) | DECLARED |
+| `diag_indices`, `diag_indices_from` | `numel` of the returned index arrays | DECLARED |
+| `tril_indices`, `tril_indices_from` | `numel` of the returned index arrays | DECLARED |
+| `triu_indices`, `triu_indices_from` | `numel` of the returned index arrays | DECLARED |
+| `tri` | `numel(output)` — **not** dtype-neutral; bills the actual output dtype like a value array (see [Generator](#generator-linspace-arange-and-kin)) | DECLARED |
+| `broadcast_shapes` | sum of `len(shape)` across the input shapes (floor 1) | DECLARED |
+| `indices` | `numel(output)` at the actual output dtype (dense: `len(dims)·prod(dims)`; sparse: `sum(dims)`) | DECLARED |
+
+All weight 1.0. Source: `src/flopscope/_array_ops.py`.
 
 ---
 
@@ -1169,6 +1316,33 @@ and destination operands — see [Which dtype prices a call](#which-dtype-prices
 
 ---
 
+### I/O (save / load)
+
+Writing an array to disk is a real, billable side effect — even though it produces no
+new in-memory array — while reading one back is not: the values already existed
+somewhere (the caller's own prior compute paid for them, or they were supplied as
+input data), so ingesting them is a free, view-like operation, the same treatment
+`from_dlpack` gets.
+
+| Op | flop_cost | weight | basis |
+|---|---|---|---|
+| `save` | `4 × numel(array)` | 1.0 | DECLARED: I/O write, priced per element serialized |
+| `savez`, `savez_compressed` | `4 × Σ numel(array_i)` (summed over every array passed, `__meta__` excluded) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
+| `load` | `0` | — | DECLARED free: ingesting previously-computed values is not new compute |
+| `from_dlpack` | `0` | — | DECLARED free: zero-copy ingest from another array library |
+
+The `4×` constant is a flat write-amplification price or format overhead, not a literal
+byte count — it multiplies with the normal `dtype_rate`/`complex_factor`/`weight` factors
+like any other `flop_cost`, so a `save` of a float64 array bills `2×` the same call on
+float32 (`4 × numel × 2.0 × 1.0`), not a fixed byte size. `load` and `from_dlpack` have
+no cost path in code and are unconditionally free; `save`/`savez`/`savez_compressed`
+are the charged member of this family — writing an array to disk is metered, reading
+one back is not.
+
+Source: `src/flopscope/_array_ops.py`.
+
+---
+
 ### Functional / higher-order
 
 Operations that apply a user-supplied callable across an array. flopscope bills the
@@ -1178,41 +1352,58 @@ result the wrapper materializes (numpy runs the callback itself).
 > `RemoteCallbackError` on the client/server backend used for AIcrowd submissions, so
 > they cannot appear in submitted code — their cost matters only for local runs.
 
-| Op | flop_cost | source |
-|---|---|---|
-| `apply_along_axis`, `apply_over_axes` | `numel(output)` | `_counting_ops.py` |
-| `fromfunction` | `numel(output)` | `_array_ops.py` |
-| `piecewise` | `numel(output)` (the op bills its assembled result; each condition you pass in `condlist` is billed separately as its own comparison op) | `_counting_ops.py` |
+| Op | flop_cost | weight | source |
+|---|---|---|---|
+| `apply_along_axis` | `numel(output)` | 1.0 | `_counting_ops.py` |
+| `apply_over_axes` | `numel(output)` | 1.0 | `_counting_ops.py` |
+| `fromfunction` | `numel(output)` | 1.0 | `_array_ops.py` |
+| `piecewise` | `numel(input) × len(condlist)` | 1.0 | `_counting_ops.py` |
+
+`apply_along_axis` was price-cut from weight 4.0 to 1.0 (the wrapper's own
+`numel(output)` formula is unchanged; only the callback's *own* `fnp` calls, billed
+separately, ever carried the higher tiers). `piecewise` moved from a flat
+`numel(input)` at weight 4.0 to `numel(input) × len(condlist)` at weight 1.0 — every
+condition you pass rescans the input once, folded directly into `flop_cost` rather
+than relying on the weight to do that work.
 
 ---
 
 ### View / free (weight 0.0)
 
-**Family rule**: operations that return a view, re-interpret memory, or
-inspect metadata without touching element values charge 0 FLOPs.
+**Family rule**: operations that return a view, re-interpret memory, or leave a newly
+allocated buffer untouched (no per-element write) charge 0 FLOPs. See [The unifying
+philosophy](#the-unifying-philosophy--every-byte-written-is-metered) and [Views and
+metadata](#views-and-metadata-weight-00) for the full decision procedure and both
+refinements — this entry is the family-table lookup, not a restatement of the rule.
 
-Weight 0 now covers *four* sub-families (see [§The unifying philosophy](#the-unifying-philosophy--compute-not-logistics)
-in the Billing model section for the full rule and both refinements):
+Weight 0 now covers two sub-families:
 
-- **Views / metadata**: `reshape`, `ravel`, `flatten`, `transpose`, `squeeze`,
-  `expand_dims`, `broadcast_to`, `atleast_1d/2d/3d`, `asarray` (free —
-  representation change), `asfortranarray`, `ascontiguousarray`, `astype`
-  (free — representation change, both directions),
-  `view`, `diagonal` (view), `moveaxis`, `swapaxes`, `real`, `imag`,
-  `ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`,
-  `data`, `ctypes`, `strides`, `T`, `linalg.diagonal`, `linalg.matrix_transpose`,
-  `fft.fftshift`, `fft.ifftshift`, `isscalar`, `isfortran`.
-  (`real`/`imag` extract a component of a complex value — a strided view or constant-fill,
-  no arithmetic; see [Which dtype prices a call](#which-dtype-prices-a-call).)
-- **Copy / materialize**: `concatenate`, `stack`, `hstack`, `vstack`,
-  `column_stack`, `dstack`, `block`, `bmat`, `tile`, `repeat`, `resize`,
-  `roll`, `tril`, `triu`, `copy`, `insert`, `append`, `delete`, `diagflat`,
-  `fill_diagonal`, `unstack`, and kin.
-- **Gather / scatter & mask-select (selector given)**: `take`, `take_along_axis`,
-  `put`, `put_along_axis`, `choose`, `where(cond, x, y)` (3-arg), `select`,
-  `compress(mask, a)`, `extract(mask, a)`, `place`, `putmask`.
-- **Constant init**: `zeros`, `ones`, `empty`, `full`, `eye`, `identity`, `tri`,
-  `zeros_like`, `ones_like`, `empty_like`, `full_like`, `meshgrid`.
+- **Views / metadata** — no new buffer, or a read-only reinterpretation of an
+  existing one: `flatten`, `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
+  `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`, `atleast_1d`/`atleast_2d`/
+  `atleast_3d`, `broadcast_to`, `astype` (free in both directions — a representation
+  change, not a value change), `asarray`, `asfortranarray`, `ascontiguousarray`,
+  `view`, `real`/`imag` (component extraction — a strided view or constant-fill, no
+  arithmetic), `split`, `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal`
+  (2-D view path only — the 1-D *construct* path writes, see [Copy and
+  gather](#copy-and-gather)), `linalg.diagonal`, `linalg.matrix_transpose`,
+  `from_dlpack`, `load`, and all other shape/stride/dtype introspection (`ndim`,
+  `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`, `ctypes`,
+  `strides`, `T`, `isscalar`, `isfortran`).
+- **Untouched allocation** — a new buffer whose contents are the platform zero-page
+  default, so nothing is actually written: `zeros`, `zeros_like`, `empty`,
+  `empty_like`.
+
+**Everything else that used to live in this family now writes real memory and is
+charged.** `reshape`/`ravel`/`copy`/`require`, every materializing-copy op
+(`concatenate`/`stack`/`tile`/…), and `fft.fftshift`/`fft.ifftshift` are weight 1.0;
+`take`/`take_along_axis`/`choose` (gather) are weight 4.0; `put`/`putmask`/`place`/
+`compress`/`extract`/`select`/3-arg `where`/`fill_diagonal` (scatter/select) are
+weight 1.0 (`where` gathers, so it is weight 4.0) — see [Copy and
+gather](#copy-and-gather) for the full breakdown. `ones`/`full`/`eye`/`identity`/
+`tri`/`meshgrid` moved the same way — see
+[Generator](#generator-linspace-arange-and-kin) for the constant-fill split that
+keeps only `zeros`/`empty` (and their `_like` forms) free.
 
 Source: `src/flopscope/_array_ops.py`.
 
