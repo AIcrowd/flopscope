@@ -714,3 +714,69 @@ def test_getitem_bool_scalar_and_0d_array_indices_are_advanced():
     assert billed(lambda: fa[zi]) == 4 * 1
     # An integer SCALAR stays basic (a view) -- it must NOT bill.
     assert billed(lambda: fbig[7]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 12 (final-review fix, CRITICAL): __getitem__ classifies a tuple/range
+# PART as advanced too, not just list/ndarray/bool-scalar. numpy performs
+# advanced (copying) indexing for ANY array-like integer/bool sequence part;
+# a tuple or range part gathers exactly like the list form, so under the
+# list-only check this was an unbounded 0-FLOP gather -- ``arr[range(n)]``
+# for any n, or ``arr[tuple_a, tuple_b]``, billed nothing for a real copy.
+# The top-level key, when it IS a tuple, is unchanged: it is multi-axis
+# BASIC indexing, already split into per-axis parts before this check runs
+# -- see test_getitem_top_level_tuple_key_still_splits_to_basic_parts below
+# for that distinction.
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_tuple_and_range_parts_are_advanced():
+    fv = fnp.asarray(np.arange(500, dtype=np.float64))
+    # A bare range key: one part, a range -- gathers all 500 elements.
+    # 4*500 * dtype_rate(float64)=2.0.
+    assert billed(lambda: fv[range(500)]) == 4 * 500 * 2
+
+    big = fnp.asarray(np.arange(500 * 2000, dtype=np.float64).reshape(500, 2000))
+    rows = tuple(range(100))
+    cols = tuple(range(100))
+    rows_l = list(rows)
+    cols_l = list(cols)
+    # Two top-level parts, each a plain tuple: numpy pairs them elementwise
+    # (NOT an outer product), gathering 100 elements at (rows[i], cols[i]).
+    # The list form was already correct; both must agree bit-exact.
+    assert billed(lambda: big[rows, cols]) == 4 * 100 * 2
+    assert billed(lambda: big[rows_l, cols_l]) == billed(lambda: big[rows, cols])
+
+    v = fnp.asarray(np.arange(5, dtype=np.float64))
+    mask_tuple = (True, False, True, False, True)
+    mask_list = list(mask_tuple)
+    # A tuple PART containing bools (wrapped in a 1-tuple so it survives the
+    # top-level split as ONE part, not five bool-scalar parts -- see the
+    # regression test below) is a boolean mask gather: 5 scan + 4*3 gather =
+    # 17, at dtype_rate(float64)=2.0. Must agree with the list form.
+    assert billed(lambda: v[(mask_tuple,)]) == (5 + 4 * 3) * 2
+    assert billed(lambda: v[(mask_tuple,)]) == billed(lambda: v[mask_list])
+
+
+def test_getitem_top_level_tuple_key_still_splits_to_basic_parts():
+    """Guard the subtlety the CRITICAL fix must not disturb: whether a tuple
+    is "advanced" depends on WHERE it sits, not that it IS a tuple. A
+    top-level tuple key is multi-axis indexing, unpacked into per-axis parts
+    before the advanced check runs, so broadening what counts as an advanced
+    *part* (previous test) leaves these untouched.
+    """
+    m = fnp.asarray(np.arange(1000, dtype=np.float64).reshape(20, 50))
+    assert billed(lambda: m[1:3, ::2]) == 0  # parts are slices: basic
+    assert billed(lambda: m[3]) == 0  # single int: basic
+    assert billed(lambda: m[3, 4]) == 0  # two int parts: basic
+
+    v = fnp.asarray(np.arange(10, dtype=np.float64))
+    # key IS the 3-tuple (0, 2, 4) -> splits into three INT parts -> basic ->
+    # falls through to numpy, which raises its own "too many indices" error
+    # for a 1-D array (3 indices, 1 axis). Must not be billed.
+    with pytest.raises(IndexError, match="too many indices"):
+        v[(0, 2, 4)]
+    # A 1-tuple *containing* the 3-tuple is a DIFFERENT key: one part, a
+    # genuine advanced gather, matching the list form bit-exact.
+    assert billed(lambda: v[(0, 2, 4),]) == 4 * 3 * 2
+    assert billed(lambda: v[(0, 2, 4),]) == billed(lambda: v[[0, 2, 4]])

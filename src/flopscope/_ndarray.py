@@ -688,12 +688,25 @@ class FlopscopeArray(_np.ndarray):
         * an integer- or boolean-dtype ``ndarray`` (or ``FlopscopeArray``) of
           **any** ``ndim`` -- including 0-d: numpy classifies a 0-d int/bool
           array operand as advanced (it copies, never views);
-        * a Python ``list`` (numpy coerces it to an index array).
+        * a Python ``list``, ``tuple``, or ``range`` (numpy coerces any of
+          these array-like sequences to an index array the same way). This is
+          about a *part* -- an already-decomposed element of ``parts`` -- not
+          the top-level ``key``: ``m[1:3, ::2]`` has ``key`` as a tuple, but
+          that tuple is the multi-axis split itself (``parts = key``), and its
+          parts are slices, so it stays basic. Likewise ``v[(0, 2, 4)]`` on a
+          1-D ``v`` has ``key`` as the 3-tuple; splitting it into parts
+          ``0, 2, 4`` yields three *int* parts -- basic, and numpy raises its
+          own "too many indices" error since none of them consumes as an
+          array. A tuple only triggers this branch when it survives the
+          top-level split as one part, e.g. ``v[(0, 2, 4),]`` (a 1-tuple
+          *containing* the 3-tuple) or ``m[tuple_a, tuple_b]`` (each axis's
+          index happens to be a tuple).
 
         A numpy/Python *integer scalar* stays basic (a view) -- only integer
-        *arrays* gather. ``mask_elems`` counts boolean elements only: a bool
-        scalar contributes 1, a bool array contributes its size; integer
-        operands add nothing beyond the gather.
+        *arrays* (or list/tuple/range coerced to one) gather. ``mask_elems``
+        counts boolean elements only: a bool scalar contributes 1, a bool
+        array contributes its size; integer operands add nothing beyond the
+        gather.
         """
         parts = key if isinstance(key, tuple) else (key,)
         mask_elems = 0
@@ -710,7 +723,14 @@ class FlopscopeArray(_np.ndarray):
             arr = None
             if isinstance(p, _np.ndarray):
                 arr = p
-            elif isinstance(p, list):
+            elif isinstance(p, (list, tuple, range)):
+                # numpy performs advanced (copying) indexing for ANY
+                # array-like integer/bool sequence part, not just a list --
+                # a tuple or range part gathers exactly the same way
+                # (``v[range(n)]``, ``v[(0, 2, 4),]``, ``m[tuple_a, tuple_b]``
+                # all materialize a copy). Missing this let an unbounded
+                # 0-FLOP gather through: repeated indices in a tuple/range
+                # part can read out any number of elements for free.
                 arr = _np.asarray(p)
             # An integer- or boolean-dtype array operand of ANY ndim (including
             # 0-d) is advanced indexing -- numpy materializes a gathered copy,
