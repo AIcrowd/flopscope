@@ -1877,6 +1877,12 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "notes": "Return selected slices along axis. Cost: len(condition) + 4*numel(output).",
     },
+    "getitem": {
+        "category": "counted_custom",
+        "module": "numpy",
+        "complex_factor": 2.0,
+        "notes": "Array indexing. Basic slicing: free (view). Fancy indexing: 4*numel(output); boolean masks add numel(mask).",
+    },
     "array_equal": {
         "category": "counted_custom",
         "module": "numpy",

@@ -324,6 +324,10 @@ PROBES.update(
         "fill_diagonal": lambda: fnp.fill_diagonal(M.copy(), 9),
         "extract": lambda: fnp.extract(COND, V),
         "compress": lambda: fnp.compress(COND, V),
+        # getitem (Task 11, new billed surface): FlopscopeArray.__getitem__
+        # declares dtypes=(self.dtype,) -- the array being gathered from, not
+        # the fancy-index operand -- same convention as take/compress above.
+        "getitem": lambda: fnp.asarray(V)[fnp.asarray(V01)],
     }
 )
 

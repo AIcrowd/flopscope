@@ -142,6 +142,7 @@
     "full_like": 1.0,
     "gcd": 16.0,
     "geomspace": 16.0,
+    "getitem": 1.0,
     "gradient": 1.0,
     "greater": 1.0,
     "greater_equal": 1.0,

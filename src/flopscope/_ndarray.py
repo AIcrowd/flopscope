@@ -668,6 +668,49 @@ class FlopscopeArray(_np.ndarray):
     def nonzero(self, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # type: ignore[override]
         return _me().nonzero(self, *args, **kwargs)
 
+    # ----- Indexing -----
+
+    def __getitem__(self, key: Any):  # type: ignore[override]
+        """Index the array. Basic indexing is free; advanced indexing bills.
+
+        Basic indexing -- every part of ``key`` is an ``int``, ``slice``,
+        ``np.newaxis`` (``None``), ``Ellipsis``, or a tuple of those --
+        returns a view, matching NumPy's own zero-copy semantics: 0 FLOPs.
+
+        Advanced indexing -- any part is an integer-array or boolean-mask
+        (an ``ndarray``/``FlopscopeArray`` with ``ndim > 0``, or a ``list``)
+        -- materializes a gathered copy and is billed under ``"getitem"``:
+        4 FLOPs per gathered output element (matching ``take``), plus
+        ``numel(mask)`` for each boolean-mask part's scan (matching
+        ``compress``).
+        """
+        parts = key if isinstance(key, tuple) else (key,)
+        mask_elems = 0
+        advanced = False
+        for p in parts:
+            arr = None
+            if isinstance(p, _np.ndarray):
+                arr = p
+            elif isinstance(p, (list, FlopscopeArray)):
+                arr = _np.asarray(p)
+            if arr is not None and arr.ndim > 0:
+                advanced = True
+                if arr.dtype == _np.bool_:
+                    mask_elems += int(arr.size)
+        if not advanced:
+            return super().__getitem__(key)  # basic indexing: view, free
+
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        with budget.deduct_after(
+            "getitem", subscripts=None, shapes=(self.shape,), dtypes=(self.dtype,)
+        ) as _op:
+            result = super().__getitem__(key)
+            out_numel = int(result.size) if hasattr(result, "size") else 1
+            _op.set_cost(mask_elems + 4 * out_numel)
+        return result
+
     # flopscope arrays are immutable: item assignment and in-place mutation
     # are not supported.  Raise descriptive errors that match the client.
 

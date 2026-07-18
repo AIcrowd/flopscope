@@ -769,6 +769,12 @@ DEFERRED: dict[str, str] = {
     "take_along_axis": "pinned in OP_EXPECTATIONS (numel(output) weight 4.0 gather tier)",
     "choose": "numel(output) gather tier",
     "compress": "pinned in OP_EXPECTATIONS (len(cond)+4*numel(out) weight 1.0)",
+    # Task 11: __getitem__ (new billed surface) -- basic indexing (int/slice/
+    # newaxis/Ellipsis, tuples thereof) is free (view); advanced (fancy/bool)
+    # indexing bills 4*numel(out) + numel(mask) per bool-mask part, weight
+    # 1.0. Pinned in
+    # tests/test_triage_price_pins.py::test_getitem_slices_free_fancy_4x_mask_scan_plus_4x.
+    "getitem": "4*numel(output) gather + numel(mask) per boolean-mask part; basic indexing free",
     "extract": "numel(input) gather",
     "place": "numel(input) scatter",
     "put": "numel(indices) scatter at gather tier",

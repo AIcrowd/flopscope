@@ -612,3 +612,33 @@ def test_io_savez_bills_sum_of_saved_arrays_excluding_meta(tmp_path):
         )
         == 4 * 400
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 11: __getitem__ bills advanced indexing (new surface). Basic indexing
+# (int/slice/newaxis/Ellipsis, or a tuple thereof) stays free -- it returns a
+# view. Advanced indexing bills under "getitem": integer-array (fancy)
+# indexing costs 4*numel(output) (matching take); a boolean-mask part ALSO
+# adds numel(mask) for the scan (matching compress).
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_slices_free_fancy_4x_mask_scan_plus_4x():
+    a = np.arange(1000, dtype=np.float32)
+    idx = np.arange(0, 1000, 10)
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = True
+    # Build every FlopscopeArray input outside the billed() thunk so
+    # construction (free, but still routed through require_budget()) never
+    # contaminates the single-op measurement below.
+    fa = fnp.asarray(a)
+    fidx = fnp.asarray(idx)
+    fmask = fnp.asarray(mask)
+    m = fnp.asarray(a.reshape(20, 50))
+    assert billed(lambda: fa[10:500:2]) == 0
+    assert billed(lambda: fa[fidx]) == 4 * 100
+    assert billed(lambda: fa[fmask]) == 1000 + 4 * 250
+    assert billed(lambda: m[3]) == 0
+    assert billed(lambda: m[:, ::5]) == 0
+    # 2-D fancy on axis 0: output (3, 50) = 150 elements -> 4*150.
+    assert billed(lambda: m[[0, 2, 4]]) == 4 * 150

@@ -184,6 +184,7 @@ FUNCTION_CATEGORIES: dict[str, str] = {
     "getbufsize": "blacklisted",
     "geterr": "blacklisted",
     "geterrcall": "blacklisted",
+    "getitem": "counted_custom",
     "gradient": "counted_custom",
     "greater": "counted_binary",
     "greater_equal": "counted_binary",
