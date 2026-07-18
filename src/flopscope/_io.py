@@ -6,11 +6,20 @@ dtype is rejected, so loading a file can never execute code. `load` costs
 0 FLOPs (data ingress is free), matching the competition client; `save`/
 `savez`/`savez_compressed` bill 4*size (data egress: the elements the call
 writes to disk).
+
+`_bill_save_egress` is the single-sourced egress-billing formula: the
+in-process wrappers below call it directly, and the flopscope-server request
+handler (``flopscope_server._request_handler._handle_save``) imports and
+calls the same function to bill the identical cost when a *remote*
+flopscope-client dispatches a save/savez/savez_compressed round-trip (the
+client writes the file locally; only the billing crosses the wire, as a
+handle-only request with no array data).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as _np
@@ -76,20 +85,30 @@ def load(file: str) -> Any:
     return _wrap(obj)
 
 
+def _bill_save_egress(op_name: str, arrays: Sequence[_np.ndarray]) -> None:
+    """Deduct the data-egress cost of writing *arrays* to disk: 4*sum(numel).
+
+    Single-sourced so the server-side billing round-trip
+    (``flopscope_server._request_handler._handle_save``) charges exactly the
+    same formula as the in-process ``save``/``savez``/``savez_compressed``
+    wrappers below -- an empty ``arrays`` sequence still floors at 1.
+    """
+    require_budget().deduct(
+        op_name,
+        flop_cost=4 * max(sum(int(a.size) for a in arrays), 1),
+        subscripts=None,
+        shapes=tuple(a.shape for a in arrays),
+        dtypes=tuple(a.dtype for a in arrays),
+    )
+
+
 @_counted_wrapper
 def save(file: str, arr: Any) -> None:
     """Save a single array to .npy. Cost: 4*numel(arr)."""
-    budget = require_budget()
     base = _np.asarray(_to_base_ndarray(arr))
     _check_dtype(base, where="save")
-    with budget.deduct(
-        "save",
-        flop_cost=4 * max(int(base.size), 1),
-        subscripts=None,
-        shapes=(base.shape,),
-        dtypes=(base.dtype,),
-    ):
-        _call_numpy(_np.save, file, base, allow_pickle=False)
+    _bill_save_egress("save", [base])
+    _call_numpy(_np.save, file, base, allow_pickle=False)
 
 
 def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
@@ -118,17 +137,10 @@ def _savez_billed_arrays(converted: dict[str, _np.ndarray]) -> list[_np.ndarray]
 @_counted_wrapper
 def savez(file: str, **arrays: Any) -> None:
     """Save multiple named arrays (+ optional __meta__ dict) to .npz. Cost: 4*sum(numel)."""
-    budget = require_budget()
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
-    with budget.deduct(
-        "savez",
-        flop_cost=4 * max(sum(int(v.size) for v in billed), 1),
-        subscripts=None,
-        shapes=(),
-        dtypes=tuple(v.dtype for v in billed),
-    ):
-        _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
+    _bill_save_egress("savez", billed)
+    _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
 
 
 @_counted_wrapper
@@ -137,14 +149,7 @@ def savez_compressed(file: str, **arrays: Any) -> None:
 
     Cost: 4*sum(numel).
     """
-    budget = require_budget()
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
-    with budget.deduct(
-        "savez_compressed",
-        flop_cost=4 * max(sum(int(v.size) for v in billed), 1),
-        subscripts=None,
-        shapes=(),
-        dtypes=tuple(v.dtype for v in billed),
-    ):
-        _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]
+    _bill_save_egress("savez_compressed", billed)
+    _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]
