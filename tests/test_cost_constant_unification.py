@@ -575,21 +575,24 @@ def test_row_stack_bills_numel_output():
     assert cost(lambda: fnp.row_stack([v, w])) == cost(lambda: fnp.vstack([v, w]))
 
 
-def test_tril_bills_numel_output():
+def test_tril_bills_kept_triangle():
     m = np.ones((100, 100))
-    # weight from spec: 1.0 (materializing-copy tier per triu spec)
-    assert cost(lambda: fnp.tril(m)) == 10_000
-    # batch dims billed
+    # Task 7: kept-triangle count via _triangle_kept, not numel(output);
+    # k=0 on a square 100x100 keeps the lower triangle incl. diagonal =
+    # 100*101/2 = 5050. weight 1.0 (materializing-copy tier per triu spec).
+    assert cost(lambda: fnp.tril(m)) == 5050
+    # batch dims multiply the per-matrix count in
     ms = np.ones((50, 100, 100))
-    assert cost(lambda: fnp.tril(ms)) == 500_000
+    assert cost(lambda: fnp.tril(ms)) == 50 * 5050
 
 
-def test_triu_bills_numel_output():
+def test_triu_bills_kept_triangle():
     m = np.ones((100, 100))
-    assert cost(lambda: fnp.triu(m)) == 10_000
-    # batch dims billed
+    # k=0 on a square 100x100 keeps the upper triangle incl. diagonal = 5050.
+    assert cost(lambda: fnp.triu(m)) == 5050
+    # batch dims multiply the per-matrix count in
     ms = np.ones((50, 100, 100))
-    assert cost(lambda: fnp.triu(ms)) == 500_000
+    assert cost(lambda: fnp.triu(ms)) == 50 * 5050
 
 
 def test_put_bills_numel_indices():
@@ -1422,14 +1425,15 @@ _bits800 = fnp.asarray(np.ones(800, dtype=np.uint8))
 
 
 def test_diag_diagonal_view_vs_copy():
-    """diagonal is a numpy view → 0 FLOPs; diag is a copy → min(m,n) or n^2."""
+    """diagonal is always a numpy view → 0 FLOPs; diag's 2-D extract is ALSO
+    a view (Task 7) → 0 FLOPs; diag's 1-D construct writes v.shape[0] values."""
     # numpy.diagonal returns a read-only VIEW → 0 FLOPs
     assert cost(lambda: fnp.diagonal(_A100)) == 0
     assert cost(lambda: fnp.linalg.diagonal(_A100)) == 0
-    # diag extract (2-D input): copies min(m,n) elements → min(100,100)=100 at w=1.0
-    assert cost(lambda: fnp.diag(_A100)) == 100
-    # diag construct (1-D input): materialises n^2 output → 50^2=2500 at w=1.0
-    assert cost(lambda: fnp.diag(_v50)) == 2500
+    # diag extract (2-D input): numpy.diag returns a VIEW → 0 FLOPs
+    assert cost(lambda: fnp.diag(_A100)) == 0
+    # diag construct (1-D input): one write per input value → 50 at w=1.0
+    assert cost(lambda: fnp.diag(_v50)) == 50
 
 
 def test_gather_tier_consistency():

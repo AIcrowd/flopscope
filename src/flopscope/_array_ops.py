@@ -242,20 +242,20 @@ def diag(v: ArrayLike, k: int = 0) -> FlopscopeArray:
     """Extract diagonal or construct diagonal array.
 
     Cost (weight 1.0):
-    - 2-D input (extract): ``min(m, n)`` — copies the diagonal elements.
-    - 1-D input (construct): ``numel(output) = (n + |k|)^2`` — materialises the full
-      output matrix.
+    - 2-D input (extract): 0 — ``numpy.diag`` returns a VIEW of the input
+      (unconditionally, confirmed in ``tests/test_view_semantics_lock.py``),
+      so no elements are copied.
+    - 1-D input (construct): ``v.shape[0]`` — one write per input value; the
+      zero background is free.
     """
     budget = require_budget()
     v = _np.asarray(v)
     if v.ndim == 1:
-        # Constructing diagonal matrix: output is (n+|k|) x (n+|k|)
-        n = v.shape[0] + abs(k)
-        cost = n * n
+        # Constructing diagonal matrix: one write per input value.
+        cost = v.shape[0]
     else:
-        # Extracting diagonal: copies min(m,n) elements
-        m, n = v.shape[0], v.shape[1] if v.ndim > 1 else v.shape[0]
-        cost = min(m, n)
+        # Extracting diagonal: a view, nothing copied.
+        cost = 0
     with budget.deduct(
         "diag", flop_cost=cost, subscripts=None, shapes=(v.shape,), dtypes=(v.dtype,)
     ):
@@ -266,7 +266,7 @@ def diag(v: ArrayLike, k: int = 0) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(diag, _np.diag, "free", "0 FLOPs")
+attach_docstring(diag, _np.diag, "counted_custom", "0 (2-D view); v.shape[0] (1-D)")
 
 
 @_counted_wrapper
@@ -1307,9 +1307,36 @@ attach_docstring(
 )
 
 
+def _triangle_kept(m: int, n: int, k: int, upper: bool) -> int:
+    """Count of an ``m x n`` matrix's elements kept by ``triu``/``tril`` at offset ``k``.
+
+    ``upper=True`` mirrors ``triu``: row ``i`` keeps columns
+    ``[max(i+k, 0), n)``. ``upper=False`` mirrors ``tril``: row ``i`` keeps
+    columns ``[0, min(i+k+1, n))``. Matches ``numpy.tri``'s own
+    diagonal-offset convention (the mask both wrappers are built from)
+    exactly, so it reproduces numpy's actual kept-element count for any
+    ``m``, ``n``, ``k`` -- including ``k`` fully off either edge, where it
+    correctly returns 0.
+    """
+    kept = 0
+    for i in range(m):
+        if upper:
+            kept += n - min(max(i + k, 0), n)
+        else:
+            kept += min(max(i + k + 1, 0), n)
+    return kept
+
+
 @_counted_wrapper
 def triu(m: ArrayLike, k: int = 0) -> FlopscopeArray:
-    """Upper triangle. Wraps ``numpy.triu``. Cost: numel(output)."""
+    """Upper triangle. Wraps ``numpy.triu``.
+
+    Cost (weight 1.0): elements at/above the kth diagonal. A 1-D (or lower)
+    input is promoted to a square 2-D output by numpy itself; any leading
+    batch dimensions on a >=2-D input multiply the per-matrix count in.
+    Floored at 1 (an out-of-range ``k`` keeps zero elements but the op still
+    ran).
+    """
     budget = require_budget()
     _warn_if_symmetric(m, "triu")
     m_arr = _np.asarray(m)
@@ -1317,16 +1344,25 @@ def triu(m: ArrayLike, k: int = 0) -> FlopscopeArray:
         "triu", subscripts=None, shapes=(), dtypes=(m_arr.dtype,)
     ) as _op:
         result = _call_numpy(_np.triu, _to_base_ndarray(m), k=k)
-        _op.set_cost(result.size)
+        rows, cols = result.shape[-2], result.shape[-1]
+        lead = result.size // (rows * cols) if rows and cols else 0
+        _op.set_cost(max(lead * _triangle_kept(rows, cols, k, upper=True), 1))
     return result  # type: ignore[return-value]
 
 
-attach_docstring(triu, _np.triu, "free", "0 FLOPs")
+attach_docstring(triu, _np.triu, "counted_custom", "elements at/above kth diagonal")
 
 
 @_counted_wrapper
 def tril(m: ArrayLike, k: int = 0) -> FlopscopeArray:
-    """Lower triangle. Wraps ``numpy.tril``. Cost: numel(output)."""
+    """Lower triangle. Wraps ``numpy.tril``.
+
+    Cost (weight 1.0): elements at/below the kth diagonal. A 1-D (or lower)
+    input is promoted to a square 2-D output by numpy itself; any leading
+    batch dimensions on a >=2-D input multiply the per-matrix count in.
+    Floored at 1 (an out-of-range ``k`` keeps zero elements but the op still
+    ran).
+    """
     budget = require_budget()
     _warn_if_symmetric(m, "tril")
     m_arr = _np.asarray(m)
@@ -1334,11 +1370,13 @@ def tril(m: ArrayLike, k: int = 0) -> FlopscopeArray:
         "tril", subscripts=None, shapes=(), dtypes=(m_arr.dtype,)
     ) as _op:
         result = _call_numpy(_np.tril, _to_base_ndarray(m), k=k)
-        _op.set_cost(result.size)
+        rows, cols = result.shape[-2], result.shape[-1]
+        lead = result.size // (rows * cols) if rows and cols else 0
+        _op.set_cost(max(lead * _triangle_kept(rows, cols, k, upper=False), 1))
     return result  # type: ignore[return-value]
 
 
-attach_docstring(tril, _np.tril, "free", "0 FLOPs")
+attach_docstring(tril, _np.tril, "counted_custom", "elements at/below kth diagonal")
 
 
 @_counted_wrapper
@@ -2201,14 +2239,18 @@ attach_docstring(diag_indices_from, _np.diag_indices_from, "free", "0 FLOPs")
 
 @_counted_wrapper
 def diagflat(v: ArrayLike, k: int = 0) -> FlopscopeArray:
-    """Create diagonal array from flattened input. Cost: numel(output)."""
+    """Create diagonal array from flattened input.
+
+    Cost (weight 1.0): ``numel(v)`` — one write per input value; the zero
+    background is free.
+    """
     budget = require_budget()
     v_arr = _np.asarray(v)
     with budget.deduct_after(
         "diagflat", subscripts=None, shapes=(v_arr.shape,), dtypes=(v_arr.dtype,)
     ) as _op:
         result = _call_numpy(_np.diagflat, _to_base_ndarray(v), k=k)
-        _op.set_cost(result.size)
+        _op.set_cost(v_arr.size)
     symmetry = _infer_structural_constructor_symmetry(
         kind="diagflat", k=k, v_ndim=v_arr.ndim
     )
@@ -2217,7 +2259,7 @@ def diagflat(v: ArrayLike, k: int = 0) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(diagflat, _np.diagflat, "free", "0 FLOPs")
+attach_docstring(diagflat, _np.diagflat, "counted_custom", "numel(v)")
 
 
 @_counted_wrapper

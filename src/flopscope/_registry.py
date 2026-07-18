@@ -1485,7 +1485,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Extract diagonal or construct diagonal array. Cost: len(diagonal).",
+        "notes": "Extract diagonal or construct diagonal array. Cost: 2-D input (extract): 0 (view); 1-D input (construct): numel(v) — the zero background is free.",
     },
     "arange": {
         "category": "counted_custom",
@@ -1671,13 +1671,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Upper triangle of array. Cost: numel(output) (masked-select copy).",
+        "notes": "Upper triangle of array. Cost: elements at/above the kth diagonal (batch leading dims multiply in; floored at 1).",
     },
     "tril": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Lower triangle of array. Cost: numel(output) (masked-select copy).",
+        "notes": "Lower triangle of array. Cost: elements at/below the kth diagonal (batch leading dims multiply in; floored at 1).",
     },
     "diagonal": {
         "category": "counted_custom",
@@ -2143,7 +2143,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Create diagonal array from flattened input. Cost: len(v).",
+        "notes": "Create diagonal array from flattened input. Cost: numel(v) — the zero background is free.",
     },
     "mask_indices": {
         "category": "counted_custom",

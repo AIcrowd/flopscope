@@ -368,9 +368,11 @@ class TestIntegration:
             fnp.zeros((10, 10))  # free
             fnp.ones((10, 10))  # numel(output)=100 (Task 4)
             fnp.full((10, 10), 3.14)  # numel(output)=100
-            fnp.diag(np.arange(10, dtype=float))  # numel(output)=100
-            fnp.diagflat(np.arange(5, dtype=float))  # numel(output)=25
-            assert budget.flops_used == 10 + 10 + 100 + 100 + 100 + 25
+            fnp.diag(
+                np.arange(10, dtype=float)
+            )  # 1-D construct: v.shape[0]=10 (Task 7)
+            fnp.diagflat(np.arange(5, dtype=float))  # numel(v)=5 (Task 7)
+            assert budget.flops_used == 10 + 10 + 100 + 100 + 10 + 5
 
 
 class TestSymmetryInferredSlot:

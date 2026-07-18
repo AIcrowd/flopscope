@@ -12,10 +12,11 @@ from flopscope._weights import get_weight, load_weights, reset_weights
 
 # Ops that must bill 0 FLOPs under production weights (data movement / select).
 FREE_DATA_MOVEMENT_OPS = [
-    "tril",
-    "triu",
-    "diag",
-    "diagflat",
+    # tril/triu/diag/diagflat left the free tier too -- the triangular/diagonal
+    # family now bills the values it writes (kept-triangle count / v.shape[0] /
+    # numel(v)) at weight 1.0, see
+    # tests/test_triage_price_pins.py::test_diag_family_bills_written_values_only,
+    # test_triu_batch_leading_dims_multiply.
     # take/take_along_axis/choose (gather x4), put/place/putmask/put_along_axis/
     # fill_diagonal/extract/compress (scatter x1) left the free tier -- see
     # tests/test_triage_price_pins.py::test_gather_tier_bills_4x_output,

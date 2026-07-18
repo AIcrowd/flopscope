@@ -653,6 +653,20 @@ PROBES.update(
     }
 )
 
+# ---------------------------------------------------------------------------
+# diag family + triangular constructors (weight-flipped from free -> 1.0,
+# cost-model triage Task 7): diag's 1-D construct branch, diagflat, triu,
+# and tril all declare the input array's own dtype; none of them widen.
+# ---------------------------------------------------------------------------
+PROBES.update(
+    {
+        "diag": lambda: fnp.diag(V),
+        "diagflat": lambda: fnp.diagflat(V),
+        "triu": lambda: fnp.triu(M),
+        "tril": lambda: fnp.tril(M),
+    }
+)
+
 
 def _copyto_probe() -> np.ndarray:
     dst = np.zeros(8, dtype=np.int32)

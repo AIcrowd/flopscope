@@ -891,11 +891,12 @@ class TestFreeOps:
         assert _cost_of(we.trim_zeros, numpy.array([0, 0, 1, 2, 0, 0])) == 6
 
     def test_diag_1d(self, we):
-        # 1D->2D: cost = numel(output) = 3*3 = 9
-        assert _cost_of(we.diag, numpy.array([1, 2, 3])) == 9
+        # 1-D construct: cost = v.shape[0] = 3 (Task 7)
+        assert _cost_of(we.diag, numpy.array([1, 2, 3])) == 3
 
     def test_diag_2d(self, we):
-        assert _cost_of(we.diag, numpy.random.rand(5, 5)) == 5
+        # 2-D extract: numpy.diag returns a view -> 0 (Task 7)
+        assert _cost_of(we.diag, numpy.random.rand(5, 5)) == 0
 
     def test_fill_diagonal(self, we):
         assert _cost_of(we.fill_diagonal, numpy.zeros((5, 5)), 1.0) == 5

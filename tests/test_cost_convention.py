@@ -88,10 +88,8 @@ _u100 = fnp.asarray(_rng.uniform(0.01, 0.99, 100))
 _v100_pos = fnp.asarray(np.asarray(_v100) > 0)  # bool mask, built outside BudgetContext
 
 # Copy / gather / view ops
-_sq10_2d = fnp.asarray(
-    _rng.standard_normal((10, 10))
-)  # 2-D: diag extract → min(10,10)=10
-_v5_1d = fnp.asarray(_rng.standard_normal(5))  # 1-D: diag construct → (5+0)^2=25 output
+_sq10_2d = fnp.asarray(_rng.standard_normal((10, 10)))  # 2-D: diag extract → view → 0
+_v5_1d = fnp.asarray(_rng.standard_normal(5))  # 1-D: diag construct → v.shape[0]=5
 _sq3a = fnp.asarray(_rng.standard_normal((3, 3)))
 _sq3b = fnp.asarray(_rng.standard_normal((3, 3)))
 _idx10x3 = fnp.asarray(np.random.default_rng(7).integers(0, 10, (10, 3)))
@@ -510,8 +508,8 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "trace": (lambda: fnp.trace(_sq10), 10),
     "linalg.cross": (lambda: fnp.linalg.cross(_a3, _b3), 3 * 3),
     # ---- Copy / gather / view ops (audit-completion pins) ------------------
-    # diag extract: 2-D (10,10) → min(10,10)=10
-    "diag": (lambda: fnp.diag(_sq10_2d), 10),
+    # diag extract: 2-D (10,10) → view → 0 (Task 7)
+    "diag": (lambda: fnp.diag(_sq10_2d), 0),
     # diagonal: returns a view → 0 FLOPs
     "diagonal": (lambda: fnp.diagonal(_sq10_2d), 0),
     # take_along_axis: gather tier weight 4.0; conftest resets weights → flop_cost = numel(output) = 30
@@ -719,7 +717,7 @@ DEFERRED: dict[str, str] = {
     "require": "numel(input); billed regardless of view-vs-copy",
     "fft.fftshift": "numel(output); roll-based reindex, no arithmetic",
     "fft.ifftshift": "numel(output); roll-based reindex, no arithmetic",
-    "diag": "pinned in OP_EXPECTATIONS (extract path; construct path = numel(output))",
+    "diag": "pinned in OP_EXPECTATIONS (2-D extract: 0, view; 1-D construct: v.shape[0])",
     "concatenate": "numel(output); trivial copy",
     "concat": "numel(output); numpy 2.x alias for concatenate",
     "stack": "numel(output); trivial copy",
@@ -731,8 +729,8 @@ DEFERRED: dict[str, str] = {
     "hstack": "numel(output); materializing copy",
     "column_stack": "numel(output); materializing copy (1-D to 2-D columns)",
     "row_stack": "numel(output); alias for vstack",
-    "tril": "numel(output); masked-select copy; weight 1.0",
-    "triu": "numel(output); masked-select copy; weight 1.0",
+    "tril": "elements at/below kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
+    "triu": "elements at/above kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
     "einsum_path": "path planning only; returns list+string, no numeric FLOPs",
     "histogram_bin_edges": "numel(a); bin-edge computation",
     "pad": "numel(output); pad fill",
@@ -774,7 +772,7 @@ DEFERRED: dict[str, str] = {
     "ravel_multi_index": "2*(ndim-1)*N (+N for clip/wrap); one stride is unity",
     "ix_": "numel(output)",
     "mask_indices": "2*n^2 + 8*k; weight 1.0 (mask scan + gather index pairs)",
-    "diagflat": "len(v)",
+    "diagflat": "numel(v)",
     "fill_diagonal": "min(m,n)",
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
     "unpackbits": "8*n",

@@ -385,3 +385,28 @@ def test_apply_along_axis_wrapper_bills_1x_output():
         )
         == 20
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: diag family + triangular constructors
+# ---------------------------------------------------------------------------
+
+
+def test_diag_family_bills_written_values_only():
+    sq = np.arange(64.0, dtype=np.float32).reshape(8, 8)
+    v = np.arange(10, dtype=np.float32)
+    assert billed(lambda: fnp.diag(fnp.asarray(sq))) == 0  # 2-D extract: view
+    assert billed(lambda: fnp.diag(fnp.asarray(v), k=3)) == 10  # 1-D construct: len(v)
+    assert billed(lambda: fnp.diagflat(fnp.asarray(v))) == 10
+    assert billed(lambda: fnp.triu(fnp.asarray(sq))) == 36  # 8*9/2 kept
+    assert billed(lambda: fnp.tril(fnp.asarray(sq), k=-1)) == 28  # below diagonal
+    assert billed(lambda: fnp.triu(fnp.asarray(sq), k=2)) == 21
+
+
+def test_triu_batch_leading_dims_multiply():
+    """A (3, 8, 8) stack bills 3x the per-matrix kept-triangle count -- numpy
+    applies triu/tril to the final two axes and leaves leading batch
+    dimensions alone, so the cost must multiply in the batch size rather
+    than treat the whole stack as one flat triangle."""
+    stacked = np.ones((3, 8, 8), dtype=np.float32)
+    assert billed(lambda: fnp.triu(fnp.asarray(stacked))) == 3 * 36
