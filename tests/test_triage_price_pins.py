@@ -488,3 +488,51 @@ def test_indices_already_charged_weight_one_no_change():
     bills its REAL output dtype (not dtype-neutral): dense (2,3,4) int64 grid
     -> numel(output)=24 elements x dtype_rate(int64)=2.0 x weight 1.0 = 48."""
     assert billed(lambda: fnp.indices((3, 4))) == 48
+
+
+# ---------------------------------------------------------------------------
+# Task 9: pad -- writes-consistent base (numel(output)) + mode extras
+# ---------------------------------------------------------------------------
+
+
+def test_pad_bills_full_output_plus_mode_extras():
+    a = np.arange(100, dtype=np.float32)
+    assert billed(lambda: fnp.pad(fnp.asarray(a), 10)) == 120  # constant: numel(out)
+    assert billed(lambda: fnp.pad(fnp.asarray(a), 10, mode="edge")) == 120
+    assert (
+        billed(lambda: fnp.pad(fnp.asarray(a), 10, mode="linear_ramp")) == 140
+    )  # out + (out - in)
+    stat = billed(lambda: fnp.pad(fnp.asarray(a), 10, mode="mean"))
+    assert stat > 120  # out + stat cost
+
+
+def test_pad_movement_and_odd_reflect_modes():
+    """wrap and (default even) reflect are movement modes -- 0 extra, so they
+    bill the same numel(out)=120 as constant/edge above. symmetric with
+    reflect_type='odd' takes the same +(out-in) extra as linear_ramp."""
+    a = np.arange(100, dtype=np.float32)
+    assert billed(lambda: fnp.pad(fnp.asarray(a), 10, mode="wrap")) == 120
+    assert billed(lambda: fnp.pad(fnp.asarray(a), 10, mode="reflect")) == 120
+    assert (
+        billed(
+            lambda: fnp.pad(fnp.asarray(a), 10, mode="symmetric", reflect_type="odd")
+        )
+        == 140
+    )
+
+
+def test_pad_2d_multiplies_the_full_output_base():
+    """A (10, 10) input padded by 2 on every side of every axis produces a
+    14x14=196-element output; the writes-consistent base charges every one of
+    those cells (not just the padded border), locking multi-axis numel(out)."""
+    a2 = np.arange(100, dtype=np.float32).reshape(10, 10)
+    assert billed(lambda: fnp.pad(fnp.asarray(a2), 2)) == 196
+
+
+def test_pad_empty_input_floors_at_one():
+    """A 0-element input padded by 0 (numpy accepts mode='constant'/'empty' on
+    an empty axis; every other mode rejects it) produces a 0-element output --
+    the writes-consistent base would charge 0 flop_cost, but pad still ran, so
+    the shared floor-of-1 convention applies."""
+    a = np.zeros(0, dtype=np.float32)
+    assert billed(lambda: fnp.pad(fnp.asarray(a), 0)) == 1

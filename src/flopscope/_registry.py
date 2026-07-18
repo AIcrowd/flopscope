@@ -1665,7 +1665,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Pad array. Cost: 0 for data-movement modes; reduction cost (maximum/minimum/mean/median) or 2*(numel_out-numel_in) (linear_ramp, reflect_type='odd') for value-computing modes; mode=<callable> raises.",
+        "notes": "Pad array. Cost: numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises.",
     },
     "triu": {
         "category": "counted_custom",

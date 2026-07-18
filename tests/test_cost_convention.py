@@ -733,7 +733,7 @@ DEFERRED: dict[str, str] = {
     "triu": "elements at/above kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
     "einsum_path": "path planning only; returns list+string, no numeric FLOPs",
     "histogram_bin_edges": "numel(a); bin-edge computation",
-    "pad": "numel(output); pad fill",
+    "pad": "numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises",
     "resize": "numel(output)",
     "meshgrid": "numel(output) per array; sparse=True bills sum(input lengths); copy=False bills 1",
     "indices": "numel(dense output)",

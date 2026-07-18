@@ -1218,26 +1218,35 @@ def _pad_pairs(value, ndim):
 
 
 def _pad_flop_cost(in_shape, pad_width, mode, kwargs):
-    """flop_cost for np.pad: 0 for movement modes; reduction/affine for value modes."""
+    """flop_cost for np.pad: numpy allocates a fresh output and writes EVERY
+    cell (interior copy + border fill), so every mode bills a numel(output)
+    base; movement modes add nothing on top, linear_ramp/odd-reflect add the
+    border's second write pass, and the stat modes add their reduction cost.
+    """
     ndim = len(in_shape)
-    # Movement modes short-circuit BEFORE normalizing pad_width, so a malformed
-    # pad_width surfaces numpy's own clean ValueError (not an IndexError from
-    # _pad_pairs) for these modes.
-    if mode in _PAD_FREE_MODES:
-        return 0
-    if mode in ("reflect", "symmetric") and kwargs.get("reflect_type", "even") != "odd":
-        return 0
     numel_in = _math.prod(in_shape) if ndim else 1
-    pad_pairs = _pad_pairs(pad_width, ndim)
-    numel_out = (
-        _math.prod(s + b + a for s, (b, a) in zip(in_shape, pad_pairs, strict=False))
-        if ndim
-        else 1
-    )
+    try:
+        pad_pairs = _pad_pairs(pad_width, ndim)
+        numel_out = (
+            _math.prod(
+                s + b + a for s, (b, a) in zip(in_shape, pad_pairs, strict=False)
+            )
+            if ndim
+            else 1
+        )
+    except (IndexError, TypeError, ValueError):
+        # pad_width didn't normalize here (e.g. a row count mismatched to
+        # ndim); bill nothing and let the real numpy call below raise its own
+        # clean error instead of leaking an internal one from this helper.
+        return 0
+    if mode in _PAD_FREE_MODES:
+        return max(numel_out, 1)
+    if mode in ("reflect", "symmetric") and kwargs.get("reflect_type", "even") != "odd":
+        return max(numel_out, 1)
     if mode in ("reflect", "symmetric"):  # reflect_type == "odd" (even handled above)
-        return 2 * (numel_out - numel_in)
+        return max(numel_out + (numel_out - numel_in), 1)
     if mode == "linear_ramp":
-        return 2 * (numel_out - numel_in)
+        return max(numel_out + (numel_out - numel_in), 1)
     if mode in _PAD_STAT_MODES:
         stat_length = kwargs.get("stat_length", None)
         if stat_length is None:
@@ -1268,18 +1277,16 @@ def _pad_flop_cost(in_shape, pad_width, mode, kwargs):
             cost += cross * sum(stats)
             if mode == "mean":
                 cost += cross * len(stats)  # one divide per stat output cell
-        return cost
-    return 0  # unknown string mode: let numpy raise its own ValueError
+        return max(numel_out + cost, 1)
+    return max(numel_out, 1)  # unknown string mode: let numpy raise its own ValueError
 
 
 @_counted_wrapper
 def pad(
     array: ArrayLike, pad_width: Any, mode: Any = "constant", **kwargs: Any
 ) -> FlopscopeArray:
-    """Pad an array. Cost: 0 for data-movement modes (constant/edge/empty/wrap/
-    reflect/symmetric with reflect_type='even'); reduction cost for
-    maximum/minimum/mean/median; 2*(numel_out-numel_in) for linear_ramp and for
-    reflect/symmetric with reflect_type='odd'. mode=<callable> is unsupported."""
+    """Pad an array. Cost: numel(output) + mode extras (movement 0;
+    linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises."""
     if callable(mode):
         raise ValueError(
             "flopscope: pad(mode=<callable>) is not supported under FLOP metering "
@@ -1303,7 +1310,8 @@ attach_docstring(
     pad,
     _np.pad,
     "counted_custom",
-    "0 for movement modes; reduction/affine for value modes",
+    "numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); "
+    "stat modes +stat cost); mode=<callable> raises",
 )
 
 
