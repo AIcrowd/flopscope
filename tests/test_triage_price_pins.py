@@ -164,6 +164,52 @@ def test_scatter_ops_bill_elements_touched():
     assert billed(lambda: fnp.fill_diagonal(fnp.asarray(sq.copy()), 7.0)) == 30
 
 
+def test_place_and_putmask_bill_numel_input_not_mask_count():
+    """place/putmask both declare ``dtypes=(arr's own dtype,)`` and cost
+    ``numel(input)`` -- the WHOLE array is scanned regardless of how many
+    positions the mask actually selects (unlike put's numel(indices)
+    formula above). A float64 array resolves at dtype_rate 2.0, proving the
+    dtype declaration is live (a dtype-neutral bug would still read 1000)."""
+    a = np.zeros(1000, dtype=np.float32)
+    vals = np.ones(50, dtype=np.float32)
+    mask = np.zeros(1000, dtype=bool)
+    mask[:50] = True  # built outside the thunk: the slice-assign must not bill
+    assert (
+        billed(
+            lambda: fnp.place(
+                fnp.asarray(a.copy()), fnp.asarray(mask), fnp.asarray(vals)
+            )
+        )
+        == 1000
+    )
+    assert (
+        billed(
+            lambda: fnp.putmask(
+                fnp.asarray(a.copy()), fnp.asarray(mask), fnp.asarray(vals)
+            )
+        )
+        == 1000
+    )
+    a64 = np.zeros(1000, dtype=np.float64)
+    vals64 = np.ones(50, dtype=np.float64)
+    assert (
+        billed(
+            lambda: fnp.place(
+                fnp.asarray(a64.copy()), fnp.asarray(mask), fnp.asarray(vals64)
+            )
+        )
+        == 2000
+    )
+    assert (
+        billed(
+            lambda: fnp.putmask(
+                fnp.asarray(a64.copy()), fnp.asarray(mask), fnp.asarray(vals64)
+            )
+        )
+        == 2000
+    )
+
+
 def test_extract_and_compress_bill_scan_plus_gather():
     a = np.zeros(1000, dtype=np.float32)
     mask = np.zeros(1000, dtype=bool)
