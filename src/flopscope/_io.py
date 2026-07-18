@@ -110,13 +110,9 @@ def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
     return converted
 
 
-def _savez_flop_cost(converted: dict[str, _np.ndarray]) -> int:
-    total = sum(int(v.size) for k, v in converted.items() if k != _META_KEY)
-    return 4 * max(total, 1)
-
-
-def _savez_dtypes(converted: dict[str, _np.ndarray]) -> tuple:
-    return tuple(v.dtype for k, v in converted.items() if k != _META_KEY)
+def _savez_billed_arrays(converted: dict[str, _np.ndarray]) -> list[_np.ndarray]:
+    """The saved arrays that count toward billing (everything but __meta__)."""
+    return [v for k, v in converted.items() if k != _META_KEY]
 
 
 @_counted_wrapper
@@ -124,12 +120,13 @@ def savez(file: str, **arrays: Any) -> None:
     """Save multiple named arrays (+ optional __meta__ dict) to .npz. Cost: 4*sum(numel)."""
     budget = require_budget()
     converted = _prepare(arrays)
+    billed = _savez_billed_arrays(converted)
     with budget.deduct(
         "savez",
-        flop_cost=_savez_flop_cost(converted),
+        flop_cost=4 * max(sum(int(v.size) for v in billed), 1),
         subscripts=None,
         shapes=(),
-        dtypes=_savez_dtypes(converted),
+        dtypes=tuple(v.dtype for v in billed),
     ):
         _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
 
@@ -142,11 +139,12 @@ def savez_compressed(file: str, **arrays: Any) -> None:
     """
     budget = require_budget()
     converted = _prepare(arrays)
+    billed = _savez_billed_arrays(converted)
     with budget.deduct(
         "savez_compressed",
-        flop_cost=_savez_flop_cost(converted),
+        flop_cost=4 * max(sum(int(v.size) for v in billed), 1),
         subscripts=None,
         shapes=(),
-        dtypes=_savez_dtypes(converted),
+        dtypes=tuple(v.dtype for v in billed),
     ):
         _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]

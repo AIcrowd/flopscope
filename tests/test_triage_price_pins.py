@@ -602,3 +602,13 @@ def test_io_savez_bills_sum_of_saved_arrays_excluding_meta(tmp_path):
         )
         == 4 * 400
     )
+    # savez_compressed shares savez's exact formula (4*sum(numel), meta excluded).
+    fzc = str(tmp_path / "wzc.npz")
+    assert (
+        billed(
+            lambda: fnp.savez_compressed(
+                fzc, a=fnp.asarray(a), b=fnp.asarray(b), __meta__={"k": 1}
+            )
+        )
+        == 4 * 400
+    )

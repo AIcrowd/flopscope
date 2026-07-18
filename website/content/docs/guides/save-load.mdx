@@ -2,7 +2,7 @@
 title: "Saving & Loading Models"
 ---
 
-*Store weights in a portable, pickle-free file and load them back in zero FLOPs.*
+*Store weights in a portable, pickle-free file. Loading them back is free; saving bills the bytes you write.*
 
 **You will learn:**
 - What a flopscope file contains and why it is safe to load
@@ -19,7 +19,9 @@ A flopscope file stores exactly two things:
 
 Your *class* always lives in *your code*, never in the file. flopscope reads the numeric payload and hands the values to the object you construct — no pickle, no `eval`, no `exec`. That boundary is the entire security model: loading a file can never execute code.
 
-Loading is also **free**: `fnp.load` charges 0 FLOPs regardless of file size.
+Loading is **free**: `fnp.load` charges 0 FLOPs regardless of file size. Saving is
+not — `fnp.save`, `fnp.savez`, and `fnp.savez_compressed` each charge 4 FLOPs per
+element written (the `__meta__` block itself is not counted).
 
 ## Saving and loading arrays
 
