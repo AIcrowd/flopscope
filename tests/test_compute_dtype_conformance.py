@@ -588,6 +588,14 @@ PROBES.update(
         "unpackbits": lambda: fnp.unpackbits(V01.astype(np.uint8)),
         "vdot": lambda: fnp.vdot(V, V),
         "inner": lambda: fnp.inner(V3, V3),
+        # 3-arg branch: bills the operands' own dtype (dtypes=(x.dtype, y.dtype)),
+        # no longer dtype-neutral since the select-class rework. The 1-arg
+        # branch aliases to nonzero's own deduct() call and is covered by the
+        # "nonzero" probe above (identical formula, same op-name at runtime).
+        "where": lambda: fnp.where(COND, V, V),
+        # select: newly charged (weight 0.0 -> 1.0) by the select-class
+        # rework, bills the choicelist arrays' own dtype (dtypes=_select_dtypes).
+        "select": lambda: fnp.select([V > 4], [V]),
     }
 )
 
@@ -888,14 +896,9 @@ SKIPPED["row_stack"] = (
 )
 
 # --- dtype-neutral by design, non-random: verified individually.
-SKIPPED["where"] = (
-    "dual behavior by call arity (src/flopscope/_array_ops.py): the 3-arg "
-    "selection form `where(cond, x, y)` is pure selection by a GIVEN mask "
-    "and is declared dtype-neutral (resolved_dtype=None, verified) -- "
-    "movement family, matching the data-movement free-tier model. The 1-arg "
-    "form `where(cond)` (nonzero-equivalent) bills cond.dtype and is an "
-    "index-output op, covered by the nonzero/argwhere-family probes above."
-)
+# `where`'s 3-arg branch used to live here (declared dtype-neutral,
+# resolved_dtype=None) but the select-class rework made it bill the
+# operands' own dtype -- it now has a direct PROBES entry above instead.
 SKIPPED["einsum_path"] = (
     "returns a contraction PLAN, not a value (registry note: 'no numeric "
     "output'); verified 0 FLOPs / resolved_dtype=None -- a planning "

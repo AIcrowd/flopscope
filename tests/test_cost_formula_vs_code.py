@@ -1096,7 +1096,7 @@ def test_gradient_cost_pinned(shape, expected, we):
     assert _cost_of(we.gradient, f) == expected
 
 
-@pytest.mark.parametrize("size,expected", [(100, 1100), (1000, 11000)])
+@pytest.mark.parametrize("size,expected", [(100, 1300), (1000, 13000)])
 def test_unwrap_cost_pinned(size, expected, we):
     a = we.asarray(numpy.zeros(size))
     assert _cost_of(we.unwrap, a) == expected

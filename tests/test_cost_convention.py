@@ -493,8 +493,11 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     # ---- Miscellaneous counted_custom -------------------------------------
     # clip: 2 bounds → 2 compare-selects/elem → 2*numel(output); old pin was 1*numel
     "clip": (lambda: fnp.clip(_v100, -1.0, 1.0), 200),
-    # where (1-arg): cond.size = 100; equivalent to nonzero -> charged numel at weight 1.0
-    # 3-arg where (select) is FREE (0 FLOPs); only the 1-arg form (derives indices) is charged.
+    # where (1-arg): cond.size = 100; equivalent to nonzero -> deducted under
+    # "nonzero" (alias parity), charged numel at weight 1.0. This pin exercises
+    # that path -- unit-weight flops_used is unaffected by the op_name it logs
+    # under. 3-arg where (select) is now charged too: 4*numel(broadcast output)
+    # at weight 4.0 (unit weight here -> 1*numel), see test_triage_price_pins.py.
     "where": (lambda: fnp.where(_v100_pos), 100),
     "tile": (lambda: fnp.tile(_v100, 3), 300),
     "repeat": (lambda: fnp.repeat(_v100, 3), 300),
@@ -524,8 +527,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "compress": (lambda: fnp.compress(_cond5, _v5_float), 17),
     # packbits: numel(input)=8
     "packbits": (lambda: fnp.packbits(_v8_bits), 8),
-    # unwrap: 11 * numel(input) = 11 * 100 (steps 8/12 are 3-arg where = free selects)
-    "unwrap": (lambda: fnp.unwrap(_v100), 11 * 100),
+    # unwrap: 13 * numel(input) = 13 * 100 (steps 8/12, 3-arg where selects,
+    # are charged like every other pass now that 3-arg where itself bills)
+    "unwrap": (lambda: fnp.unwrap(_v100), 13 * 100),
 }
 
 # ---------------------------------------------------------------------------
@@ -745,8 +749,8 @@ DEFERRED: dict[str, str] = {
     "nonzero": "numel(input)",
     "flatnonzero": "numel(input)",
     "argwhere": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
-    "select": "numel(output) gather tier",
-    "piecewise": "numel(input); local_callback",
+    "select": "numel(output) * len(condlist)",
+    "piecewise": "numel(input) * len(condlist); local_callback",
     "apply_along_axis": "numel(output); local_callback",
     "apply_over_axes": "numel(output); local_callback",
     "fromfunction": "numel(output); local_callback",
@@ -774,7 +778,7 @@ DEFERRED: dict[str, str] = {
     "fill_diagonal": "min(m,n)",
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
     "unpackbits": "8*n",
-    "unwrap": "pinned in OP_EXPECTATIONS (11*numel(input) weight 1.0; steps 8/12 are free 3-arg where)",
+    "unwrap": "pinned in OP_EXPECTATIONS (13*numel(input) weight 1.0; steps 8/12 are 3-arg where selects, charged like the rest since Task 6's select-class rework)",
     # unstack left this dict in Task 5 -- it now bills 0 FLOPs (free-tier
     # view, NumPy 2.1+); see tests/test_triage_price_pins.py::test_unstack_stays_free
     # and tests/test_view_semantics_lock.py.

@@ -26,7 +26,10 @@ FREE_DATA_MOVEMENT_OPS = [
     # replication family now bills numel(output) at weight 1.0, see
     # tests/test_triage_price_pins.py::test_creation_and_copy_family_bills_output,
     # test_creation_and_copy_family_remaining_ops_bill_output.
-    "select",
+    # select and 3-arg where left the free tier too -- the select class now
+    # bills its scan/select work at weight 1.0/4.0, see
+    # tests/test_triage_price_pins.py::test_select_and_piecewise_bill_per_condition,
+    # test_where_three_arg_bills_4x_broadcast_output.
     "unstack",
     "ix_",
 ]
@@ -166,18 +169,20 @@ def test_empty_and_tri_are_not_falsely_symmetric():
 
 
 def test_where_one_arg_is_charged_like_nonzero():
-    """1-arg where derives indices by testing values -> charged numel (unit weights)."""
+    """1-arg where IS nonzero -> deducts under "nonzero" (alias parity),
+    charged numel (unit weights)."""
     with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
         mask = fnp.asarray([True, False, True, False] * 25)  # 100 elems, prebuilt
         n0 = len(ctx.op_log)
         fnp.where(mask)
         new = ctx.op_log[n0:]
-    assert len(new) == 1 and new[0].op_name == "where"
+    assert len(new) == 1 and new[0].op_name == "nonzero"
     assert new[0].flop_cost == 100  # numel, unit weight
 
 
-def test_where_three_arg_is_free():
-    """3-arg where selects by a given mask -> 0 FLOPs (unit weights)."""
+def test_where_three_arg_bills_broadcast_output():
+    """3-arg where selects by a given mask but still scans and writes every
+    output element -> charged numel(broadcast output) (unit weights)."""
     with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
         mask = fnp.asarray([True, False] * 50)
         x = fnp.asarray([1.0] * 100)
@@ -186,11 +191,12 @@ def test_where_three_arg_is_free():
         fnp.where(mask, x, y)
         new = ctx.op_log[n0:]
     assert len(new) == 1 and new[0].op_name == "where"
-    assert new[0].flop_cost == 0
+    assert new[0].flop_cost == 100  # numel(broadcast), unit weight
 
 
 def test_where_predicate_still_charged(production_weights):
-    """where(a > 0.5): the comparison is charged; the select is free."""
+    """where(a > 0.5): the comparison is charged; the 1-arg form deducts
+    under "nonzero" at nonzero's weight, distinct from 3-arg where's own."""
 
     def call():
         a = fnp.asarray([i / 100 for i in range(100)])
@@ -201,9 +207,10 @@ def test_where_predicate_still_charged(production_weights):
         call()
         names = [r.op_name for r in ctx.op_log[n0:]]
     assert "greater" in names  # predicate charged
+    assert "nonzero" in names  # 1-arg where deducts under nonzero (alias parity)
     assert (
-        get_weight("where") == 1.0
-    )  # 1-arg where charged at weight 1.0 (numel), not 4.0
+        get_weight("nonzero") == 1.0
+    )  # 1-arg where charged at nonzero's weight 1.0, not 3-arg where's 4.0
 
 
 def test_nonzero_method_matches_function():

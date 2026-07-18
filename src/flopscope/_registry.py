@@ -1612,7 +1612,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Select elements based on condition. Cost: numel(input).",
+        "notes": "Select elements based on condition. Cost: numel(cond) at nonzero's weight (1-arg, deducted under 'nonzero'); 4 * numel(broadcast output) (3-arg).",
     },
     "tile": {
         "category": "counted_custom",
@@ -1821,7 +1821,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Return array from list of choices based on conditions. Cost: numel(output), gather tier ×4.",
+        "notes": "Return array from list of choices based on conditions. Cost: numel(output) * len(condlist).",
     },
     "extract": {
         "category": "counted_custom",
@@ -3673,7 +3673,7 @@ REGISTRY: dict[str, dict] = {
         "local_callback": True,
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Piecewise function. Cost: numel(input).",
+        "notes": "Piecewise function. Cost: numel(input) * len(condlist).",
     },
     "apply_along_axis": {
         "category": "counted_custom",

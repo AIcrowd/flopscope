@@ -388,8 +388,8 @@ def test_sort_complex_per_slice():
 def test_select_bills_broadcast_output():
     x = fnp.asarray(np.random.rand(1000))
     conds = [np.asarray(x) < 0.3, np.asarray(x) > 0.7]
-    # scalar choices used to collapse the charge; output is 1000 elements
-    assert cost(lambda: fnp.select(conds, [0.0, 1.0], default=0.5)) == 1000
+    # output is 1000 elements, scanned once per condition -> 1000 * len(conds)
+    assert cost(lambda: fnp.select(conds, [0.0, 1.0], default=0.5)) == 2000
 
 
 # ---------------- choice(p=) + diff prepend/append (audit-2 verified) ----------------
@@ -1516,12 +1516,13 @@ def test_cov_corrcoef_centering():
 
 
 def test_unwrap_passes():
-    """unwrap: 11 one-FLOP ufunc passes per element
-    (diff, +period/2, mod, -period/2, ==low, >0, &, sub, abs, <discont, cumsum)
-    Two 3-arg where (select) passes are now free (weight=1.0→free), charged as 11*N.
+    """unwrap: 13 one-FLOP ufunc passes per element
+    (diff, +period/2, mod, -period/2, ==low, >0, &, 2x where-select, sub, abs,
+    <discont, cumsum). The two 3-arg where (select) passes are charged like
+    every other pass (see _unwrap.py:unwrap_cost), so the total is 13*N.
     """
     v = fnp.asarray(np.random.rand(1000))
-    assert cost(lambda: fnp.unwrap(v)) == 11 * 1000
+    assert cost(lambda: fnp.unwrap(v)) == 13 * 1000
 
 
 def test_poly_1d_exact_convolution():

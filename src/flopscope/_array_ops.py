@@ -1008,16 +1008,19 @@ def where(
 ) -> FlopscopeArray | tuple[FlopscopeArray, ...]:
     """Return elements chosen from *x*/*y*, or indices where *condition* holds.
 
-    Cost: 3-arg select is free (selection by a given mask). 1-arg form
-    (``where(condition)`` == ``nonzero``) derives indices by testing values,
-    so it is charged ``numel`` at the comparison tier (weight 1.0).
+    Cost: 3-arg form scans and writes the whole broadcast result, charged
+    ``4 * numel(broadcast(cond, x, y))`` at the select tier (weight 4.0). 1-arg
+    form (``where(condition)`` == ``nonzero``) derives indices by testing
+    values, so it bills identically to ``nonzero`` (numel, weight 1.0).
     """
     budget = require_budget()
     cond_arr = _np.asarray(condition)
     if x is None and y is None:
-        # 1-arg: equivalent to nonzero -> charged numel.
+        # 1-arg where IS nonzero (same values-derive-indices computation), so
+        # it deducts under nonzero's op name -- alias parity, not a separate
+        # price: this call bills identically to fnp.nonzero(condition).
         with budget.deduct(
-            "where",
+            "nonzero",
             flop_cost=cond_arr.size,
             subscripts=None,
             shapes=(cond_arr.shape,),
@@ -1025,9 +1028,22 @@ def where(
         ):
             result = _call_numpy(_np.where, _to_base_ndarray(condition))
     else:
-        # 3-arg: pure selection by a given mask -> free (still time-accounted).
+        # 3-arg: selection by a given mask still tests every output element
+        # and writes the full broadcast result -- charged at the select tier.
+        x_arr = _np.asarray(x)
+        y_arr = _np.asarray(y)
+        out_numel = max(
+            int(
+                _np.prod(_np.broadcast_shapes(cond_arr.shape, x_arr.shape, y_arr.shape))
+            ),
+            1,
+        )
         with budget.deduct(
-            "where", flop_cost=0, subscripts=None, shapes=(cond_arr.shape,), dtypes=()
+            "where",
+            flop_cost=out_numel,
+            subscripts=None,
+            shapes=(cond_arr.shape, x_arr.shape, y_arr.shape),
+            dtypes=(x_arr.dtype, y_arr.dtype),
         ):
             result = _call_numpy(
                 _np.where,
@@ -1039,7 +1055,10 @@ def where(
 
 
 attach_docstring(
-    where, _np.where, "counted_custom", "numel(cond) FLOPs (1-arg); 0 FLOPs (3-arg)"
+    where,
+    _np.where,
+    "counted_custom",
+    "numel(cond) FLOPs at nonzero's weight (1-arg); 4 * numel(output) FLOPs (3-arg)",
 )
 
 
@@ -3103,8 +3122,8 @@ def select(
 ) -> FlopscopeArray:
     """Return array drawn from elements depending on conditions.
 
-    Cost: numel(output) — the true broadcast size of the result.
-    Weight tier: gather (×4.0 from the packaged table).
+    Cost: ``numel(output) * len(condlist)`` — each condition is its own scan
+    over the output, at weight 1.0.
     """
     budget = require_budget()
     _select_dtypes = tuple(_np.asarray(c).dtype for c in choicelist)
@@ -3117,7 +3136,8 @@ def select(
             _to_base_ndarray_tree(choicelist),  # type: ignore[arg-type]
             default=default,
         )
-        _op.set_cost(result.size if hasattr(result, "size") else 1)
+        out_numel = result.size if hasattr(result, "size") else 1
+        _op.set_cost(out_numel * max(len(list(condlist)), 1))
     return result  # type: ignore[return-value]
 
 
@@ -3125,7 +3145,7 @@ attach_docstring(
     select,
     _np.select,
     "counted_custom",
-    "numel(output) FLOPs (Cost: numel(output), gather tier ×4)",
+    "numel(output) * len(condlist) FLOPs",
 )
 
 

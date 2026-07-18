@@ -712,7 +712,7 @@ def piecewise(
     *args: Any,
     **kw: Any,
 ) -> FlopscopeArray:
-    """Counted version of np.piecewise. Cost: numel(input)."""
+    """Counted version of np.piecewise. Cost: numel(input) * len(condlist)."""
     _warn_remote_callback("piecewise")
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
@@ -726,7 +726,11 @@ def piecewise(
         *args,
         **kw,
     )
-    cost = x.size
+    # condlist may be a single bool array (numpy treats it as [condlist]) or
+    # a list/tuple of per-piece conditions -- each condition is its own scan
+    # over x, so the bill scales with how many were passed.
+    condlist_seq = condlist if isinstance(condlist, (list, tuple)) else [condlist]
+    cost = x.size * max(len(condlist_seq), 1)
     # Same reasoning as apply_along_axis: funclist entries are arbitrary
     # user code, so bill whichever is pricier of the input dtype and the
     # callback's own demonstrated result dtype.
@@ -748,7 +752,7 @@ attach_docstring(
     piecewise,
     _np.piecewise,
     "counted_custom",
-    "numel(input) FLOPs",
+    "numel(input) * len(condlist) FLOPs",
 )
 
 

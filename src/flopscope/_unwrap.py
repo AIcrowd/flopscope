@@ -24,7 +24,7 @@ def unwrap_cost(shape: tuple[int, ...]) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: ``11 * numel(input)``.
+        Estimated FLOP count: ``13 * numel(input)``.
 
     Notes
     -----
@@ -40,30 +40,34 @@ def unwrap_cost(shape: tuple[int, ...]) -> int:
     5.  ``ddmod == low``    — elementwise compare (boundary check)
     6.  ``dd > 0``          — elementwise compare
     7.  ``& ``              — bitwise-and of two bool arrays
-    8.  ``copyto/select``   — conditional write (boundary fix) **FREE** (3-arg where)
+    8.  ``copyto/select``   — conditional write (boundary fix), 3-arg where
     9.  ``ddmod - dd``      — elementwise subtract (ph_correct)
     10. ``abs(dd)``         — elementwise absolute value
     11. ``< discont``       — elementwise compare
-    12. ``copyto/select``   — conditional write (small-jump zeroing) **FREE** (3-arg where)
+    12. ``copyto/select``   — conditional write (small-jump zeroing), 3-arg where
     13. ``cumsum``          — prefix-sum scan
 
     The ``p[slice1] + ph_correct.cumsum(axis)`` expression (final output
     materialization) involves one add pass but is treated as part of the
     output-write cost — following the convention that the output buffer
-    fill is attributed to the issuing op.  Charging all 11 *non-free* op-passes
-    against ``numel(input)`` rather than ``N-1`` avoids tracking the
-    edge-element correction (one extra element) and gives a clean formula.
+    fill is attributed to the issuing op.  Charging all 13 op-passes against
+    ``numel(input)`` rather than ``N-1`` avoids tracking the edge-element
+    correction (one extra element) and gives a clean formula.
 
-    Steps 8 and 12 (``copyto/select`` via 3-arg ``where``) are pure data
-    movement (selecting by a given mask) and are therefore free per the
-    cost-model rule introduced with the where-arity branching (Task 4,
-    2026-06-15).  Prior value was ``13 * numel`` (included 2 free selects);
-    before that it was ``7 * numel`` (Audit-completion Task 4, 2026-06-12).
+    Steps 8 and 12 (``copyto/select`` via 3-arg ``where``) were treated as
+    free data movement (selecting by a given mask) from the where-arity
+    branching (Task 4, 2026-06-15) through the select-class rework (Task 6,
+    2026-07-17), which discounted this formula to ``11 * numel`` for that
+    window. Task 6 also fixed 3-arg ``where`` itself to charge
+    ``4 * numel(broadcast output)`` (it derives no selector, but does scan
+    and write every output element), so the discount those two steps relied
+    on no longer holds; this formula reverts to charging all 13 passes,
+    matching the original value from Audit-completion Task 4 (2026-06-12).
     """
     numel = 1
     for d in shape:
         numel *= d
-    return max(11 * numel, 1)
+    return max(13 * numel, 1)
 
 
 @_counted_wrapper
@@ -97,7 +101,7 @@ def unwrap(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(unwrap, _np.unwrap, "counted_custom", "11 * numel(input) FLOPs")
+attach_docstring(unwrap, _np.unwrap, "counted_custom", "13 * numel(input) FLOPs")
 
 import sys as _sys  # noqa: E402
 

@@ -304,3 +304,67 @@ def test_split_broadcast_and_diagonal_stay_free():
 def test_unstack_stays_free():
     a = np.arange(24, dtype=np.float32).reshape(4, 6)
     assert billed(lambda: fnp.unstack(fnp.asarray(a))) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 6: where / select / piecewise / apply_along_axis rework
+# ---------------------------------------------------------------------------
+
+
+def test_where_three_arg_bills_4x_broadcast_output():
+    cond = np.ones(1000, dtype=bool)
+    x = np.arange(1000, dtype=np.float32)
+    assert (
+        billed(lambda: fnp.where(fnp.asarray(cond), fnp.asarray(x), fnp.asarray(x)))
+        == 4 * 1000
+    )
+    # cond smaller than result: broadcast size is what's billed
+    cond_row = np.ones((1, 4), dtype=bool)
+    big = np.ones((300, 4), dtype=np.float32)
+    assert (
+        billed(
+            lambda: fnp.where(fnp.asarray(cond_row), fnp.asarray(big), fnp.asarray(big))
+        )
+        == 4 * 1200
+    )
+
+
+def test_where_one_arg_prices_as_nonzero():
+    cond = np.ones(1000, dtype=bool)
+    one_arg = billed(lambda: fnp.where(fnp.asarray(cond)))
+    nz = billed(lambda: fnp.nonzero(fnp.asarray(cond)))
+    assert one_arg == nz == 1000
+
+
+def test_select_and_piecewise_bill_per_condition():
+    x = np.arange(500, dtype=np.float32)
+    c1, c2 = np.zeros(500, dtype=bool), np.ones(500, dtype=bool)
+    assert (
+        billed(
+            lambda: fnp.select(
+                [fnp.asarray(c1), fnp.asarray(c2)], [fnp.asarray(x), fnp.asarray(x)]
+            )
+        )
+        == 2 * 500
+    )
+    assert (
+        billed(
+            lambda: fnp.piecewise(
+                fnp.asarray(x), [fnp.asarray(c1), fnp.asarray(c2)], [0.0, 1.0]
+            )
+        )
+        == 2 * 500
+    )
+
+
+def test_apply_along_axis_wrapper_bills_1x_output():
+    m = np.arange(1000, dtype=np.float32).reshape(20, 50)
+    # scalar-returning pure-python func1d: no separately billed fnp ops inside.
+    # Return np.float32 so heavier-of-dtype billing stays at rate 1 (a python
+    # float would make the result float64 and double the pin).
+    assert (
+        billed(
+            lambda: fnp.apply_along_axis(lambda row: np.float32(0.0), 1, fnp.asarray(m))
+        )
+        == 20
+    )
