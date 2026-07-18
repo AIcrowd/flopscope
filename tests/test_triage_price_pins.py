@@ -357,6 +357,23 @@ def test_select_and_piecewise_bill_per_condition():
     )
 
 
+def test_piecewise_ndarray_condlist_counts_rows():
+    """numpy promotion parity: a 2-D bool ndarray condlist is a stack of
+    per-ROW conditions (bit-identical results to the list form), so it must
+    bill numel * n_rows -- not collapse to one condition. A bare 1-D bool
+    array really is ONE condition (numpy wraps it as [condlist])."""
+    x = np.arange(500, dtype=np.float32)
+    c1, c2 = np.zeros(500, dtype=bool), np.ones(500, dtype=bool)
+    stacked = np.stack([c1, c2])  # (2, 500): two row-conditions
+    assert (
+        billed(lambda: fnp.piecewise(fnp.asarray(x), fnp.asarray(stacked), [0.0, 1.0]))
+        == 2 * 500
+    )
+    assert (
+        billed(lambda: fnp.piecewise(fnp.asarray(x), fnp.asarray(c2), [1.0])) == 1 * 500
+    )
+
+
 def test_apply_along_axis_wrapper_bills_1x_output():
     m = np.arange(1000, dtype=np.float32).reshape(20, 50)
     # scalar-returning pure-python func1d: no separately billed fnp ops inside.

@@ -726,11 +726,23 @@ def piecewise(
         *args,
         **kw,
     )
-    # condlist may be a single bool array (numpy treats it as [condlist]) or
-    # a list/tuple of per-piece conditions -- each condition is its own scan
-    # over x, so the bill scales with how many were passed.
-    condlist_seq = condlist if isinstance(condlist, (list, tuple)) else [condlist]
-    cost = x.size * max(len(condlist_seq), 1)
+    # Count conditions exactly the way numpy's piecewise promotes condlist
+    # (numpy.lib._function_base_impl.piecewise): a scalar condlist, or one
+    # whose first element is neither a list nor an ndarray while x is not
+    # 0-d, is a SINGLE condition (numpy wraps it as [condlist]); everything
+    # else -- a list/tuple of per-piece conditions, or a 2-D+ bool ndarray
+    # whose ROWS are independent conditions -- counts len(condlist). Each
+    # condition is its own scan over x, so the bill scales with that count;
+    # an isinstance(list/tuple) test alone would let a stacked 2-D condlist
+    # bill as one condition. numpy has already accepted condlist above, so
+    # condlist[0] here cannot raise on inputs numpy itself rejects.
+    if _np.isscalar(condlist) or (
+        not isinstance(condlist[0], (list, _np.ndarray)) and x.ndim != 0
+    ):
+        n_conds = 1
+    else:
+        n_conds = len(condlist)
+    cost = x.size * max(n_conds, 1)
     # Same reasoning as apply_along_axis: funclist entries are arbitrary
     # user code, so bill whichever is pricier of the input dtype and the
     # callback's own demonstrated result dtype.
