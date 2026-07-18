@@ -278,7 +278,10 @@ class TestErrors:
         import flopscope as we
 
         with we.BudgetContext(flop_budget=1):
-            a = we.ones((100,))
+            # zeros, not ones: ones bills numel(output) server-side now, so it
+            # would exhaust the 1-FLOP budget during SETUP. zeros stays free;
+            # exhaustion must raise exactly at the charged op below.
+            a = we.zeros((100,))
             with pytest.raises(we.BudgetExhaustedError):
                 we.exp(a)
 
