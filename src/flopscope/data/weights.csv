@@ -471,7 +471,7 @@ amin,alias,counted_reduction,,1.0000,1.0010,,,,Minimum value of array (alias for
 around,alias,counted_unary,,1.0000,0.8722,,,,Alias for round.,Alias of rint (weight: 1.00),0.30,,,,,,,,,,
 fix,alias,counted_unary,,1.0000,0.8777,,,,Round toward zero element-wise (alias for trunc).,Alias of trunc (weight: 1.00),0.30,,,,,,,,,,
 random.ranf,alias,counted_custom,,1.0000,3.0001,,,,Sampling; cost = numel(output).,Alias of random.random_sample (weight: 1.00),3.00,,,,,,,,,,
-random.sample,alias,counted_custom,,1.0000,3.0001,,,,Sampling; cost = numel(output).,Alias of random.random_sample (weight: 1.00),3.00,,,,,,,,,,
+random.sample,benchmarked,counted_custom,,4.0000,3.0001,,,,Sampling; cost = numel(output).,Delegates to random.random_sample's draw but billed independently at weight 4.0 (2026-07-18 wholesale sort/set/random-reorder bump) -- no longer weight-parity with random_sample so it is not folded as an alias.,3.00,,,,,,,,,,
 round,alias,counted_unary,,1.0000,0.8722,,,,Round to given number of decimals element-wise.,Alias of rint (weight: 1.00),0.30,,,,,,,,,,
 trapz,alias,counted_custom,,1.0000,4.3001,,,,Alias for trapezoid (deprecated). Removed in numpy 2.4; use `trapezoid` instead.,Alias of trapezoid (weight: 1.00),4.30,,,,,,,,,,
 random.random_integers,excluded,blacklisted,,,,,,,Deprecated numpy alias; intentionally unsupported (raises AttributeError).,Removed in NumPy 2.x,,,,,,,,,,,

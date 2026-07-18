@@ -560,11 +560,11 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "polyfit": ("2m * (deg+1)^2", r"$2m \cdot (\text{deg}+1)^2$"),
     "poly": ("n^2", r"$n^2$"),
     "roots": ("10n^3", r"$10n^3$"),
-    "bartlett": ("n", "$n$"),
-    "blackman": ("3n", "$3n$"),
-    "hamming": ("n", "$n$"),
-    "hanning": ("n", "$n$"),
-    "kaiser": ("3n", "$3n$"),
+    "bartlett": ("4n", "$4n$"),
+    "blackman": ("40n", "$40n$"),
+    "hamming": ("18n", "$18n$"),
+    "hanning": ("18n", "$18n$"),
+    "kaiser": ("23n", "$23n$"),
     "unwrap": ("numel(input)", r"$\text{numel}(\text{input})$"),
     # stats distributions (not in numpy registry — these are scipy-compatible)
     "stats.norm.pdf": ("10n", r"$10n$"),
@@ -2668,6 +2668,25 @@ def _build_operation_record(
     )
 
 
+# Registry ops whose live implementation is a dunder method on FlopscopeArray
+# (e.g. "getitem" bills ``arr[key]`` -> ``FlopscopeArray.__getitem__``), not a
+# module-level ``fnp.<name>`` callable. ``getattr(fnp, name)`` on one of these
+# hits flopscope.numpy's registry-aware ``__getattr__`` (the op IS registered,
+# just not as a module attribute) and raises -- so resolve_live_objects maps
+# them explicitly instead of falling through to the generic branch.
+METHOD_SURFACE_OPS: dict[str, str] = {
+    "getitem": "__getitem__",
+}
+
+# Hand-written call signatures for METHOD_SURFACE_OPS: ``inspect.signature``
+# on the raw dunder would render the ``self`` parameter (``(self, key)``)
+# under the misleading ``fnp.<name>(...)`` call form nothing actually uses --
+# participants spell this ``arr[key]``, never ``fnp.getitem(arr, key)``.
+METHOD_SURFACE_SIGNATURES: dict[str, str] = {
+    "getitem": "arr[key]",
+}
+
+
 def resolve_live_objects(name: str, module: str) -> tuple[object, object | None]:
     """Resolve the live flopscope object and its upstream NumPy/SciPy counterpart."""
     import numpy as np
@@ -2675,6 +2694,16 @@ def resolve_live_objects(name: str, module: str) -> tuple[object, object | None]
     flops = _import_local_flopscope_module("flopscope")
     fnp = _import_local_flopscope_module("flopscope.numpy")
 
+    if name in METHOD_SURFACE_OPS:
+        dunder = METHOD_SURFACE_OPS[name]
+        ndarray_module = _import_local_flopscope_module("flopscope._ndarray")
+        flopscope_method = getattr(ndarray_module.FlopscopeArray, dunder)
+        # Upstream's slot-wrapper docstring is a content-free stub ("Return
+        # self[key]."), so it is deliberately left unresolved (None) rather
+        # than returned here: build_structured_doc's docstring fallback
+        # (upstream-first, "or" flopscope) would otherwise let that stub
+        # shadow the real, billing-relevant flopscope docstring.
+        return flopscope_method, None
     if module == "numpy.linalg":
         short_name = name.removeprefix("linalg.")
         return getattr(fnp.linalg, short_name), getattr(np.linalg, short_name, None)
@@ -2883,12 +2912,15 @@ def build_structured_doc(
     if parsed.examples:
         example = derive_example_from_upstream(parsed.examples[0].code)
 
-    try:
-        signature = _sanitize_signature(
-            f"{flopscope_ref(name, module)}{inspect.signature(flopscope_obj)}"
-        )
-    except (TypeError, ValueError):
-        signature = f"{flopscope_ref(name, module)}(...)"
+    if name in METHOD_SURFACE_SIGNATURES:
+        signature = METHOD_SURFACE_SIGNATURES[name]
+    else:
+        try:
+            signature = _sanitize_signature(
+                f"{flopscope_ref(name, module)}{inspect.signature(flopscope_obj)}"
+            )
+        except (TypeError, ValueError):
+            signature = f"{flopscope_ref(name, module)}(...)"
 
     flopscope_source_url = _repo_source_url(
         flopscope_obj,

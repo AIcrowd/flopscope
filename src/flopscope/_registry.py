@@ -2537,7 +2537,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": 2.0,
-        "notes": "Shuffle; cost = n*ceil(log2(n)).",
+        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] for array input or the int argument itself (Fisher-Yates draws, dtype-neutral).",
     },
     "random.poisson": {
         "category": "counted_custom",
@@ -2613,7 +2613,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": 2.0,
-        "notes": "Shuffle; cost = n*ceil(log2(n)).",
+        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] (in-place Fisher-Yates draws, dtype-neutral).",
     },
     "random.standard_cauchy": {
         "category": "counted_custom",

@@ -145,7 +145,7 @@
       "slug": "append",
       "status": "supported",
       "summary": "Append values to the end of an array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -166,7 +166,7 @@
       "slug": "apply_along_axis",
       "status": "supported",
       "summary": "Apply a function to 1-D slices along the given axis.",
-      "weight": 4.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -418,7 +418,7 @@
       "slug": "argpartition",
       "status": "supported",
       "summary": "Perform an indirect partition along the given axis using the algorithm specified by the `kind` keyword. It returns an array of indices of the same shape as `a` that index data along the given axis in partitioned order.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -439,7 +439,7 @@
       "slug": "argsort",
       "status": "supported",
       "summary": "Returns the indices that would sort an array.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -719,8 +719,8 @@
       "blocked": false,
       "canonical_path": "numpy/bartlett",
       "category": "counted_custom",
-      "cost_formula": "n",
-      "cost_formula_latex": "$n$",
+      "cost_formula": "4n",
+      "cost_formula_latex": "$4n$",
       "detail_href": "/docs/api/numpy/bartlett/",
       "detail_json_href": "/api-data/ops/bartlett.json",
       "display_type": "custom",
@@ -754,7 +754,7 @@
       "slug": "bincount",
       "status": "supported",
       "summary": "Count number of occurrences of each value in array of non-negative ints.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -908,8 +908,8 @@
       "blocked": false,
       "canonical_path": "numpy/blackman",
       "category": "counted_custom",
-      "cost_formula": "3n",
-      "cost_formula_latex": "$3n$",
+      "cost_formula": "40n",
+      "cost_formula_latex": "$40n$",
       "detail_href": "/docs/api/numpy/blackman/",
       "detail_json_href": "/api-data/ops/blackman.json",
       "display_type": "custom",
@@ -943,7 +943,7 @@
       "slug": "block",
       "status": "supported",
       "summary": "Assemble an nd-array from nested lists of blocks.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -964,7 +964,7 @@
       "slug": "bmat",
       "status": "supported",
       "summary": "Build a matrix object from a string, nested sequence, or array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -991,22 +991,22 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/broadcast-shapes",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/broadcast-shapes/",
       "detail_json_href": "/api-data/ops/broadcast_shapes.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.broadcast_shapes",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "broadcast_shapes",
-      "notes": "Compute broadcast shape from input shapes.",
+      "notes": "Compute broadcast shape from input shapes. Cost: sum of len(shape) across inputs (floor 1); dtype-neutral.",
       "numpy_ref": "np.broadcast_shapes",
       "slug": "broadcast_shapes",
       "status": "supported",
       "summary": "Broadcast the input shapes into a single shape.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1111,7 +1111,7 @@
       "slug": "choose",
       "status": "supported",
       "summary": "Construct an array from an index array and a list of arrays to choose from.",
-      "weight": 0.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -1153,7 +1153,7 @@
       "slug": "column_stack",
       "status": "supported",
       "summary": "Stack 1-D arrays as columns into a 2-D array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1190,12 +1190,12 @@
       "free": false,
       "module": "numpy",
       "name": "compress",
-      "notes": "Return selected slices along axis. Cost: numel(input).",
+      "notes": "Return selected slices along axis. Cost: len(condition) + 4*numel(output).",
       "numpy_ref": "np.compress",
       "slug": "compress",
       "status": "supported",
       "summary": "Return selected slices of an array along given axis.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1216,7 +1216,7 @@
       "slug": "concatenate",
       "status": "supported",
       "summary": "Join a sequence of arrays along an existing axis.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1285,22 +1285,22 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/copy",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/copy/",
       "detail_json_href": "/api-data/ops/copy.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.copy",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "copy",
-      "notes": "Return array copy.",
+      "notes": "Return array copy. Cost: numel(input).",
       "numpy_ref": "np.copy",
       "slug": "copy",
       "status": "supported",
       "summary": "Return an array copy of the given object.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1615,7 +1615,7 @@
       "slug": "delete",
       "status": "supported",
       "summary": "Return a new array with sub-arrays along an axis deleted. For a one dimensional array, this returns those entries not returned by `arr[obj]`.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1631,54 +1631,54 @@
       "free": false,
       "module": "numpy",
       "name": "diag",
-      "notes": "Extract diagonal or construct diagonal array. Cost: len(diagonal).",
+      "notes": "Extract diagonal or construct diagonal array. Cost: 2-D input (extract): 0 (view); 1-D input (construct): numel(v) \u2014 the zero background is free.",
       "numpy_ref": "np.diag",
       "slug": "diag",
       "status": "supported",
       "summary": "Extract a diagonal or construct a diagonal array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/diag-indices",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/diag-indices/",
       "detail_json_href": "/api-data/ops/diag_indices.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.diag_indices",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "diag_indices",
-      "notes": "Return indices to access main diagonal of n-D array.",
+      "notes": "Return indices to access main diagonal of n-D array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.diag_indices",
       "slug": "diag_indices",
       "status": "supported",
       "summary": "Return the indices to access the main diagonal of an array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/diag-indices-from",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/diag-indices-from/",
       "detail_json_href": "/api-data/ops/diag_indices_from.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.diag_indices_from",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "diag_indices_from",
-      "notes": "Return indices to access main diagonal of given array.",
+      "notes": "Return indices to access main diagonal of given array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.diag_indices_from",
       "slug": "diag_indices_from",
       "status": "supported",
       "summary": "Return the indices to access the main diagonal of an n-dimensional array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1694,12 +1694,12 @@
       "free": false,
       "module": "numpy",
       "name": "diagflat",
-      "notes": "Create diagonal array from flattened input. Cost: len(v).",
+      "notes": "Create diagonal array from flattened input. Cost: numel(v) \u2014 the zero background is free.",
       "numpy_ref": "np.diagflat",
       "slug": "diagflat",
       "status": "supported",
       "summary": "Create a two-dimensional array with the flattened input as a diagonal.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -1762,7 +1762,7 @@
       "slug": "digitize",
       "status": "supported",
       "summary": "Return the indices of the bins to which each value in input array belongs.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -1846,7 +1846,7 @@
       "slug": "dstack",
       "status": "supported",
       "summary": "Stack arrays in sequence depth wise (along third axis).",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2077,28 +2077,28 @@
       "slug": "extract",
       "status": "supported",
       "summary": "Return the elements of an array that satisfy some condition.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/eye",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/eye/",
       "detail_json_href": "/api-data/ops/eye.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.eye",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "eye",
-      "notes": "Create identity matrix.",
+      "notes": "Create identity matrix. Cost: diagonal length written = max(0, min(N, M-k)) for k>=0, max(0, min(N+k, M)) for k<0 (fully off-diagonal bills 0).",
       "numpy_ref": "np.eye",
       "slug": "eye",
       "status": "supported",
       "summary": "Return a 2-D array with ones on the diagonal and zeros elsewhere.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2209,22 +2209,22 @@
       "area": "fft",
       "blocked": false,
       "canonical_path": "numpy/fft/fftshift",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/fft/fftshift/",
       "detail_json_href": "/api-data/ops/fft-fftshift.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.fft.fftshift",
-      "free": true,
+      "free": false,
       "module": "numpy.fft",
       "name": "fft.fftshift",
-      "notes": "Shift zero-frequency component to center. No arithmetic; index reordering only.",
+      "notes": "Shift zero-frequency component to center. Cost: numel(output). No arithmetic (numpy.fft.fftshift is numpy.roll); billed as a data-movement reindex, same tier as roll -- not part of the FFT priced-in family.",
       "numpy_ref": "np.fft.fftshift",
       "slug": "fft-fftshift",
       "status": "supported",
       "summary": "Shift the zero-frequency component to the center of the spectrum.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "fft",
@@ -2314,22 +2314,22 @@
       "area": "fft",
       "blocked": false,
       "canonical_path": "numpy/fft/ifftshift",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/fft/ifftshift/",
       "detail_json_href": "/api-data/ops/fft-ifftshift.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.fft.ifftshift",
-      "free": true,
+      "free": false,
       "module": "numpy.fft",
       "name": "fft.ifftshift",
-      "notes": "Inverse of fftshift. No arithmetic; index reordering only.",
+      "notes": "Inverse of fftshift. Cost: numel(output). No arithmetic (numpy.fft.ifftshift is numpy.roll); billed as a data-movement reindex, same tier as roll -- not part of the FFT priced-in family.",
       "numpy_ref": "np.fft.ifftshift",
       "slug": "fft-ifftshift",
       "status": "supported",
       "summary": "The inverse of `fftshift`. Although identical for even-length `x`, the functions differ by one sample for odd-length `x`.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "fft",
@@ -2518,7 +2518,7 @@
       "slug": "fill_diagonal",
       "status": "supported",
       "summary": "Fill the main diagonal of the given array of any dimensionality.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2833,7 +2833,7 @@
       "slug": "fromiter",
       "status": "supported",
       "summary": "Create a new 1-dimensional array from an iterable object.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2854,7 +2854,7 @@
       "slug": "full",
       "status": "supported",
       "summary": "Return a new array of given shape and type, filled with `fill_value`.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2875,7 +2875,7 @@
       "slug": "full_like",
       "status": "supported",
       "summary": "Return a full array with the same shape and type as a given array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2918,6 +2918,27 @@
       "status": "supported",
       "summary": "Return numbers spaced evenly on a log scale (a geometric progression).",
       "weight": 16.0
+    },
+    {
+      "area": "core",
+      "blocked": false,
+      "canonical_path": "numpy/getitem",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
+      "detail_href": "/docs/api/numpy/getitem/",
+      "detail_json_href": "/api-data/ops/getitem.json",
+      "display_type": "custom",
+      "flopscope_ref": "fnp.getitem",
+      "free": false,
+      "module": "numpy",
+      "name": "getitem",
+      "notes": "Array indexing. Basic slicing: free (view). Fancy indexing: 4*numel(output); boolean masks add numel(mask).",
+      "numpy_ref": "np.getitem",
+      "slug": "getitem",
+      "status": "supported",
+      "summary": "Index the array. Basic indexing is free; advanced indexing bills.",
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -2987,8 +3008,8 @@
       "blocked": false,
       "canonical_path": "numpy/hamming",
       "category": "counted_custom",
-      "cost_formula": "n",
-      "cost_formula_latex": "$n$",
+      "cost_formula": "18n",
+      "cost_formula_latex": "$18n$",
       "detail_href": "/docs/api/numpy/hamming/",
       "detail_json_href": "/api-data/ops/hamming.json",
       "display_type": "custom",
@@ -2996,20 +3017,20 @@
       "free": false,
       "module": "flopscope._window",
       "name": "hamming",
-      "notes": "Hamming window. Cost: n (one cosine per sample).",
+      "notes": "Hamming window. Cost: 18*n (per sample: 1 cosine at transcendental tier 16 + multiply + subtract).",
       "numpy_ref": "np.hamming",
       "slug": "hamming",
       "status": "supported",
       "summary": "Return the Hamming window.",
-      "weight": 8.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/hanning",
       "category": "counted_custom",
-      "cost_formula": "n",
-      "cost_formula_latex": "$n$",
+      "cost_formula": "18n",
+      "cost_formula_latex": "$18n$",
       "detail_href": "/docs/api/numpy/hanning/",
       "detail_json_href": "/api-data/ops/hanning.json",
       "display_type": "custom",
@@ -3017,12 +3038,12 @@
       "free": false,
       "module": "flopscope._window",
       "name": "hanning",
-      "notes": "Hanning window. Cost: n (one cosine per sample).",
+      "notes": "Hanning window. Cost: 18*n (per sample: 1 cosine at transcendental tier 16 + multiply + subtract).",
       "numpy_ref": "np.hanning",
       "slug": "hanning",
       "status": "supported",
       "summary": "Return the Hanning window.",
-      "weight": 8.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -3064,7 +3085,7 @@
       "slug": "histogram",
       "status": "supported",
       "summary": "Compute the histogram of a dataset.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -3085,7 +3106,7 @@
       "slug": "histogram2d",
       "status": "supported",
       "summary": "Compute the bi-dimensional histogram of two data samples.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -3106,7 +3127,7 @@
       "slug": "histogram_bin_edges",
       "status": "supported",
       "summary": "Function to calculate only the edges of the bins used by the `histogram` function.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -3127,7 +3148,7 @@
       "slug": "histogramdd",
       "status": "supported",
       "summary": "Compute the multidimensional histogram of some data.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -3169,7 +3190,7 @@
       "slug": "hstack",
       "status": "supported",
       "summary": "Stack arrays in sequence horizontally (column wise).",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -3217,22 +3238,22 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/identity",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/identity/",
       "detail_json_href": "/api-data/ops/identity.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.identity",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "identity",
-      "notes": "Create square identity matrix.",
+      "notes": "Create square identity matrix. Cost: diagonal length written (=n).",
       "numpy_ref": "np.identity",
       "slug": "identity",
       "status": "supported",
       "summary": "Return the identity array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -3337,7 +3358,7 @@
       "slug": "insert",
       "status": "supported",
       "summary": "Insert values along the given axis before the given indices.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -3379,7 +3400,7 @@
       "slug": "intersect1d",
       "status": "supported",
       "summary": "Find the intersection of two arrays.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -3785,8 +3806,8 @@
       "blocked": false,
       "canonical_path": "numpy/kaiser",
       "category": "counted_custom",
-      "cost_formula": "3n",
-      "cost_formula_latex": "$3n$",
+      "cost_formula": "23n",
+      "cost_formula_latex": "$23n$",
       "detail_href": "/docs/api/numpy/kaiser/",
       "detail_json_href": "/api-data/ops/kaiser.json",
       "display_type": "custom",
@@ -3946,7 +3967,7 @@
       "slug": "lexsort",
       "status": "supported",
       "summary": "Perform an indirect stable sort using a sequence of keys.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "linalg",
@@ -4886,7 +4907,7 @@
       "free": false,
       "module": "numpy",
       "name": "mask_indices",
-      "notes": "Return indices of mask for n x n array. Cost: numel(output).",
+      "notes": "Return indices of mask for n x n array. Cost: numel of the returned index arrays (= 2*k); dtype-neutral.",
       "numpy_ref": "np.mask_indices",
       "slug": "mask_indices",
       "status": "supported",
@@ -5080,7 +5101,7 @@
       "slug": "meshgrid",
       "status": "supported",
       "summary": "Return a tuple of coordinate matrices from coordinate vectors.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -5674,43 +5695,43 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/ones",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/ones/",
       "detail_json_href": "/api-data/ops/ones.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.ones",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "ones",
-      "notes": "Create one-filled array.",
+      "notes": "Create one-filled array. Cost: numel(output).",
       "numpy_ref": "np.ones",
       "slug": "ones",
       "status": "supported",
       "summary": "Return a new array of given shape and type, filled with ones.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/ones-like",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/ones-like/",
       "detail_json_href": "/api-data/ops/ones_like.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.ones_like",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "ones_like",
-      "notes": "Array of ones with same shape/type as input.",
+      "notes": "Array of ones with same shape/type as input. Cost: numel(output).",
       "numpy_ref": "np.ones_like",
       "slug": "ones_like",
       "status": "supported",
       "summary": "Return an array of ones with the same shape and type as a given array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -5768,7 +5789,7 @@
       "free": false,
       "module": "numpy",
       "name": "pad",
-      "notes": "Pad array. Cost: 0 for data-movement modes; reduction cost (maximum/minimum/mean/median) or 2*(numel_out-numel_in) (linear_ramp, reflect_type='odd') for value-computing modes; mode=<callable> raises.",
+      "notes": "Pad array. Cost: numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises.",
       "numpy_ref": "np.pad",
       "slug": "pad",
       "status": "supported",
@@ -5794,7 +5815,7 @@
       "slug": "partition",
       "status": "supported",
       "summary": "Return a partitioned copy of an array.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -5852,12 +5873,12 @@
       "free": false,
       "module": "numpy",
       "name": "piecewise",
-      "notes": "Piecewise function. Cost: numel(input).",
+      "notes": "Piecewise function. Cost: numel(input) * len(condlist).",
       "numpy_ref": "np.piecewise",
       "slug": "piecewise",
       "status": "supported",
       "summary": "Evaluate a piecewise-defined function.",
-      "weight": 4.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -5878,7 +5899,7 @@
       "slug": "place",
       "status": "supported",
       "summary": "Change elements of an array based on conditional and input values.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -6193,7 +6214,7 @@
       "slug": "put",
       "status": "supported",
       "summary": "Replaces specified elements of an array with given values.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -6209,12 +6230,12 @@
       "free": false,
       "module": "numpy",
       "name": "put_along_axis",
-      "notes": "Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None); gather tier weight 4.0.",
+      "notes": "Put values into destination array along axis. Cost: elements scattered = (numel(arr) / arr.shape[axis]) x indices.shape[axis] (indices.size when axis=None).",
       "numpy_ref": "np.put_along_axis",
       "slug": "put_along_axis",
       "status": "supported",
       "summary": "Put values into the destination array by matching 1d index and data slices.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -6235,7 +6256,7 @@
       "slug": "putmask",
       "status": "supported",
       "summary": "Changes elements of an array based on conditional and input values.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -6403,7 +6424,7 @@
       "slug": "random-Generator-choice",
       "status": "supported",
       "summary": "Generates a random sample from a given array",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -6844,7 +6865,7 @@
       "slug": "random-Generator-permutation",
       "status": "supported",
       "summary": "Randomly permute a sequence, or return a permuted range.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -6865,7 +6886,7 @@
       "slug": "random-Generator-permuted",
       "status": "supported",
       "summary": "Randomly permute `x` along axis `axis`.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -6970,7 +6991,7 @@
       "slug": "random-Generator-shuffle",
       "status": "supported",
       "summary": "Modify an array or sequence in-place by shuffling its contents.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -7327,7 +7348,7 @@
       "slug": "random-RandomState-choice",
       "status": "supported",
       "summary": "Generates a random sample from a given 1-D array",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -7747,7 +7768,7 @@
       "slug": "random-RandomState-permutation",
       "status": "supported",
       "summary": "Randomly permute a sequence, or return a permuted range.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -7999,7 +8020,7 @@
       "slug": "random-RandomState-shuffle",
       "status": "supported",
       "summary": "Modify a sequence in-place by shuffling its contents.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -8792,12 +8813,12 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.permutation",
-      "notes": "Shuffle; cost = n*ceil(log2(n)).",
+      "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] for array input or the int argument itself (Fisher-Yates draws, dtype-neutral).",
       "numpy_ref": "np.random.permutation",
       "slug": "random-permutation",
       "status": "supported",
       "summary": "Randomly permute a sequence, or return a permuted range.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -8970,6 +8991,27 @@
     {
       "area": "random",
       "blocked": false,
+      "canonical_path": "numpy/random/sample",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
+      "detail_href": "/docs/api/numpy/random/sample/",
+      "detail_json_href": "/api-data/ops/random-sample.json",
+      "display_type": "custom",
+      "flopscope_ref": "fnp.random.sample",
+      "free": false,
+      "module": "numpy.random",
+      "name": "random.sample",
+      "notes": "Sampling; cost = numel(output).",
+      "numpy_ref": "np.random.sample",
+      "slug": "random-sample",
+      "status": "supported",
+      "summary": "This is an alias of `random_sample`. See `random_sample`  for the complete documentation.",
+      "weight": 4.0
+    },
+    {
+      "area": "random",
+      "blocked": false,
       "canonical_path": "numpy/random/seed",
       "category": "free",
       "cost_formula": "0",
@@ -9023,12 +9065,12 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.shuffle",
-      "notes": "Shuffle; cost = n*ceil(log2(n)).",
+      "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] (in-place Fisher-Yates draws, dtype-neutral).",
       "numpy_ref": "np.random.shuffle",
       "slug": "random-shuffle",
       "status": "supported",
       "summary": "Modify a sequence in-place by shuffling its contents.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -9286,22 +9328,22 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/ravel",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/ravel/",
       "detail_json_href": "/api-data/ops/ravel.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.ravel",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "ravel",
-      "notes": "Return contiguous flattened array. Cost: numel(input).",
+      "notes": "Return contiguous flattened array. Cost: numel(input), billed regardless of whether numpy returns a view or a copy.",
       "numpy_ref": "np.ravel",
       "slug": "ravel",
       "status": "supported",
       "summary": "Return a contiguous flattened array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9317,7 +9359,7 @@
       "free": false,
       "module": "numpy",
       "name": "ravel_multi_index",
-      "notes": "Convert multi-index to flat index. Cost: 2*(ndim-1)*N (+N for clip/wrap mode), N = #output indices.",
+      "notes": "Convert multi-index to flat index. Cost: numel(output) = N, the number of index tuples; dtype-neutral.",
       "numpy_ref": "np.ravel_multi_index",
       "slug": "ravel_multi_index",
       "status": "supported",
@@ -9427,49 +9469,49 @@
       "slug": "repeat",
       "status": "supported",
       "summary": "Repeat each element of an array after themselves",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/require",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/require/",
       "detail_json_href": "/api-data/ops/require.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.require",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "require",
-      "notes": "Return array that satisfies requirements.",
+      "notes": "Return array that satisfies requirements. Cost: numel(input), billed regardless of whether numpy returns the input unchanged or a new array.",
       "numpy_ref": "np.require",
       "slug": "require",
       "status": "supported",
       "summary": "Return an ndarray of the provided type that satisfies requirements.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/reshape",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/reshape/",
       "detail_json_href": "/api-data/ops/reshape.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.reshape",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "reshape",
-      "notes": "Reshape array without copying.",
+      "notes": "Reshape array. Cost: numel(input), billed regardless of whether numpy returns a view or a copy.",
       "numpy_ref": "np.reshape",
       "slug": "reshape",
       "status": "supported",
       "summary": "Gives a new shape to an array without changing its data.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9490,7 +9532,7 @@
       "slug": "resize",
       "status": "supported",
       "summary": "Return a new array with the specified shape.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9574,7 +9616,7 @@
       "slug": "roll",
       "status": "supported",
       "summary": "Roll array elements along a given axis.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9643,64 +9685,64 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/save",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/save/",
       "detail_json_href": "/api-data/ops/save.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.save",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "save",
-      "notes": "Save array to .npy file (pickle-free). Cost: 0 FLOPs.",
+      "notes": "Save array to .npy file (pickle-free). Cost: 4*size (io write).",
       "numpy_ref": "np.save",
       "slug": "save",
       "status": "supported",
       "summary": "Save an array to a binary file in NumPy ``.npy`` format.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/savez",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/savez/",
       "detail_json_href": "/api-data/ops/savez.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.savez",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "savez",
-      "notes": "Save multiple arrays to .npz (pickle-free). Cost: 0 FLOPs.",
+      "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*size (io write).",
       "numpy_ref": "np.savez",
       "slug": "savez",
       "status": "supported",
       "summary": "Save several arrays into a single file in uncompressed ``.npz`` format.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/savez-compressed",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/savez-compressed/",
       "detail_json_href": "/api-data/ops/savez_compressed.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.savez_compressed",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "savez_compressed",
-      "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 0 FLOPs.",
+      "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*size (io write).",
       "numpy_ref": "np.savez_compressed",
       "slug": "savez_compressed",
       "status": "supported",
       "summary": "Save several arrays into a single file in compressed ``.npz`` format.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9721,7 +9763,7 @@
       "slug": "searchsorted",
       "status": "supported",
       "summary": "Find indices where elements should be inserted to maintain order.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -9737,12 +9779,12 @@
       "free": false,
       "module": "numpy",
       "name": "select",
-      "notes": "Return array from list of choices based on conditions. Cost: numel(output), gather tier \u00d74.",
+      "notes": "Return array from list of choices based on conditions. Cost: numel(output) * len(condlist).",
       "numpy_ref": "np.select",
       "slug": "select",
       "status": "supported",
       "summary": "Return an array drawn from elements in choicelist, depending on conditions.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -9763,7 +9805,7 @@
       "slug": "setdiff1d",
       "status": "supported",
       "summary": "Find the set difference of two arrays.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -9784,7 +9826,7 @@
       "slug": "setxor1d",
       "status": "supported",
       "summary": "Find the set exclusive-or of two arrays.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -9973,7 +10015,7 @@
       "slug": "sort",
       "status": "supported",
       "summary": "Return a sorted copy of an array.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -10120,7 +10162,7 @@
       "slug": "stack",
       "status": "supported",
       "summary": "Join a sequence of arrays along a new axis.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "stats",
@@ -10750,7 +10792,7 @@
       "slug": "take",
       "status": "supported",
       "summary": "Take elements from an array along an axis.",
-      "weight": 0.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -10771,7 +10813,7 @@
       "slug": "take_along_axis",
       "status": "supported",
       "summary": "Take values from the input array by matching 1d index and data slices.",
-      "weight": 0.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -10855,7 +10897,7 @@
       "slug": "tile",
       "status": "supported",
       "summary": "Construct an array by repeating A the number of times given by reps.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -10924,22 +10966,22 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/tri",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/tri/",
       "detail_json_href": "/api-data/ops/tri.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.tri",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "tri",
-      "notes": "Array with ones at and below given diagonal.",
+      "notes": "Array with ones at and below given diagonal. Cost: numel(output); bills the actual output dtype (not dtype-neutral).",
       "numpy_ref": "np.tri",
       "slug": "tri",
       "status": "supported",
       "summary": "An array with ones at and below the given diagonal and zeros elsewhere.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -10955,54 +10997,54 @@
       "free": false,
       "module": "numpy",
       "name": "tril",
-      "notes": "Lower triangle of array. Cost: numel(output) (masked-select copy).",
+      "notes": "Lower triangle of array. Cost: elements at/below the kth diagonal (batch leading dims multiply in; floored at 1).",
       "numpy_ref": "np.tril",
       "slug": "tril",
       "status": "supported",
       "summary": "Lower triangle of an array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/tril-indices",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/tril-indices/",
       "detail_json_href": "/api-data/ops/tril_indices.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.tril_indices",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "tril_indices",
-      "notes": "Return lower-triangle indices for n x n array.",
+      "notes": "Return lower-triangle indices for n x n array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.tril_indices",
       "slug": "tril_indices",
       "status": "supported",
       "summary": "Return the indices for the lower-triangle of an (n, m) array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/tril-indices-from",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/tril-indices-from/",
       "detail_json_href": "/api-data/ops/tril_indices_from.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.tril_indices_from",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "tril_indices_from",
-      "notes": "Return lower-triangle indices for given array.",
+      "notes": "Return lower-triangle indices for given array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.tril_indices_from",
       "slug": "tril_indices_from",
       "status": "supported",
       "summary": "Return the indices for the lower-triangle of arr.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -11039,54 +11081,54 @@
       "free": false,
       "module": "numpy",
       "name": "triu",
-      "notes": "Upper triangle of array. Cost: numel(output) (masked-select copy).",
+      "notes": "Upper triangle of array. Cost: elements at/above the kth diagonal (batch leading dims multiply in; floored at 1).",
       "numpy_ref": "np.triu",
       "slug": "triu",
       "status": "supported",
       "summary": "Upper triangle of an array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/triu-indices",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/triu-indices/",
       "detail_json_href": "/api-data/ops/triu_indices.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.triu_indices",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "triu_indices",
-      "notes": "Return upper-triangle indices for n x n array.",
+      "notes": "Return upper-triangle indices for n x n array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.triu_indices",
       "slug": "triu_indices",
       "status": "supported",
       "summary": "Return the indices for the upper-triangle of an (n, m) array.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/triu-indices-from",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/triu-indices-from/",
       "detail_json_href": "/api-data/ops/triu_indices_from.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.triu_indices_from",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "triu_indices_from",
-      "notes": "Return upper-triangle indices for given array.",
+      "notes": "Return upper-triangle indices for given array. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.triu_indices_from",
       "slug": "triu_indices_from",
       "status": "supported",
       "summary": "Return the indices for the upper-triangle of arr.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -11170,7 +11212,7 @@
       "slug": "union1d",
       "status": "supported",
       "summary": "Find the union of two arrays.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11191,7 +11233,7 @@
       "slug": "unique",
       "status": "supported",
       "summary": "Find the unique elements of an array.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11212,7 +11254,7 @@
       "slug": "unique_all",
       "status": "supported",
       "summary": "Find the unique elements of an array, and counts, inverse, and indices.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11233,7 +11275,7 @@
       "slug": "unique_counts",
       "status": "supported",
       "summary": "Find the unique elements and counts of an input array `x`.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11254,7 +11296,7 @@
       "slug": "unique_inverse",
       "status": "supported",
       "summary": "Find the unique elements of `x` and indices to reconstruct `x`.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11275,7 +11317,7 @@
       "slug": "unique_values",
       "status": "supported",
       "summary": "Returns the unique elements of an input array `x`.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11302,38 +11344,38 @@
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/unravel-index",
-      "category": "free",
-      "cost_formula": "0",
-      "cost_formula_latex": "$0$",
+      "category": "counted_custom",
+      "cost_formula": "per-operation",
+      "cost_formula_latex": "varies",
       "detail_href": "/docs/api/numpy/unravel-index/",
       "detail_json_href": "/api-data/ops/unravel_index.json",
-      "display_type": "free",
+      "display_type": "custom",
       "flopscope_ref": "fnp.unravel_index",
-      "free": true,
+      "free": false,
       "module": "numpy",
       "name": "unravel_index",
-      "notes": "Convert flat index to multi-dimensional index.",
+      "notes": "Convert flat index to multi-dimensional index. Cost: numel of the returned index arrays; dtype-neutral.",
       "numpy_ref": "np.unravel_index",
       "slug": "unravel_index",
       "status": "supported",
       "summary": "Converts a flat index or array of flat indices into a tuple of coordinate arrays.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
       "blocked": false,
       "canonical_path": "numpy/unstack",
-      "category": "counted_custom",
-      "cost_formula": "per-operation",
-      "cost_formula_latex": "varies",
+      "category": "free",
+      "cost_formula": "0",
+      "cost_formula_latex": "$0$",
       "detail_href": "/docs/api/numpy/unstack/",
       "detail_json_href": "/api-data/ops/unstack.json",
-      "display_type": "custom",
+      "display_type": "free",
       "flopscope_ref": "fnp.unstack",
-      "free": false,
+      "free": true,
       "module": "numpy",
       "name": "unstack",
-      "notes": "Unstack array along axis into tuple of arrays (NumPy 2.x). Cost: numel(output).",
+      "notes": "Unstack array along axis into tuple of arrays (NumPy 2.x). View \u2014 no elements copied. Cost: 0 FLOPs.",
       "numpy_ref": "np.unstack",
       "slug": "unstack",
       "status": "supported",
@@ -11506,7 +11548,7 @@
       "slug": "vstack",
       "status": "supported",
       "summary": "Stack arrays in sequence vertically (row wise).",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
@@ -11522,12 +11564,12 @@
       "free": false,
       "module": "numpy",
       "name": "where",
-      "notes": "Select elements based on condition. Cost: numel(input).",
+      "notes": "Select elements based on condition. Cost: numel(cond) at nonzero's weight (1-arg, deducted under 'nonzero'); 4 * numel(broadcast output) (3-arg).",
       "numpy_ref": "np.where",
       "slug": "where",
       "status": "supported",
       "summary": "Return elements chosen from `x` or `y` depending on `condition`.",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "core",
@@ -11572,5 +11614,5 @@
       "weight": 0.0
     }
   ],
-  "total": 551
+  "total": 553
 }
