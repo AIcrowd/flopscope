@@ -11,6 +11,7 @@ calls ``load_weights()`` itself, so every assertion here reads as
 ``weight * dtype_rate * <existing formula>``.
 """
 
+import array
 import math
 
 import numpy as np
@@ -782,6 +783,50 @@ def test_getitem_top_level_tuple_key_still_splits_to_basic_parts():
     # genuine advanced gather, matching the list form bit-exact.
     assert billed(lambda: v[(0, 2, 4),]) == 4 * 3 * 2
     assert billed(lambda: v[(0, 2, 4),]) == billed(lambda: v[[0, 2, 4]])
+
+
+def test_getitem_any_arraylike_sequence_part_is_advanced_others_fall_through():
+    """Hardening: the advanced-part classifier is numpy-faithful (any part that
+    coerces to an integer/bool array gathers), not an enumerated type list --
+    so array.array, memoryview, and any future sequence/buffer bill like the
+    list form, while parts numpy can't turn into a b/i/u index array fall
+    through to numpy unbilled. Not grader-reachable (the client wire rejects
+    these before the server sees them); this closes the in-process robustness
+    gap after the list-only then list/tuple/range allow-lists each missed a
+    silent-budget sequence kind.
+    """
+    fv = fnp.asarray(np.arange(500, dtype=np.float64))
+    # array.array of int64 ('q') indices -> 500-elem gather, dtype_rate(f64)=2.
+    ia = array.array("q", range(500))
+    assert billed(lambda: fv[ia]) == 4 * 500 * 2
+    # memoryview over an int64 buffer -> same 500-elem gather. (np.ndarray
+    # satisfies the buffer protocol at runtime; the memoryview() stub only
+    # declares ReadableBuffer, hence the arg-type ignore.)
+    mv = memoryview(np.arange(500))  # type: ignore[arg-type]
+    assert billed(lambda: fv[mv]) == 4 * 500 * 2
+
+    # A numpy integer SCALAR stays BASIC (a view): np.asarray would make it a
+    # 0-d int array (kind 'i'), but the fast path catches np.integer first so
+    # it is NOT misbilled as an advanced 0-d-array gather.
+    npint = np.int64(7)
+    assert billed(lambda: fv[npint]) == 0
+
+    # Fall-through parts numpy cannot coerce to a b/i/u index array: a float
+    # sequence (kind 'f'), a ragged sequence (np.asarray raises, caught), and a
+    # generator (kind 'O', NOT consumed by the classification asarray) all fall
+    # through to super().__getitem__ -> numpy raises its own error, unbilled.
+    with pytest.raises(IndexError):
+        fv[[1.5, 2.5]]
+    with pytest.raises(ValueError):
+        fv[[[0, 1], [2, 3, 4]]]
+
+    def _gen():
+        yield 0
+        yield 1
+        yield 2
+
+    with pytest.raises(IndexError):
+        fv[_gen()]
 
 
 # ---------------------------------------------------------------------------

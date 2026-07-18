@@ -685,28 +685,37 @@ class FlopscopeArray(_np.ndarray):
         * a ``bool`` / ``np.bool_`` **scalar** -- numpy routes a bare boolean
           scalar through the advanced-index copy path (prepending a length-1 /
           length-0 axis), a genuine copy though it is not an ``ndarray``;
-        * an integer- or boolean-dtype ``ndarray`` (or ``FlopscopeArray``) of
-          **any** ``ndim`` -- including 0-d: numpy classifies a 0-d int/bool
-          array operand as advanced (it copies, never views);
-        * a Python ``list``, ``tuple``, or ``range`` (numpy coerces any of
-          these array-like sequences to an index array the same way). This is
-          about a *part* -- an already-decomposed element of ``parts`` -- not
-          the top-level ``key``: ``m[1:3, ::2]`` has ``key`` as a tuple, but
-          that tuple is the multi-axis split itself (``parts = key``), and its
-          parts are slices, so it stays basic. Likewise ``v[(0, 2, 4)]`` on a
-          1-D ``v`` has ``key`` as the 3-tuple; splitting it into parts
-          ``0, 2, 4`` yields three *int* parts -- basic, and numpy raises its
-          own "too many indices" error since none of them consumes as an
-          array. A tuple only triggers this branch when it survives the
-          top-level split as one part, e.g. ``v[(0, 2, 4),]`` (a 1-tuple
-          *containing* the 3-tuple) or ``m[tuple_a, tuple_b]`` (each axis's
-          index happens to be a tuple).
+        * **any other part that coerces to an integer- or boolean-dtype array**
+          -- an ``ndarray`` (or ``FlopscopeArray``) of any ``ndim`` including
+          0-d, a ``list``, ``tuple``, ``range``, ``array.array``,
+          ``memoryview``, or any future array-like sequence/buffer. This
+          matches numpy's own rule (any array-like integer/bool index gathers a
+          copy) rather than an enumerated type list, so it cannot silently miss
+          a sequence kind: the part is classified by ``np.asarray(part).dtype``,
+          and only its ``dtype``/``size`` are read -- the original ``key`` is
+          what actually indexes, so a single-use generator part is never
+          consumed.
+
+        This is about a *part* -- an already-decomposed element of ``parts`` --
+        not the top-level ``key``: ``m[1:3, ::2]`` has ``key`` as a tuple, but
+        that tuple is the multi-axis split itself (``parts = key``), and its
+        parts are slices, so it stays basic. Likewise ``v[(0, 2, 4)]`` on a 1-D
+        ``v`` has ``key`` as the 3-tuple; splitting it into parts ``0, 2, 4``
+        yields three *int* parts -- basic, and numpy raises its own "too many
+        indices" error since none of them consumes as an array. A tuple only
+        gathers when it survives the top-level split as one part, e.g.
+        ``v[(0, 2, 4),]`` (a 1-tuple *containing* the 3-tuple) or
+        ``m[tuple_a, tuple_b]`` (each axis's index happens to be a tuple).
 
         A numpy/Python *integer scalar* stays basic (a view) -- only integer
-        *arrays* (or list/tuple/range coerced to one) gather. ``mask_elems``
-        counts boolean elements only: a bool scalar contributes 1, a bool
-        array contributes its size; integer operands add nothing beyond the
-        gather.
+        *arrays* (or a sequence/buffer coerced to one) gather. A part numpy
+        cannot turn into an integer/bool array -- an object array (kind ``O``,
+        e.g. a generator), a string/bytes field selector (``U``/``S``), a
+        float/complex array, or a ragged sequence ``np.asarray`` rejects --
+        falls through to ``super().__getitem__`` unbilled, so numpy handles or
+        raises on it exactly as usual. ``mask_elems`` counts boolean elements
+        only: a bool scalar contributes 1, a bool array contributes its size;
+        integer operands add nothing beyond the gather.
         """
         parts = key if isinstance(key, tuple) else (key,)
         mask_elems = 0
@@ -720,23 +729,38 @@ class FlopscopeArray(_np.ndarray):
                 advanced = True
                 mask_elems += 1
                 continue
-            arr = None
-            if isinstance(p, _np.ndarray):
-                arr = p
-            elif isinstance(p, (list, tuple, range)):
-                # numpy performs advanced (copying) indexing for ANY
-                # array-like integer/bool sequence part, not just a list --
-                # a tuple or range part gathers exactly the same way
-                # (``v[range(n)]``, ``v[(0, 2, 4),]``, ``m[tuple_a, tuple_b]``
-                # all materialize a copy). Missing this let an unbounded
-                # 0-FLOP gather through: repeated indices in a tuple/range
-                # part can read out any number of elements for free.
-                arr = _np.asarray(p)
+            # Fast BASIC path: a scalar integer (Python or numpy), a slice,
+            # ``np.newaxis`` (None), or Ellipsis all index as a view -- 0 FLOPs.
+            # A numpy integer SCALAR (``np.int64(3)``) MUST be caught here: the
+            # coercion below would turn it into a 0-d int array (kind 'i') and
+            # misread it as an advanced gather, but a scalar-int index is basic.
+            # (A 0-d int ARRAY, ``np.array(3)``, is genuinely advanced -- it is
+            # an ndarray, not an ``int``/``np.integer``, so it flows on below.)
+            if p is None or p is Ellipsis or isinstance(p, (int, _np.integer, slice)):
+                continue
+            # Everything else -- list, tuple, range, ``array.array``,
+            # ``memoryview``, an ndarray, or any future array-like sequence /
+            # buffer -- is classified exactly as numpy would: coerce it to an
+            # array and treat it as an advanced (copying) gather iff the result
+            # is an integer/bool index array. Only ``dtype``/``size`` are READ
+            # off the coercion; the ORIGINAL ``key`` is what actually indexes
+            # below, so a single-use generator part is never consumed here
+            # (``np.asarray`` wraps it in a 0-d object array without draining
+            # it, kind 'O', which falls through as basic below).
+            try:
+                arr = p if isinstance(p, _np.ndarray) else _np.asarray(p)
+            except Exception:
+                # numpy can't build an array from this part (ragged /
+                # inhomogeneous / uncoercible) -- leave the ORIGINAL key to
+                # super().__getitem__ to handle or raise on. Never billed.
+                continue
             # An integer- or boolean-dtype array operand of ANY ndim (including
             # 0-d) is advanced indexing -- numpy materializes a gathered copy,
-            # never a view. Float/complex/object index arrays are not valid
-            # indices; leave them to super().__getitem__ to raise numpy's error.
-            if arr is not None and arr.dtype.kind in "biu":
+            # never a view. A coercion whose kind is NOT in "biu"
+            # (float/complex index arrays, object arrays from generators,
+            # string/bytes field selectors) is not a valid gather index; fall
+            # through so numpy handles or raises on the original key.
+            if arr.dtype.kind in "biu":
                 advanced = True
                 if arr.dtype.kind == "b":
                     mask_elems += int(arr.size)
