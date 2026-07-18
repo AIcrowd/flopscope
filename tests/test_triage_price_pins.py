@@ -642,3 +642,29 @@ def test_getitem_slices_free_fancy_4x_mask_scan_plus_4x():
     assert billed(lambda: m[:, ::5]) == 0
     # 2-D fancy on axis 0: output (3, 50) = 150 elements -> 4*150.
     assert billed(lambda: m[[0, 2, 4]]) == 4 * 150
+
+
+def test_getitem_bool_scalar_and_0d_array_indices_are_advanced():
+    """Regression: numpy routes a bare boolean scalar AND a 0-d int/bool array
+    through the advanced-index COPY path (shares_memory False), not a view --
+    so both must bill, not fall through the ndim>0 / ndarray-only gate as free.
+
+    - ``fa[True]`` / ``fa[np.bool_(True)]``: a (1, 1000) copy -> 1 (scalar scan)
+      + 4*1000 (gather) = 4001.
+    - ``fbig[np.array(7)]`` on a (500, 2000) array: a 2000-elem row COPY (not a
+      view, unlike ``fbig[7]``) -> 4*2000 = 8000.
+    - ``fa[np.array(7)]`` on a 1-D array: gathers a single scalar -> 4*1 = 4.
+    """
+    a = np.arange(1000, dtype=np.float32)
+    big = np.arange(500 * 2000, dtype=np.float32).reshape(500, 2000)
+    # Index operands (bool scalars, 0-d int arrays) built outside billed().
+    bt = np.bool_(True)
+    zi = np.array(7)
+    fa = fnp.asarray(a)
+    fbig = fnp.asarray(big)
+    assert billed(lambda: fa[True]) == 1 + 4 * 1000
+    assert billed(lambda: fa[bt]) == 1 + 4 * 1000
+    assert billed(lambda: fbig[zi]) == 4 * 2000
+    assert billed(lambda: fa[zi]) == 4 * 1
+    # An integer SCALAR stays basic (a view) -- it must NOT bill.
+    assert billed(lambda: fbig[7]) == 0

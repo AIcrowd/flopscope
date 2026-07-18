@@ -673,29 +673,52 @@ class FlopscopeArray(_np.ndarray):
     def __getitem__(self, key: Any):  # type: ignore[override]
         """Index the array. Basic indexing is free; advanced indexing bills.
 
-        Basic indexing -- every part of ``key`` is an ``int``, ``slice``,
-        ``np.newaxis`` (``None``), ``Ellipsis``, or a tuple of those --
-        returns a view, matching NumPy's own zero-copy semantics: 0 FLOPs.
+        Basic indexing -- every part of ``key`` is an ``int`` (Python or numpy
+        scalar), ``slice``, ``np.newaxis`` (``None``), ``Ellipsis``, or a tuple
+        of those -- returns a view, matching NumPy's zero-copy semantics: 0 FLOPs.
 
-        Advanced indexing -- any part is an integer-array or boolean-mask
-        (an ``ndarray``/``FlopscopeArray`` with ``ndim > 0``, or a ``list``)
-        -- materializes a gathered copy and is billed under ``"getitem"``:
-        4 FLOPs per gathered output element (matching ``take``), plus
-        ``numel(mask)`` for each boolean-mask part's scan (matching
-        ``compress``).
+        Advanced indexing materializes a gathered copy and is billed under
+        ``"getitem"``: 4 FLOPs per gathered output element (matching ``take``),
+        plus one scan FLOP per boolean-mask element (matching ``compress``). A
+        part triggers advanced indexing when it is any of:
+
+        * a ``bool`` / ``np.bool_`` **scalar** -- numpy routes a bare boolean
+          scalar through the advanced-index copy path (prepending a length-1 /
+          length-0 axis), a genuine copy though it is not an ``ndarray``;
+        * an integer- or boolean-dtype ``ndarray`` (or ``FlopscopeArray``) of
+          **any** ``ndim`` -- including 0-d: numpy classifies a 0-d int/bool
+          array operand as advanced (it copies, never views);
+        * a Python ``list`` (numpy coerces it to an index array).
+
+        A numpy/Python *integer scalar* stays basic (a view) -- only integer
+        *arrays* gather. ``mask_elems`` counts boolean elements only: a bool
+        scalar contributes 1, a bool array contributes its size; integer
+        operands add nothing beyond the gather.
         """
         parts = key if isinstance(key, tuple) else (key,)
         mask_elems = 0
         advanced = False
         for p in parts:
+            # Boolean scalars drive numpy's advanced-index copy path even
+            # though they are not ndarrays. Check bool FIRST: ``isinstance(
+            # True, int)`` is True, but a bare int is a BASIC index (view), so
+            # a plain int must not slip through this branch as "advanced".
+            if isinstance(p, (bool, _np.bool_)):
+                advanced = True
+                mask_elems += 1
+                continue
             arr = None
             if isinstance(p, _np.ndarray):
                 arr = p
-            elif isinstance(p, (list, FlopscopeArray)):
+            elif isinstance(p, list):
                 arr = _np.asarray(p)
-            if arr is not None and arr.ndim > 0:
+            # An integer- or boolean-dtype array operand of ANY ndim (including
+            # 0-d) is advanced indexing -- numpy materializes a gathered copy,
+            # never a view. Float/complex/object index arrays are not valid
+            # indices; leave them to super().__getitem__ to raise numpy's error.
+            if arr is not None and arr.dtype.kind in "biu":
                 advanced = True
-                if arr.dtype == _np.bool_:
+                if arr.dtype.kind == "b":
                     mask_elems += int(arr.size)
         if not advanced:
             return super().__getitem__(key)  # basic indexing: view, free
