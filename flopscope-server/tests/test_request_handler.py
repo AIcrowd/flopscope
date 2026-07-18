@@ -514,3 +514,130 @@ def test_getitem_advanced_indexing_bills_on_computed_array(handler, session):
     )
     assert resp["status"] == "ok"
     assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+# ---------------------------------------------------------------------------
+# save / savez / savez_compressed billing (bill-only, no data transfer,
+# nothing written server-side) — closes the client's free-save budget bypass:
+# flopscope-client used to write the file entirely locally and never
+# round-trip to the server, so the 4*numel egress cost was never billed.
+# ---------------------------------------------------------------------------
+
+
+def test_handle_save_bills_four_times_numel(handler, session):
+    """A ``save`` request for a single handle deducts 4*numel, matches the
+    in-process ``flops.save`` formula, writes nothing, and returns no result
+    payload (the client already wrote the file locally)."""
+    a = np.arange(1000, dtype=np.float32)
+    h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle({"op": "save", "args": [{"__handle__": h}], "kwargs": {}})
+
+    assert resp["status"] == "ok"
+    assert resp["result"] is None
+    assert session.budget_status()["flops_used"] - before == 4 * 1000
+    # budget info in the response matches a fresh query (server-owned counting).
+    assert resp["budget"] == session.budget_status()
+
+
+def test_handle_savez_bills_sum_of_all_handles(handler, session):
+    """``savez``/``savez_compressed`` deduct 4*(sum of numel across every
+    handle passed), matching the in-process ``flops.savez`` formula."""
+    a = np.arange(250, dtype=np.float32)
+    b = np.arange(150, dtype=np.float32)
+    h1 = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [250],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+    h2 = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": b.tobytes(),
+            "shape": [150],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "savez",
+            "args": [{"__handle__": h1}, {"__handle__": h2}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 4 * (250 + 150)
+
+    before2 = session.budget_status()["flops_used"]
+    resp2 = handler.handle(
+        {
+            "op": "savez_compressed",
+            "args": [{"__handle__": h1}, {"__handle__": h2}],
+            "kwargs": {},
+        }
+    )
+    assert resp2["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before2 == 4 * (250 + 150)
+
+
+def test_handle_save_bills_nothing_stored(handler, session):
+    """save/savez must not allocate a new array handle -- pure bill-only op."""
+    a = np.arange(64, dtype=np.float32)
+    h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [64],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+    before_count = session._conn.arrays.count
+
+    resp = handler.handle({"op": "save", "args": [{"__handle__": h}], "kwargs": {}})
+
+    assert resp["status"] == "ok"
+    assert session._conn.arrays.count == before_count
+
+
+def test_handle_save_unknown_handle_returns_error(handler):
+    resp = handler.handle(
+        {"op": "save", "args": [{"__handle__": "a999"}], "kwargs": {}}
+    )
+    assert resp["status"] == "error"
+    assert resp["error_type"] == "KeyError"
+
+
+def test_handle_save_insufficient_budget_returns_error():
+    """A save that would overshoot the remaining budget is rejected -- the
+    server, not the client, is the sole authority on whether the egress is
+    affordable."""
+    s = Session(flop_budget=100)
+    h = RequestHandler(s)
+    a = np.arange(1000, dtype=np.float32)  # would cost 4*1000 = 4000 > 100
+    handle = h.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    resp = h.handle({"op": "save", "args": [{"__handle__": handle}], "kwargs": {}})
+    assert resp["status"] == "error"
+    assert resp["error_type"] == "BudgetExhaustedError"
+
+    s.close()

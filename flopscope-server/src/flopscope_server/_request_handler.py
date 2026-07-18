@@ -149,6 +149,8 @@ class RequestHandler:
                 return self._handle_create_from_data(request)
             if op == "__getitem__":
                 return self._handle_getitem(request)
+            if op in ("save", "savez", "savez_compressed"):
+                return self._handle_save(op, request)
 
             # Any other op — flopscope function call
             return self._handle_flopscope_op(request)
@@ -289,6 +291,30 @@ class RequestHandler:
         key = self._decode_index_key(args[1])
         result = self._run_kernel(lambda: arr[key])
         return self._pack_result(result)
+
+    # ------------------------------------------------------------------
+    # save / savez / savez_compressed — bill-only, no data transfer
+    # ------------------------------------------------------------------
+
+    def _handle_save(self, op: str, request: dict) -> dict:
+        """Bill the data-egress cost of a client-side save; no array data
+        crosses the wire and nothing is written on the server.
+
+        The flopscope-client already writes the file to the participant's
+        local disk; this round-trip exists only so the SERVER -- the sole
+        owner of the FLOP budget -- can charge the same 4*sum(numel) egress
+        cost the in-process wrappers charge. ``request["args"]`` carries only
+        handle refs (``{"__handle__": id}``), resolved here exactly like
+        ``__getitem__`` above; the deduction runs inside this session's
+        already-active BudgetContext (``Session.__init__`` entered it), so
+        ``_bill_save_egress``'s own ``require_budget()`` resolves it.
+        """
+        from flopscope._io import _bill_save_egress
+
+        raw_args = request.get("args") or []
+        arrays = [np.asarray(self._resolve_arg(a)) for a in raw_args]
+        _bill_save_egress(op, arrays)
+        return {"status": "ok", "result": None, "budget": self._session.budget_status()}
 
     # ------------------------------------------------------------------
     # Analytical cost estimators (flopscope.accounting)
