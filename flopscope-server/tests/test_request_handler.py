@@ -449,10 +449,10 @@ def test_getitem_advanced_indexing_bills_on_computed_array(handler, session):
     ``FlopscopeArray`` — i.e. the state after any flopscope op has touched the
     array. ``FlopscopeArray.__getitem__`` runs server-side and bills.
 
-    (A separate, tracked cross-package task covers the ``create_from_data``
-    first-touch case, where the stored object is a plain ``numpy.ndarray`` and
-    the override never fires — that bypass is intentionally NOT exercised here;
-    this test locks the WORKING path so it can't silently regress.)
+    (See ``test_getitem_advanced_indexing_bills_on_first_touch_data`` below
+    for the ``create_from_data`` first-touch case, where the stored object
+    used to be a plain ``numpy.ndarray`` and the override never fired — this
+    test locks the already-working path so it can't silently regress.)
     """
     a = np.arange(1000, dtype=np.float32)
     src = handler.handle(
@@ -514,6 +514,152 @@ def test_getitem_advanced_indexing_bills_on_computed_array(handler, session):
     )
     assert resp["status"] == "ok"
     assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+# ---------------------------------------------------------------------------
+# __getitem__ / astype billing on FIRST-TOUCH data (budget-bypass regression)
+#
+# Session.store_array used to store the raw np.frombuffer(...).copy() ndarray
+# from create_from_data verbatim. Any op that runs directly against that
+# handle via a bare Python dunder/method call (__getitem__, astype) -- rather
+# than through a flopscope counted wrapper -- hit numpy's own unbilled
+# ndarray implementation instead of FlopscopeArray's billing override, so
+# advanced indexing performed as the FIRST op on fresh client-ingested data
+# silently billed 0 FLOPs. Session.store_array now view-casts every plain
+# ndarray to FlopscopeArray on the way in, so first-touch data bills exactly
+# like the already-touched case above.
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_advanced_indexing_bills_on_first_touch_data(handler, session):
+    """Fancy/boolean indexing performed DIRECTLY on a handle returned by
+    ``create_from_data`` (no intervening flopscope op) must bill exactly like
+    the already-touched case in
+    ``test_getitem_advanced_indexing_bills_on_computed_array`` above. Before
+    the ``Session.store_array`` fix, both assertions below failed with 0
+    billed FLOPs because the stored object was a plain ``numpy.ndarray`` and
+    ``arr[key]`` resolved to numpy's own unbilled ``__getitem__``.
+    """
+    a = np.arange(1000, dtype=np.float32)
+    src_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    from flopscope._ndarray import FlopscopeArray
+
+    assert isinstance(session.get_array(src_h), FlopscopeArray)
+
+    # Fancy (integer-array) index of 100 elements -> 4 * 100 = 400.
+    idx = np.arange(0, 1000, 10, dtype=np.int64)
+    idx_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": idx.tobytes(),
+            "shape": [100],
+            "dtype": "int64",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": src_h}, {"__handle__": idx_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 400
+
+    # Boolean mask with 250 True -> 250 gathered + 1000 scanned = 1000 + 4*250.
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = True
+    mask_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": mask.tobytes(),
+            "shape": [1000],
+            "dtype": "bool",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": src_h}, {"__handle__": mask_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+def test_astype_on_first_touch_data_preserves_flopscopearray_typing(handler, session):
+    """``astype`` bills 0 FLOPs by design (registry weight 0 -- a
+    representation change is free, matching ``FlopscopeArray.astype``'s own
+    behavior for both lossless AND lossy casts: ``_cast_changes_values``
+    computes a structural ``numel`` cost, but the op's weight zeroes it out
+    before it reaches the budget). That policy is unchanged by this fix.
+
+    What DOES change: before the ``Session.store_array`` fix, calling
+    ``astype`` directly on a ``create_from_data`` handle (a plain
+    ``numpy.ndarray``) resolved to base ``numpy.ndarray.astype`` and stored
+    its plain-ndarray result verbatim -- silently extending the billing
+    bypass to every downstream op on THAT result too, not just the astype
+    call itself. After the fix, the astype result is stored as a
+    ``FlopscopeArray`` and a subsequent fancy-index read on it bills
+    correctly instead of continuing the bypass chain.
+    """
+    a = np.arange(1000, dtype=np.float64)
+    src_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float64",
+        }
+    )["result"]["id"]
+
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {"op": "astype", "args": [{"__handle__": src_h}, "float32"], "kwargs": {}}
+    )
+    assert resp["status"] == "ok"
+    # Representation change: free by design, including this lossy narrowing
+    # (float64 -> float32) -- unchanged, intentional policy (registry weight
+    # 0 for "astype"). This assertion is not the regression under test.
+    assert session.budget_status()["flops_used"] - before == 0
+
+    from flopscope._ndarray import FlopscopeArray
+
+    astype_h = resp["result"]["id"]
+    assert isinstance(session.get_array(astype_h), FlopscopeArray)
+
+    # The chain must stay billable: a fancy-index read on the astype OUTPUT
+    # bills like any other FlopscopeArray-backed handle (4 * 100 = 400).
+    idx = np.arange(0, 1000, 10, dtype=np.int64)
+    idx_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": idx.tobytes(),
+            "shape": [100],
+            "dtype": "int64",
+        }
+    )["result"]["id"]
+    before2 = session.budget_status()["flops_used"]
+    resp2 = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": astype_h}, {"__handle__": idx_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp2["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before2 == 400
 
 
 # ---------------------------------------------------------------------------

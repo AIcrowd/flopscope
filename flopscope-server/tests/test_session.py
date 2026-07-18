@@ -67,10 +67,20 @@ def test_get_array_returns_original(session):
     np.testing.assert_array_equal(retrieved, arr)
 
 
-def test_get_array_returns_same_object(session):
+def test_get_array_returns_zero_copy_view_of_original(session):
+    """``store_array`` view-casts a plain ``ndarray`` to ``FlopscopeArray`` (so
+    first-touch data routes through the billing overrides -- see its
+    docstring), so the retrieved object is no longer ``is arr``. It must
+    still be a zero-copy VIEW over the same memory, not a copy.
+    """
+    from flopscope._ndarray import FlopscopeArray
+
     arr = np.zeros((3, 4))
     handle = session.store_array(arr)
-    assert session.get_array(handle) is arr
+    retrieved = session.get_array(handle)
+    assert isinstance(retrieved, FlopscopeArray)
+    assert np.shares_memory(retrieved, arr)
+    assert retrieved.base is arr
 
 
 def test_store_multiple_arrays(session):
