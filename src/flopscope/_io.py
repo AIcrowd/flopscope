@@ -2,8 +2,10 @@
 
 `load`/`save`/`savez`/`savez_compressed` move only inert numeric arrays plus an
 optional inert JSON `__meta__` block. `allow_pickle` is always False and object
-dtype is rejected, so loading a file can never execute code. These ops cost
-0 FLOPs (data ingress is free), matching the competition client.
+dtype is rejected, so loading a file can never execute code. `load` costs
+0 FLOPs (data ingress is free), matching the competition client; `save`/
+`savez`/`savez_compressed` bill 4*size (data egress: the elements the call
+writes to disk).
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ from typing import Any
 
 import numpy as _np
 
+from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
+from flopscope._validation import require_budget
 
 _WHITELIST = frozenset(
     {
@@ -72,11 +76,20 @@ def load(file: str) -> Any:
     return _wrap(obj)
 
 
+@_counted_wrapper
 def save(file: str, arr: Any) -> None:
-    """Save a single array to .npy. Cost: 0 FLOPs."""
+    """Save a single array to .npy. Cost: 4*numel(arr)."""
+    budget = require_budget()
     base = _np.asarray(_to_base_ndarray(arr))
     _check_dtype(base, where="save")
-    _np.save(file, base, allow_pickle=False)
+    with budget.deduct(
+        "save",
+        flop_cost=4 * max(int(base.size), 1),
+        subscripts=None,
+        shapes=(base.shape,),
+        dtypes=(base.dtype,),
+    ):
+        _call_numpy(_np.save, file, base, allow_pickle=False)
 
 
 def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
@@ -97,11 +110,43 @@ def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
     return converted
 
 
+def _savez_flop_cost(converted: dict[str, _np.ndarray]) -> int:
+    total = sum(int(v.size) for k, v in converted.items() if k != _META_KEY)
+    return 4 * max(total, 1)
+
+
+def _savez_dtypes(converted: dict[str, _np.ndarray]) -> tuple:
+    return tuple(v.dtype for k, v in converted.items() if k != _META_KEY)
+
+
+@_counted_wrapper
 def savez(file: str, **arrays: Any) -> None:
-    """Save multiple named arrays (+ optional __meta__ dict) to .npz. 0 FLOPs."""
-    _np.savez(file, **_prepare(arrays))  # type: ignore[arg-type]
+    """Save multiple named arrays (+ optional __meta__ dict) to .npz. Cost: 4*sum(numel)."""
+    budget = require_budget()
+    converted = _prepare(arrays)
+    with budget.deduct(
+        "savez",
+        flop_cost=_savez_flop_cost(converted),
+        subscripts=None,
+        shapes=(),
+        dtypes=_savez_dtypes(converted),
+    ):
+        _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
 
 
+@_counted_wrapper
 def savez_compressed(file: str, **arrays: Any) -> None:
-    """Save multiple named arrays (+ optional __meta__ dict) to compressed .npz."""
-    _np.savez_compressed(file, **_prepare(arrays))  # type: ignore[arg-type]
+    """Save multiple named arrays (+ optional __meta__ dict) to compressed .npz.
+
+    Cost: 4*sum(numel).
+    """
+    budget = require_budget()
+    converted = _prepare(arrays)
+    with budget.deduct(
+        "savez_compressed",
+        flop_cost=_savez_flop_cost(converted),
+        subscripts=None,
+        shapes=(),
+        dtypes=_savez_dtypes(converted),
+    ):
+        _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]

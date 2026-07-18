@@ -43,12 +43,13 @@ class TestHamming:
             assert numpy.allclose(hamming(10), numpy.hamming(10))
 
     def test_cost(self):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        # Updated (cost-model triage Task 10): derived-constant convention,
+        # matching kaiser -- cos@16 + mul + sub per sample = 18 ops/point.
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy import hamming
 
             hamming(10)
-            assert budget.flops_used == 20
+            assert budget.flops_used == 180
 
 
 class TestHanning:
@@ -59,12 +60,13 @@ class TestHanning:
             assert numpy.allclose(hanning(10), numpy.hanning(10))
 
     def test_cost(self):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
+        # Updated (cost-model triage Task 10): derived-constant convention,
+        # matching kaiser -- cos@16 + mul + sub per sample = 18 ops/point.
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope.numpy import hanning
 
             hanning(10)
-            assert budget.flops_used == 20
+            assert budget.flops_used == 180
 
 
 class TestKaiser:

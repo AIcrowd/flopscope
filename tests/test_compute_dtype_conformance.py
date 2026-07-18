@@ -503,6 +503,25 @@ PROBES.update(
 )
 
 # ---------------------------------------------------------------------------
+# save/savez/savez_compressed (cost-model triage Task 10): became dtype-aware
+# charged ops (4*size, billed at the saved array's own dtype -- dtypes=
+# (base.dtype,) for save, dtypes=tuple(v.dtype for saved arrays) for
+# savez/savez_compressed). Like from{file,string} above, exercised via temp
+# files under _PROBE_DIR; each write returns None so the compute-dtype oracle's
+# result-dtype floor stays at the default 1.0 (there is no result to inspect).
+# ---------------------------------------------------------------------------
+_SAVE_PATH = os.path.join(_PROBE_DIR, "probe_save.npy")
+_SAVEZ_PATH = os.path.join(_PROBE_DIR, "probe_savez.npz")
+_SAVEZ_COMPRESSED_PATH = os.path.join(_PROBE_DIR, "probe_savez_compressed.npz")
+PROBES.update(
+    {
+        "save": lambda: fnp.save(_SAVE_PATH, V),
+        "savez": lambda: fnp.savez(_SAVEZ_PATH, a=V),
+        "savez_compressed": lambda: fnp.savez_compressed(_SAVEZ_COMPRESSED_PATH, a=V),
+    }
+)
+
+# ---------------------------------------------------------------------------
 # isnat — despite its registry category ("blacklisted"), this is a real,
 # reachable, charged comparison-tier op (see its own note: "Un-blacklisted:
 # comparison tier"). Non-numeric (datetime64) dtypes bill the neutral rate
@@ -909,15 +928,16 @@ SKIPPED["random.Generator.spawn"] = (
     "deduct()."
 )
 
-# --- free (0-FLOP) I/O: "Cost: 0 FLOPs" per their own registry notes;
-# verified they never call deduct() (src/flopscope/_io.py), so no billed
-# dtype exists to check.
-for _name in ("load", "save", "savez", "savez_compressed"):
-    SKIPPED[_name] = (
-        "0-FLOP data movement by design (registry note); never calls "
-        "deduct() (src/flopscope/_io.py) -- no billed dtype to conform. "
-        "Exercised by tests/test_io.py."
-    )
+# --- free (0-FLOP) I/O: "Cost: 0 FLOPs" per its own registry note; verified
+# it never calls deduct() (src/flopscope/_io.py), so no billed dtype exists
+# to check. save/savez/savez_compressed became dtype-aware charged ops (4*size)
+# in the cost-model triage (Task 10) -- moved to PROBES below (see
+# "save/savez/savez_compressed" block near the from{file,string} probes).
+SKIPPED["load"] = (
+    "0-FLOP data movement by design (registry note); never calls "
+    "deduct() (src/flopscope/_io.py) -- no billed dtype to conform. "
+    "Exercised by tests/test_io.py."
+)
 
 # --- linalg.{matmul,outer,tensordot,vecdot}: pure Python aliases with NO
 # deduct() of their own -- attach_docstring literally documents each as

@@ -4,7 +4,16 @@ Asserts the post-unification state:
 - `flops.fma_cost` no longer exists on the public API
 - `flops.configure(fma_cost=...)` raises for unknown setting
 - Dense / symmetric cost columns match for unsymmetric matmul
-- 7 affected ops produce post-doubled values
+- 5 affected ops produce post-doubled values
+
+hamming/hanning were originally doubled here too (n -> 2*n), but the
+cost-model triage (Task 10) moved them off the FMA=2-doubling convention
+entirely and onto the kaiser-family derived-constant formula (18*n: cosine at
+the transcendental tier + multiply + subtract per sample) -- like kaiser,
+which was never a "doubled" op and was never listed here, hamming/hanning no
+longer belong in this suite. Their locked values live in
+tests/test_window.py::TestHamming/TestHanning and
+tests/test_triage_price_pins.py::test_windows_bill_derived_constants.
 """
 
 import pytest
@@ -33,24 +42,6 @@ def test_fma_cost_constant_removed():
 
     with pytest.raises(ImportError):
         importlib.import_module("flopscope._cost_model")
-
-
-def test_hamming_cost_doubled():
-    """hamming(n=400) should charge 2*n = 800 (was n=400 under FMA=1)."""
-    import flopscope.numpy as fnp
-
-    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
-        _ = fnp.hamming(400)
-    assert bc.flops_used == 800, f"hamming(400) charged {bc.flops_used}, expected 800"
-
-
-def test_hanning_cost_doubled():
-    """hanning(n=400) should charge 2*n = 800."""
-    import flopscope.numpy as fnp
-
-    with flops.BudgetContext(flop_budget=10**12, quiet=True) as bc:
-        _ = fnp.hanning(400)
-    assert bc.flops_used == 800, f"hanning(400) charged {bc.flops_used}, expected 800"
 
 
 def test_polyval_cost_doubled():

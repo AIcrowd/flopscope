@@ -38,10 +38,10 @@ class TestAnalyticalCost:
         )  # 2 cos evals @16 + 8 arith per sample
 
     def test_hamming_cost(self):
-        assert _ANALYTICAL_COST["hamming"] == 1
+        assert _ANALYTICAL_COST["hamming"] == 18  # cos@16 + mul + sub per sample
 
     def test_hanning_cost(self):
-        assert _ANALYTICAL_COST["hanning"] == 1
+        assert _ANALYTICAL_COST["hanning"] == 18  # cos@16 + mul + sub per sample
 
     def test_kaiser_cost(self):
         assert (

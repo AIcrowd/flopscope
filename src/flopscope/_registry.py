@@ -3565,13 +3565,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._window",
         "complex_factor": 2.0,
-        "notes": "Hamming window. Cost: n (one cosine per sample).",
+        "notes": "Hamming window. Cost: 18*n (per sample: 1 cosine at transcendental tier 16 + multiply + subtract).",
     },
     "hanning": {
         "category": "counted_custom",
         "module": "flopscope._window",
         "complex_factor": 2.0,
-        "notes": "Hanning window. Cost: n (one cosine per sample).",
+        "notes": "Hanning window. Cost: 18*n (per sample: 1 cosine at transcendental tier 16 + multiply + subtract).",
     },
     "kaiser": {
         "category": "counted_custom",
@@ -3596,9 +3596,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Load arrays from .npy/.npz files (pickle-free). Cost: 0 FLOPs.",
     },
     "save": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Save array to .npy file (pickle-free). Cost: 0 FLOPs.",
+        "complex_factor": 2.0,
+        "notes": "Save array to .npy file (pickle-free). Cost: 4*size (io write).",
     },
     "savetxt": {
         "category": "blacklisted",
@@ -3606,14 +3607,16 @@ REGISTRY: dict[str, dict] = {
         "notes": "Save array to text file. Not supported.",
     },
     "savez": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Save multiple arrays to .npz (pickle-free). Cost: 0 FLOPs.",
+        "complex_factor": 2.0,
+        "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*size (io write).",
     },
     "savez_compressed": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 0 FLOPs.",
+        "complex_factor": 2.0,
+        "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*size (io write).",
     },
     # blacklisted — config / runtime
     "show_config": {

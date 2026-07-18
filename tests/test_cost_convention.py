@@ -178,7 +178,16 @@ _SYMMETRIC = {
     "random.symmetric",
 }
 
-COVERED_ELSEWHERE: set[str] = _CCU | _FMA | _UFUNC | _SYMMETRIC
+# test_triage_price_pins.py — file I/O needs a tmp_path fixture, which this
+# module's module-level-only array convention doesn't support; exact probes
+# (4*size) live there instead (cost-model triage Task 10).
+_TRIAGE_IO = {
+    "save",
+    "savez",
+    "savez_compressed",
+}
+
+COVERED_ELSEWHERE: set[str] = _CCU | _FMA | _UFUNC | _SYMMETRIC | _TRIAGE_IO
 
 # ---------------------------------------------------------------------------
 # Registry categories where ALL members follow a simple family rule.
@@ -456,8 +465,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         lambda: fnp.blackman(50),
         40 * 50,
     ),  # 2 cosine evals @16 + 8 arith per sample
-    "hamming": (lambda: fnp.hamming(50), 2 * 50),  # 1 mul + 1 cos
-    "hanning": (lambda: fnp.hanning(50), 2 * 50),
+    # cos@16 + mul + sub per sample (kaiser-family derived-constant convention)
+    "hamming": (lambda: fnp.hamming(50), 18 * 50),
+    "hanning": (lambda: fnp.hanning(50), 18 * 50),
     "kaiser": (lambda: fnp.kaiser(50, 14), 23 * 50),  # Bessel I0 @16 + 7 arith (FMA=2)
     # ---- Stats (fixed per-elem constants at weight=1.0) -------------------
     "stats.norm.pdf": (lambda: fst.norm.pdf(_v100), 27 * 100),

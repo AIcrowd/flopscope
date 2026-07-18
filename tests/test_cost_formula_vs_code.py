@@ -815,13 +815,15 @@ class TestWindows:
         # Updated: compare+div+add+select per sample (FMA=2); 4 ops/point
         assert _cost_of(we.bartlett, 20) == 4 * 20
 
-    def test_hamming_n(self, we):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
-        assert _cost_of(we.hamming, 20) == 40
+    def test_hamming_18n(self, we):
+        # Updated: cos@16 + mul + sub per sample (kaiser-family derived
+        # constant convention); 18 ops/point.
+        assert _cost_of(we.hamming, 20) == 18 * 20
 
-    def test_hanning_n(self, we):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
-        assert _cost_of(we.hanning, 20) == 40
+    def test_hanning_18n(self, we):
+        # Updated: cos@16 + mul + sub per sample (kaiser-family derived
+        # constant convention); 18 ops/point.
+        assert _cost_of(we.hanning, 20) == 18 * 20
 
     def test_blackman_40n(self, we):
         # Updated: 2 cos evals @16 + 8 arith per sample; 40 ops/point

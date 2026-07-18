@@ -568,3 +568,37 @@ def test_pad_malformed_pad_width_still_raises_numpy_error():
     v = np.arange(10.0)
     with pytest.raises(ValueError):
         billed(lambda: fnp.pad(fnp.asarray(v), [[1, 2], [3, 4]], mode="constant"))
+
+
+# ---------------------------------------------------------------------------
+# Task 10: windows bill their derived per-sample constant; save/savez bill
+# the bytes they write (load and from_dlpack stay free)
+# ---------------------------------------------------------------------------
+
+
+def test_windows_bill_derived_constants():
+    # windows return float64 by design; dtype_rate 2 applies -> 2 * 18 * M
+    assert billed(lambda: fnp.hamming(100)) == 2 * 18 * 100
+    assert billed(lambda: fnp.hanning(100)) == 2 * 18 * 100
+    assert billed(lambda: fnp.kaiser(100, 14.0)) == 2 * 23 * 100  # unchanged
+
+
+def test_io_save_bills_load_stays_free(tmp_path):
+    a = np.arange(250, dtype=np.float32)
+    f = str(tmp_path / "w.npy")
+    assert billed(lambda: fnp.save(f, fnp.asarray(a))) == 4 * 250
+    assert billed(lambda: fnp.load(f)) == 0
+    src = np.arange(64, dtype=np.float32)
+    assert billed(lambda: fnp.from_dlpack(src)) == 0  # stays free everywhere (Q9)
+
+
+def test_io_savez_bills_sum_of_saved_arrays_excluding_meta(tmp_path):
+    a = np.arange(250, dtype=np.float32)
+    b = np.arange(150, dtype=np.float32)
+    fz = str(tmp_path / "wz.npz")
+    assert (
+        billed(
+            lambda: fnp.savez(fz, a=fnp.asarray(a), b=fnp.asarray(b), __meta__={"k": 1})
+        )
+        == 4 * 400
+    )
