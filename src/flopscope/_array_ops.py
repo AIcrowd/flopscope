@@ -1202,19 +1202,29 @@ _PAD_STAT_MODES = frozenset({"maximum", "minimum", "mean", "median"})
 
 
 def _pad_pairs(value, ndim):
-    """Normalize int / (b, a) / ((b, a), ...) into a list of (before, after) per axis."""
-    arr = _np.asarray(value)
-    if arr.ndim == 0:
-        v = int(arr)
-        return [(v, v)] * ndim
-    if arr.shape == (1,):
-        v = int(arr[0])
-        return [(v, v)] * ndim
-    if arr.shape == (2,):
-        return [(int(arr[0]), int(arr[1]))] * ndim
-    if arr.shape == (1, 2):
-        return [(int(arr[0, 0]), int(arr[0, 1]))] * ndim
-    return [(int(arr[i, 0]), int(arr[i, 1])) for i in range(ndim)]
+    """Normalize a ``pad_width``/``stat_length`` argument into a list of
+    ``(before, after)`` pairs, one per axis.
+
+    Deliberately mirrors ``numpy.pad``'s own ``_as_pairs(..., as_index=True)``
+    broadcasting -- round to integer, then broadcast to shape ``(ndim, 2)`` --
+    including its scalar fast path, its single-``(before, after)``-pair fast
+    path, and its ``(2, 1)`` exclusion (a per-axis column like ``[[1], [2]]``
+    broadcasts to ``[[1, 1], [2, 2]]``, NOT to a single ``(1, 2)`` pair). Any
+    argument ``numpy.pad`` accepts must normalize here to the SAME widths, and
+    any argument it rejects must raise here too: a normalizer narrower than the
+    real ``np.pad`` that runs afterward would let a genuinely padded call --
+    one that returns a full-size output -- fall through to a 0 FLOP bill.
+    """
+    x = _np.round(_np.asarray(value)).astype(_np.intp, copy=False)
+    if x.ndim < 3:
+        if x.size == 1:
+            flat = x.ravel()
+            return [(int(flat[0]), int(flat[0]))] * ndim
+        if x.size == 2 and x.shape != (2, 1):
+            flat = x.ravel()
+            return [(int(flat[0]), int(flat[1]))] * ndim
+    pairs = _np.broadcast_to(x, (ndim, 2))
+    return [(int(pairs[i, 0]), int(pairs[i, 1])) for i in range(ndim)]
 
 
 def _pad_flop_cost(in_shape, pad_width, mode, kwargs):
@@ -1225,20 +1235,18 @@ def _pad_flop_cost(in_shape, pad_width, mode, kwargs):
     """
     ndim = len(in_shape)
     numel_in = _math.prod(in_shape) if ndim else 1
-    try:
-        pad_pairs = _pad_pairs(pad_width, ndim)
-        numel_out = (
-            _math.prod(
-                s + b + a for s, (b, a) in zip(in_shape, pad_pairs, strict=False)
-            )
-            if ndim
-            else 1
-        )
-    except (IndexError, TypeError, ValueError):
-        # pad_width didn't normalize here (e.g. a row count mismatched to
-        # ndim); bill nothing and let the real numpy call below raise its own
-        # clean error instead of leaking an internal one from this helper.
-        return 0
+    # _pad_pairs mirrors np.pad's own normalization exactly, so it accepts every
+    # pad_width numpy accepts (yielding the true output size, hence a correct
+    # nonzero cost) and raises on every pad_width numpy rejects (surfacing
+    # numpy's own broadcasting error before any budget deduction). No fallback
+    # swallow here: returning 0 for a pad_width numpy would go on to pad in full
+    # was a budget bypass (real output, zero bill).
+    pad_pairs = _pad_pairs(pad_width, ndim)
+    numel_out = (
+        _math.prod(s + b + a for s, (b, a) in zip(in_shape, pad_pairs, strict=False))
+        if ndim
+        else 1
+    )
     if mode in _PAD_FREE_MODES:
         return max(numel_out, 1)
     if mode in ("reflect", "symmetric") and kwargs.get("reflect_type", "even") != "odd":

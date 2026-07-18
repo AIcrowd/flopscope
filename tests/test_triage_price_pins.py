@@ -536,3 +536,35 @@ def test_pad_empty_input_floors_at_one():
     the shared floor-of-1 convention applies."""
     a = np.zeros(0, dtype=np.float32)
     assert billed(lambda: fnp.pad(fnp.asarray(a), 0)) == 1
+
+
+def test_pad_broadcastable_pad_width_bills_the_real_output_not_zero():
+    """Regression: pad_width forms that numpy.pad broadcasts -- a per-axis
+    column ``[[1], [2]]`` (shape (ndim, 1)) and a single ``[[5]]`` (shape
+    (1, 1)) -- must bill the full output they actually produce.
+
+    numpy.pad normalizes these via its own ``_as_pairs`` broadcasting; an
+    earlier flopscope normalizer was NARROWER and raised on them, and the
+    cost path swallowed that into a 0 FLOP bill while numpy.pad went on to
+    return a full-size padded array -- a real-output-for-0-FLOPs budget
+    bypass, reproducible for EVERY mode. The normalizer now mirrors
+    ``_as_pairs`` exactly, so the bill equals the true output size."""
+    m = np.zeros((3, 4), dtype=np.float32)  # -> out (3+1+1, 4+2+2) = (5, 8) = 40
+    assert billed(lambda: fnp.pad(fnp.asarray(m), [[1], [2]])) == 40
+    # mean/linear_ramp still bill numel(out)=40 as their base + a mode extra,
+    # so strictly more than the movement-mode 40.
+    assert billed(lambda: fnp.pad(fnp.asarray(m), [[1], [2]], mode="mean")) > 40
+    assert billed(lambda: fnp.pad(fnp.asarray(m), [[1], [2]], mode="linear_ramp")) > 40
+    # single (1, 1) pad_width broadcasts to (5, 5) on a length-10 vector -> 20
+    v = np.zeros(10, dtype=np.float32)
+    assert billed(lambda: fnp.pad(fnp.asarray(v), [[5]])) == 20
+
+
+def test_pad_malformed_pad_width_still_raises_numpy_error():
+    """A pad_width numpy.pad itself rejects must surface numpy's own error
+    (the mirrored normalizer raises the same ValueError), NOT get swallowed
+    into a 0 bill. ``[[1, 2], [3, 4]]`` (shape (2, 2)) is not broadcastable to
+    (ndim=1, 2)."""
+    v = np.arange(10.0)
+    with pytest.raises(ValueError):
+        billed(lambda: fnp.pad(fnp.asarray(v), [[1, 2], [3, 4]], mode="constant"))
