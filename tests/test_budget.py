@@ -579,7 +579,10 @@ def test_budget_summary_dict_shows_live_timing_for_active_context():
 def test_budget_summary_dict_includes_global_default_while_explicit_context_is_open():
     import flopscope
 
-    a = flopscope.numpy.ones((10,))
+    # zeros, not ones: ones is billed as of Task 4 (numel(output)=10), which
+    # would double-count on the global-default accumulator this test measures
+    # (it only wants add's own 10).
+    a = flopscope.numpy.zeros((10,))
     _ = flopscope.numpy.add(a, a)
 
     with flopscope.BudgetContext(flop_budget=100, quiet=True) as budget:

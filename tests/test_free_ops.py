@@ -49,10 +49,12 @@ def test_where():
 
 
 def test_array_ops_dont_cost_flops():
+    # ones/reshape are billed as of Task 4 (numel(output)/numel(input));
+    # zeros/transpose are the still-free witnesses here.
     with BudgetContext(flop_budget=1) as budget:
         ops.zeros((1000, 1000))
-        ops.ones((1000,))
-        ops.reshape(ops.ones((6,)), (2, 3))
+        ops.zeros((1000,))
+        ops.transpose(ops.zeros((2, 3)))
         assert budget.flops_used == 0
 
 

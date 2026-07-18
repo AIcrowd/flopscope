@@ -100,7 +100,10 @@ def test_complex_factor_free_op_is_two_not_raise():
     # relocate or allocate whole complex values, and a complex value is two
     # real components, so the default factor is 2.0 (one unit per component),
     # never raise.
-    assert complex_factor_for("reshape", np.dtype("complex128")) == 2.0
+    # (reshape carried this fallback pre-Task-4; it now has an explicit
+    # complex_factor=2.0 registry entry -- transpose is the still-unclassified
+    # witness.)
+    assert complex_factor_for("transpose", np.dtype("complex128")) == 2.0
     assert complex_factor_for("asarray", np.dtype("complex128")) == 2.0
     assert complex_factor_for("some_unknown_op_xyz", np.dtype("complex128")) == 2.0
 

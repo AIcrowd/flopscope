@@ -108,6 +108,18 @@ def _infer_structural_constructor_symmetry(*, kind, N=None, M=None, k=0, v_ndim=
     return None
 
 
+def _eye_diagonal_length(N: int, M: int | None, k: int) -> int:
+    """Number of ones an ``eye(N, M, k)``/``identity(n)`` call writes.
+
+    A fully off-diagonal ``k`` (the requested diagonal misses the array
+    entirely) writes nothing -- floors at 0, not 1: the zero background is
+    free, and there is no value-writing work to bill when the diagonal is
+    empty.
+    """
+    m = N if M is None else M
+    return max(0, min(N, m - k)) if k >= 0 else max(0, min(N + k, m))
+
+
 # ---------------------------------------------------------------------------
 # Tensor creation
 # ---------------------------------------------------------------------------
@@ -160,14 +172,18 @@ def ones(
     dtype: DTypeLike = float,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Return array of ones. Wraps ``numpy.ones``. Cost: 0 FLOPs."""
+    """Return array of ones. Wraps ``numpy.ones``. Cost: numel(output)."""
     budget = require_budget()
-    with budget.deduct("ones", flop_cost=0, subscripts=None, shapes=(), dtypes=()):
-        result = _call_numpy(_np.ones, shape, dtype=dtype, **kwargs)
-    return _wrap_constant_fill(result)
+    result = _call_numpy(_np.ones, shape, dtype=dtype, **kwargs)
+    cost = result.size if hasattr(result, "size") else 1
+    with budget.deduct(
+        "ones", flop_cost=cost, subscripts=None, shapes=(), dtypes=(result.dtype,)
+    ):
+        result = _wrap_constant_fill(result)
+    return result
 
 
-attach_docstring(ones, _np.ones, "free", "0 FLOPs")
+attach_docstring(ones, _np.ones, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -199,9 +215,16 @@ def eye(
     dtype: DTypeLike = float,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Return identity matrix. Wraps ``numpy.eye``. Cost: 0 FLOPs."""
+    """Return identity matrix. Wraps ``numpy.eye``. Cost: diagonal length written."""
     budget = require_budget()
-    with budget.deduct("eye", flop_cost=0, subscripts=None, shapes=(), dtypes=()):
+    cost = _eye_diagonal_length(N, M, k)
+    with budget.deduct(
+        "eye",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(_np.dtype(dtype),),
+    ):
         result = _call_numpy(_np.eye, N, M=M, k=k, dtype=dtype, **kwargs)
     symmetry = _infer_structural_constructor_symmetry(kind="eye", N=N, M=M, k=k)
     if symmetry is not None:
@@ -209,7 +232,9 @@ def eye(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(eye, _np.eye, "free", "0 FLOPs")
+attach_docstring(
+    eye, _np.eye, "counted_custom", "diagonal length written (0 if k is off-diagonal)"
+)
 
 
 @_counted_wrapper
@@ -347,31 +372,34 @@ def ones_like(
     dtype: DTypeLike | None = None,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Return array of ones with same shape. Wraps ``numpy.ones_like``. Cost: 0 FLOPs."""
+    """Return array of ones with same shape. Wraps ``numpy.ones_like``. Cost: numel(output)."""
     budget = require_budget()
     base = _to_base_ndarray(a)
+    result = _call_numpy(_np.ones_like, base, dtype=dtype, **kwargs)
+    cost = result.size if hasattr(result, "size") else 1
     with budget.deduct(
         "ones_like",
-        flop_cost=0,
+        flop_cost=cost,
         subscripts=None,
-        shapes=(_np.shape(base),),
-        dtypes=(),
+        shapes=(),
+        dtypes=(result.dtype,),
     ):
-        result = _call_numpy(_np.ones_like, base, dtype=dtype, **kwargs)
-    propagated_symmetry = None
-    if isinstance(a, SymmetricTensor):
-        propagated_symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
-    if propagated_symmetry is not None:
-        return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
-    inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
-    if inferred_symmetry is None:
+        propagated_symmetry = None
         if isinstance(a, SymmetricTensor):
-            return _np.array(result, copy=False, subok=False)  # type: ignore[return-value]
-        return result  # type: ignore[return-value]
-    return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
+            propagated_symmetry = _compatible_symmetry_for_shape(
+                a.symmetry, result.shape
+            )
+        if propagated_symmetry is not None:
+            return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
+        inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
+        if inferred_symmetry is None:
+            if isinstance(a, SymmetricTensor):
+                return _call_numpy(_np.array, result, copy=False, subok=False)  # type: ignore[return-value]
+            return result  # type: ignore[return-value]
+        return wrap_with_inferred_symmetry(result, inferred_symmetry)  # type: ignore[return-value]
 
 
-attach_docstring(ones_like, _np.ones_like, "free", "0 FLOPs")
+attach_docstring(ones_like, _np.ones_like, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
@@ -455,9 +483,16 @@ attach_docstring(empty_like, _np.empty_like, "free", "0 FLOPs")
 
 @_counted_wrapper
 def identity(n: int, dtype: DTypeLike = float) -> FlopscopeArray:
-    """Return identity matrix. Wraps ``numpy.identity``. Cost: 0 FLOPs."""
+    """Return identity matrix. Wraps ``numpy.identity``. Cost: diagonal length written (=n)."""
     budget = require_budget()
-    with budget.deduct("identity", flop_cost=0, subscripts=None, shapes=(), dtypes=()):
+    cost = _eye_diagonal_length(n, n, 0)
+    with budget.deduct(
+        "identity",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(_np.dtype(dtype),),
+    ):
         result = _call_numpy(_np.identity, n, dtype=dtype)
     symmetry = _infer_structural_constructor_symmetry(kind="identity")
     if symmetry is not None:
@@ -465,7 +500,9 @@ def identity(n: int, dtype: DTypeLike = float) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(identity, _np.identity, "free", "0 FLOPs")
+attach_docstring(
+    identity, _np.identity, "counted_custom", "diagonal length written (=n) FLOPs"
+)
 
 # ---------------------------------------------------------------------------
 # Tensor manipulation
@@ -474,12 +511,17 @@ attach_docstring(identity, _np.identity, "free", "0 FLOPs")
 
 @_counted_wrapper
 def reshape(a: ArrayLike, /, *args: Any, **kwargs: Any) -> FlopscopeArray:
-    """Reshape an array. Wraps ``numpy.reshape``. Cost: 0 FLOPs."""
+    """Reshape an array. Wraps ``numpy.reshape``. Cost: numel(input)."""
     budget = require_budget()
     a_arr = _np.asarray(a)
+    cost = max(a_arr.size, 1)
     in_group = a.symmetry if isinstance(a, SymmetricTensor) else None
     with budget.deduct(
-        "reshape", flop_cost=0, subscripts=None, shapes=(a_arr.shape,), dtypes=()
+        "reshape",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a_arr.shape,),
+        dtypes=(a_arr.dtype,),
     ):
         result = _call_numpy(_np.reshape, a_arr, *args, **kwargs)
     out_group = _st.transport_reshape(
@@ -501,7 +543,9 @@ def reshape(a: ArrayLike, /, *args: Any, **kwargs: Any) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(reshape, _np.reshape, "free", "0 FLOPs")
+attach_docstring(
+    reshape, _np.reshape, "counted_custom", "numel(input) FLOPs (even as a view)"
+)
 
 
 @_counted_wrapper
@@ -901,7 +945,7 @@ attach_docstring(expand_dims, _np.expand_dims, "free", "0 FLOPs")
 
 @_counted_wrapper
 def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Flatten array. Cost: numel(output)."""
+    """Flatten array. Cost: numel(input) (= numel(output); ravel does not change element count)."""
     budget = require_budget()
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
@@ -929,16 +973,23 @@ def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
-attach_docstring(ravel, _np.ravel, "free", "0 FLOPs")
+attach_docstring(
+    ravel, _np.ravel, "counted_custom", "numel(input) FLOPs (even for a view result)"
+)
 
 
 @_counted_wrapper
 def copy(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Return copy of array. Wraps ``numpy.copy``. Cost: 0 FLOPs."""
+    """Return copy of array. Wraps ``numpy.copy``. Cost: numel(input)."""
     budget = require_budget()
     a_arr = _np.asarray(a)
+    cost = max(a_arr.size, 1)
     with budget.deduct(
-        "copy", flop_cost=0, subscripts=None, shapes=(a_arr.shape,), dtypes=()
+        "copy",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a_arr.shape,),
+        dtypes=(a_arr.dtype,),
     ):
         result = _call_numpy(_np.copy, a_arr, **kwargs)
     if isinstance(a, SymmetricTensor):
@@ -946,7 +997,7 @@ def copy(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(copy, _np.copy, "free", "0 FLOPs")
+attach_docstring(copy, _np.copy, "counted_custom", "numel(input) FLOPs")
 
 
 @_counted_wrapper
@@ -2933,17 +2984,34 @@ attach_docstring(
 )
 
 
-def require(*args, **kwargs):
-    """Return array satisfying requirements. Wraps ``numpy.require``. Cost: 0 FLOPs."""
+@_counted_wrapper
+def require(*args: Any, **kwargs: Any) -> FlopscopeArray:
+    """Return array satisfying requirements. Wraps ``numpy.require``. Cost: numel(input)."""
     # Pass args through unstripped: ``_np.require`` is a thin Python
     # helper around ``np.asanyarray`` and does not enter the
     # ``__array_function__`` dispatch path, so passing a FlopscopeArray
     # cannot recurse. Stripping would break ``np.require(x).is(x)``
-    # identity for already-conforming inputs.
-    return _np.require(*args, **kwargs)
+    # identity for already-conforming inputs. The cost peek below uses a
+    # separate ``_np.asarray()`` call rather than the stripped value, so the
+    # actual ``_np.require`` call still receives the original, unstripped args.
+    budget = require_budget()
+    a = args[0] if args else kwargs.get("a")
+    a_arr = _np.asarray(a)
+    cost = max(a_arr.size, 1)
+    with budget.deduct(
+        "require",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(),
+        dtypes=(a_arr.dtype,),
+    ):
+        result = _call_numpy(_np.require, *args, **kwargs)
+    return result  # type: ignore[return-value]
 
 
-attach_docstring(require, _np.require, "free", "0 FLOPs")
+attach_docstring(
+    require, _np.require, "counted_custom", "numel(input) FLOPs (even if unchanged)"
+)
 
 
 @_counted_wrapper

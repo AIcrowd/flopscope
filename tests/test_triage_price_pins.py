@@ -233,3 +233,39 @@ def test_creation_and_copy_family_remaining_ops_bill_output():
     x20 = np.arange(20, dtype=np.float32)
     y25 = np.arange(25, dtype=np.float32)
     assert billed(lambda: fnp.meshgrid(fnp.asarray(x20), fnp.asarray(y25))) == 1000
+
+
+# ---------------------------------------------------------------------------
+# Task 4: value-writing creation & layout copies -- diagonal length / numel
+# ---------------------------------------------------------------------------
+
+
+def test_writing_creation_bills_output_zeros_stay_free():
+    assert billed(lambda: fnp.ones((40, 25), dtype=np.float32)) == 1000
+    assert billed(lambda: fnp.eye(64, dtype=np.float32)) == 64
+    assert (
+        billed(lambda: fnp.eye(64, 32, k=40, dtype=np.float32)) == 0
+    )  # k beyond width: no ones written
+    assert billed(lambda: fnp.identity(50, dtype=np.float32)) == 50
+    assert billed(lambda: fnp.zeros((40, 25), dtype=np.float32)) == 0
+    assert billed(lambda: fnp.empty((40, 25), dtype=np.float32)) == 0
+    base = np.ones((40, 25), dtype=np.float32)
+    assert billed(lambda: fnp.zeros_like(fnp.asarray(base))) == 0
+    assert billed(lambda: fnp.empty_like(fnp.asarray(base))) == 0
+    # ones_like: not in the brief's given pin block above, added here so all
+    # ten Task 4 ops have a dedicated pin (mirrors ones' numel(output)).
+    assert billed(lambda: fnp.ones_like(fnp.asarray(base))) == 1000
+
+
+def test_fft_shifts_bill_their_copy():
+    a = np.arange(640, dtype=np.float32)
+    assert billed(lambda: fnp.fft.fftshift(fnp.asarray(a))) == 640
+    assert billed(lambda: fnp.fft.ifftshift(fnp.asarray(a))) == 640
+
+
+def test_conditional_view_copies_bill_numel():
+    a = np.arange(600, dtype=np.float32)
+    assert billed(lambda: fnp.copy(fnp.asarray(a))) == 600
+    assert billed(lambda: fnp.reshape(fnp.asarray(a), (20, 30))) == 600
+    assert billed(lambda: fnp.ravel(fnp.asarray(a.reshape(20, 30)))) == 600
+    assert billed(lambda: fnp.require(fnp.asarray(a), requirements=["C"])) == 600

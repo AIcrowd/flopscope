@@ -1360,9 +1360,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "FFT sample frequencies; cost = n (index grid scaled by 1/(n*d)). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftshift": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy.fft",
-        "notes": "Shift zero-frequency component to center. No arithmetic; index reordering only.",
+        "complex_factor": 2.0,
+        "notes": "Shift zero-frequency component to center. Cost: numel(output). No arithmetic (numpy.fft.fftshift is numpy.roll); billed as a data-movement reindex, same tier as roll -- not part of the FFT priced-in family.",
     },
     "fft.hfft": {
         "category": "counted_custom",
@@ -1389,9 +1390,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Inverse N-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2; Van Loan 1992 §1.4). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftshift": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy.fft",
-        "notes": "Inverse of fftshift. No arithmetic; index reordering only.",
+        "complex_factor": 2.0,
+        "notes": "Inverse of fftshift. Cost: numel(output). No arithmetic (numpy.fft.ifftshift is numpy.roll); billed as a data-movement reindex, same tier as roll -- not part of the FFT priced-in family.",
     },
     "fft.ihfft": {
         "category": "counted_custom",
@@ -1456,9 +1458,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Create zero-filled array.",
     },
     "ones": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Create one-filled array.",
+        "complex_factor": 2.0,
+        "notes": "Create one-filled array. Cost: numel(output).",
     },
     "full": {
         "category": "counted_custom",
@@ -1467,14 +1470,16 @@ REGISTRY: dict[str, dict] = {
         "notes": "Create array filled with scalar value. Cost: num copied.",
     },
     "eye": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Create identity matrix.",
+        "complex_factor": 2.0,
+        "notes": "Create identity matrix. Cost: diagonal length written = max(0, min(N, M-k)) for k>=0, max(0, min(N+k, M)) for k<0 (fully off-diagonal bills 0).",
     },
     "identity": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Create square identity matrix.",
+        "complex_factor": 2.0,
+        "notes": "Create square identity matrix. Cost: diagonal length written (=n).",
     },
     "diag": {
         "category": "counted_custom",
@@ -1500,9 +1505,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Array of zeros with same shape/type as input.",
     },
     "ones_like": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Array of ones with same shape/type as input.",
+        "complex_factor": 2.0,
+        "notes": "Array of ones with same shape/type as input. Cost: numel(output).",
     },
     "full_like": {
         "category": "counted_custom",
@@ -1521,9 +1527,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Uninitialized array with same shape/type as input.",
     },
     "reshape": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Reshape array without copying.",
+        "complex_factor": 2.0,
+        "notes": "Reshape array. Cost: numel(input), billed regardless of whether numpy returns a view or a copy.",
     },
     "transpose": {
         "category": "free",
@@ -1590,14 +1597,16 @@ REGISTRY: dict[str, dict] = {
         "notes": "Insert new size-1 axis.",
     },
     "ravel": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Return contiguous flattened array. Cost: numel(input).",
+        "complex_factor": 2.0,
+        "notes": "Return contiguous flattened array. Cost: numel(input), billed regardless of whether numpy returns a view or a copy.",
     },
     "copy": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Return array copy.",
+        "complex_factor": 2.0,
+        "notes": "Return array copy. Cost: numel(input).",
     },
     "where": {
         "category": "counted_custom",
@@ -2280,9 +2289,10 @@ REGISTRY: dict[str, dict] = {
         "notes": "Convert to array, raising if NaN or inf. Cost: numel(input).",
     },
     "require": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Return array that satisfies requirements.",
+        "complex_factor": 2.0,
+        "notes": "Return array that satisfies requirements. Cost: numel(input), billed regardless of whether numpy returns the input unchanged or a new array.",
     },
     "issubdtype": {
         "category": "free",

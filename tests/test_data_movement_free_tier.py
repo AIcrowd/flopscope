@@ -80,14 +80,17 @@ def _mk2d():
 # (build, call): build runs BEFORE n0 so ONLY the op under test is measured.
 # (After migration, building inputs via reshape would itself add a record, so
 # shaped inputs are constructed outside the measured region.)
+# reshape/copy/fft.fftshift/fft.ifftshift left this dict in Task 4: they now
+# bill numel(input)/numel(output) (weight 1.0), so they no longer belong among
+# the "free view op, 0 FLOPs" cases below -- see
+# tests/test_triage_price_pins.py::test_fft_shifts_bill_their_copy,
+# test_conditional_view_copies_bill_numel for their exact-value pins.
 VIEW_OPS_126 = {
-    "reshape": (_mk1d, lambda a: fnp.reshape(a, (10, 10))),
     "transpose": (_mk2d, lambda a: fnp.transpose(a)),
     "swapaxes": (_mk2d, lambda a: fnp.swapaxes(a, 0, 1)),
     "moveaxis": (_mk2d, lambda a: fnp.moveaxis(a, 0, 1)),
     "squeeze": (lambda: _mk1d().reshape(1, 100), lambda a: fnp.squeeze(a)),
     "expand_dims": (_mk1d, lambda a: fnp.expand_dims(a, 0)),
-    "copy": (_mk1d, lambda a: fnp.copy(a)),
     "flip": (_mk1d, lambda a: fnp.flip(a)),
     "fliplr": (_mk2d, lambda a: fnp.fliplr(a)),
     "flipud": (_mk2d, lambda a: fnp.flipud(a)),
@@ -95,8 +98,6 @@ VIEW_OPS_126 = {
     "atleast_1d": (_mk1d, lambda a: fnp.atleast_1d(a)),
     "atleast_2d": (_mk1d, lambda a: fnp.atleast_2d(a)),
     "atleast_3d": (_mk1d, lambda a: fnp.atleast_3d(a)),
-    "fft.fftshift": (_mk1d, lambda a: fnp.fft.fftshift(a)),
-    "fft.ifftshift": (_mk1d, lambda a: fnp.fft.ifftshift(a)),
     "hsplit": (_mk2d, lambda a: fnp.hsplit(a, 2)),
 }
 
@@ -114,12 +115,12 @@ def test_view_op_is_time_accounted(name):
     assert all(r.flop_cost == 0 for r in new), f"{name}: free op billed nonzero FLOPs"
 
 
+# ones/eye/identity left this dict in Task 4: they now bill numel(output) /
+# diagonal length (weight 1.0) -- see
+# tests/test_triage_price_pins.py::test_writing_creation_bills_output_zeros_stay_free.
 INIT_OPS_126 = {
     "zeros": lambda: fnp.zeros((10, 10)),
-    "ones": lambda: fnp.ones((10, 10)),
     "empty": lambda: fnp.empty((10, 10)),
-    "eye": lambda: fnp.eye(10),
-    "identity": lambda: fnp.identity(10),
     "tri": lambda: fnp.tri(10),
 }
 
@@ -137,8 +138,9 @@ def test_init_op_is_time_accounted(name):
     assert new[0].flop_cost == 0
 
 
-@pytest.mark.parametrize("name", ["zeros_like", "ones_like", "empty_like"])
+@pytest.mark.parametrize("name", ["zeros_like", "empty_like"])
 def test_init_like_op_is_time_accounted(name):
+    # ones_like left this list in Task 4 -- it now bills numel(output).
     with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
         a = fnp.asarray([float(i) for i in range(100)])
         n0 = len(ctx.op_log)

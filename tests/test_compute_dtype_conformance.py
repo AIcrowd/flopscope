@@ -623,6 +623,28 @@ PROBES.update(
     }
 )
 
+# ---------------------------------------------------------------------------
+# value-writing creation & layout copies (weight-flipped from free -> 1.0,
+# cost-model triage Task 4): ones/ones_like/eye/identity declare the
+# constructor's own dtype= parameter (or the input's, for *_like); copy/
+# reshape/ravel/require/fft.fftshift/fft.ifftshift declare the input array's
+# dtype. All resolve int32 here -- none of these ops widen.
+# ---------------------------------------------------------------------------
+PROBES.update(
+    {
+        "ones": lambda: fnp.ones(8, dtype=np.int32),
+        "ones_like": lambda: fnp.ones_like(V),
+        "eye": lambda: fnp.eye(4, dtype=np.int32),
+        "identity": lambda: fnp.identity(4, dtype=np.int32),
+        "copy": lambda: fnp.copy(V),
+        "reshape": lambda: fnp.reshape(V, (2, 4)),
+        "ravel": lambda: fnp.ravel(M),
+        "require": lambda: fnp.require(V, requirements=["C"]),
+        "fft.fftshift": lambda: fnp.fft.fftshift(V),
+        "fft.ifftshift": lambda: fnp.fft.ifftshift(V),
+    }
+)
+
 
 def _copyto_probe() -> np.ndarray:
     dst = np.zeros(8, dtype=np.int32)

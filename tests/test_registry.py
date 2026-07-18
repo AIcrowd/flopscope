@@ -93,10 +93,7 @@ def test_existing_array_ops():
     # Some former free ops are now counted_custom (budget deduction added)
     still_free = [
         "zeros",
-        "ones",
-        "reshape",
         "transpose",
-        "eye",
     ]
     now_counted = [
         "concatenate",
@@ -114,6 +111,17 @@ def test_existing_array_ops():
         "hstack",
         "column_stack",
         "row_stack",
+        # Task 4: value-writing creation & layout copies
+        "ones",
+        "ones_like",
+        "eye",
+        "identity",
+        "copy",
+        "reshape",
+        "ravel",
+        "require",
+        "fft.fftshift",
+        "fft.ifftshift",
     ]
     for name in still_free:
         assert name in REGISTRY, f"{name} not in registry"

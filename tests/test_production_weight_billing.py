@@ -51,12 +51,14 @@ def _billed(call):
 #
 # _A/_B are float64 (np.random.default_rng(...).standard_normal's default
 # dtype), so add/exp/take resolve dtype_rate 2.0. random.randn has no dtype=
-# parameter and always draws float64, so it is also dtype_rate 2.0. reshape
-# is weight 0.0 (billed 0 regardless of dtype_rate). hanning takes no array
-# operand but always produces a float64 window, so it declares that output
-# dtype and bills dtype_rate 2.0 — consistent with the samplers.
+# parameter and always draws float64, so it is also dtype_rate 2.0. transpose
+# is weight 0.0 (billed 0 regardless of dtype_rate) -- reshape represented this
+# tier before Task 4, which moved it to the 1.0 tier (numel(input)); transpose
+# is the still-free witness now. hanning takes no array operand but always
+# produces a float64 window, so it declares that output dtype and bills
+# dtype_rate 2.0 — consistent with the samplers.
 _TIER_CASES = [
-    ("free: reshape", "reshape", lambda: fnp.reshape(_A, (10, 10)), 0, 0.0),
+    ("free: transpose", "transpose", lambda: fnp.transpose(_A), 0, 0.0),
     # gather tier: numel(output)=100 (take(_A, _IDX) with axis=None flattens
     # to _IDX's shape) * dtype_rate 2.0(f64, take's own declared dtype) * 4.0
     ("gather: take", "take", lambda: fnp.take(_A, _IDX), 800, 4.0),
@@ -88,7 +90,7 @@ _TIER_CASES = [
 # dtype_rate that applies to each case above (keyed by weight_key), used by
 # the invariant test below. See the derivations in the _TIER_CASES comment.
 _DTYPE_RATE_BY_WEIGHT_KEY = {
-    "reshape": 1.0,
+    "transpose": 1.0,
     "take": 2.0,
     "add": 2.0,
     "hanning": 2.0,  # fixed float64 output window

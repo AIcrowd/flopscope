@@ -290,10 +290,11 @@ def test_array_ops_creation_bills_output_dtype():
 
 
 def test_array_ops_free_op_bills_zero_regardless_of_dtype():
-    # flop_cost=0 data-movement ops (reshape) bill 0 for any dtype, incl complex.
+    # flop_cost=0 data-movement ops (transpose) bill 0 for any dtype, incl
+    # complex. (reshape was the witness pre-Task-4; it now bills numel(input).)
     load_weights()
-    zc = fnp.asarray(np.ones(12, dtype=np.complex128))
-    assert _cost(lambda: fnp.reshape(zc, (3, 4))) == 0
+    zc = fnp.asarray(np.ones((3, 4), dtype=np.complex128))
+    assert _cost(lambda: fnp.transpose(zc)) == 0
 
 
 def test_astype_is_free_and_still_resolves_heavier_dtype():
@@ -343,7 +344,9 @@ def test_complex_movement_and_creation_do_not_raise():
     load_weights()
     zc = fnp.asarray(np.ones(100, dtype=np.complex128))
     assert _cost(lambda: fnp.asarray(np.ones(50, dtype=np.complex128))) == 0
-    assert _cost(lambda: fnp.ravel(zc)) == 0
+    # ravel is billed as of Task 4 (numel(input)); flip is the still-free
+    # movement-op witness here.
+    assert _cost(lambda: fnp.flip(zc)) == 0
     assert _cost(lambda: fnp.broadcast_to(zc, (2, 100))) == 0
     # astype complex->real is value-changing (structural cost=numel, inert at
     # astype's weight 0) -- both the function form and the .astype() method

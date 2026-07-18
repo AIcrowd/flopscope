@@ -704,6 +704,17 @@ DEFERRED: dict[str, str] = {
     "array": "numel(input); plain copy",
     "full": "numel; scalar broadcast",
     "full_like": "numel; trivial",
+    # Task 4: value-writing creation & layout copies (formerly free tier)
+    "ones": "numel(output); constant fill",
+    "ones_like": "numel(output); constant fill",
+    "eye": "diagonal length written; structural constructor",
+    "identity": "diagonal length written (=n); structural constructor",
+    "copy": "numel(input); materializing copy",
+    "reshape": "numel(input); billed regardless of view-vs-copy",
+    "ravel": "numel(input); billed regardless of view-vs-copy",
+    "require": "numel(input); billed regardless of view-vs-copy",
+    "fft.fftshift": "numel(output); roll-based reindex, no arithmetic",
+    "fft.ifftshift": "numel(output); roll-based reindex, no arithmetic",
     "diag": "pinned in OP_EXPECTATIONS (extract path; construct path = numel(output))",
     "concatenate": "numel(output); trivial copy",
     "concat": "numel(output); numpy 2.x alias for concatenate",
@@ -844,18 +855,18 @@ def test_family_defaults_reduction():
 
 
 def test_family_defaults_free():
-    """Free / view ops: cost = 0."""
+    """Free / view ops: cost = 0.
+
+    reshape/ones/ones_like/fft.fftshift/fft.ifftshift moved out of this test
+    in Task 4 -- they now bill numel(input)/numel(output) (weight 1.0); see
+    OP_EXPECTATIONS / DEFERRED below and tests/test_triage_price_pins.py.
+    """
     v = fnp.asarray(_rng.standard_normal(100))
     sq = fnp.asarray(_rng.standard_normal((4, 4)))
-    assert _cost(lambda: fnp.reshape(v, (10, 10))) == 0
     assert _cost(lambda: fnp.transpose(sq)) == 0
     assert _cost(lambda: fnp.zeros(100)) == 0
-    assert _cost(lambda: fnp.ones(100)) == 0
     assert _cost(lambda: fnp.empty(100)) == 0
     assert _cost(lambda: fnp.zeros_like(v)) == 0
-    assert _cost(lambda: fnp.ones_like(v)) == 0
-    assert _cost(lambda: fnp.fft.fftshift(v)) == 0
-    assert _cost(lambda: fnp.fft.ifftshift(v)) == 0
     assert _cost(lambda: fnp.linalg.matrix_transpose(sq)) == 0
 
 
