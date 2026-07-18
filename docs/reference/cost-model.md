@@ -1295,13 +1295,12 @@ All weight 1.0. Source: `src/flopscope/_array_ops.py`.
 A free (weight-0) classification covers only an op's **pure data-movement / structural**
 behavior. Any parameter, mode, or path that **computes or inspects values** is **charged**
 with a reliable cost reusing the convention for that work; a path we cannot reliably bill
-is **rejected with a clear error**. These four ops carry weight **1.0** with a path-aware
+is **rejected with a clear error**. These three ops carry weight **1.0** with a path-aware
 `flop_cost`:
 
 | Op | free path (`flop_cost = 0`) | charged / rejected path |
 |---|---|---|
 | `pad` | `constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` (`reflect_type='even'`) | stat modes `maximum`/`minimum`/`mean`/`median`: `Σᵢ stats_i·stat_len_i·cross_i` (lanes from the input cross-section); `linear_ramp` and `reflect_type='odd'`: `2·(numel_out − numel_in)`; **`mode=<callable>` raises** |
-| `ravel_multi_index` | — | `2·(ndim − 1)·N` (one unit stride), `+N` for `mode='clip'/'wrap'` |
 | `trim_zeros` | — | `numel(input)` (value scan for the nonzero boundary) |
 | `copyto` | — | `numel(dst)` (or popcount(`where`) when masked) — every write is priced, same-dtype or not |
 
@@ -1309,10 +1308,13 @@ For `pad` stat modes: `cross_i = numel_in // in_shape[i]`, `stat_len_i = min(sta
 in_shape[i])` (default = full axis), summed over padded axes only; a full-axis stat serves
 both sides (one reduction). `mean` adds one divide per stat output cell.
 
+(`ravel_multi_index` — an index-math op with no free path — lives in the [Index
+generators](#index-generators) table, billed `numel(output)` and dtype-neutral.)
+
 **Complex dtypes**: the charged `pad` stat modes and `trim_zeros` bill factor 2 (value
-scan / reduction); `ravel_multi_index` is integer index math and is complex-illegal.
-`copyto` resolves its billed dtype the general way — `np.result_type` over its source
-and destination operands — see [Which dtype prices a call](#which-dtype-prices-a-call).
+scan / reduction). `copyto` resolves its billed dtype the general way — `np.result_type`
+over its source and destination operands — see [Which dtype prices a
+call](#which-dtype-prices-a-call).
 
 ---
 

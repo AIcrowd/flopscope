@@ -630,6 +630,13 @@ class OperationDocRecord:
     notes: str
     aliases: list[str]
     signature: str
+    # Overrides the detail-page title when the op has no `fnp.<name>` call form
+    # (e.g. method-surface ops like `getitem`, whose only invocation is
+    # `arr[key]` syntax). Left None for ordinary ops so the website's
+    # `display_name ?? import_path ?? flopscope_ref` fallback resolves to
+    # `flopscope_ref` as before; a method-surface op sets it so the title does
+    # not read as the non-existent `fnp.getitem`.
+    display_name: str | None = None
     summary: str = ""
     provenance_label: str = ""
     provenance_url: str = ""
@@ -2648,6 +2655,7 @@ def _build_operation_record(
         notes=notes,
         aliases=aliases,
         signature=signature,
+        display_name=METHOD_SURFACE_SIGNATURES.get(name),
         summary=parsed_doc.summary,
         provenance_label=provenance_label_for_operation(module),
         provenance_url=docs_url_for_operation(name, module),
@@ -4114,7 +4122,12 @@ def _public_api_payload_from_operation(record: OperationDocRecord) -> dict[str, 
     payload["canonical_path"] = payload["href"]
     payload["legacy_href"] = detail_href_for_slug(record.slug)
     payload["import_path"] = import_path
-    payload["display_name"] = import_path
+    # A method-surface op (e.g. getitem) has no `flopscope.numpy.<name>(...)`
+    # call form, so its detail-page title uses the record's own display_name
+    # (e.g. `arr[key]`) instead of the dotted import path — which would read as
+    # a non-existent callable. Ordinary ops leave display_name None and keep the
+    # import-path title.
+    payload["display_name"] = record.display_name or import_path
     payload["kind"] = "function"
     payload["operation"] = {
         "name": record.name,
