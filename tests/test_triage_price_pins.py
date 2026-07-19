@@ -116,6 +116,21 @@ def test_random_reorder_bills_4x():
     assert billed(lambda: g.shuffle(fnp.asarray(arr.copy()))) == 4 * N
     assert billed(lambda: fnp.random.shuffle(fnp.asarray(arr.copy()))) == 4 * N
 
+    # Module-level random.choice must join the x4 reorder tier: numpy's module
+    # surface delegates to the legacy RandomState singleton (the same selection
+    # machinery as RandomState.choice / default_rng().choice), so weight 1.0 was
+    # a cheaper alias route around the agreed reorder tier. An int32 pool bills
+    # dtype-neutral (rate 1): 4 x 100 = 400, at parity with the Generator
+    # surface for the identical draw.
+    pool = np.arange(1000, dtype=np.int32)
+    assert (
+        billed(lambda: fnp.random.choice(fnp.asarray(pool), size=100, replace=True))
+        == 400
+    )
+    assert billed(
+        lambda: fnp.random.choice(fnp.asarray(pool), size=100, replace=True)
+    ) == billed(lambda: g.choice(fnp.asarray(pool), size=100, replace=True))
+
     # random.sample is an alias of random_sample (uniform draws, see
     # src/flopscope/numpy/random/__init__.py:500) but always bills float64
     # (no dtype= parameter), so it resolves at rate 2.0 -- expected is

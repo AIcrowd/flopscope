@@ -316,7 +316,7 @@
     "random.binomial": 16.0,
     "random.bytes": 1.0,
     "random.chisquare": 16.0,
-    "random.choice": 1.0,
+    "random.choice": 4.0,
     "random.default_rng": 0.0,
     "random.dirichlet": 16.0,
     "random.exponential": 16.0,
