@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from test_dtype_cost import _billed_with_production_rates
 
+import flopscope as flops
 import flopscope.numpy as fnp
 
 
@@ -928,3 +929,77 @@ def test_choose_block_bmat_bill_wide_dtypes():
     assert billed(lambda: fnp.bmat([[a_f32, b_f32]])) == 200
     assert billed(lambda: fnp.bmat([[a_f64, b_f64]])) == 400
     assert billed(lambda: fnp.bmat([[a_c128, b_c128]])) == 800
+
+
+# ---------------------------------------------------------------------------
+# Task 14 (whole-branch review fix F1a, IMPORTANT): FlopscopeArray METHOD
+# forms of .copy/.ravel/.reshape/.choose/.flatten bill identically to their
+# fnp.* FUNCTION forms. This branch repriced copy/ravel/reshape/choose as
+# functions (0 -> numel@w1, choose 0 -> 4x numel) but left the ndarray
+# METHODS unoverridden -- they fell through to numpy's raw C implementation
+# and billed 0, a fresh regression diverging from fnp.copy(x) == x.copy()
+# parity. flatten has no fnp.flatten function at all (numpy.ndarray.flatten
+# is always a real copy, unlike .ravel() which may return a view); it now
+# bills once under the "copy" op name rather than composing copy-then-
+# reshape, which would double-bill the same data movement.
+# ---------------------------------------------------------------------------
+
+
+def test_ndarray_method_forms_match_function_forms():
+    """x.copy()/.ravel()/.reshape()/.choose() must bill exactly like their
+    fnp.* function counterparts, at production rates. All were 0 before this
+    fix (the method fell through to numpy's unbilled C implementation)."""
+    x = fnp.asarray(np.ones(1_000_000, dtype=np.float64))
+    assert billed(lambda: x.copy()) == 2_000_000
+    assert billed(lambda: fnp.copy(x)) == 2_000_000
+    assert billed(lambda: x.ravel()) == 2_000_000
+    assert billed(lambda: fnp.ravel(x)) == 2_000_000
+    # .reshape() must accept BOTH the varargs form (x.reshape(1000, 1000))
+    # and the tuple form (x.reshape((1000, 1000))) -- unlike fnp.reshape /
+    # np.reshape, whose 2nd positional parameter is `order`, not another
+    # shape dimension.
+    assert billed(lambda: x.reshape(1000, 1000)) == 2_000_000
+    assert billed(lambda: x.reshape((1000, 1000))) == 2_000_000
+    assert billed(lambda: fnp.reshape(x, (1000, 1000))) == 2_000_000
+
+    # choose's index array selects among `choices`; billing is dtype-aware
+    # off the promoted CHOICES dtype (read from the result), not off the
+    # (integer) index array -- a 1000-element float64 choose bills
+    # 4 (access-tier weight) * 2.0 (float64 rate) * 1000 = 8000.
+    idx = fnp.asarray(np.arange(1000) % 2)
+    choices = [
+        fnp.asarray(np.zeros(1000, dtype=np.float64)),
+        fnp.asarray(np.ones(1000, dtype=np.float64)),
+    ]
+    assert billed(lambda: idx.choose(choices)) == 8000
+    assert billed(lambda: fnp.choose(idx, choices)) == 8000
+
+
+def test_copy_method_and_function_are_self_consistent_every_dtype():
+    """fnp.copy(x) == x.copy() at every dtype, not just float64 -- the method
+    now forwards to the same fnp.copy backend, so this must hold generally."""
+    for dt in (np.float32, np.float64, np.complex64, np.complex128):
+        x = fnp.asarray(np.arange(37, dtype=dt) + 1)
+        cost_fn = billed(lambda x=x: fnp.copy(x))
+        cost_method = billed(lambda x=x: x.copy())
+        assert cost_fn == cost_method
+        assert cost_fn > 0
+
+
+def test_ndarray_flatten_bills_once_like_copy_not_double():
+    """.flatten() has no fnp.flatten function to delegate to (numpy.flatten
+    is always a real copy). It must bill exactly once at numel(input) --
+    the same price as .copy() -- not twice (e.g. a naive copy-then-reshape
+    composition)."""
+    x = fnp.asarray(np.ones(1_000_000, dtype=np.float64))
+    assert billed(lambda: x.flatten()) == 2_000_000
+    assert billed(lambda: x.flatten()) == billed(lambda: x.copy())
+
+    # And it must actually be a real copy (OWNDATA), not a view -- matching
+    # numpy.ndarray.flatten's documented contract.
+    with flops.BudgetContext(flop_budget=10**18, quiet=True):
+        two_d = fnp.asarray(np.ones((1000, 1000), dtype=np.float64))
+        flat = two_d.flatten()
+    assert flat.flags["OWNDATA"]
+    assert flat.base is None
+    assert flat.shape == (1_000_000,)

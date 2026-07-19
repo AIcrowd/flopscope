@@ -11,9 +11,10 @@ flopscope's FLOP-counted ``me.*`` functions.
   result would weaken or destroy ``A_sym``'s tagged symmetry. ``A @= B``
   on shape-changing matmul falls back to CPython's documented
   rebind-the-name semantics.
-- **25 ndarray methods** (``sum``, ``mean``, ``dot``, ``argsort``,
-  ``compress``, ``trace``, ``round``, ``clip``, ``ptp``, …) so
-  ``a.sum()`` and ``fnp.sum(a)`` produce the same FLOP count.
+- **33 ndarray methods** (``sum``, ``mean``, ``dot``, ``argsort``,
+  ``compress``, ``trace``, ``round``, ``clip``, ``ptp``, ``copy``,
+  ``ravel``, ``reshape``, ``choose``, ``flatten``, …) so ``a.sum()`` and
+  ``fnp.sum(a)`` produce the same FLOP count.
 - **In-place ``sort`` / ``partition``** which refuse on a
   ``SymmetricTensor`` (the reorder would break symmetry).
 
@@ -46,6 +47,8 @@ from typing import Any
 
 import numpy as _np
 from numpy.typing import DTypeLike
+
+from flopscope._budget import _call_numpy, _counted_wrapper
 
 
 def _me():
@@ -676,6 +679,56 @@ class FlopscopeArray(_np.ndarray):
 
     def nonzero(self, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # type: ignore[override]
         return _me().nonzero(self, *args, **kwargs)
+
+    def copy(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        return _me().copy(self, *args, **kwargs)
+
+    def ravel(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        return _me().ravel(self, *args, **kwargs)
+
+    def reshape(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        # ndarray.reshape uniquely allows the target shape as either one
+        # tuple/list argument (``x.reshape((2, 3))``) or separate positional
+        # ints (``x.reshape(2, 3)``). The free-function form (np.reshape /
+        # fnp.reshape) only takes a single shape argument -- its 2nd
+        # positional slot is ``order``, not another shape dim -- so multi-int
+        # varargs must be collapsed into one shape tuple before delegating.
+        # A single argument (already a tuple/list, or a lone int/-1) is
+        # forwarded unchanged.
+        if len(args) > 1:
+            args = (args,)
+        return _me().reshape(self, *args, **kwargs)
+
+    def choose(self, choices: Any, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        return _me().choose(self, choices, *args, **kwargs)
+
+    @_counted_wrapper
+    def flatten(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        """Return a flattened copy.
+
+        ``ndarray.flatten`` always allocates a new buffer (unlike
+        ``.ravel()``, which may return a view) and there is no dedicated
+        ``fnp.flatten`` free function to delegate to. Bill it directly under
+        the "copy" op name at numel(input) -- mirroring
+        :func:`flopscope._array_ops.copy` exactly -- rather than composing
+        copy-then-reshape, which would charge twice for the same data
+        movement. ``@_counted_wrapper`` (matching every other billing
+        wrapper in this codebase) attributes this method's own bookkeeping
+        time to flopscope_overhead instead of leaking it into residual.
+        """
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        cost = max(self.size, 1)
+        with budget.deduct(
+            "copy",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(self.shape,),
+            dtypes=(self.dtype,),
+        ):
+            result = _call_numpy(super().flatten, *args, **kwargs)
+        return result
 
     # ----- Indexing -----
 

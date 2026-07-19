@@ -944,8 +944,14 @@ attach_docstring(expand_dims, _np.expand_dims, "free", "0 FLOPs")
 
 
 @_counted_wrapper
-def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Flatten array. Cost: numel(input) (= numel(output); ravel does not change element count)."""
+def ravel(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
+    """Flatten array. Cost: numel(input) (= numel(output); ravel does not change element count).
+
+    Accepts ``order`` either positionally or by keyword (``np.ravel(a, 'F')``
+    and ``np.ravel(a, order='F')`` both work), matching ``numpy.ravel``'s own
+    signature -- required so the ``.ravel()`` ndarray-method override can
+    forward its args unchanged regardless of call style.
+    """
     budget = require_budget()
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
@@ -958,7 +964,7 @@ def ravel(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         shapes=(a_arr.shape,),
         dtypes=(a_arr.dtype,),
     ):
-        result = _call_numpy(_np.ravel, a_arr, **kwargs)
+        result = _call_numpy(_np.ravel, a_arr, *args, **kwargs)
     if in_group is not None and out_group is None:
         _warn_symmetry_loss(
             lost_dims=[
@@ -979,8 +985,14 @@ attach_docstring(
 
 
 @_counted_wrapper
-def copy(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Return copy of array. Wraps ``numpy.copy``. Cost: numel(input)."""
+def copy(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
+    """Return copy of array. Wraps ``numpy.copy``. Cost: numel(input).
+
+    Accepts ``order`` either positionally or by keyword (``np.copy(a, 'F')``
+    and ``np.copy(a, order='F')`` both work), matching ``numpy.copy``'s own
+    signature -- required so the ``.copy()`` ndarray-method override can
+    forward its args unchanged regardless of call style.
+    """
     budget = require_budget()
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
@@ -991,7 +1003,7 @@ def copy(a: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         shapes=(a_arr.shape,),
         dtypes=(a_arr.dtype,),
     ):
-        result = _call_numpy(_np.copy, a_arr, **kwargs)
+        result = _call_numpy(_np.copy, a_arr, *args, **kwargs)
     if isinstance(a, SymmetricTensor):
         return wrap_with_symmetry(result, a.symmetry)  # type: ignore[return-value]
     return result  # type: ignore[return-value]
