@@ -1003,3 +1003,35 @@ def test_ndarray_flatten_bills_once_like_copy_not_double():
     assert flat.flags["OWNDATA"]
     assert flat.base is None
     assert flat.shape == (1_000_000,)
+
+
+# ---------------------------------------------------------------------------
+# Task 14b (F1a follow-up regression): outer/vdot flatten multi-D operands
+# through a PRIVATE internal ravel whose result only feeds the einsum cost
+# resolver. Task 14 (adding FlopscopeArray.ravel) made a bare a.ravel() there
+# bill numel@w1, over-charging the operand's size on top of the real
+# contraction. The internal flatten is now subclass-stripped so it stays a
+# free numpy view. Production-rate pins for the exact honest cost.
+# ---------------------------------------------------------------------------
+
+
+def test_vdot_matrix_operands_bill_core_not_ravel_surcharge():
+    """vdot of two 500x500 f64 matrices (Frobenius inner product) bills only
+    the flattened i,i-> contraction (2*250000-1 = 499999, x2.0 f64 = 999998),
+    NOT 999998 + two 500000 ravel surcharges (the pre-fix 1999998)."""
+    a = fnp.asarray(np.ones((500, 500), dtype=np.float64))
+    b = fnp.asarray(np.ones((500, 500), dtype=np.float64))
+    assert billed(lambda: fnp.vdot(a, b)) == (2 * 250_000 - 1) * 2  # 999998
+
+
+def test_outer_2d_operand_bills_same_as_1d_twin():
+    """outer(2x3, 4) flattens the 2x3 operand internally; it must bill the
+    IDENTICAL amount as outer(6, 4) -- both produce a 6x4 output, so the bill
+    depends only on the output, never on the operand's shape. f64: 6*4*2.0=48
+    (pre-fix outer(2x3,4) was 60: 48 + a 12-FLOP ravel of the 6-elem operand)."""
+    m2x3 = fnp.asarray(np.ones((2, 3), dtype=np.float64))
+    v6 = fnp.asarray(np.ones(6, dtype=np.float64))
+    v4 = fnp.asarray(np.ones(4, dtype=np.float64))
+    assert billed(lambda: fnp.outer(m2x3, v4)) == 6 * 4 * 2  # 48
+    assert billed(lambda: fnp.outer(v6, v4)) == 6 * 4 * 2  # 48 (identical)
+    assert billed(lambda: fnp.outer(m2x3, v4)) == billed(lambda: fnp.outer(v6, v4))

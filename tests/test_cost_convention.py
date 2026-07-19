@@ -47,6 +47,12 @@ _sq10 = fnp.asarray(_rng.standard_normal((10, 10)))
 _sq10_psd = fnp.asarray(_sq10.T @ _sq10 + np.eye(10))
 _a3 = fnp.asarray(np.array([1.0, 2.0, 3.0]))
 _b3 = fnp.asarray(np.array([4.0, 5.0, 6.0]))
+# Non-1-D outer/vdot operands: outer/vdot flatten these internally, and that
+# private flatten must stay a free numpy view (not the now-billed
+# FlopscopeArray.ravel) -- see test_outer_vdot_nd_operands_no_ravel_surcharge.
+_m2x3 = fnp.asarray(_rng.standard_normal((2, 3)))  # ndim=2 -> internal ravel
+_v4 = fnp.asarray(_rng.standard_normal(4))
+_v6 = fnp.asarray(_rng.standard_normal(6))  # 1-D twin of _m2x3 (same 6 elems)
 
 # FFT inputs
 _x64c = fnp.asarray(_rng.standard_normal(64).astype(complex))
@@ -311,6 +317,13 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         lambda: fnp.vdot(_v100, _v100),
         2 * 100 - 1,  # 199
     ),
+    # vdot on 2-D operands (Frobenius inner product) flattens both internally;
+    # that private ravel must NOT bill, so a 10x10 (=100 elems) vdot costs the
+    # SAME 199 as the 1-D 100-vector vdot above -- no numel(input) surcharge.
+    "vdot (2-D operands, no ravel surcharge)": (
+        lambda: fnp.vdot(_sq10, _sq10),
+        2 * 100 - 1,  # 199 (NOT 199 + 100 + 100)
+    ),
     "kron": (
         lambda: fnp.kron(_v10, _v10),
         10 * 10,  # 100
@@ -319,6 +332,17 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "outer": (
         lambda: fnp.outer(_v10, _v10b),
         10 * 10,  # 100
+    ),
+    # outer on a 2-D operand flattens it internally; that private ravel must NOT
+    # bill, so outer(2x3, 4) costs the SAME 24 as the 1-D outer(6, 4) below --
+    # the bill must depend only on the 6x4 output, never on the operand's shape.
+    "outer (2-D operand, no ravel surcharge)": (
+        lambda: fnp.outer(_m2x3, _v4),
+        6 * 4,  # 24 (NOT 24 + 6)
+    ),
+    "outer (1-D twin, shape-parity baseline)": (
+        lambda: fnp.outer(_v6, _v4),
+        6 * 4,  # 24
     ),
     "linalg.outer": (
         lambda: fnp.linalg.outer(_v10, _v10b),
@@ -848,6 +872,29 @@ def test_conformance():
             failures.append(f"  {op}: got {actual}, expected {expected}")
     if failures:
         pytest.fail("Cost convention violations:\n" + "\n".join(failures))
+
+
+def test_outer_vdot_nd_operands_no_ravel_surcharge():
+    """outer/vdot flatten multi-D operands internally; that private ravel must
+    stay a free numpy view, not the now-billed FlopscopeArray.ravel.
+
+    Regression guard for the F1a follow-up: adding FlopscopeArray.ravel made a
+    bare ``a.ravel()`` inside outer/vdot bill numel@w1, so a multi-D operand
+    was over-charged by its own size on top of the real contraction cost. The
+    bill must depend only on the contraction (output for outer, flattened
+    length for vdot), never on the operand's original ndim/shape.
+    """
+    # vdot: a 10x10 (=100 elems) Frobenius inner product must equal a 1-D
+    # 100-vector vdot -- no +100+100 ravel surcharge.
+    assert _cost(lambda: fnp.vdot(_sq10, _sq10)) == _cost(
+        lambda: fnp.vdot(_v100, _v100)
+    )
+    assert _cost(lambda: fnp.vdot(_sq10, _sq10)) == 2 * 100 - 1  # core only
+
+    # outer: a 2x3 operand flattens to a 6-vector; outer(2x3, 4) must bill the
+    # SAME as outer(6, 4) -- identical 6x4 output, so identical cost.
+    assert _cost(lambda: fnp.outer(_m2x3, _v4)) == _cost(lambda: fnp.outer(_v6, _v4))
+    assert _cost(lambda: fnp.outer(_m2x3, _v4)) == 6 * 4  # output-only, no +6 surcharge
 
 
 def test_family_defaults_elementwise():

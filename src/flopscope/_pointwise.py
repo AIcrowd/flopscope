@@ -2932,8 +2932,15 @@ def outer(
     # einsum subscripts regardless of original ndim.
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
-    a_flat = a.ravel() if a.ndim != 1 else a
-    b_flat = b.ravel() if b.ndim != 1 else b
+    # Strip the FlopscopeArray subclass BEFORE the internal ravel: this flatten
+    # is a private cost-model helper (its result only feeds the einsum cost
+    # resolver, never the user), so it must stay numpy's free C view. Since
+    # FlopscopeArray.ravel() now bills numel@w1, a bare a.ravel() here would
+    # over-bill the operand's size on top of the real outer cost (and on a
+    # SymmetricTensor would also emit a spurious symmetry-loss warning). The
+    # ndim==1 branch never ravels, so it keeps the operand as-is.
+    a_flat = _to_base_ndarray(a).ravel() if a.ndim != 1 else a
+    b_flat = _to_base_ndarray(b).ravel() if b.ndim != 1 else b
     # Preserve operand-aliasing through the asarray boundary: if the user
     # passed the same Python object for both operands, treat them as one
     # array for the helper's identity-pattern detection.
@@ -3215,8 +3222,13 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
-    a_flat = a.ravel() if a.ndim != 1 else a
-    b_flat = b.ravel() if b.ndim != 1 else b
+    # Strip the subclass before this internal ravel so it stays a free numpy
+    # view: its result only feeds the einsum cost resolver below, and a bare
+    # a.ravel() would now bill numel@w1 (FlopscopeArray.ravel is counted),
+    # over-charging vdot-of-matrices (Frobenius inner product) by both
+    # operands' sizes. ndim==1 never ravels, so it is left untouched.
+    a_flat = _to_base_ndarray(a).ravel() if a.ndim != 1 else a
+    b_flat = _to_base_ndarray(b).ravel() if b.ndim != 1 else b
     info = _resolve_cost_and_output_symmetry("i,i->", a_flat, b_flat)
     cost = info.accumulation.total
     canonical_subs = info.canonical_subscripts
