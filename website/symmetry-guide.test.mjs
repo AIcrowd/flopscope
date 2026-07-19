@@ -239,10 +239,13 @@ print(json.dumps({
     // (the "first cell of each output orbit is a free copy" correction the
     // reduction surface also applies). For ki,kj->ij with k=5,i=j=3 and S_2 on
     // the (i,j) output, ∏num_output_orbits = 6 (repeated input) / 9 (distinct
-    // operands), giving base 54 / 81. fnp.random.randn produces float64, so
-    // dtype-aware billing (rate 2.0) doubles it: 54→108, 81→162.
-    repeated_einsum_cost: 108,
-    distinct_einsum_cost: 162,
+    // operands), giving base 54 / 81. float64 operands, so dtype-aware billing
+    // (rate 2.0) doubles it: 54→108, 81→162. The `fnp.ones((5, 3))` operand
+    // creations run INSIDE the BudgetContext and creation now bills
+    // numel(output) (15 × rate 2 = 30 per operand): one operand for the
+    // repeated case (108+30=138), two for the distinct case (162+60=222).
+    repeated_einsum_cost: 138,
+    distinct_einsum_cost: 222,
     repeated_einsum_type: 'SymmetricTensor',
     distinct_einsum_type: 'SymmetricTensor',
   });
