@@ -438,6 +438,19 @@ def test_decode_index_key_ellipsis(handler):
     assert handler._decode_index_key({b"__ellipsis__": True}) is Ellipsis
 
 
+def test_decode_index_key_marker_semantics(handler):
+    from flopscope_server._request_handler import _decode_index_key
+
+    # bare wire-list is always a tuple (basic multi-axis index)
+    assert handler._decode_index_key([0, 2]) == (0, 2)
+    assert _decode_index_key([0, 2]) == (0, 2)
+    # marked list is a fancy-index Python list
+    assert handler._decode_index_key({"__list__": [0, 2]}) == [0, 2]
+    assert _decode_index_key({"__list__": [0, 2]}) == [0, 2]
+    # nested: tuple(int, fancy-list)
+    assert handler._decode_index_key([1, {"__list__": [0, 2]}]) == (1, [0, 2])
+
+
 # ---------------------------------------------------------------------------
 # __getitem__ billing (positive lock)
 # ---------------------------------------------------------------------------
@@ -514,6 +527,28 @@ def test_getitem_advanced_indexing_bills_on_computed_array(handler, session):
     )
     assert resp["status"] == "ok"
     assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+# ---------------------------------------------------------------------------
+# Python-list index key = fancy indexing (wire marker {"__list__": [...]})
+# ---------------------------------------------------------------------------
+
+
+def test_handle_getitem_python_list_is_fancy_index(handler, session):
+    import numpy as np
+
+    arr = np.arange(12, dtype=np.float64).reshape(3, 4)
+    handle = session.store_array(arr)
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": handle}, {"__list__": [0, 2]}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    out = session.get_array(resp["result"]["id"])
+    np.testing.assert_array_equal(out, arr[[0, 2]])
 
 
 # ---------------------------------------------------------------------------

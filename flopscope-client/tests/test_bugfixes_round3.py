@@ -121,7 +121,18 @@ class TestFix2FancyIndexEncoding:
         idx = RemoteArray(handle_id="a3", shape=(5,), dtype="int64")
         # list fancy index containing a RemoteArray
         result = _encode_index_key([idx])
-        assert result == [{"__handle__": "a3"}]
+        assert result == {"__list__": [{"__handle__": "a3"}]}
+
+
+def test_encode_index_key_marks_lists():
+    from flopscope._remote_array import _encode_index_key
+
+    assert _encode_index_key([0, 2]) == {"__list__": [0, 2]}
+    assert _encode_index_key((0, 2)) == [0, 2]
+    assert _encode_index_key((1, [0, 2])) == [1, {"__list__": [0, 2]}]
+    assert _encode_index_key([[0, 2], [1, 3]]) == {
+        "__list__": [{"__list__": [0, 2]}, {"__list__": [1, 3]}]
+    }
 
 
 # =========================================================================

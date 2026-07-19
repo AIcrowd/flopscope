@@ -416,6 +416,7 @@ def _encode_index_key(key):
 
     Slices become ``{"__slice__": [start, stop, step]}``.
     Tuples become lists of encoded items.
+    Python lists become ``{'__list__': [...]}`` (advanced/fancy indexing).
     RemoteArray -> ``{"__handle__": handle_id}`` (fancy indexing).
     RemoteScalar -> its raw value.
     Integers pass through as-is.
@@ -430,7 +431,7 @@ def _encode_index_key(key):
     if isinstance(key, tuple):
         return [_encode_index_key(k) for k in key]
     if isinstance(key, list):
-        return [_encode_index_key(k) for k in key]
+        return {"__list__": [_encode_index_key(k) for k in key]}
     if key is Ellipsis:
         return {"__ellipsis__": True}
     return key

@@ -505,17 +505,18 @@ class RequestHandler:
             if b"__slice__" in raw_key:
                 parts = raw_key[b"__slice__"]
                 return slice(*[None if p is None else int(p) for p in parts])
+            if "__list__" in raw_key or b"__list__" in raw_key:
+                items = (
+                    raw_key["__list__"]
+                    if "__list__" in raw_key
+                    else raw_key[b"__list__"]
+                )
+                # A Python list key = advanced (fancy) indexing along axis 0.
+                return [self._decode_index_key(item) for item in items]
         if isinstance(raw_key, list):
-            decoded = [self._decode_index_key(item) for item in raw_key]
-            # A one-element key like ``arr[..., ]`` arrives as ``(Ellipsis,)`` ->
-            # ``[Ellipsis]``; numpy needs the tuple form, so treat Ellipsis (like
-            # a slice) as a marker that this list is a multi-axis index tuple.
-            if (
-                any(isinstance(d, slice) or d is Ellipsis for d in decoded)
-                or len(decoded) > 1
-            ):
-                return tuple(decoded)
-            return decoded
+            # A bare wire-list is always an encoded tuple (multi-axis index);
+            # fancy-index lists arrive marked as {"__list__": [...]} above.
+            return tuple(self._decode_index_key(item) for item in raw_key)
         if isinstance(raw_key, (int, float)):
             return int(raw_key)
         return raw_key
@@ -661,6 +662,7 @@ def _decode_index_key(raw_key):
     Supports:
     - int / float -> int
     - ``{"__slice__": [start, stop, step]}`` -> slice
+    - ``{"__list__": [...]}`` -> list (advanced/fancy indexing)
     - list of the above -> tuple (for multi-dimensional indexing)
     """
     if isinstance(raw_key, dict):
@@ -672,18 +674,16 @@ def _decode_index_key(raw_key):
         if b"__slice__" in raw_key:
             parts = raw_key[b"__slice__"]
             return slice(*[None if p is None else int(p) for p in parts])
+        if "__list__" in raw_key or b"__list__" in raw_key:
+            items = (
+                raw_key["__list__"] if "__list__" in raw_key else raw_key[b"__list__"]
+            )
+            # A Python list key = advanced (fancy) indexing along axis 0.
+            return [_decode_index_key(item) for item in items]
     if isinstance(raw_key, list):
-        decoded = [_decode_index_key(item) for item in raw_key]
-        # A list of slices/ints (or a one-element Ellipsis like ``arr[..., ]``)
-        # -> tuple for multi-dim indexing; numpy needs the tuple form.
-        if (
-            any(isinstance(d, slice) or d is Ellipsis for d in decoded)
-            or len(decoded) > 1
-        ):
-            return tuple(decoded)
-        # Single-element list: could be the key itself being a list
-        # (e.g., fancy indexing) -- keep as list
-        return decoded
+        # A bare wire-list is always an encoded tuple (multi-axis index);
+        # fancy-index lists arrive marked as {"__list__": [...]} above.
+        return tuple(_decode_index_key(item) for item in raw_key)
     if isinstance(raw_key, (int, float)):
         return int(raw_key)
     return raw_key
