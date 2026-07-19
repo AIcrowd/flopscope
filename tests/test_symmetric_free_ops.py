@@ -572,3 +572,42 @@ class TestMarkerNotPropagated:
         src = fnp.zeros((3, 3))
         plain = np.asarray(src)
         assert getattr(plain, "_symmetry_inferred", False) is False
+
+
+def test_high_rank_symmetric_reduction_falls_back_not_hangs():
+    """fnp.all over a rank-8 symmetric tensor must terminate quickly by falling
+    back to dense cost (with a warning), not hang enumerating S_8. Runs the op
+    in a bounded worker thread so a regression fails LOUDLY instead of being
+    force-exited green by the xdist watchdog."""
+    import threading
+    import warnings
+
+    import flopscope.numpy as fnp
+    from flopscope.errors import CostFallbackWarning
+
+    box: dict = {}
+
+    def op():
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                value = bool(fnp.all(fnp.full((2,) * 8, 1.0) == 1.0))
+            box["value"] = value
+            box["fallbacks"] = [
+                w for w in caught if issubclass(w.category, CostFallbackWarning)
+            ]
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = exc
+
+    t = threading.Thread(target=op, daemon=True)
+    t.start()
+    t.join(30.0)
+    assert not t.is_alive(), (
+        "rank-8 symmetric reduction did not finish in 30s — cost-model hang regression"
+    )
+    if "error" in box:
+        raise box["error"]
+    assert box["value"] is True
+    assert box["fallbacks"], (
+        "expected a CostFallbackWarning when the symmetry group is too large to enumerate"
+    )
