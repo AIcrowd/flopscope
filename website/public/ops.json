@@ -1118,8 +1118,8 @@
       "blocked": false,
       "canonical_path": "numpy/clip",
       "category": "counted_custom",
-      "cost_formula": "numel(input)",
-      "cost_formula_latex": "$\\text{numel}(\\text{input})$",
+      "cost_formula": "max(n_bounds, 1) * numel(output)",
+      "cost_formula_latex": "$\\max(n_{\\text{bounds}}, 1) \\cdot \\text{numel}(\\text{output})$",
       "detail_href": "/docs/api/numpy/clip/",
       "detail_json_href": "/api-data/ops/clip.json",
       "display_type": "custom",
@@ -1265,8 +1265,8 @@
       "blocked": false,
       "canonical_path": "numpy/convolve",
       "category": "counted_custom",
-      "cost_formula": "n * m",
-      "cost_formula_latex": "$n \\cdot m$",
+      "cost_formula": "full: 2*n*m - n - m; valid: (2*min - 1)*(max - min + 1); same: variable-length dot sum",
+      "cost_formula_latex": "varies (per mode)",
       "detail_href": "/docs/api/numpy/convolve/",
       "detail_json_href": "/api-data/ops/convolve.json",
       "display_type": "custom",
@@ -1349,8 +1349,8 @@
       "blocked": false,
       "canonical_path": "numpy/corrcoef",
       "category": "counted_custom",
-      "cost_formula": "n^2 * m",
-      "cost_formula_latex": "$n^2 \\cdot m$",
+      "cost_formula": "(2*f^2*s + 2*f*s) + 2*f^2 + f",
+      "cost_formula_latex": "$2f^2 s + 2fs + 2f^2 + f$",
       "detail_href": "/docs/api/numpy/corrcoef/",
       "detail_json_href": "/api-data/ops/corrcoef.json",
       "display_type": "custom",
@@ -1370,8 +1370,8 @@
       "blocked": false,
       "canonical_path": "numpy/correlate",
       "category": "counted_custom",
-      "cost_formula": "n * m",
-      "cost_formula_latex": "$n \\cdot m$",
+      "cost_formula": "full: 2*n*m - n - m + 1; valid: (2*min - 1)*(max - min + 1); same: variable-length dot sum",
+      "cost_formula_latex": "varies (per mode)",
       "detail_href": "/docs/api/numpy/correlate/",
       "detail_json_href": "/api-data/ops/correlate.json",
       "display_type": "custom",
@@ -1454,8 +1454,8 @@
       "blocked": false,
       "canonical_path": "numpy/cov",
       "category": "counted_custom",
-      "cost_formula": "n^2 * m",
-      "cost_formula_latex": "$n^2 \\cdot m$",
+      "cost_formula": "2*f^2*s + 2*f*s",
+      "cost_formula_latex": "$2f^2 s + 2fs$",
       "detail_href": "/docs/api/numpy/cov/",
       "detail_json_href": "/api-data/ops/cov.json",
       "display_type": "custom",
@@ -1715,7 +1715,7 @@
       "free": false,
       "module": "numpy",
       "name": "diagonal",
-      "notes": "Return specified diagonals. Cost: numel(input).",
+      "notes": "Return specified diagonals. Free (0 FLOPs) \u2014 returns a view.",
       "numpy_ref": "np.diagonal",
       "slug": "diagonal",
       "status": "supported",
@@ -1727,8 +1727,8 @@
       "blocked": false,
       "canonical_path": "numpy/diff",
       "category": "counted_custom",
-      "cost_formula": "numel(input)",
-      "cost_formula_latex": "$\\text{numel}(\\text{input})$",
+      "cost_formula": "prod(other axes) * (n*L - n*(n+1)//2) along the diff axis (n = order)",
+      "cost_formula_latex": "$\\prod_{\\text{other}} (nL - n(n+1)/2)$",
       "detail_href": "/docs/api/numpy/diff/",
       "detail_json_href": "/api-data/ops/diff.json",
       "display_type": "custom",
@@ -1799,7 +1799,7 @@
       "free": false,
       "module": "numpy",
       "name": "dot",
-      "notes": "Dot product; cost = M*K*N (weight-calibrated).",
+      "notes": "Dot product; cost = 2*M*K*N - M*N (FMA=2, via the einsum contraction engine).",
       "numpy_ref": "np.dot",
       "slug": "dot",
       "status": "supported",
@@ -1853,8 +1853,8 @@
       "blocked": false,
       "canonical_path": "numpy/ediff1d",
       "category": "counted_custom",
-      "cost_formula": "numel(input)",
-      "cost_formula_latex": "$\\text{numel}(\\text{input})$",
+      "cost_formula": "numel(input) - 1 (+ to_begin/to_end extras)",
+      "cost_formula_latex": "$\\text{numel}(\\text{input}) - 1$",
       "detail_href": "/docs/api/numpy/ediff1d/",
       "detail_json_href": "/api-data/ops/ediff1d.json",
       "display_type": "custom",
@@ -1895,8 +1895,8 @@
       "blocked": false,
       "canonical_path": "numpy/einsum-path",
       "category": "counted_custom",
-      "cost_formula": "0 (planning only)",
-      "cost_formula_latex": "$0$",
+      "cost_formula": "1 (planning only - path search, no numeric output)",
+      "cost_formula_latex": "$1$",
       "detail_href": "/docs/api/numpy/einsum-path/",
       "detail_json_href": "/api-data/ops/einsum_path.json",
       "display_type": "custom",
@@ -2135,7 +2135,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.fft",
-      "notes": "1-D complex FFT. Cost: 5*n*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "1-D complex FFT. Cost: 5*n*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.fft",
       "slug": "fft-fft",
       "status": "supported",
@@ -2156,7 +2156,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.fft2",
-      "notes": "2-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.fft2",
       "slug": "fft-fft2",
       "status": "supported",
@@ -2177,7 +2177,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.fftfreq",
-      "notes": "FFT sample frequencies; cost = n (index grid scaled by 1/(n*d)). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "FFT sample frequencies; cost = n (index grid scaled by 1/(n*d)).",
       "numpy_ref": "np.fft.fftfreq",
       "slug": "fft-fftfreq",
       "status": "supported",
@@ -2198,7 +2198,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.fftn",
-      "notes": "N-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.fftn",
       "slug": "fft-fftn",
       "status": "supported",
@@ -2261,7 +2261,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.ifft",
-      "notes": "Inverse 1-D complex FFT. Cost: 5*n*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse 1-D complex FFT. Cost: 5*n*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.ifft",
       "slug": "fft-ifft",
       "status": "supported",
@@ -2282,7 +2282,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.ifft2",
-      "notes": "Inverse 2-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse 2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.ifft2",
       "slug": "fft-ifft2",
       "status": "supported",
@@ -2303,7 +2303,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.ifftn",
-      "notes": "Inverse N-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.ifftn",
       "slug": "fft-ifftn",
       "status": "supported",
@@ -2345,7 +2345,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.ihfft",
-      "notes": "Inverse FFT of Hermitian signal; numpy computes conj(rfft(a,n)). Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse FFT of Hermitian signal; numpy computes conj(rfft(a,n)). Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.ihfft",
       "slug": "fft-ihfft",
       "status": "supported",
@@ -2366,7 +2366,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.irfft",
-      "notes": "Inverse 1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse 1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.irfft",
       "slug": "fft-irfft",
       "status": "supported",
@@ -2387,7 +2387,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.irfft2",
-      "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.irfft2",
       "slug": "fft-irfft2",
       "status": "supported",
@@ -2408,7 +2408,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.irfftn",
-      "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.irfftn",
       "slug": "fft-irfftn",
       "status": "supported",
@@ -2429,7 +2429,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.rfft",
-      "notes": "1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.rfft",
       "slug": "fft-rfft",
       "status": "supported",
@@ -2450,7 +2450,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.rfft2",
-      "notes": "2-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.rfft2",
       "slug": "fft-rfft2",
       "status": "supported",
@@ -2471,7 +2471,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.rfftfreq",
-      "notes": "Real FFT sample frequencies; cost = n//2+1 (index grid scaled by 1/(n*d)). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "Real FFT sample frequencies; cost = n//2+1 (index grid scaled by 1/(n*d)).",
       "numpy_ref": "np.fft.rfftfreq",
       "slug": "fft-rfftfreq",
       "status": "supported",
@@ -2492,7 +2492,7 @@
       "free": false,
       "module": "numpy.fft",
       "name": "fft.rfftn",
-      "notes": "N-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+      "notes": "N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
       "numpy_ref": "np.fft.rfftn",
       "slug": "fft-rfftn",
       "status": "supported",
@@ -2945,8 +2945,8 @@
       "blocked": false,
       "canonical_path": "numpy/gradient",
       "category": "counted_custom",
-      "cost_formula": "numel(input)",
-      "cost_formula_latex": "$\\text{numel}(\\text{input})$",
+      "cost_formula": "sum over axes of 2*S*(L-2)//L (uniform); + surcharge for coordinate-array spacing",
+      "cost_formula_latex": "$\\sum_{\\text{ax}} 2S(L-2)/L$",
       "detail_href": "/docs/api/numpy/gradient/",
       "detail_json_href": "/api-data/ops/gradient.json",
       "display_type": "custom",
@@ -3290,7 +3290,7 @@
       "free": false,
       "module": "numpy",
       "name": "in1d",
-      "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)). Removed in numpy 2.4; use `isin` instead.",
+      "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes, or object dtype). Removed in numpy 2.4; use `isin` instead.",
       "numpy_ref": "np.in1d",
       "slug": "in1d",
       "status": "supported",
@@ -3323,8 +3323,8 @@
       "blocked": false,
       "canonical_path": "numpy/inner",
       "category": "counted_custom",
-      "cost_formula": "n",
-      "cost_formula_latex": "$n$",
+      "cost_formula": "(2*K - 1) * M",
+      "cost_formula_latex": "$(2K - 1) \\cdot M$",
       "detail_href": "/docs/api/numpy/inner/",
       "detail_json_href": "/api-data/ops/inner.json",
       "display_type": "custom",
@@ -3332,7 +3332,7 @@
       "free": false,
       "module": "numpy",
       "name": "inner",
-      "notes": "Inner product; cost = N (weight-calibrated).",
+      "notes": "Inner product; cost = (2K-1)*M over the contracted/output dims (2N-1 for two length-N vectors).",
       "numpy_ref": "np.inner",
       "slug": "inner",
       "status": "supported",
@@ -3365,8 +3365,8 @@
       "blocked": false,
       "canonical_path": "numpy/interp",
       "category": "counted_custom",
-      "cost_formula": "n * log(m)",
-      "cost_formula_latex": "$n \\cdot \\log m$",
+      "cost_formula": "3*n + n*ceil(log2(len(xp)))",
+      "cost_formula_latex": "$3n + n \\lceil\\log_2 |xp|\\rceil$",
       "detail_href": "/docs/api/numpy/interp/",
       "detail_json_href": "/api-data/ops/interp.json",
       "display_type": "custom",
@@ -3395,7 +3395,7 @@
       "free": false,
       "module": "numpy",
       "name": "intersect1d",
-      "notes": "Set intersection; cost = (n+m)*ceil(log2(n+m)).",
+      "notes": "Set intersection; cost = sort_cost(n)+sort_cost(m)+sort_cost(n+m) (default); sort_cost(n+m) when assume_unique=True.",
       "numpy_ref": "np.intersect1d",
       "slug": "intersect1d",
       "status": "supported",
@@ -3794,7 +3794,7 @@
       "free": false,
       "module": "numpy",
       "name": "ix_",
-      "notes": "Construct open mesh from multiple sequences. Cost: numel(output).",
+      "notes": "Construct open mesh from multiple sequences. Free (0 FLOPs) \u2014 index construction from given sequences.",
       "numpy_ref": "np.ix_",
       "slug": "ix_",
       "status": "supported",
@@ -4025,7 +4025,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.cross",
-      "notes": "Delegates to `fnp.cross` which charges `numel(output)` FLOPs.",
+      "notes": "Cross product; charges `3*numel(output)` FLOPs (2 mul + 1 sub per output component).",
       "numpy_ref": "np.linalg.cross",
       "slug": "linalg-cross",
       "status": "supported",
@@ -4214,7 +4214,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.matmul",
-      "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (weight-calibrated).",
+      "notes": "Delegates to `fnp.matmul` which charges `2*m*k*n - m*n` FLOPs (FMA=2).",
       "numpy_ref": "np.linalg.matmul",
       "slug": "linalg-matmul",
       "status": "supported",
@@ -4256,7 +4256,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.matrix_power",
-      "notes": "Matrix power. Cost: $(\\lfloor\\log_2 k\\rfloor + \\text{popcount}(k) - 1) \\cdot n^3$ (exponentiation by squaring).",
+      "notes": "Matrix power. Cost: (floor(log2 k) + popcount(k) - 1) * (2*n^3 - n^2) (exponentiation by squaring; per-matmul = matmul_cost).",
       "numpy_ref": "np.linalg.matrix_power",
       "slug": "linalg-matrix_power",
       "status": "supported",
@@ -4340,7 +4340,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.norm",
-      "notes": "Norm. Cost depends on ord: 2*numel for L1/inf/Frobenius, $2ab^2+2b^3$ for ord=2/-2/nuc (values-only SVD; a=max(m,n), b=min(m,n)); \u00d7 batch groups (non-reduced dims); axis=None \u2192 1 group.",
+      "notes": "Norm. Cost depends on ord: 2*numel for L1/inf/Frobenius, $2ab^2+2b^3$ for ord=2/-2/nuc (values-only SVD; a=max(m,n), b=min(m,n)), 18*numel+16 for vector general-p ord (not in {None, 0, 1, 2, +/-inf}); \u00d7 batch groups (non-reduced dims); axis=None \u2192 1 group.",
       "numpy_ref": "np.linalg.norm",
       "slug": "linalg-norm",
       "status": "supported",
@@ -4592,7 +4592,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.vecdot",
-      "notes": "Delegates to `fnp.vecdot` which charges `2*n` FLOPs.",
+      "notes": "Delegates to `fnp.vecdot` which charges `2*n - 1` FLOPs.",
       "numpy_ref": "np.linalg.vecdot",
       "slug": "linalg-vecdot",
       "status": "supported",
@@ -4613,7 +4613,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.vector_norm",
-      "notes": "Vector norm. Cost: 2*numel(effective_shape) \u00d7 batch groups (non-reduced dims); axis=None \u2192 1 group.",
+      "notes": "Vector norm. Cost: 2*numel(effective_shape) \u00d7 batch groups (non-reduced dims); axis=None \u2192 1 group. General-p ord (not in {None, 0, 1, 2, +/-inf}): 18*numel + 16 per group.",
       "numpy_ref": "np.linalg.vector_norm",
       "slug": "linalg-vector_norm",
       "status": "supported",
@@ -4928,7 +4928,7 @@
       "free": false,
       "module": "numpy",
       "name": "matmul",
-      "notes": "Matrix multiplication; cost = M*K*N (weight-calibrated).",
+      "notes": "Matrix multiplication; cost = 2*M*K*N - M*N (FMA=2).",
       "numpy_ref": "np.matmul",
       "slug": "matmul",
       "status": "supported",
@@ -4970,7 +4970,7 @@
       "free": false,
       "module": "numpy",
       "name": "matvec",
-      "notes": "Matrix-vector product. Cost = output_size * contracted_axis. Einsum-accumulation family; cost computed exactly per-call.",
+      "notes": "Matrix-vector product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
       "numpy_ref": "np.matvec",
       "slug": "matvec",
       "status": "supported",
@@ -5915,7 +5915,7 @@
       "free": false,
       "module": "flopscope._polynomial",
       "name": "poly",
-      "notes": "Polynomial from roots. Cost: $n^2$ FLOPs.",
+      "notes": "Polynomial from roots. Cost: (3*n^2 + n)//2 FLOPs (iterated convolution build-from-roots).",
       "numpy_ref": "np.poly",
       "slug": "poly",
       "status": "supported",
@@ -5978,7 +5978,7 @@
       "free": false,
       "module": "flopscope._polynomial",
       "name": "polydiv",
-      "notes": "Divide one polynomial by another. Cost: n1 * n2 FLOPs.",
+      "notes": "Divide one polynomial by another. Cost: 1 + Q*(2*n2+1), Q = max(n1-n2+1, 0) FLOPs.",
       "numpy_ref": "np.polydiv",
       "slug": "polydiv",
       "status": "supported",
@@ -6041,7 +6041,7 @@
       "free": false,
       "module": "flopscope._polynomial",
       "name": "polymul",
-      "notes": "Multiply polynomials. Cost: n1 * n2 FLOPs.",
+      "notes": "Multiply polynomials. Cost: 2*n1*n2 - n1 - n2 FLOPs (convolution, FMA=2).",
       "numpy_ref": "np.polymul",
       "slug": "polymul",
       "status": "supported",
@@ -6319,7 +6319,7 @@
       "slug": "random-Generator-beta",
       "status": "supported",
       "summary": "Draw samples from a Beta distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6340,7 +6340,7 @@
       "slug": "random-Generator-binomial",
       "status": "supported",
       "summary": "Draw samples from a binomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6403,7 +6403,7 @@
       "slug": "random-Generator-chisquare",
       "status": "supported",
       "summary": "Draw samples from a chi-square distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6445,7 +6445,7 @@
       "slug": "random-Generator-dirichlet",
       "status": "supported",
       "summary": "Draw samples from the Dirichlet distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6466,7 +6466,7 @@
       "slug": "random-Generator-exponential",
       "status": "supported",
       "summary": "Draw samples from an exponential distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6487,7 +6487,7 @@
       "slug": "random-Generator-f",
       "status": "supported",
       "summary": "Draw samples from an F distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6508,7 +6508,7 @@
       "slug": "random-Generator-gamma",
       "status": "supported",
       "summary": "Draw samples from a Gamma distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6529,7 +6529,7 @@
       "slug": "random-Generator-geometric",
       "status": "supported",
       "summary": "Draw samples from the geometric distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6550,7 +6550,7 @@
       "slug": "random-Generator-gumbel",
       "status": "supported",
       "summary": "Draw samples from a Gumbel distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6571,7 +6571,7 @@
       "slug": "random-Generator-hypergeometric",
       "status": "supported",
       "summary": "Draw samples from a Hypergeometric distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6613,7 +6613,7 @@
       "slug": "random-Generator-laplace",
       "status": "supported",
       "summary": "Draw samples from the Laplace or double exponential distribution with specified location (or mean) and scale (decay).",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6634,7 +6634,7 @@
       "slug": "random-Generator-logistic",
       "status": "supported",
       "summary": "Draw samples from a logistic distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6655,7 +6655,7 @@
       "slug": "random-Generator-lognormal",
       "status": "supported",
       "summary": "Draw samples from a log-normal distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6676,7 +6676,7 @@
       "slug": "random-Generator-logseries",
       "status": "supported",
       "summary": "Draw samples from a logarithmic series distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6697,7 +6697,7 @@
       "slug": "random-Generator-multinomial",
       "status": "supported",
       "summary": "Draw samples from a multinomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6734,7 +6734,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.Generator.multivariate_normal",
-      "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+      "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
       "numpy_ref": "np.random.Generator.multivariate_normal",
       "slug": "random-Generator-multivariate_normal",
       "status": "supported",
@@ -6760,7 +6760,7 @@
       "slug": "random-Generator-negative_binomial",
       "status": "supported",
       "summary": "Draw samples from a negative binomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6781,7 +6781,7 @@
       "slug": "random-Generator-noncentral_chisquare",
       "status": "supported",
       "summary": "Draw samples from a noncentral chi-square distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6802,7 +6802,7 @@
       "slug": "random-Generator-noncentral_f",
       "status": "supported",
       "summary": "Draw samples from the noncentral F distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6823,7 +6823,7 @@
       "slug": "random-Generator-normal",
       "status": "supported",
       "summary": "Draw random samples from a normal (Gaussian) distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6844,7 +6844,7 @@
       "slug": "random-Generator-pareto",
       "status": "supported",
       "summary": "Draw samples from a Pareto II (AKA Lomax) distribution with specified shape.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6907,7 +6907,7 @@
       "slug": "random-Generator-poisson",
       "status": "supported",
       "summary": "Draw samples from a Poisson distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6928,7 +6928,7 @@
       "slug": "random-Generator-power",
       "status": "supported",
       "summary": "Draws samples in [0, 1] from a power distribution with positive exponent a - 1.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -6970,7 +6970,7 @@
       "slug": "random-Generator-rayleigh",
       "status": "supported",
       "summary": "Draw samples from a Rayleigh distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7033,7 +7033,7 @@
       "slug": "random-Generator-standard_cauchy",
       "status": "supported",
       "summary": "Draw samples from a standard Cauchy distribution with mode = 0.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7054,7 +7054,7 @@
       "slug": "random-Generator-standard_exponential",
       "status": "supported",
       "summary": "Draw samples from the standard exponential distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7075,7 +7075,7 @@
       "slug": "random-Generator-standard_gamma",
       "status": "supported",
       "summary": "Draw samples from a standard Gamma distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7096,7 +7096,7 @@
       "slug": "random-Generator-standard_normal",
       "status": "supported",
       "summary": "Draw samples from a standard Normal distribution (mean=0, stdev=1).",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7117,7 +7117,7 @@
       "slug": "random-Generator-standard_t",
       "status": "supported",
       "summary": "Draw samples from a standard Student's t distribution with `df` degrees of freedom.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7138,7 +7138,7 @@
       "slug": "random-Generator-triangular",
       "status": "supported",
       "summary": "Draw samples from the triangular distribution over the interval ``[left, right]``.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7154,7 +7154,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.Generator.uniform",
-      "notes": "Uniform distribution; cost = numel(output).",
+      "notes": "Uniform distribution over [low, high); cost = 3*numel(output) (draw + affine mul/add).",
       "numpy_ref": "np.random.Generator.uniform",
       "slug": "random-Generator-uniform",
       "status": "supported",
@@ -7180,7 +7180,7 @@
       "slug": "random-Generator-vonmises",
       "status": "supported",
       "summary": "Draw samples from a von Mises distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7201,7 +7201,7 @@
       "slug": "random-Generator-wald",
       "status": "supported",
       "summary": "Draw samples from a Wald, or inverse Gaussian, distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7222,7 +7222,7 @@
       "slug": "random-Generator-weibull",
       "status": "supported",
       "summary": "Draw samples from a Weibull distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7243,7 +7243,7 @@
       "slug": "random-Generator-zipf",
       "status": "supported",
       "summary": "Draw samples from a Zipf distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7264,7 +7264,7 @@
       "slug": "random-RandomState-beta",
       "status": "supported",
       "summary": "Draw samples from a Beta distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7285,7 +7285,7 @@
       "slug": "random-RandomState-binomial",
       "status": "supported",
       "summary": "Draw samples from a binomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7327,7 +7327,7 @@
       "slug": "random-RandomState-chisquare",
       "status": "supported",
       "summary": "Draw samples from a chi-square distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7369,7 +7369,7 @@
       "slug": "random-RandomState-dirichlet",
       "status": "supported",
       "summary": "Draw samples from the Dirichlet distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7390,7 +7390,7 @@
       "slug": "random-RandomState-exponential",
       "status": "supported",
       "summary": "Draw samples from an exponential distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7411,7 +7411,7 @@
       "slug": "random-RandomState-f",
       "status": "supported",
       "summary": "Draw samples from an F distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7432,7 +7432,7 @@
       "slug": "random-RandomState-gamma",
       "status": "supported",
       "summary": "Draw samples from a Gamma distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7453,7 +7453,7 @@
       "slug": "random-RandomState-geometric",
       "status": "supported",
       "summary": "Draw samples from the geometric distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7474,7 +7474,7 @@
       "slug": "random-RandomState-get_state",
       "status": "supported",
       "summary": "Return a tuple representing the internal state of the generator.",
-      "weight": 1.0
+      "weight": 0.0
     },
     {
       "area": "random",
@@ -7495,7 +7495,7 @@
       "slug": "random-RandomState-gumbel",
       "status": "supported",
       "summary": "Draw samples from a Gumbel distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7516,7 +7516,7 @@
       "slug": "random-RandomState-hypergeometric",
       "status": "supported",
       "summary": "Draw samples from a Hypergeometric distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7537,7 +7537,7 @@
       "slug": "random-RandomState-laplace",
       "status": "supported",
       "summary": "Draw samples from the Laplace or double exponential distribution with specified location (or mean) and scale (decay).",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7558,7 +7558,7 @@
       "slug": "random-RandomState-logistic",
       "status": "supported",
       "summary": "Draw samples from a logistic distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7579,7 +7579,7 @@
       "slug": "random-RandomState-lognormal",
       "status": "supported",
       "summary": "Draw samples from a log-normal distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7600,7 +7600,7 @@
       "slug": "random-RandomState-logseries",
       "status": "supported",
       "summary": "Draw samples from a logarithmic series distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7621,7 +7621,7 @@
       "slug": "random-RandomState-multinomial",
       "status": "supported",
       "summary": "Draw samples from a multinomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7637,7 +7637,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.RandomState.multivariate_normal",
-      "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+      "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
       "numpy_ref": "np.random.RandomState.multivariate_normal",
       "slug": "random-RandomState-multivariate_normal",
       "status": "supported",
@@ -7663,7 +7663,7 @@
       "slug": "random-RandomState-negative_binomial",
       "status": "supported",
       "summary": "Draw samples from a negative binomial distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7684,7 +7684,7 @@
       "slug": "random-RandomState-noncentral_chisquare",
       "status": "supported",
       "summary": "Draw samples from a noncentral chi-square distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7705,7 +7705,7 @@
       "slug": "random-RandomState-noncentral_f",
       "status": "supported",
       "summary": "Draw samples from the noncentral F distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7726,7 +7726,7 @@
       "slug": "random-RandomState-normal",
       "status": "supported",
       "summary": "Draw random samples from a normal (Gaussian) distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7747,7 +7747,7 @@
       "slug": "random-RandomState-pareto",
       "status": "supported",
       "summary": "Draw samples from a Pareto II or Lomax distribution with specified shape.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7789,7 +7789,7 @@
       "slug": "random-RandomState-poisson",
       "status": "supported",
       "summary": "Draw samples from a Poisson distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7810,7 +7810,7 @@
       "slug": "random-RandomState-power",
       "status": "supported",
       "summary": "Draws samples in [0, 1] from a power distribution with positive exponent a - 1.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7873,7 +7873,7 @@
       "slug": "random-RandomState-randn",
       "status": "supported",
       "summary": "Return a sample (or samples) from the \"standard normal\" distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7957,7 +7957,7 @@
       "slug": "random-RandomState-rayleigh",
       "status": "supported",
       "summary": "Draw samples from a Rayleigh distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -7978,7 +7978,7 @@
       "slug": "random-RandomState-seed",
       "status": "supported",
       "summary": "Reseed a legacy MT19937 BitGenerator",
-      "weight": 1.0
+      "weight": 0.0
     },
     {
       "area": "random",
@@ -7999,7 +7999,7 @@
       "slug": "random-RandomState-set_state",
       "status": "supported",
       "summary": "Set the internal state of the generator from a tuple.",
-      "weight": 1.0
+      "weight": 0.0
     },
     {
       "area": "random",
@@ -8041,7 +8041,7 @@
       "slug": "random-RandomState-standard_cauchy",
       "status": "supported",
       "summary": "Draw samples from a standard Cauchy distribution with mode = 0.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8062,7 +8062,7 @@
       "slug": "random-RandomState-standard_exponential",
       "status": "supported",
       "summary": "Draw samples from the standard exponential distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8083,7 +8083,7 @@
       "slug": "random-RandomState-standard_gamma",
       "status": "supported",
       "summary": "Draw samples from a standard Gamma distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8104,7 +8104,7 @@
       "slug": "random-RandomState-standard_normal",
       "status": "supported",
       "summary": "Draw samples from a standard Normal distribution (mean=0, stdev=1).",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8125,7 +8125,7 @@
       "slug": "random-RandomState-standard_t",
       "status": "supported",
       "summary": "Draw samples from a standard Student's t distribution with `df` degrees of freedom.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8167,7 +8167,7 @@
       "slug": "random-RandomState-triangular",
       "status": "supported",
       "summary": "Draw samples from the triangular distribution over the interval ``[left, right]``.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8183,7 +8183,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.RandomState.uniform",
-      "notes": "Legacy uniform sampler; cost = numel(output).",
+      "notes": "Legacy uniform sampler; cost = 3*numel(output) (draw + affine mul/add).",
       "numpy_ref": "np.random.RandomState.uniform",
       "slug": "random-RandomState-uniform",
       "status": "supported",
@@ -8209,7 +8209,7 @@
       "slug": "random-RandomState-vonmises",
       "status": "supported",
       "summary": "Draw samples from a von Mises distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8230,7 +8230,7 @@
       "slug": "random-RandomState-wald",
       "status": "supported",
       "summary": "Draw samples from a Wald, or inverse Gaussian, distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8251,7 +8251,7 @@
       "slug": "random-RandomState-weibull",
       "status": "supported",
       "summary": "Draw samples from a Weibull distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8272,7 +8272,7 @@
       "slug": "random-RandomState-zipf",
       "status": "supported",
       "summary": "Draw samples from a Zipf distribution.",
-      "weight": 1.0
+      "weight": 16.0
     },
     {
       "area": "random",
@@ -8330,7 +8330,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.bytes",
-      "notes": "Sampling; cost = numel(output).",
+      "notes": "Raw bytes; cost = length argument.",
       "numpy_ref": "np.random.bytes",
       "slug": "random-bytes",
       "status": "supported",
@@ -8377,7 +8377,7 @@
       "slug": "random-choice",
       "status": "supported",
       "summary": "Generates a random sample from a given 1-D array",
-      "weight": 1.0
+      "weight": 4.0
     },
     {
       "area": "random",
@@ -8687,7 +8687,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.multivariate_normal",
-      "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+      "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
       "numpy_ref": "np.random.multivariate_normal",
       "slug": "random-multivariate_normal",
       "status": "supported",
@@ -9233,7 +9233,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.uniform",
-      "notes": "Sampling; cost = numel(output).",
+      "notes": "Uniform sampler with affine map low+(high-low)*U; cost = 3*numel(output).",
       "numpy_ref": "np.random.uniform",
       "slug": "random-uniform",
       "status": "supported",
@@ -9632,7 +9632,7 @@
       "free": true,
       "module": "numpy",
       "name": "rollaxis",
-      "notes": "Roll specified axis backwards. Cost: numel(output).",
+      "notes": "Roll specified axis backwards. Free (view; 0 FLOPs).",
       "numpy_ref": "np.rollaxis",
       "slug": "rollaxis",
       "status": "supported",
@@ -9695,7 +9695,7 @@
       "free": false,
       "module": "numpy",
       "name": "save",
-      "notes": "Save array to .npy file (pickle-free). Cost: 4*size (io write).",
+      "notes": "Save array to .npy file (pickle-free). Cost: 4*(numel + ndim*8) (data + shape-header egress).",
       "numpy_ref": "np.save",
       "slug": "save",
       "status": "supported",
@@ -9716,7 +9716,7 @@
       "free": false,
       "module": "numpy",
       "name": "savez",
-      "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*size (io write).",
+      "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*(sum(numel) + sum(ndim*8) + member-name bytes) (data + shape-header + name egress).",
       "numpy_ref": "np.savez",
       "slug": "savez",
       "status": "supported",
@@ -9737,7 +9737,7 @@
       "free": false,
       "module": "numpy",
       "name": "savez_compressed",
-      "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*size (io write).",
+      "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*(sum(numel) + sum(ndim*8) + member-name bytes) (data + shape-header + name egress).",
       "numpy_ref": "np.savez_compressed",
       "slug": "savez_compressed",
       "status": "supported",
@@ -10073,7 +10073,7 @@
       "free": true,
       "module": "numpy",
       "name": "split",
-      "notes": "Split array into sub-arrays. Cost: numel(output).",
+      "notes": "Split array into sub-arrays. Free (view; 0 FLOPs).",
       "numpy_ref": "np.split",
       "slug": "split",
       "status": "supported",
@@ -10178,7 +10178,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.cauchy.cdf",
-      "notes": "Cauchy CDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Cauchy CDF; composite: 20 FLOPs per element of the broadcast of x with the distribution parameters (z + arctan + arithmetic), weight 1.0.",
       "numpy_ref": "scipy.stats.cauchy.cdf",
       "slug": "stats-cauchy-cdf",
       "status": "supported",
@@ -10220,7 +10220,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.cauchy.ppf",
-      "notes": "Cauchy PPF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Cauchy PPF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (tan + edge selects), weight 1.0.",
       "numpy_ref": "scipy.stats.cauchy.ppf",
       "slug": "stats-cauchy-ppf",
       "status": "supported",
@@ -10241,7 +10241,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.expon.cdf",
-      "notes": "Exponential CDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Exponential CDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + where), weight 1.0.",
       "numpy_ref": "scipy.stats.expon.cdf",
       "slug": "stats-expon-cdf",
       "status": "supported",
@@ -10262,7 +10262,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.expon.pdf",
-      "notes": "Exponential PDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Exponential PDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + where), weight 1.0.",
       "numpy_ref": "scipy.stats.expon.pdf",
       "slug": "stats-expon-pdf",
       "status": "supported",
@@ -10283,7 +10283,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.expon.ppf",
-      "notes": "Exponential PPF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Exponential PPF; composite: 27 FLOPs per element of the broadcast of x with the distribution parameters (log1p + edge selects), weight 1.0.",
       "numpy_ref": "scipy.stats.expon.ppf",
       "slug": "stats-expon-ppf",
       "status": "supported",
@@ -10325,7 +10325,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.laplace.pdf",
-      "notes": "Laplace PDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Laplace PDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (|x-loc| + exp(-z)), weight 1.0.",
       "numpy_ref": "scipy.stats.laplace.pdf",
       "slug": "stats-laplace-pdf",
       "status": "supported",
@@ -10367,7 +10367,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.logistic.cdf",
-      "notes": "Logistic CDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Logistic CDF; composite: 21 FLOPs per element of the broadcast of x with the distribution parameters (sigmoid = exp(-z) + 1/denom), weight 1.0.",
       "numpy_ref": "scipy.stats.logistic.cdf",
       "slug": "stats-logistic-cdf",
       "status": "supported",
@@ -10388,7 +10388,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.logistic.pdf",
-      "notes": "Logistic PDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Logistic PDF; composite: 23 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + sigmoid arithmetic), weight 1.0.",
       "numpy_ref": "scipy.stats.logistic.pdf",
       "slug": "stats-logistic-pdf",
       "status": "supported",
@@ -10409,7 +10409,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.logistic.ppf",
-      "notes": "Logistic PPF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Logistic PPF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (logit = log + edge selects), weight 1.0.",
       "numpy_ref": "scipy.stats.logistic.ppf",
       "slug": "stats-logistic-ppf",
       "status": "supported",
@@ -10535,7 +10535,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.norm.ppf",
-      "notes": "Normal PPF (inverse CDF); composite: 83 FLOPs per element of the broadcast of x with the distribution parameters (Acklam rational ndtri + Newton polish with erf+exp), weight 1.0.",
+      "notes": "Normal PPF (inverse CDF); composite: 83 FLOPs per element of the broadcast of x with the distribution parameters (rational ndtri + Newton polish with erf+exp), weight 1.0.",
       "numpy_ref": "scipy.stats.norm.ppf",
       "slug": "stats-norm-ppf",
       "status": "supported",
@@ -10556,7 +10556,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.truncnorm.cdf",
-      "notes": "Truncated normal CDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Truncated normal CDF; composite: 51 FLOPs per element of the broadcast of x with the distribution parameters (std_norm_cdf + 2 where), weight 1.0.",
       "numpy_ref": "scipy.stats.truncnorm.cdf",
       "slug": "stats-truncnorm-cdf",
       "status": "supported",
@@ -10577,7 +10577,7 @@
       "free": false,
       "module": "flopscope.stats",
       "name": "stats.truncnorm.pdf",
-      "notes": "Truncated normal PDF; cost = numel of the broadcast of x with the distribution parameters.",
+      "notes": "Truncated normal PDF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (std_norm_pdf + bounds), weight 1.0.",
       "numpy_ref": "scipy.stats.truncnorm.pdf",
       "slug": "stats-truncnorm-pdf",
       "status": "supported",
@@ -10682,7 +10682,7 @@
       "free": false,
       "module": "numpy",
       "name": "std",
-      "notes": "Standard deviation; cost_multiplier=2 (two passes).",
+      "notes": "Standard deviation; cost ~ 4*numel + M (2 pointwise + 2 reduction passes, per-output divide + sqrt).",
       "numpy_ref": "np.std",
       "slug": "std",
       "status": "supported",
@@ -10862,8 +10862,8 @@
       "blocked": false,
       "canonical_path": "numpy/tensordot",
       "category": "counted_custom",
-      "cost_formula": "product of contracted dims * output size",
-      "cost_formula_latex": "$\\prod_i d_i$",
+      "cost_formula": "2*K*out - out (FMA=2)",
+      "cost_formula_latex": "$2 \\cdot K \\cdot \\text{out} - \\text{out}$",
       "detail_href": "/docs/api/numpy/tensordot/",
       "detail_json_href": "/api-data/ops/tensordot.json",
       "display_type": "custom",
@@ -10946,8 +10946,8 @@
       "blocked": false,
       "canonical_path": "numpy/trapezoid",
       "category": "counted_custom",
-      "cost_formula": "numel(input)",
-      "cost_formula_latex": "$\\text{numel}(\\text{input})$",
+      "cost_formula": "4*numel",
+      "cost_formula_latex": "$4 \\cdot \\text{numel}$",
       "detail_href": "/docs/api/numpy/trapezoid/",
       "detail_json_href": "/api-data/ops/trapezoid.json",
       "display_type": "custom",
@@ -11333,7 +11333,7 @@
       "free": false,
       "module": "numpy",
       "name": "unpackbits",
-      "notes": "Unpack elements of array into bits. Cost: numel(input).",
+      "notes": "Unpack elements of array into bits. Cost: numel(output) (bit expansion: 8x the uint8 input).",
       "numpy_ref": "np.unpackbits",
       "slug": "unpackbits",
       "status": "supported",
@@ -11396,7 +11396,7 @@
       "free": false,
       "module": "flopscope._unwrap",
       "name": "unwrap",
-      "notes": "Phase unwrap. Cost: $\\text{numel}(\\text{input})$ (diff + conditional adjustment).",
+      "notes": "Phase unwrap. Cost: 13*numel(input) (13 ufunc passes over diff + cumsum).",
       "numpy_ref": "np.unwrap",
       "slug": "unwrap",
       "status": "supported",
@@ -11417,7 +11417,7 @@
       "free": false,
       "module": "numpy",
       "name": "vander",
-      "notes": "Vandermonde matrix; cost = len(x)*(N-1).",
+      "notes": "Vandermonde matrix; cost = len(x)*(N-2).",
       "numpy_ref": "np.vander",
       "slug": "vander",
       "status": "supported",
@@ -11438,7 +11438,7 @@
       "free": false,
       "module": "numpy",
       "name": "var",
-      "notes": "Variance; cost_multiplier=2 (two passes).",
+      "notes": "Variance; cost ~ 4*numel (2 pointwise + 2 reduction passes, per-output divide).",
       "numpy_ref": "np.var",
       "slug": "var",
       "status": "supported",
@@ -11450,8 +11450,8 @@
       "blocked": false,
       "canonical_path": "numpy/vdot",
       "category": "counted_custom",
-      "cost_formula": "n",
-      "cost_formula_latex": "$n$",
+      "cost_formula": "2*n - 1",
+      "cost_formula_latex": "$2n - 1$",
       "detail_href": "/docs/api/numpy/vdot/",
       "detail_json_href": "/api-data/ops/vdot.json",
       "display_type": "custom",
@@ -11459,7 +11459,7 @@
       "free": false,
       "module": "numpy",
       "name": "vdot",
-      "notes": "Dot product with conjugation; cost = N (weight-calibrated).",
+      "notes": "Dot product with conjugation; cost = 2*N - 1 (FMA=2 dot with conjugation).",
       "numpy_ref": "np.vdot",
       "slug": "vdot",
       "status": "supported",
@@ -11501,7 +11501,7 @@
       "free": false,
       "module": "numpy",
       "name": "vecmat",
-      "notes": "Vector-matrix product. Cost = output_size * contracted_axis. Einsum-accumulation family; cost computed exactly per-call.",
+      "notes": "Vector-matrix product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
       "numpy_ref": "np.vecmat",
       "slug": "vecmat",
       "status": "supported",
@@ -11522,7 +11522,7 @@
       "free": true,
       "module": "numpy",
       "name": "vsplit",
-      "notes": "Split array into rows. Cost: numel(output).",
+      "notes": "Split array into rows. Free (view; 0 FLOPs).",
       "numpy_ref": "np.vsplit",
       "slug": "vsplit",
       "status": "supported",

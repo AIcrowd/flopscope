@@ -779,14 +779,14 @@ REGISTRY: dict[str, dict] = {
         "module": "numpy",
         "min_numpy": "2.2",
         "complex_factor": "exact",
-        "notes": "Matrix-vector product. Cost = output_size * contracted_axis. Einsum-accumulation family; cost computed exactly per-call.",
+        "notes": "Matrix-vector product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
     },
     "vecmat": {
         "category": "counted_binary",
         "module": "numpy",
         "min_numpy": "2.2",
         "complex_factor": "exact",
-        "notes": "Vector-matrix product. Cost = output_size * contracted_axis. Einsum-accumulation family; cost computed exactly per-call.",
+        "notes": "Vector-matrix product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
     },
     # ------------------------------------------------------------------
     # counted_reduction — implemented in _pointwise.py
@@ -837,13 +837,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": 2.5,
-        "notes": "Standard deviation; cost_multiplier=2 (two passes).",
+        "notes": "Standard deviation; cost ~ 4*numel + M (2 pointwise + 2 reduction passes, per-output divide + sqrt).",
     },
     "var": {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": 2.5,
-        "notes": "Variance; cost_multiplier=2 (two passes).",
+        "notes": "Variance; cost ~ 4*numel (2 pointwise + 2 reduction passes, per-output divide).",
     },
     "argmax": {
         "category": "counted_reduction",
@@ -1022,13 +1022,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": "exact",
-        "notes": "Dot product; cost = M*K*N (weight-calibrated).",
+        "notes": "Dot product; cost = 2*M*K*N - M*N (FMA=2, via the einsum contraction engine).",
     },
     "matmul": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": "exact",
-        "notes": "Matrix multiplication; cost = M*K*N (weight-calibrated).",
+        "notes": "Matrix multiplication; cost = 2*M*K*N - M*N (FMA=2).",
     },
     "einsum": {
         "category": "counted_custom",
@@ -1052,7 +1052,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": "exact",
-        "notes": "Inner product; cost = N (weight-calibrated).",
+        "notes": "Inner product; cost = (2K-1)*M over the contracted/output dims (2N-1 for two length-N vectors).",
     },
     "outer": {
         "category": "counted_custom",
@@ -1070,7 +1070,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": "exact",
-        "notes": "Dot product with conjugation; cost = N (weight-calibrated).",
+        "notes": "Dot product with conjugation; cost = 2*N - 1 (FMA=2 dot with conjugation).",
     },
     "kron": {
         "category": "counted_custom",
@@ -1170,7 +1170,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Delegates to `fnp.cross` which charges `numel(output)` FLOPs.",
+        "notes": "Cross product; charges `3*numel(output)` FLOPs (2 mul + 1 sub per output component).",
     },
     "linalg.det": {
         "category": "counted_custom",
@@ -1223,7 +1223,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Delegates to `fnp.matmul` which charges `m*k*n` FLOPs (weight-calibrated).",
+        "notes": "Delegates to `fnp.matmul` which charges `2*m*k*n - m*n` FLOPs (FMA=2).",
     },
     "linalg.matrix_norm": {
         "category": "counted_custom",
@@ -1235,7 +1235,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Matrix power. Cost: $(\\lfloor\\log_2 k\\rfloor + \\text{popcount}(k) - 1) \\cdot n^3$ (exponentiation by squaring).",
+        "notes": "Matrix power. Cost: (floor(log2 k) + popcount(k) - 1) * (2*n^3 - n^2) (exponentiation by squaring; per-matmul = matmul_cost).",
     },
     "linalg.matrix_rank": {
         "category": "counted_custom",
@@ -1258,7 +1258,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Norm. Cost depends on ord: 2*numel for L1/inf/Frobenius, $2ab^2+2b^3$ for ord=2/-2/nuc (values-only SVD; a=max(m,n), b=min(m,n)); × batch groups (non-reduced dims); axis=None → 1 group.",
+        "notes": "Norm. Cost depends on ord: 2*numel for L1/inf/Frobenius, $2ab^2+2b^3$ for ord=2/-2/nuc (values-only SVD; a=max(m,n), b=min(m,n)), 18*numel+16 for vector general-p ord (not in {None, 0, 1, 2, +/-inf}); × batch groups (non-reduced dims); axis=None → 1 group.",
     },
     "linalg.outer": {
         "category": "counted_custom",
@@ -1324,13 +1324,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Delegates to `fnp.vecdot` which charges `2*n` FLOPs.",
+        "notes": "Delegates to `fnp.vecdot` which charges `2*n - 1` FLOPs.",
     },
     "linalg.vector_norm": {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Vector norm. Cost: 2*numel(effective_shape) × batch groups (non-reduced dims); axis=None → 1 group.",
+        "notes": "Vector norm. Cost: 2*numel(effective_shape) × batch groups (non-reduced dims); axis=None → 1 group. General-p ord (not in {None, 0, 1, 2, +/-inf}): 18*numel + 16 per group.",
     },
     # ------------------------------------------------------------------
     # fft — counted_custom (14 transforms) + free (4 utility ops)
@@ -1339,25 +1339,25 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "1-D complex FFT. Cost: 5*n*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "1-D complex FFT. Cost: 5*n*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fft2": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftfreq": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "FFT sample frequencies; cost = n (index grid scaled by 1/(n*d)). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "FFT sample frequencies; cost = n (index grid scaled by 1/(n*d)).",
     },
     "fft.fftshift": {
         "category": "counted_custom",
@@ -1375,19 +1375,19 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 1-D complex FFT. Cost: 5*n*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 1-D complex FFT. Cost: 5*n*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifft2": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D complex FFT. Cost: 5*N*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftshift": {
         "category": "counted_custom",
@@ -1399,49 +1399,49 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse FFT of Hermitian signal; numpy computes conj(rfft(a,n)). Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse FFT of Hermitian signal; numpy computes conj(rfft(a,n)). Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.irfft": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.irfft2": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.irfftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfft": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "1-D real FFT. Cost: 5*(n//2)*ceil(log2(n)) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfft2": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfftfreq": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Real FFT sample frequencies; cost = n//2+1 (index grid scaled by 1/(n*d)). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Real FFT sample frequencies; cost = n//2+1 (index grid scaled by 1/(n*d)).",
     },
     "fft.rfftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D real FFT. Cost: 5*(N//2)*ceil(log2(N)), N=prod(s) (Cooley-Tukey radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     # ------------------------------------------------------------------
     # free — implemented in _array_ops.py
@@ -1574,7 +1574,7 @@ REGISTRY: dict[str, dict] = {
     "split": {
         "category": "free",
         "module": "numpy",
-        "notes": "Split array into sub-arrays. Cost: numel(output).",
+        "notes": "Split array into sub-arrays. Free (view; 0 FLOPs).",
     },
     "hsplit": {
         "category": "free",
@@ -1584,7 +1584,7 @@ REGISTRY: dict[str, dict] = {
     "vsplit": {
         "category": "free",
         "module": "numpy",
-        "notes": "Split array into rows. Cost: numel(output).",
+        "notes": "Split array into rows. Free (view; 0 FLOPs).",
     },
     "squeeze": {
         "category": "free",
@@ -1683,7 +1683,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Return specified diagonals. Cost: numel(input).",
+        "notes": "Return specified diagonals. Free (0 FLOPs) — returns a view.",
     },
     "trace": {
         "category": "counted_custom",
@@ -1815,7 +1815,7 @@ REGISTRY: dict[str, dict] = {
         "module": "numpy",
         "complex_factor": 2.0,
         "max_numpy": "2.4",
-        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)). Removed in numpy 2.4; use `isin` instead.",
+        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes, or object dtype). Removed in numpy 2.4; use `isin` instead.",
     },
     "select": {
         "category": "counted_custom",
@@ -1988,7 +1988,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Unpack elements of array into bits. Cost: numel(input).",
+        "notes": "Unpack elements of array into bits. Cost: numel(output) (bit expansion: 8x the uint8 input).",
     },
     "fromfunction": {
         "category": "counted_custom",
@@ -2069,7 +2069,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Set intersection; cost = (n+m)*ceil(log2(n+m)).",
+        "notes": "Set intersection; cost = sort_cost(n)+sort_cost(m)+sort_cost(n+m) (default); sort_cost(n+m) when assume_unique=True.",
     },
     "setdiff1d": {
         "category": "counted_custom",
@@ -2219,18 +2219,18 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 6.0,
-        "notes": "Vandermonde matrix; cost = len(x)*(N-1).",
+        "notes": "Vandermonde matrix; cost = len(x)*(N-2).",
     },
     "ix_": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Construct open mesh from multiple sequences. Cost: numel(output).",
+        "notes": "Construct open mesh from multiple sequences. Free (0 FLOPs) — index construction from given sequences.",
     },
     "rollaxis": {
         "category": "free",
         "module": "numpy",
-        "notes": "Roll specified axis backwards. Cost: numel(output).",
+        "notes": "Roll specified axis backwards. Free (view; 0 FLOPs).",
     },
     "permute_dims": {
         "category": "free",
@@ -2396,7 +2396,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": "illegal",
-        "notes": "Sampling; cost = numel(output).",
+        "notes": "Raw bytes; cost = length argument.",
     },
     "random.chisquare": {
         "category": "counted_custom",
@@ -2501,7 +2501,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": "illegal",
-        "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+        "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
     },
     "random.negative_binomial": {
         "category": "counted_custom",
@@ -2661,7 +2661,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": "illegal",
-        "notes": "Sampling; cost = numel(output).",
+        "notes": "Uniform sampler with affine map low+(high-low)*U; cost = 3*numel(output).",
     },
     "random.vonmises": {
         "category": "counted_custom",
@@ -2829,7 +2829,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "multivariate_normal",
-        "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+        "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
     },
     "random.Generator.negative_binomial": {
         "category": "counted_random_method",
@@ -2962,7 +2962,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "uniform",
-        "notes": "Uniform distribution; cost = numel(output).",
+        "notes": "Uniform distribution over [low, high); cost = 3*numel(output) (draw + affine mul/add).",
     },
     "random.Generator.vonmises": {
         "category": "counted_random_method",
@@ -3130,7 +3130,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "multivariate_normal",
-        "notes": "Composite cost: d^3//3 (Cholesky factorization) + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+        "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
     },
     "random.RandomState.negative_binomial": {
         "category": "counted_random_method",
@@ -3298,7 +3298,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "uniform",
-        "notes": "Legacy uniform sampler; cost = numel(output).",
+        "notes": "Legacy uniform sampler; cost = 3*numel(output) (draw + affine mul/add).",
     },
     "random.RandomState.vonmises": {
         "category": "counted_random_method",
@@ -3363,7 +3363,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Normal PPF (inverse CDF); composite: 83 FLOPs per element of the broadcast of x with the distribution parameters (Acklam rational ndtri + Newton polish with erf+exp), weight 1.0.",
+        "notes": "Normal PPF (inverse CDF); composite: 83 FLOPs per element of the broadcast of x with the distribution parameters (rational ndtri + Newton polish with erf+exp), weight 1.0.",
     },
     "stats.uniform.pdf": {
         "category": "counted_custom",
@@ -3387,19 +3387,19 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Exponential PDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Exponential PDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + where), weight 1.0.",
     },
     "stats.expon.cdf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Exponential CDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Exponential CDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + where), weight 1.0.",
     },
     "stats.expon.ppf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Exponential PPF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Exponential PPF; composite: 27 FLOPs per element of the broadcast of x with the distribution parameters (log1p + edge selects), weight 1.0.",
     },
     "stats.cauchy.pdf": {
         "category": "counted_custom",
@@ -3411,37 +3411,37 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Cauchy CDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Cauchy CDF; composite: 20 FLOPs per element of the broadcast of x with the distribution parameters (z + arctan + arithmetic), weight 1.0.",
     },
     "stats.cauchy.ppf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Cauchy PPF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Cauchy PPF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (tan + edge selects), weight 1.0.",
     },
     "stats.logistic.pdf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Logistic PDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Logistic PDF; composite: 23 FLOPs per element of the broadcast of x with the distribution parameters (exp(-z) + sigmoid arithmetic), weight 1.0.",
     },
     "stats.logistic.cdf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Logistic CDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Logistic CDF; composite: 21 FLOPs per element of the broadcast of x with the distribution parameters (sigmoid = exp(-z) + 1/denom), weight 1.0.",
     },
     "stats.logistic.ppf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Logistic PPF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Logistic PPF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (logit = log + edge selects), weight 1.0.",
     },
     "stats.laplace.pdf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Laplace PDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Laplace PDF; composite: 22 FLOPs per element of the broadcast of x with the distribution parameters (|x-loc| + exp(-z)), weight 1.0.",
     },
     "stats.laplace.cdf": {
         "category": "counted_custom",
@@ -3477,13 +3477,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Truncated normal PDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Truncated normal PDF; composite: 28 FLOPs per element of the broadcast of x with the distribution parameters (std_norm_pdf + bounds), weight 1.0.",
     },
     "stats.truncnorm.cdf": {
         "category": "counted_custom",
         "module": "flopscope.stats",
         "complex_factor": 3.0,
-        "notes": "Truncated normal CDF; cost = numel of the broadcast of x with the distribution parameters.",
+        "notes": "Truncated normal CDF; composite: 51 FLOPs per element of the broadcast of x with the distribution parameters (std_norm_cdf + 2 where), weight 1.0.",
     },
     "stats.truncnorm.ppf": {
         "category": "counted_custom",
@@ -3498,7 +3498,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Polynomial from roots. Cost: $n^2$ FLOPs.",
+        "notes": "Polynomial from roots. Cost: (3*n^2 + n)//2 FLOPs (iterated convolution build-from-roots).",
     },
     "roots": {
         "category": "counted_custom",
@@ -3522,7 +3522,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Divide one polynomial by another. Cost: n1 * n2 FLOPs.",
+        "notes": "Divide one polynomial by another. Cost: 1 + Q*(2*n2+1), Q = max(n1-n2+1, 0) FLOPs.",
     },
     "polyfit": {
         "category": "counted_custom",
@@ -3540,7 +3540,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Multiply polynomials. Cost: n1 * n2 FLOPs.",
+        "notes": "Multiply polynomials. Cost: 2*n1*n2 - n1 - n2 FLOPs (convolution, FMA=2).",
     },
     "polysub": {
         "category": "counted_custom",
@@ -3605,7 +3605,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Save array to .npy file (pickle-free). Cost: 4*size (io write).",
+        "notes": "Save array to .npy file (pickle-free). Cost: 4*(numel + ndim*8) (data + shape-header egress).",
     },
     "savetxt": {
         "category": "blacklisted",
@@ -3616,13 +3616,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*size (io write).",
+        "notes": "Save multiple arrays to .npz (pickle-free). Cost: 4*(sum(numel) + sum(ndim*8) + member-name bytes) (data + shape-header + name egress).",
     },
     "savez_compressed": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*size (io write).",
+        "notes": "Save multiple arrays to compressed .npz (pickle-free). Cost: 4*(sum(numel) + sum(ndim*8) + member-name bytes) (data + shape-header + name egress).",
     },
     # blacklisted — config / runtime
     "show_config": {
@@ -3814,7 +3814,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._unwrap",
         "complex_factor": "illegal",
-        "notes": "Phase unwrap. Cost: $\\text{numel}(\\text{input})$ (diff + conditional adjustment).",
+        "notes": "Phase unwrap. Cost: 13*numel(input) (13 ufunc passes over diff + cumsum).",
     },
 }
 
