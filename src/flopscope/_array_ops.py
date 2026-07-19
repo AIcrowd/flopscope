@@ -2082,7 +2082,10 @@ def choose(*args, **kwargs):
     # Warn if the first arg (index array) carries symmetry.
     if args:
         _warn_if_symmetric(args[0], "choose")
-    # Args: (a, choices, ...) or just (a, choices) — strip arrays.
+    # Args: (a, choices, ...) or just (a, choices) — strip arrays. Kwargs too:
+    # ``out=`` arrives as a keyword (e.g. ``ndarray.choose(..., out=arr)``) and
+    # an unstripped FlopscopeArray there trips the numpy-entry guard; stripping
+    # to the base view writes into the same buffer.
     stripped_args = []
     for arg in args:
         if isinstance(arg, _np.ndarray):
@@ -2091,8 +2094,18 @@ def choose(*args, **kwargs):
             stripped_args.append(_to_base_ndarray_tree(arg))
         else:
             stripped_args.append(arg)
+    stripped_kwargs = {
+        key: (
+            _to_base_ndarray(val)
+            if isinstance(val, _np.ndarray)
+            else _to_base_ndarray_tree(val)
+            if isinstance(val, (tuple, list))
+            else val
+        )
+        for key, val in kwargs.items()
+    }
     with budget.deduct_after("choose", subscripts=None, shapes=(), dtypes=()) as _op:
-        result = _call_numpy(_np.choose, *stripped_args, **kwargs)
+        result = _call_numpy(_np.choose, *stripped_args, **stripped_kwargs)
         # Bill the promoted dtype of the choices, read off the output rather
         # than re-derived from *args/**kwargs (choices can arrive positional
         # or keyword, as a list/tuple/array). Leaving dtypes=() above would

@@ -680,8 +680,31 @@ class FlopscopeArray(_np.ndarray):
     def nonzero(self, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # type: ignore[override]
         return _me().nonzero(self, *args, **kwargs)
 
+    @_counted_wrapper
     def copy(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
-        return _me().copy(self, *args, **kwargs)
+        """Return an owning copy, billed exactly like ``fnp.copy``.
+
+        Delegating to ``fnp.copy`` would hand back a wrapper VIEW of a base
+        buffer (``OWNDATA=False``), and ``np.require(..., ['OWNDATA'])``
+        satisfies the 'O' requirement via ``arr.copy()`` then checks the flag
+        on what it gets back -- so the copy must be allocated natively by
+        ``ndarray.copy``. Bill the identical deduct
+        (:func:`flopscope._array_ops.copy`: numel(input) under ``"copy"``)
+        directly, mirroring :meth:`flatten` below.
+        """
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        cost = max(self.size, 1)
+        with budget.deduct(
+            "copy",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(self.shape,),
+            dtypes=(self.dtype,),
+        ):
+            result = _call_numpy(super().copy, *args, **kwargs)
+        return result
 
     def ravel(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
         return _me().ravel(self, *args, **kwargs)
