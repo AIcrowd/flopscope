@@ -1333,7 +1333,7 @@ input data), so ingesting them is a free, view-like operation, the same treatmen
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
 | `save` | `4 × (numel(array) + ndim(array) × 8)` | 1.0 | DECLARED: I/O write, priced per element serialized plus the array's shape header |
-| `savez`, `savez_compressed` | `4 × (Σ numel(array_i) + Σ ndim(array_i) × 8 + Σ len(member name bytes) + 8)` (summed over every array passed, plus the byte length of a `__meta__` blob when present, plus the UTF-8 byte length of every archive member name including `"__meta__"`, plus one more 8-byte shape header for the names blob itself, present whenever the archive has at least one member) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
+| `savez`, `savez_compressed` | `4 × (Σ numel(array_i) + Σ ndim(array_i) × 8 + Σ len(member name bytes) + 8)` (summed over every array passed, plus the byte length of a `__meta__` blob when present, plus the UTF-8 byte length of every archive member name including `"__meta__"`, plus one more 8-byte shape header for the names blob itself, present whenever the archive has at least one non-empty member name) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
 | `load` | `0` | — | DECLARED free: ingesting previously-computed values is not new compute |
 | `from_dlpack` | `0` | — | DECLARED free: zero-copy ingest from another array library |
 

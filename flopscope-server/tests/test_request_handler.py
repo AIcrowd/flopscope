@@ -447,8 +447,13 @@ def test_decode_index_key_marker_semantics(handler):
     # marked list is a fancy-index Python list
     assert handler._decode_index_key({"__list__": [0, 2]}) == [0, 2]
     assert _decode_index_key({"__list__": [0, 2]}) == [0, 2]
+    # msgpack bytes-key form of the fancy-list marker (wire uses bytes keys)
+    assert handler._decode_index_key({b"__list__": [0, 2]}) == [0, 2]
+    assert _decode_index_key({b"__list__": [0, 2]}) == [0, 2]
     # nested: tuple(int, fancy-list)
     assert handler._decode_index_key([1, {"__list__": [0, 2]}]) == (1, [0, 2])
+    # module-level decoder: same nested case too
+    assert _decode_index_key([1, {"__list__": [0, 2]}]) == (1, [0, 2])
 
 
 # ---------------------------------------------------------------------------

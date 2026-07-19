@@ -1118,7 +1118,7 @@ def compute_accumulation_cost(
       partition_budget: per-component partition cap; defaults to global setting.
 
     Dimino-budget fallback: any internal call to ``_dimino`` that exceeds the
-    configured ``dimino_budget`` (default 500_000) raises
+    configured ``dimino_budget`` (default 50_000) raises
     :class:`_DiminoBudgetExceeded`. This function catches the exception,
     emits a :class:`CostFallbackWarning`, and returns an
     :class:`AccumulationCost` with ``fallback_used=True`` and
