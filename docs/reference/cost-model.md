@@ -1332,8 +1332,8 @@ input data), so ingesting them is a free, view-like operation, the same treatmen
 
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
-| `save` | `4 × numel(array)` | 1.0 | DECLARED: I/O write, priced per element serialized |
-| `savez`, `savez_compressed` | `4 × (Σ numel(array_i) + Σ len(member name bytes))` (summed over every array passed, plus the byte length of a `__meta__` blob when present, plus the UTF-8 byte length of every archive member name including `"__meta__"`) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
+| `save` | `4 × (numel(array) + ndim(array) × 8)` | 1.0 | DECLARED: I/O write, priced per element serialized plus the array's shape header |
+| `savez`, `savez_compressed` | `4 × (Σ numel(array_i) + Σ ndim(array_i) × 8 + Σ len(member name bytes) + 8)` (summed over every array passed, plus the byte length of a `__meta__` blob when present, plus the UTF-8 byte length of every archive member name including `"__meta__"`, plus one more 8-byte shape header for the names blob itself, present whenever the archive has at least one member) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
 | `load` | `0` | — | DECLARED free: ingesting previously-computed values is not new compute |
 | `from_dlpack` | `0` | — | DECLARED free: zero-copy ingest from another array library |
 
@@ -1344,6 +1344,15 @@ float32 (`4 × numel × 2.0 × 1.0`), not a fixed byte size. `load` and `from_dl
 no cost path in code and are unconditionally free; `save`/`savez`/`savez_compressed`
 are the charged member of this family — writing an array to disk is metered, reading
 one back is not.
+
+Each array's `.npy`/`.npz` header also encodes its shape as one 8-byte integer per
+dimension — a channel a participant fully controls independent of the element count
+(`zeros((0, K))` has 0 elements but an arbitrary `K`, so a bare `4 × numel` price floors
+at a near-zero cost no matter how large `K` is). Every billed array's shape header
+(`ndim(array) × 8` bytes) is billed alongside its element data. `savez`/`savez_compressed`
+bill one further 8-byte shape header for the archive's member-names blob itself: the
+concatenated member names are ingested server-side as one synthetic 1-D `uint8` array, so
+they carry a shape header of their own, billed in-process too so the two paths match.
 
 The optional `__meta__` dict `savez`/`savez_compressed` accept is JSON-serialized and
 written to the archive as a `uint8` byte array, exactly like any named array — so it

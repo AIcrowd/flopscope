@@ -671,9 +671,13 @@ def test_astype_on_first_touch_data_preserves_flopscopearray_typing(handler, ses
 
 
 def test_handle_save_bills_four_times_numel(handler, session):
-    """A ``save`` request for a single handle deducts 4*numel, matches the
-    in-process ``flops.save`` formula, writes nothing, and returns no result
-    payload (the client already wrote the file locally)."""
+    """A ``save`` request for a single handle deducts 4*(numel + ndim*8),
+    matches the in-process ``flops.save`` formula, writes nothing, and
+    returns no result payload (the client already wrote the file locally).
+
+    The ``+ndim*8`` term is the array's ``.npy`` shape header: a
+    participant-controlled channel (e.g. ``zeros((0, K))`` has 0 elements
+    but an arbitrary ``K``), billed alongside the element data."""
     a = np.arange(1000, dtype=np.float32)
     h = handler.handle(
         {
@@ -689,14 +693,19 @@ def test_handle_save_bills_four_times_numel(handler, session):
 
     assert resp["status"] == "ok"
     assert resp["result"] is None
-    assert session.budget_status()["flops_used"] - before == 4 * 1000
+    # numel(1000) + shape-header (ndim=1 -> 1*8 bytes).
+    assert session.budget_status()["flops_used"] - before == 4 * (1000 + 8)
     # budget info in the response matches a fresh query (server-owned counting).
     assert resp["budget"] == session.budget_status()
 
 
 def test_handle_savez_bills_sum_of_all_handles(handler, session):
     """``savez``/``savez_compressed`` deduct 4*(sum of numel across every
-    handle passed), matching the in-process ``flops.savez`` formula."""
+    handle passed + sum of ndim*8 shape-header bytes), matching the
+    in-process ``flops.savez`` formula. No names blob is passed here (this
+    test exercises the handler's raw handle-summation mechanics, not a full
+    client round-trip with member names -- see
+    test_handle_savez_bills_same_as_in_process below for that)."""
     a = np.arange(250, dtype=np.float32)
     b = np.arange(150, dtype=np.float32)
     h1 = handler.handle(
@@ -716,6 +725,7 @@ def test_handle_savez_bills_sum_of_all_handles(handler, session):
         }
     )["result"]["id"]
 
+    # numel(250 + 150) + shape-header (2 handles, each ndim=1 -> 2*8 bytes).
     before = session.budget_status()["flops_used"]
     resp = handler.handle(
         {
@@ -725,7 +735,7 @@ def test_handle_savez_bills_sum_of_all_handles(handler, session):
         }
     )
     assert resp["status"] == "ok"
-    assert session.budget_status()["flops_used"] - before == 4 * (250 + 150)
+    assert session.budget_status()["flops_used"] - before == 4 * (250 + 150 + 2 * 8)
 
     before2 = session.budget_status()["flops_used"]
     resp2 = handler.handle(
@@ -736,7 +746,49 @@ def test_handle_savez_bills_sum_of_all_handles(handler, session):
         }
     )
     assert resp2["status"] == "ok"
-    assert session.budget_status()["flops_used"] - before2 == 4 * (250 + 150)
+    assert session.budget_status()["flops_used"] - before2 == 4 * (250 + 150 + 2 * 8)
+
+
+def test_handle_savez_bills_same_as_in_process(handler, session, tmp_path):
+    """The server's savez billing (data handle + a synthetic 1-D uint8 names
+    blob handle -- what a real client round-trip sends, see ``_handle_save``'s
+    docstring) must match what the in-process ``flops.savez`` wrapper bills
+    for the same call, including the shape-header channel on both the data
+    array and the synthetic names blob (Step 3/4 of the shape-header fix).
+
+    Both sides are measured as deltas on the SAME ``session`` fixture's
+    already-active ``BudgetContext`` (``Session.__init__`` enters one for the
+    session's lifetime -- a second top-level ``flops.BudgetContext`` can't be
+    opened here; ``BudgetContext``s don't nest). Calling ``fnp.savez``
+    directly bills into that active context exactly like a participant's own
+    in-process call would during a live session, so this is a faithful
+    apples-to-apples in-process-vs-server comparison, not a workaround."""
+    import numpy as np
+
+    import flopscope.numpy as fnp
+
+    x = np.ones((3, 4), dtype=np.float64)
+
+    # In-process reference billing.
+    before_in_process = session.budget_status()["flops_used"]
+    fnp.savez(str(tmp_path / "in_process.npz"), x=fnp.asarray(x))
+    in_process = session.budget_status()["flops_used"] - before_in_process
+
+    # Server path: data array + concatenated names blob ("x") as a 1-D uint8 array.
+    data = session.store_array(x)
+    names = session.store_array(np.frombuffer(b"x", dtype=np.uint8))
+    before_server = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "savez",
+            "args": [{"__handle__": data}, {"__handle__": names}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    server = session.budget_status()["flops_used"] - before_server
+
+    assert server == in_process
 
 
 def test_handle_save_bills_nothing_stored(handler, session):

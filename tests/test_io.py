@@ -78,3 +78,31 @@ def test_savez_rejects_reserved_meta_array(tmp_path):
     p = tmp_path / "bad.npz"
     with pytest.raises(ValueError, match="reserved"):
         fnp.savez(str(p), __meta__=np.zeros((2,)))
+
+
+def test_save_bills_shape_header_on_zero_element_array(tmp_path):
+    import numpy as np
+
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    # numel = 0, ndim = 2 -> shape channel = 2*8 = 16 bytes -> 4 * 16 = 64
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as bc:
+        fnp.save(
+            str(tmp_path / "z.npy"), fnp.asarray(np.zeros((0, 123), dtype=np.int8))
+        )
+    assert bc.flops_used == 64
+
+
+def test_save_bills_numel_plus_shape_header(tmp_path):
+    import numpy as np
+
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    # numel = 12, ndim = 2 -> 4 * (12 + 16) = 112
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as bc:
+        fnp.save(
+            str(tmp_path / "a.npy"), fnp.asarray(np.ones((3, 4), dtype=np.float64))
+        )
+    assert bc.flops_used == 4 * (12 + 2 * 8)

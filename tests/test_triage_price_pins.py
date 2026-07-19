@@ -651,7 +651,8 @@ def test_windows_bill_derived_constants():
 def test_io_save_bills_load_stays_free(tmp_path):
     a = np.arange(250, dtype=np.float32)
     f = str(tmp_path / "w.npy")
-    assert billed(lambda: fnp.save(f, fnp.asarray(a))) == 4 * 250
+    # numel(250) + shape-header (ndim=1 -> 1*8 bytes).
+    assert billed(lambda: fnp.save(f, fnp.asarray(a))) == 4 * (250 + 8)
     assert billed(lambda: fnp.load(f)) == 0
     src = np.arange(64, dtype=np.float32)
     assert billed(lambda: fnp.from_dlpack(src)) == 0  # stays free everywhere (Q9)
@@ -664,23 +665,29 @@ def test_io_savez_bills_sum_of_saved_arrays_including_meta(tmp_path):
     round-trip unlimited data through __meta__ for a flat, size-independent
     cost); see test_io_savez_large_meta_bills_proportionally_not_flat below.
     The archive's MEMBER NAMES ("a", "b", and "__meta__") are billed too --
-    see test_io_savez_name_channel_bills_proportionally_to_name_bytes below."""
+    see test_io_savez_name_channel_bills_proportionally_to_name_bytes below.
+    Every billed array also bills an 8-byte-per-dimension shape-header channel
+    (the ``.npy``/``.npz`` header encodes shape ints a participant controls),
+    and the names blob -- ingested server-side as one synthetic 1-D uint8
+    array -- bills one more 8-byte header of its own."""
     a = np.arange(250, dtype=np.float32)
     b = np.arange(150, dtype=np.float32)
     meta = {"k": 1}
     meta_len = len(json.dumps(meta).encode("utf-8"))
     name_bytes = len("a") + len("b") + len("__meta__")
+    shape_header_bytes = 3 * 8  # a, b, __meta__ blob: all 1-D
+    names_shape_header = 8  # non-empty name blob
     fz = str(tmp_path / "wz.npz")
     assert billed(
         lambda: fnp.savez(fz, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta)
-    ) == 4 * (400 + meta_len + name_bytes)
+    ) == 4 * (400 + meta_len + name_bytes + shape_header_bytes + names_shape_header)
     # savez_compressed shares savez's exact formula (4*sum(numel), meta+names included).
     fzc = str(tmp_path / "wzc.npz")
     assert billed(
         lambda: fnp.savez_compressed(
             fzc, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta
         )
-    ) == 4 * (400 + meta_len + name_bytes)
+    ) == 4 * (400 + meta_len + name_bytes + shape_header_bytes + names_shape_header)
 
 
 def test_io_savez_large_meta_bills_proportionally_not_flat(tmp_path):
@@ -694,9 +701,13 @@ def test_io_savez_large_meta_bills_proportionally_not_flat(tmp_path):
     meta_len = len(json.dumps(payload).encode("utf-8"))
     small = np.arange(10, dtype=np.float32)
     name_bytes = len("a") + len("__meta__")
+    shape_header_bytes = 2 * 8  # small + __meta__ blob: both 1-D
+    names_shape_header = 8  # non-empty name blob
     f = str(tmp_path / "exploit.npz")
     total = billed(lambda: fnp.savez(f, a=fnp.asarray(small), __meta__=payload))
-    assert total == 4 * (10 + meta_len + name_bytes)
+    assert total == 4 * (
+        10 + meta_len + name_bytes + shape_header_bytes + names_shape_header
+    )
     array_only_cost = 4 * 10
     assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
     assert total != 4  # the pre-fix floor-of-1 exploit value
@@ -719,10 +730,14 @@ def test_io_savez_name_channel_bills_proportionally_to_name_bytes(tmp_path):
     assert all(len(n) == name_len for n in names)
     raw = {name: np.array([1.0], dtype=np.float32) for name in names}
     name_bytes = sum(len(n.encode("utf-8")) for n in names)
+    shape_header_bytes = n_arrays * 8  # 200 arrays, each 1-D
+    names_shape_header = 8  # non-empty name blob
     f = str(tmp_path / "smuggle.npz")
     total = billed(lambda: fnp.savez(f, **{k: fnp.asarray(v) for k, v in raw.items()}))
     array_only_cost = 4 * n_arrays  # the pre-fix exploit value (800 FLOPs)
-    assert total == 4 * (n_arrays + name_bytes)
+    assert total == 4 * (
+        n_arrays + name_bytes + shape_header_bytes + names_shape_header
+    )
     assert total > 1000 * array_only_cost  # dominated by names, not array values
     assert total != array_only_cost  # the pre-fix name-channel exploit value
 

@@ -105,12 +105,19 @@ def _bill_save_egress(
     *,
     extra_egress_bytes: int = 0,
 ) -> None:
-    """Deduct the data-egress cost of writing *arrays* to disk: 4*sum(numel).
+    """Deduct the data-egress cost of writing *arrays* to disk:
+    4*(sum(numel) + sum(ndim*8)).
 
     Single-sourced so the server-side billing round-trip
     (``flopscope_server._request_handler._handle_save``) charges exactly the
     same formula as the in-process ``save``/``savez``/``savez_compressed``
     wrappers below -- an empty ``arrays`` sequence still floors at 1.
+
+    Each array's ``.npy``/``.npz`` header also encodes its shape as one
+    8-byte int per dimension -- a channel a participant fully controls (e.g.
+    ``zeros((0, K))`` has 0 elements but an arbitrary ``K``), so it is billed
+    alongside the element data (``ndim*8`` bytes per array) instead of riding
+    along for free.
 
     ``extra_egress_bytes`` folds in egress that has no backing ndarray --
     ``savez``/``savez_compressed`` use it for the archive's member-NAME bytes
@@ -118,9 +125,14 @@ def _bill_save_egress(
     by ``load`` just like array data, so they must count toward the same
     size-proportional bill instead of riding along for free.
     """
+    shape_header_bytes = sum(a.ndim * 8 for a in arrays)
     require_budget().deduct(
         op_name,
-        flop_cost=4 * max(sum(int(a.size) for a in arrays) + extra_egress_bytes, 1),
+        flop_cost=4
+        * max(
+            sum(int(a.size) for a in arrays) + shape_header_bytes + extra_egress_bytes,
+            1,
+        ),
         subscripts=None,
         shapes=tuple(a.shape for a in arrays),
         dtypes=tuple(a.dtype for a in arrays),
@@ -129,7 +141,7 @@ def _bill_save_egress(
 
 @_counted_wrapper
 def save(file: str, arr: Any) -> None:
-    """Save a single array to .npy. Cost: 4*numel(arr)."""
+    """Save a single array to .npy. Cost: 4*(numel + ndim*8)."""
     base = _np.asarray(_to_base_ndarray(arr))
     _check_dtype(base, where="save")
     _bill_save_egress("save", [base])
@@ -190,7 +202,14 @@ def savez(file: str, **arrays: Any) -> None:
     """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
-    _bill_save_egress("savez", billed, extra_egress_bytes=_savez_name_bytes(converted))
+    name_bytes = _savez_name_bytes(converted)
+    # The server ingests the concatenated member-names as one 1-D uint8 blob;
+    # its 8-byte shape header (ndim*8) must be billed in-process too so the two
+    # paths stay byte-identical. Present whenever there is at least one name.
+    names_shape_header = 8 if name_bytes > 0 else 0
+    _bill_save_egress(
+        "savez", billed, extra_egress_bytes=name_bytes + names_shape_header
+    )
     _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
 
 
@@ -202,7 +221,14 @@ def savez_compressed(file: str, **arrays: Any) -> None:
     """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
+    name_bytes = _savez_name_bytes(converted)
+    # The server ingests the concatenated member-names as one 1-D uint8 blob;
+    # its 8-byte shape header (ndim*8) must be billed in-process too so the two
+    # paths stay byte-identical. Present whenever there is at least one name.
+    names_shape_header = 8 if name_bytes > 0 else 0
     _bill_save_egress(
-        "savez_compressed", billed, extra_egress_bytes=_savez_name_bytes(converted)
+        "savez_compressed",
+        billed,
+        extra_egress_bytes=name_bytes + names_shape_header,
     )
     _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]
