@@ -505,18 +505,23 @@ class RequestHandler:
             if b"__slice__" in raw_key:
                 parts = raw_key[b"__slice__"]
                 return slice(*[None if p is None else int(p) for p in parts])
+            # Tagged list: a genuine Python list key (fancy indexing, e.g.
+            # x[[0, 1]]) -- decode to a list, never a tuple.
             if "__list__" in raw_key or b"__list__" in raw_key:
                 items = (
                     raw_key["__list__"]
                     if "__list__" in raw_key
                     else raw_key[b"__list__"]
                 )
-                # A Python list key = advanced (fancy) indexing along axis 0.
                 return [self._decode_index_key(item) for item in items]
         if isinstance(raw_key, list):
             # A bare wire-list is always an encoded tuple (multi-axis index);
             # fancy-index lists arrive marked as {"__list__": [...]} above.
             return tuple(self._decode_index_key(item) for item in raw_key)
+        # bool before int: bool subclasses int, and coercing a boolean-mask
+        # element True -> 1 would turn mask indexing into integer indexing.
+        if isinstance(raw_key, bool):
+            return raw_key
         if isinstance(raw_key, (int, float)):
             return int(raw_key)
         return raw_key
@@ -662,7 +667,7 @@ def _decode_index_key(raw_key):
     Supports:
     - int / float -> int
     - ``{"__slice__": [start, stop, step]}`` -> slice
-    - ``{"__list__": [...]}`` -> list (advanced/fancy indexing)
+    - ``{"__list__": [...]}`` -> list (fancy indexing, e.g. ``x[[0, 1]]``)
     - list of the above -> tuple (for multi-dimensional indexing)
     """
     if isinstance(raw_key, dict):
@@ -684,6 +689,10 @@ def _decode_index_key(raw_key):
         # A bare wire-list is always an encoded tuple (multi-axis index);
         # fancy-index lists arrive marked as {"__list__": [...]} above.
         return tuple(_decode_index_key(item) for item in raw_key)
+    # bool before int: bool subclasses int, and coercing a boolean-mask
+    # element True -> 1 would turn mask indexing into integer indexing.
+    if isinstance(raw_key, bool):
+        return raw_key
     if isinstance(raw_key, (int, float)):
         return int(raw_key)
     return raw_key

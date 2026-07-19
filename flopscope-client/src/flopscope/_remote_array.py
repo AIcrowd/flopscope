@@ -416,7 +416,9 @@ def _encode_index_key(key):
 
     Slices become ``{"__slice__": [start, stop, step]}``.
     Tuples become lists of encoded items.
-    Python lists become ``{'__list__': [...]}`` (advanced/fancy indexing).
+    Lists become ``{"__list__": [...]}`` -- tagged so the server can tell
+    fancy indexing ``x[[0, 1]]`` apart from element access ``x[0, 1]``
+    (a tuple key, which shares the bare-list wire encoding).
     RemoteArray -> ``{"__handle__": handle_id}`` (fancy indexing).
     RemoteScalar -> its raw value.
     Integers pass through as-is.
