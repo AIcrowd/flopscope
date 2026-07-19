@@ -154,13 +154,15 @@ A materializing copy or write (`concatenate`, `ones`, a scatter write) stays at 
 2. **Does it write a new buffer sequentially** — a materializing copy (`concatenate`,
    `tile`, `roll`), a constant fill that isn't the zero-page default (`ones`, `full`,
    `eye`'s diagonal), a scatter write at a *given* index (`put`, `putmask`,
-   `fill_diagonal`), or output-shaped selection (`select`, `where(cond, x, y)`,
-   `compress`, `extract`)? → **Charged at weight 1.0.** `flop_cost` is the count of
-   elements actually written (not the whole array when only part of it changes, e.g.
-   `eye`'s off-diagonal zeros are free).
+   `fill_diagonal`), or output-shaped selection (`select`, `compress`, `extract`)? →
+   **Charged at weight 1.0.** `flop_cost` is the count of elements actually written
+   (not the whole array when only part of it changes, e.g. `eye`'s off-diagonal zeros
+   are free).
 3. **Does it read via a *non-sequential* access pattern** — a computed-index gather
    (`take`, `take_along_axis`, `choose`), a comparison-order derivation (`sort`,
-   `unique`, `searchsorted`), or a random-reorder draw (`shuffle`, `permutation`,
+   `unique`, `searchsorted`), a per-element conditional select (`where(cond, x, y)`,
+   which dereferences a different source per output element and bills
+   `4 × numel(broadcast output)`), or a random-reorder draw (`shuffle`, `permutation`,
    `choice`)? → **Charged at weight 4.0** (see [Access tier](#access-tier-weight-40)).
 4. **Does it produce output values by doing floating-point arithmetic, *or* by
    comparing element values?** → **Charged.** `flop_cost` = standard-algorithm op
@@ -676,7 +678,9 @@ arcsinh, arccosh, arctanh, sinc, i0, power, angle, and their NumPy 2.x
 aliases (asin, acos, atan, asinh, acosh, atanh, atan2, pow).
 
 **Moderate binary tier (weight 16.0)**: arctan2/atan2, hypot, logaddexp,
-logaddexp2, floor_divide, mod/remainder, fmod, float_power.
+logaddexp2, floor_divide, mod/remainder, fmod, float_power. `float_power` always
+returns float64 — numpy's own promotion rule for that ufunc — so it bills at the
+float64 rate even when both operands are float32.
 
 **Basis**: DECLARED per-element FMA=2 convention and empirical calibration.
 
@@ -803,8 +807,8 @@ full FMA=2 cost. Source: `_pointwise.py` (op wrappers), `_einsum.py`
 |---|---|---|---|
 | `arange` | `2 × numel(output)` | DERIVED: `start + i×step` per element = 1 mul + 1 add (FMA=2) | `_array_ops.py`; numpy arraytypes.c.src |
 | `linspace` | `2 × numel(output)` (handles broadcast start/stop and `retstep=True`) | DERIVED: same affine model as arange | `_array_ops.py` |
-| `geomspace` | `numel(output)` (weight **16.0**) → billed `16 × numel(output)` | DERIVED: flop_cost = numel(output); transcendental weight 16.0 (log + exp path) | `_array_ops.py` |
-| `logspace` | `numel(output)` (weight **16.0**) → billed `16 × numel(output)` | DERIVED: same transcendental path as geomspace | `_array_ops.py` |
+| `geomspace` | `numel(output)` (weight **16.0**); output is float64 by default → billed `32 × numel(output)` (`16 ×` only with a 32-bit `dtype=`) | DERIVED: flop_cost = numel(output); transcendental weight 16.0 (log + exp path) | `_array_ops.py` |
+| `logspace` | `numel(output)` (weight **16.0**); output is float64 by default → billed `32 × numel(output)` (`16 ×` only with a 32-bit `dtype=`) | DERIVED: same transcendental path as geomspace | `_array_ops.py` |
 | `zeros`, `zeros_like`, `empty`, `empty_like` | 0 (allocation; the zero-page / uninitialized default — nothing is written) | DECLARED free: untouched allocation | `_array_ops.py` |
 | `ones`, `ones_like`, `full`, `full_like` | `numel(output)` | DECLARED: every cell is written a real, non-zero value | `_array_ops.py` |
 | `eye`, `identity` | diagonal length written (`max(0, min(N, M−k))` for `k≥0`, `max(0, min(N+k, M))` for `k<0`) | DECLARED: only the diagonal 1s are written; the off-diagonal zero background is free, same as `zeros` | `_array_ops.py` |
@@ -973,6 +977,10 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 | `polyint` | `m × n + m(m−1)/2` (order-aware; m passes each dividing n+j coefficients) | DERIVED | `_polynomial.py:polyint_cost` |
 | `roots` | `10n³`, `n = stripped companion dimension` (zero-leading/trailing coefficients stripped before companion matrix is built) | DERIVED: delegates to `eigvals_cost` on trimmed degree | `_polynomial.py:roots_cost` |
 
+`polyfit`, `polyder`, and `polyint` return float64 regardless of the input dtype, so
+their real bill is `2×` the `flop_cost` above; `polyval` preserves the input dtype and
+bills at its own rate.
+
 Source: `src/flopscope/_polynomial.py`.
 
 ---
@@ -1012,7 +1020,7 @@ Weight tiers:
 | `random.rand`, `random.random`, `random.random_sample`, `random.ranf` | `numel(output)` | 1.0 | DECLARED: 1 FLOP per uniform draw | `_cost_formulas.py` |
 | `random.sample` | `numel(output)` | 4.0 | DECLARED: same draw as `random_sample`, priced at the reorder/resample tier instead of the plain-draw tier (accepted policy divergence) | `_cost_formulas.py` |
 | `random.uniform` | `3 × numel(output)` | 1.0 | DERIVED: affine map `low + (high − low) × U` = 1 sub + 1 mul + 1 add per element (FMA=2, three ops) | `_cost_formulas.py` |
-| `random.randn`, `random.standard_normal`, `random.normal` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 from `default_weights.json` | `_cost_formulas.py` |
+| `random.randn`, `random.standard_normal`, `random.normal` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 from `default_weights.json`; draws default to float64 (see the preamble above), so the full bill is `32 × numel` unless a narrower `dtype=` is passed | `_cost_formulas.py` |
 | `random.randint`, `random.integers` | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
 | `random.choice` (module-level; replace=True, p=None) | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
 | `random.choice` (module-level; replace=False, p=None) | `n` (Fisher-Yates, matches `permutation`) | 1.0 | DECLARED | `_cost_formulas.py` |
@@ -1021,10 +1029,10 @@ Weight tiers:
 | `random.shuffle`, `random.permutation` (module-level) | `max(n, 1)`, `n = x.shape[0]` for array input or the int argument itself | 4.0 | DECLARED: in-place Fisher-Yates draws, dtype-neutral | `_cost_formulas.py` |
 | `Generator.permutation`, `Generator.shuffle`, `RandomState.permutation`, `RandomState.shuffle` | `max(shape[axis], 1)` (`axis` defaults to 0; `RandomState` has no `axis` kwarg) | 4.0 | DECLARED: Fisher-Yates draws | `_cost_formulas.py` |
 | `Generator.permuted` | cost from the input array's size along the permuted axis | 4.0 | DECLARED | `_cost_formulas.py` |
-| `random.exponential` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
-| `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` → billed `16 × numel` | 16.0 | DECLARED: transcendental weight 16.0 | `_cost_formulas.py` |
+| `random.exponential` | `numel(output)` | 16.0 | DECLARED: transcendental weight 16.0; float64 by default (see the preamble above) → `32 × numel` in practice | `_cost_formulas.py` |
+| `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` | 16.0 | DECLARED: transcendental weight 16.0; these draws resolve to int64 (rate 2.0, same as the float64 case above) → `32 × numel` in practice | `_cost_formulas.py` |
 | `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | 1.0 | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
-| `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` → `16 × numel` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions | `_cost_formulas.py` |
+| `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions; each draw resolves to its actual output dtype — float64 (rate 2.0) for the continuous members, int64 (rate 2.0) for the discrete `logseries`/`zipf` — so the full bill is `32 × numel` in practice | `_cost_formulas.py` |
 
 **Complex dtypes**: the distribution samplers produce **real-only** outputs, so a complex
 resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output
@@ -1042,7 +1050,10 @@ Source: `src/flopscope/numpy/random/_cost_formulas.py`.
 Stats ops are composite (weight 1.0; all per-element factors in `flop_cost`).
 The billed element count is the numel of the broadcast of the input with the
 distribution parameters — array-valued `loc`/`scale` (or `a`/`b`/`s`) enlarge
-the output beyond `x` and are charged accordingly.
+the output beyond `x` and are charged accordingly. Every `stats.*` kernel computes
+in float64 regardless of the input's own dtype, so the real bill is `2×` the
+per-element counts below even for a float32 input (e.g. `stats.uniform.pdf` on a
+10-element float32 array bills `20`, not `10`).
 
 | Op | flop_cost (per element) | basis |
 |---|---|---|
@@ -1112,6 +1123,13 @@ are not bin-search ops and stay at weight 1.0.
 | `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |
 | `trapezoid`, `trapz` | `4 × numel(y)` | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
 
+`histogram`, `histogram2d`, `histogramdd`, and `bincount` produce `int64` counts
+regardless of the input dtype, so the dtype rate adds a further `2×` on top of the
+formulas above (e.g. `histogram` with `n=100, bins=8` bills `2400`, not `1200`).
+`digitize` and `histogram_bin_edges` return the query's own index/edge dtype and do
+**not** carry this overlay. `interp` also always returns float64, so it too bills `2×`
+its `flop_cost` above regardless of the input dtype.
+
 Source: `src/flopscope/_counting_ops.py`, `src/flopscope/_array_ops.py`.
 
 ---
@@ -1143,12 +1161,15 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `gradient` | base: `sum_ax 2·S·(L−2)/L`; each coord-array axis adds a spacing surcharge (uniform: `+3(L−1)`; non-uniform: `+3S(L−2)/L + 10(L−2) + 3(L−1) + 4S/L`) | DERIVED | `_pointwise.py:gradient` |
 | `allclose` | `7·numel(broadcast) − 1` (6 FLOPs/elem tolerance core + numel−1 all-reduce) | DERIVED | `_counting_ops.py` |
 | `isclose` | `6·numel(broadcast)` (sub + 2·abs + mul + add + cmp per element) | DECLARED | `_pointwise.py` |
-| `trace` (numpy.trace) | `min(ax1, ax2) × n_traces` where `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied) | DERIVED | `_counting_ops.py:trace` |
+| `trace` (numpy.trace) | `min(shape[ax1], shape[ax2]) × n_traces` (diagonal length, floored at 1) where `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied) | DERIVED | `_counting_ops.py:trace` |
 | `correlate` | mode-aware: `full` = `2nm−n−m+1`; `valid` = `(2·min−1)·(max−min+1)`; `same` = exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:_correlate_cost` |
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |
 | `cov` | `2f²s + 2fs` (f = features, s = samples) | DERIVED: Gram term `f²` dot products of length `s` (2f²s) + centering pass `fs` elements × 2 FLOPs | `_pointwise.py:_cov_cost` |
-| `corrcoef` | `2f²s + 2fs + 2f² + f` | DERIVED: cov_cost + normalization (f² divides at weight 2.0 + f sqrts) | `_pointwise.py:_corrcoef_cost` |
+| `corrcoef` | `2f²s + 2fs + 2f² + f` | DERIVED: cov_cost + normalization (f² divides, 2 FLOPs each, + f sqrts) | `_pointwise.py:_corrcoef_cost` |
 | `unwrap` | `13 × numel(input)` | DERIVED: 13 charged one-FLOP passes (diff, sub×2, mod, add, cmp×3, bitwise-and, select×2, abs, cumsum); the 2 select passes (3-arg `where`) no longer discount to free now that 3-arg `where` itself bills, so all 13 passes are charged — prior value was 11 | `_unwrap.py:unwrap_cost` |
+
+`cov` and `corrcoef` compute in float64 regardless of the input dtype, so their real
+bill is `2×` the formulas above.
 
 ---
 
@@ -1304,7 +1325,7 @@ is **rejected with a clear error**. These three ops carry weight **1.0** with a 
 
 | Op | free path (`flop_cost = 0`) | charged / rejected path |
 |---|---|---|
-| `pad` | `constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` (`reflect_type='even'`) | stat modes `maximum`/`minimum`/`mean`/`median`: `Σᵢ stats_i·stat_len_i·cross_i` (lanes from the input cross-section); `linear_ramp` and `reflect_type='odd'`: `2·(numel_out − numel_in)`; **`mode=<callable>` raises** |
+| `pad` | — (no free path — every mode writes a fresh output buffer) | `numel(output)` base for **every** mode; movement modes (`constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` with `reflect_type='even'`) add nothing further on top of the base; `linear_ramp` and `reflect_type='odd'` add `(numel_out − numel_in)` on top of the base; stat modes `maximum`/`minimum`/`mean`/`median` add `Σᵢ stats_i·stat_len_i·cross_i` (lanes from the input cross-section) on top of the base; **`mode=<callable>` raises** |
 | `trim_zeros` | — | `numel(input)` (value scan for the nonzero boundary) |
 | `copyto` | — | `numel(dst)` (or popcount(`where`) when masked) — every write is priced, same-dtype or not |
 
@@ -1312,13 +1333,20 @@ For `pad` stat modes: `cross_i = numel_in // in_shape[i]`, `stat_len_i = min(sta
 in_shape[i])` (default = full axis), summed over padded axes only; a full-axis stat serves
 both sides (one reduction). `mean` adds one divide per stat output cell.
 
+Worked example (`a = arange(5, dtype=int32)`, `pad_width=2` ⇒ `numel_out=9`,
+`numel_in=5`): `constant`, `edge`, `wrap`, `empty`, `reflect`, and `symmetric` each
+bill **9** (the `numel_out` base, no surcharge); `linear_ramp` and `reflect_type='odd'`
+bill **13** (`9 + (9−5)`); `maximum` bills **14** (`9 + 5`); `mean` bills **15**
+(`9 + (5 + 1 divide)`).
+
 (`ravel_multi_index` — an index-math op with no free path — lives in the [Index
 generators](#index-generators) table, billed `numel(output)` and dtype-neutral.)
 
-**Complex dtypes**: the charged `pad` stat modes and `trim_zeros` bill factor 2 (value
-scan / reduction). `copyto` resolves its billed dtype the general way — `np.result_type`
-over its source and destination operands — see [Which dtype prices a
-call](#which-dtype-prices-a-call).
+**Complex dtypes**: `pad` bills factor 2 on every mode, including the movement modes —
+they now write the same `numel(output)` base as every other mode. The charged
+`trim_zeros` bills factor 2 too (value scan / reduction). `copyto` resolves its billed
+dtype the general way — `np.result_type` over its source and destination operands —
+see [Which dtype prices a call](#which-dtype-prices-a-call).
 
 ---
 
@@ -1369,7 +1397,7 @@ participant could smuggle data through many tiny arrays given very large names (
 archive member name can be tens of thousands of bytes) instead of through the array
 values, at a near-zero, name-independent cost.
 
-Source: `src/flopscope/_array_ops.py`.
+Source: `src/flopscope/_io.py`.
 
 ---
 
