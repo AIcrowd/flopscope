@@ -16,7 +16,18 @@ writes to the archive, ingests that blob to get a server handle (mirroring
 billed via `_bill_save_on_server` -- so the server sums its byte length into
 the egress cost exactly like a named array. Skipping this let a participant
 round-trip unlimited data through `__meta__` for a flat, size-independent
-cost."""
+cost.
+
+`savez`/`savez_compressed`'s archive MEMBER NAMES (the kwargs keys, plus
+"__meta__" when a meta block is present) are billed the same way too: those
+strings are written into the .npz archive and read back verbatim by `load`,
+exactly like array data, and a member name can be tens of thousands of bytes
+long. `_write_npz` concatenates them into one blob, ingests it to get a
+server handle, and includes it in the handles billed via
+`_bill_save_on_server` -- mirroring the root package's `_savez_name_bytes`.
+Skipping this let a participant smuggle data through many tiny arrays given
+huge names instead of through the array values, at a near-zero,
+size-independent cost."""
 
 from __future__ import annotations
 
@@ -133,6 +144,15 @@ def _write_npz(file: str, arrays: dict, compressed: bool, op_name: str) -> None:
         # which would misprice a uint8 byte blob.
         meta_blob = json.dumps(meta).encode("utf-8")  # raises on non-JSON-safe values
         billed_values.append(_ingest("uint8", (len(meta_blob),), meta_blob))
+    # Archive MEMBER NAMES are written to disk and read back verbatim by
+    # `load`, exactly like array data (see module docstring) -- concatenate
+    # them into one blob and ingest it the same way as the __meta__ blob
+    # above, so the server sums their byte length into the egress cost too.
+    # Mirrors the root package's `flopscope._io._savez_name_bytes`.
+    member_names = list(arrays.keys()) + ([_META_KEY] if meta is not None else [])
+    names_blob = "".join(member_names).encode("utf-8")
+    if names_blob:
+        billed_values.append(_ingest("uint8", (len(names_blob),), names_blob))
     _bill_save_on_server(op_name, billed_values)
     triples = {}
     for key, val in arrays.items():

@@ -153,22 +153,25 @@ def test_save_bills_egress_on_server(tmp_path):
 
 
 def test_savez_bills_sum_of_egress_on_server(tmp_path):
-    """savez bills 4*(n1+n2+meta_len) -- the sum across every array in the
-    call PLUS the __meta__ block's serialized byte length. __meta__ is
-    ingested to its own server handle and billed exactly like a named array
-    (see _write_npz) -- excluding it was a budget-bypass, see
-    test_savez_large_meta_bills_proportionally_on_server below."""
+    """savez bills 4*(n1+n2+meta_len+name_bytes) -- the sum across every
+    array in the call PLUS the __meta__ block's serialized byte length PLUS
+    the archive member names' own byte length ("a", "b", "__meta__").
+    __meta__ and the names blob are each ingested to their own server handle
+    and billed exactly like a named array (see _write_npz) -- excluding them
+    was a budget-bypass, see test_savez_large_meta_bills_proportionally_on_server
+    and test_savez_name_channel_bills_proportionally_on_server below."""
     import flopscope as we
 
     a_vals = [float(i) for i in range(300)]
     b_vals = [float(i) for i in range(200)]
     meta = {"k": 1}
     meta_len = len(json.dumps(meta).encode("utf-8"))
+    name_bytes = len("a") + len("b") + len("__meta__")
     with we.BudgetContext(flop_budget=1_000_000) as budget:
         a = we.array(a_vals, dtype="float32")
         b = we.array(b_vals, dtype="float32")
         we.savez(str(tmp_path / "wz.npz"), a=a, b=b, __meta__=meta)
-    assert _flops_used(budget) == 4 * (300 + 200 + meta_len)
+    assert _flops_used(budget) == 4 * (300 + 200 + meta_len + name_bytes)
 
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "wz.npz"))
@@ -189,12 +192,13 @@ def test_savez_large_meta_bills_proportionally_on_server(tmp_path):
 
     payload = {"payload": [0.0] * 100_000}
     meta_len = len(json.dumps(payload).encode("utf-8"))
+    name_bytes = len("a") + len("__meta__")
     a_vals = [float(i) for i in range(10)]
     with we.BudgetContext(flop_budget=10_000_000) as budget:
         a = we.array(a_vals, dtype="float32")
         we.savez(str(tmp_path / "exploit.npz"), a=a, __meta__=payload)
     total = _flops_used(budget)
-    assert total == 4 * (10 + meta_len)
+    assert total == 4 * (10 + meta_len + name_bytes)
     array_only_cost = 4 * 10
     assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
     assert total != 4  # the pre-fix floor-of-1 exploit value
@@ -205,17 +209,51 @@ def test_savez_large_meta_bills_proportionally_on_server(tmp_path):
         assert out["__meta__"] == payload
 
 
+def test_savez_name_channel_bills_proportionally_on_server(tmp_path):
+    """Exploit regression (budget bypass), NAME channel, client+server path:
+    before this fix, `_write_npz` never billed the archive's MEMBER NAMES
+    (savez's kwargs keys) -- only array VALUES were billed (4*numel each) --
+    so a participant could smuggle data through many tiny 1-element arrays
+    given huge names for near-zero cost (the root-package pin test exercises
+    the full confirmed exploit shape: 200 one-element arrays with
+    60,000-char names smuggling ~12MB for a pre-fix bill of 4*200=800 FLOPs;
+    this test uses a smaller N to keep the live socket round-trips fast
+    while still proving the same proportional-billing property). Member
+    names must now bill 4*sum(len(name bytes)) via their own server handle
+    (see _write_npz), dominating the tiny arrays' own cost."""
+    import flopscope as we
+
+    n_arrays = 20
+    name_len = 5_000
+    names = [f"{i:04d}" + "x" * (name_len - 4) for i in range(n_arrays)]
+    assert all(len(n) == name_len for n in names)
+    name_bytes = sum(len(n.encode("utf-8")) for n in names)
+    with we.BudgetContext(flop_budget=10_000_000) as budget:
+        kwargs = {name: we.array([1.0], dtype="float32") for name in names}
+        we.savez(str(tmp_path / "smuggle.npz"), **kwargs)
+    total = _flops_used(budget)
+    array_only_cost = 4 * n_arrays  # the pre-fix exploit value (80 FLOPs)
+    assert total == 4 * (n_arrays + name_bytes)
+    assert total > 1000 * array_only_cost  # dominated by names, not array values
+    assert total != array_only_cost  # the pre-fix name-channel exploit value
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        out = we.load(str(tmp_path / "smuggle.npz"))
+        assert sorted(out.keys()) == sorted(names)
+
+
 def test_savez_compressed_bills_sum_of_egress_on_server(tmp_path):
     """savez_compressed shares savez's exact billing formula."""
     import flopscope as we
 
     a_vals = [float(i) for i in range(300)]
     b_vals = [float(i) for i in range(200)]
+    name_bytes = len("a") + len("b")
     with we.BudgetContext(flop_budget=1_000_000) as budget:
         a = we.array(a_vals, dtype="float32")
         b = we.array(b_vals, dtype="float32")
         we.savez_compressed(str(tmp_path / "wzc.npz"), a=a, b=b)
-    assert _flops_used(budget) == 4 * (300 + 200)
+    assert _flops_used(budget) == 4 * (300 + 200 + name_bytes)
 
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "wzc.npz"))
