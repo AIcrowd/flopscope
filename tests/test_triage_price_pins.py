@@ -661,22 +661,25 @@ def test_io_savez_bills_sum_of_saved_arrays_including_meta(tmp_path):
     like any other array (see ``_prepare``), so it bills the same 4*numel
     egress cost -- excluding it was a budget-bypass (a participant could
     round-trip unlimited data through __meta__ for a flat, size-independent
-    cost); see test_io_savez_large_meta_bills_proportionally_not_flat below."""
+    cost); see test_io_savez_large_meta_bills_proportionally_not_flat below.
+    The archive's MEMBER NAMES ("a", "b", and "__meta__") are billed too --
+    see test_io_savez_name_channel_bills_proportionally_to_name_bytes below."""
     a = np.arange(250, dtype=np.float32)
     b = np.arange(150, dtype=np.float32)
     meta = {"k": 1}
     meta_len = len(json.dumps(meta).encode("utf-8"))
+    name_bytes = len("a") + len("b") + len("__meta__")
     fz = str(tmp_path / "wz.npz")
     assert billed(
         lambda: fnp.savez(fz, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta)
-    ) == 4 * (400 + meta_len)
-    # savez_compressed shares savez's exact formula (4*sum(numel), meta included).
+    ) == 4 * (400 + meta_len + name_bytes)
+    # savez_compressed shares savez's exact formula (4*sum(numel), meta+names included).
     fzc = str(tmp_path / "wzc.npz")
     assert billed(
         lambda: fnp.savez_compressed(
             fzc, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta
         )
-    ) == 4 * (400 + meta_len)
+    ) == 4 * (400 + meta_len + name_bytes)
 
 
 def test_io_savez_large_meta_bills_proportionally_not_flat(tmp_path):
@@ -689,12 +692,38 @@ def test_io_savez_large_meta_bills_proportionally_not_flat(tmp_path):
     payload = {"payload": [0.0] * 100_000}
     meta_len = len(json.dumps(payload).encode("utf-8"))
     small = np.arange(10, dtype=np.float32)
+    name_bytes = len("a") + len("__meta__")
     f = str(tmp_path / "exploit.npz")
     total = billed(lambda: fnp.savez(f, a=fnp.asarray(small), __meta__=payload))
-    assert total == 4 * (10 + meta_len)
+    assert total == 4 * (10 + meta_len + name_bytes)
     array_only_cost = 4 * 10
     assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
     assert total != 4  # the pre-fix floor-of-1 exploit value
+
+
+def test_io_savez_name_channel_bills_proportionally_to_name_bytes(tmp_path):
+    """Exploit regression (budget bypass), NAME channel: before this fix, the
+    archive's MEMBER NAMES (savez's kwargs keys) were written to the archive
+    and recovered verbatim by ``load``, but never counted toward billing --
+    only array VALUES were billed (4*numel each). A participant could
+    smuggle megabytes of data through many tiny 1-element arrays given huge
+    names (a .npz zip member name can run to tens of thousands of bytes) for
+    near-zero cost -- e.g. 200 one-element arrays with 60,000-char names
+    smuggle ~12MB of recoverable data while the array values alone bill only
+    4*200=800 FLOPs. Member names must now bill 4*sum(len(name bytes)),
+    dominating the tiny arrays' own cost, not ride along for free."""
+    n_arrays = 200
+    name_len = 60_000
+    names = [f"{i:06d}" + "x" * (name_len - 6) for i in range(n_arrays)]
+    assert all(len(n) == name_len for n in names)
+    raw = {name: np.array([1.0], dtype=np.float32) for name in names}
+    name_bytes = sum(len(n.encode("utf-8")) for n in names)
+    f = str(tmp_path / "smuggle.npz")
+    total = billed(lambda: fnp.savez(f, **{k: fnp.asarray(v) for k, v in raw.items()}))
+    array_only_cost = 4 * n_arrays  # the pre-fix exploit value (800 FLOPs)
+    assert total == 4 * (n_arrays + name_bytes)
+    assert total > 1000 * array_only_cost  # dominated by names, not array values
+    assert total != array_only_cost  # the pre-fix name-channel exploit value
 
 
 # ---------------------------------------------------------------------------

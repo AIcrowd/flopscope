@@ -21,8 +21,9 @@ Your *class* always lives in *your code*, never in the file. flopscope reads the
 
 Loading is **free**: `fnp.load` charges 0 FLOPs regardless of file size. Saving is
 not — `fnp.save`, `fnp.savez`, and `fnp.savez_compressed` each charge 4 FLOPs per
-element written, including the bytes of a serialized `__meta__` block, so there is
-no free way to smuggle data through it.
+element written, plus 4 FLOPs per byte of the array names themselves and of a
+serialized `__meta__` block, so there is no free way to smuggle data through any of
+those channels.
 
 ## Saving and loading arrays
 

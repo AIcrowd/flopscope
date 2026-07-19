@@ -1329,7 +1329,7 @@ input data), so ingesting them is a free, view-like operation, the same treatmen
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
 | `save` | `4 × numel(array)` | 1.0 | DECLARED: I/O write, priced per element serialized |
-| `savez`, `savez_compressed` | `4 × Σ numel(array_i)` (summed over every array passed, plus the byte length of a `__meta__` blob when present) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
+| `savez`, `savez_compressed` | `4 × (Σ numel(array_i) + Σ len(member name bytes))` (summed over every array passed, plus the byte length of a `__meta__` blob when present, plus the UTF-8 byte length of every archive member name including `"__meta__"`) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
 | `load` | `0` | — | DECLARED free: ingesting previously-computed values is not new compute |
 | `from_dlpack` | `0` | — | DECLARED free: zero-copy ingest from another array library |
 
@@ -1347,6 +1347,14 @@ bills the same per-byte egress cost (`4 × len(json-encoded blob)`, at the `uint
 rate) and counts toward the `Σ numel(array_i)` sum above. It is not a free side channel:
 billing it separately from the named arrays would let a participant round-trip arbitrary
 data through `__meta__` at a flat, size-independent cost.
+
+The archive's MEMBER NAMES — the `savez`/`savez_compressed` keyword-argument names
+themselves, plus the literal `"__meta__"` member when a meta block is present — are
+written into the archive and read back verbatim by `load`, exactly like array data, so
+their UTF-8 byte length is billed too, folded into the same total above. Without this, a
+participant could smuggle data through many tiny arrays given very large names (an
+archive member name can be tens of thousands of bytes) instead of through the array
+values, at a near-zero, name-independent cost.
 
 Source: `src/flopscope/_array_ops.py`.
 

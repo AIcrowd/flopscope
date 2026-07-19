@@ -11,6 +11,16 @@ is written to the archive as a uint8 array like any other member (see
 let a participant round-trip unlimited data through `__meta__` for a flat,
 size-independent cost).
 
+`savez`/`savez_compressed` ALSO bill the archive's MEMBER NAMES -- the keyword
+argument names themselves, plus the literal `"__meta__"` name when a meta
+block is present. Those strings are written into the .npz archive and read
+back verbatim by `load` at 0 FLOPs, exactly like array data, but a `.npz`
+member name can be tens of thousands of bytes long -- so without billing them,
+a participant could smuggle megabytes of data through many tiny arrays given
+huge names instead of through the array values, at a near-zero, size-independent
+cost. Folded into the same 4*size formula via `extra_egress_bytes` (see
+`_bill_save_egress`).
+
 `_bill_save_egress` is the single-sourced egress-billing formula: the
 in-process wrappers below call it directly, and the flopscope-server request
 handler (``flopscope_server._request_handler._handle_save``) imports and
@@ -89,17 +99,28 @@ def load(file: str) -> Any:
     return _wrap(obj)
 
 
-def _bill_save_egress(op_name: str, arrays: Sequence[_np.ndarray]) -> None:
+def _bill_save_egress(
+    op_name: str,
+    arrays: Sequence[_np.ndarray],
+    *,
+    extra_egress_bytes: int = 0,
+) -> None:
     """Deduct the data-egress cost of writing *arrays* to disk: 4*sum(numel).
 
     Single-sourced so the server-side billing round-trip
     (``flopscope_server._request_handler._handle_save``) charges exactly the
     same formula as the in-process ``save``/``savez``/``savez_compressed``
     wrappers below -- an empty ``arrays`` sequence still floors at 1.
+
+    ``extra_egress_bytes`` folds in egress that has no backing ndarray --
+    ``savez``/``savez_compressed`` use it for the archive's member-NAME bytes
+    (see module docstring): those strings are written to disk and read back
+    by ``load`` just like array data, so they must count toward the same
+    size-proportional bill instead of riding along for free.
     """
     require_budget().deduct(
         op_name,
-        flop_cost=4 * max(sum(int(a.size) for a in arrays), 1),
+        flop_cost=4 * max(sum(int(a.size) for a in arrays) + extra_egress_bytes, 1),
         subscripts=None,
         shapes=tuple(a.shape for a in arrays),
         dtypes=tuple(a.dtype for a in arrays),
@@ -146,15 +167,30 @@ def _savez_billed_arrays(converted: dict[str, _np.ndarray]) -> list[_np.ndarray]
     return list(converted.values())
 
 
+def _savez_name_bytes(converted: dict[str, _np.ndarray]) -> int:
+    """Total UTF-8 byte length of every archive member NAME in *converted*
+    (the savez kwargs keys, plus "__meta__" when a meta blob is present).
+
+    Member names are written into the .npz archive and read back verbatim by
+    `load` at 0 FLOPs, exactly like array data -- but a `.npz` member name can
+    be tens of thousands of bytes long, so without billing them a participant
+    could smuggle data through many tiny arrays given huge names instead of
+    through the array values, at a near-zero, size-independent cost.
+    """
+    return sum(len(key.encode("utf-8")) for key in converted)
+
+
 @_counted_wrapper
 def savez(file: str, **arrays: Any) -> None:
     """Save multiple named arrays (+ optional __meta__ dict) to .npz.
 
-    Cost: 4*sum(numel), including any __meta__ blob's serialized byte length.
+    Cost: 4*(sum(numel) + sum(len(member name bytes))), including any
+    __meta__ blob's serialized byte length and the "__meta__" member name
+    itself when present.
     """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
-    _bill_save_egress("savez", billed)
+    _bill_save_egress("savez", billed, extra_egress_bytes=_savez_name_bytes(converted))
     _call_numpy(_np.savez, file, **converted)  # type: ignore[arg-type]
 
 
@@ -162,9 +198,11 @@ def savez(file: str, **arrays: Any) -> None:
 def savez_compressed(file: str, **arrays: Any) -> None:
     """Save multiple named arrays (+ optional __meta__ dict) to compressed .npz.
 
-    Cost: 4*sum(numel), including any __meta__ blob's serialized byte length.
+    Cost: 4*(sum(numel) + sum(len(member name bytes))).
     """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
-    _bill_save_egress("savez_compressed", billed)
+    _bill_save_egress(
+        "savez_compressed", billed, extra_egress_bytes=_savez_name_bytes(converted)
+    )
     _call_numpy(_np.savez_compressed, file, **converted)  # type: ignore[arg-type]
