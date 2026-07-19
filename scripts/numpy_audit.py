@@ -347,6 +347,13 @@ def load_registry() -> tuple[dict, dict]:
         return {}, {}
 
 
+# Registry keys implemented as syntax rather than a module attribute — e.g.
+# ``getitem`` bills ``arr[key]`` via ``FlopscopeArray.__getitem__``, so
+# ``getattr(flopscope.numpy, "getitem")`` raises even though it is implemented.
+# Mirrors ``scripts/generate_api_docs.py``'s ``METHOD_SURFACE_OPS``.
+_METHOD_SURFACE_OPS = {"getitem"}
+
+
 def compare(
     discovered: dict[str, dict],
     registry: dict,
@@ -367,16 +374,34 @@ def compare(
         - ``registered_not_implemented`` — in registry but not importable
         - ``unclassified`` — discovered but not in registry at all
         - ``blacklisted`` — in registry with category 'blacklisted'
-        - ``stale`` — in registry but not discoverable in numpy
+        - ``stale`` — registered, absent from numpy, and not implemented
+        - ``flopscope_native`` — registered + implemented but outside numpy's
+          own surface (so never "discovered"): scipy-stats mirrors (``stats.*``),
+          flopscope extensions like the symmetric API, and method-surface keys
+          like ``getitem``. NOT stale — these are implemented on purpose.
     """
-    # Determine which registered functions are actually importable
+    # Determine which registered functions are actually importable. flopscope's
+    # numpy-compatible surface lives under ``flopscope.numpy`` (e.g.
+    # ``flopscope.numpy.sort``), the stats surface under ``flopscope.stats``,
+    # and a few native ops (the symmetric API, registry ``module ==
+    # "flopscope"``) at the top-level ``flopscope`` namespace.
     import flopscope as we
+    import flopscope.numpy as fnp
+    import flopscope.stats as fstats
 
     implemented_names = set()
     for name in registry:
-        parts = name.split(".")
+        if name in _METHOD_SURFACE_OPS:
+            implemented_names.add(name)
+            continue
+        if name.startswith("stats."):
+            root, parts = fstats, name[len("stats.") :].split(".")
+        elif registry[name].get("module") == "flopscope":
+            root, parts = we, name.split(".")
+        else:
+            root, parts = fnp, name.split(".")
         try:
-            obj = we
+            obj = root
             for part in parts:
                 obj = getattr(obj, part)
             implemented_names.add(name)
@@ -389,10 +414,10 @@ def compare(
         "unclassified": [],
         "blacklisted": [],
         "stale": [],
+        "flopscope_native": [],
     }
 
     for name in sorted(discovered):
-        info = discovered[name]
         if name in registry:
             entry = registry[name]
             if entry["category"] == "blacklisted":
@@ -404,8 +429,20 @@ def compare(
         else:
             result["unclassified"].append(name)
 
+    # Registry ops with no numpy counterpart: distinguish flopscope-native
+    # extensions / method-surface keys (implemented on purpose, not in numpy)
+    # from genuinely stale entries (registered but neither in numpy nor
+    # implemented). Blacklisted ops belong in their own bucket regardless.
     for name in sorted(registry):
-        if name not in discovered:
+        if name in discovered:
+            continue
+        entry = registry[name]
+        if entry.get("category") == "blacklisted":
+            if name not in result["blacklisted"]:
+                result["blacklisted"].append(name)
+        elif name in implemented_names:
+            result["flopscope_native"].append(name)
+        else:
             result["stale"].append(name)
 
     return result
@@ -447,6 +484,7 @@ def _category_color(category: str) -> str:
         "blacklisted": "dim",
         "stale": "red",
         "registered_not_implemented": "cyan",
+        "flopscope_native": "blue",
     }.get(category, "white")
 
 
