@@ -282,14 +282,38 @@ import pathlib
 import re
 
 import flopscope._array_ops as _array_ops_mod
+import flopscope._counting_ops as _counting_ops_mod
+import flopscope._sorting_ops as _sorting_ops_mod
+import flopscope._window as _window_mod
+
+# Every module that carries counted_custom/free attach_docstring() calls.
+# _array_ops.py is the largest and original home of the label guard; the
+# repricing pass added counted_custom labels to these sibling modules too
+# (sort/set/histogram ops, window functions, counting ops), so a mislabel in
+# any of them must be caught the same way.
+_LABEL_GUARD_MODULES = (
+    _array_ops_mod,
+    _counting_ops_mod,
+    _sorting_ops_mod,
+    _window_mod,
+)
+
+
+def _label_guard_source() -> str:
+    chunks = []
+    for m in _LABEL_GUARD_MODULES:
+        assert m.__file__ is not None, f"{m.__name__} has no __file__"
+        chunks.append(pathlib.Path(m.__file__).read_text())
+    return "\n".join(chunks)
 
 
 def test_free_labels_match_actual_weight():
-    """Every op labeled "free"/"0 FLOPs" in _array_ops.py must truly bill 0
-    (weight 0 under production weights). Flags charged ops mislabeled "free"."""
+    """Every op labeled "free"/"0 FLOPs" across the label-guard modules must
+    truly bill 0 (weight 0 under production weights). Flags charged ops
+    mislabeled "free"."""
     load_weights()
     try:
-        src = pathlib.Path(_array_ops_mod.__file__).read_text()
+        src = _label_guard_source()
         pattern = re.compile(
             r'attach_docstring\(\s*(\w+)\s*,[^,]+,\s*"free"\s*,\s*"([^"]*)"\s*\)'
         )
@@ -307,12 +331,12 @@ def test_free_labels_match_actual_weight():
 
 
 def test_counted_custom_labels_match_actual_weight():
-    """Every op labeled "counted_custom" in _array_ops.py must have weight != 0
-    (free ops mislabeled as counted would falsely charge budget). Reverse of
-    test_free_labels_match_actual_weight."""
+    """Every op labeled "counted_custom" across the label-guard modules must
+    have weight != 0 (free ops mislabeled as counted would falsely charge
+    budget). Reverse of test_free_labels_match_actual_weight."""
     load_weights()
     try:
-        src = pathlib.Path(_array_ops_mod.__file__).read_text()
+        src = _label_guard_source()
         pattern = re.compile(
             r'attach_docstring\(\s*(\w+)\s*,[^,]+,\s*"counted_custom"\s*,\s*"([^"]*)"\s*\)'
         )

@@ -190,7 +190,7 @@ Weight 0 is now a narrow band — a new buffer is never allocated, or it is allo
 but nothing is written into it:
 
 1. **Views / metadata** — operations that return a view of existing memory or inspect
-   metadata without touching element values: `flatten`, `transpose`, `swapaxes`,
+   metadata without touching element values: `transpose`, `swapaxes`,
    `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
    `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `astype` (both directions,
    including value-changing casts — see below), `asarray`, `asfortranarray`,
@@ -201,11 +201,13 @@ but nothing is written into it:
    `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
    (`ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`,
    `ctypes`, `strides`, `T`, `isscalar`, `isfortran`).
-   **`reshape`, `ravel`, `copy`, and `require` do *not* belong here** — flopscope bills
-   them `numel(input)` at weight 1.0 unconditionally, even on the (common) call
-   pattern where NumPy itself returns a view. Billing the cautious, always-charged
-   price avoids a participant relying on a layout coincidence (contiguity, stride
-   pattern) to get a real copy for free.
+   **`reshape`, `ravel`, `copy`, `flatten`, and `require` do *not* belong here** —
+   flopscope bills them `numel(input)` at weight 1.0 unconditionally, even on the
+   (common) call pattern where NumPy itself returns a view. Billing the cautious,
+   always-charged price avoids a participant relying on a layout coincidence
+   (contiguity, stride pattern) to get a real copy for free. `flatten` is not even a
+   coincidence: `ndarray.flatten` is documented by NumPy to always allocate a new
+   buffer, never a view.
 2. **All-zero / uninitialized allocation** — a new buffer whose contents are the
    platform zero-page default, so nothing is actually written: `zeros`, `zeros_like`,
    `empty`, `empty_like`. Any *other* constant fill (`ones`, `full`, `eye`'s diagonal,
@@ -946,7 +948,7 @@ constant is the standard textbook estimate.
 | `fft.ihfft` | `5 × (n/2) × ⌈log₂ n⌉` | DERIVED: same `hfft_cost(n)` formula |
 | `fft.fftfreq` | `n` (index grid scaled by `1/(n*d)` — one divide per output element) | DECLARED: `n` divides |
 | `fft.rfftfreq` | `n//2 + 1` (real-spectrum grid has `n//2 + 1` elements) | DECLARED: `n//2 + 1` divides |
-| `fft.fftshift`, `fft.ifftshift` | 0 | DECLARED free/metadata |
+| `fft.fftshift`, `fft.ifftshift` | `numel(output)` | DERIVED: `numpy.roll`-based data-movement reindex, billed at weight 1.0 like a materializing copy (not part of the FFT priced-in family) — see [Copy and gather](#copy-and-gather) |
 
 **Complex dtypes**: `complex_factor` is **1** (priced in) — `5N·log₂N` already counts the
 complex transform's real FLOPs (10 per radix-2 butterfly), so a complex128 transform bills
@@ -1146,7 +1148,7 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |
 | `cov` | `2f²s + 2fs` (f = features, s = samples) | DERIVED: Gram term `f²` dot products of length `s` (2f²s) + centering pass `fs` elements × 2 FLOPs | `_pointwise.py:_cov_cost` |
 | `corrcoef` | `2f²s + 2fs + 2f² + f` | DERIVED: cov_cost + normalization (f² divides at weight 2.0 + f sqrts) | `_pointwise.py:_corrcoef_cost` |
-| `unwrap` | `11 × numel(input)` | DERIVED: 11 charged passes (diff, mod, cmp×2, bitwise, sub, abs, cmp, cumsum); 2 select passes (steps 8/12) are 3-arg where = free; prior value was 13 | `_unwrap.py:unwrap_cost` |
+| `unwrap` | `13 × numel(input)` | DERIVED: 13 charged one-FLOP passes (diff, sub×2, mod, add, cmp×3, bitwise-and, select×2, abs, cumsum); the 2 select passes (3-arg `where`) no longer discount to free now that 3-arg `where` itself bills, so all 13 passes are charged — prior value was 11 | `_unwrap.py:unwrap_cost` |
 
 ---
 
@@ -1172,8 +1174,10 @@ weight entry is inert by construction. `reshape`, `ravel`, `copy`, and `require`
 billed `numel(input)` regardless of whether NumPy itself returns a view or a copy for
 that call — see [Views and metadata](#views-and-metadata-weight-00) for why the
 cautious, always-charged price was chosen over trying to detect the view case.
-`fft.fftshift`/`fft.ifftshift` are `numpy.roll` under the hood — a data-movement
-reindex, not part of the FFT priced-in family (see [FFT](#fft)).
+`flatten` (the ndarray method — there is no free-standing `fnp.flatten` function) is
+always a genuine copy, never a view, and is billed the same `numel(input)` under the
+`copy` op name. `fft.fftshift`/`fft.ifftshift` are `numpy.roll` under the hood — a
+data-movement reindex, not part of the FFT priced-in family (see [FFT](#fft)).
 
 **Triangular / diagonal writes (weight 1.0)** — bill only the cells that survive, not
 the whole array:
@@ -1396,7 +1400,7 @@ refinements — this entry is the family-table lookup, not a restatement of the 
 Weight 0 now covers two sub-families:
 
 - **Views / metadata** — no new buffer, or a read-only reinterpretation of an
-  existing one: `flatten`, `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
+  existing one: `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
   `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`, `atleast_1d`/`atleast_2d`/
   `atleast_3d`, `broadcast_to`, `astype` (free in both directions — a representation
   change, not a value change), `asarray`, `asfortranarray`, `ascontiguousarray`,
@@ -1412,7 +1416,7 @@ Weight 0 now covers two sub-families:
   `empty_like`.
 
 **Everything else that used to live in this family now writes real memory and is
-charged.** `reshape`/`ravel`/`copy`/`require`, every materializing-copy op
+charged.** `reshape`/`ravel`/`copy`/`flatten`/`require`, every materializing-copy op
 (`concatenate`/`stack`/`tile`/…), and `fft.fftshift`/`fft.ifftshift` are weight 1.0;
 `take`/`take_along_axis`/`choose` (gather) are weight 4.0; `put`/`putmask`/`place`/
 `compress`/`extract`/`select`/3-arg `where`/`fill_diagonal` (scatter/select) are
