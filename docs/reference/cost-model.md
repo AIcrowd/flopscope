@@ -1329,7 +1329,7 @@ input data), so ingesting them is a free, view-like operation, the same treatmen
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
 | `save` | `4 × numel(array)` | 1.0 | DECLARED: I/O write, priced per element serialized |
-| `savez`, `savez_compressed` | `4 × Σ numel(array_i)` (summed over every array passed, `__meta__` excluded) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
+| `savez`, `savez_compressed` | `4 × Σ numel(array_i)` (summed over every array passed, plus the byte length of a `__meta__` blob when present) | 1.0 | DECLARED: same per-element I/O price as `save`, one archive |
 | `load` | `0` | — | DECLARED free: ingesting previously-computed values is not new compute |
 | `from_dlpack` | `0` | — | DECLARED free: zero-copy ingest from another array library |
 
@@ -1340,6 +1340,13 @@ float32 (`4 × numel × 2.0 × 1.0`), not a fixed byte size. `load` and `from_dl
 no cost path in code and are unconditionally free; `save`/`savez`/`savez_compressed`
 are the charged member of this family — writing an array to disk is metered, reading
 one back is not.
+
+The optional `__meta__` dict `savez`/`savez_compressed` accept is JSON-serialized and
+written to the archive as a `uint8` byte array, exactly like any named array — so it
+bills the same per-byte egress cost (`4 × len(json-encoded blob)`, at the `uint8` dtype
+rate) and counts toward the `Σ numel(array_i)` sum above. It is not a free side channel:
+billing it separately from the named arrays would let a participant round-trip arbitrary
+data through `__meta__` at a flat, size-independent cost.
 
 Source: `src/flopscope/_array_ops.py`.
 

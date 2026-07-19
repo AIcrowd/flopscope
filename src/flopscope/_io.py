@@ -5,7 +5,11 @@ optional inert JSON `__meta__` block. `allow_pickle` is always False and object
 dtype is rejected, so loading a file can never execute code. `load` costs
 0 FLOPs (data ingress is free), matching the competition client; `save`/
 `savez`/`savez_compressed` bill 4*size (data egress: the elements the call
-writes to disk).
+writes to disk, INCLUDING the serialized `__meta__` blob when present -- it
+is written to the archive as a uint8 array like any other member (see
+`_prepare`), so it bills the same per-byte egress cost. Excluding it would
+let a participant round-trip unlimited data through `__meta__` for a flat,
+size-independent cost).
 
 `_bill_save_egress` is the single-sourced egress-billing formula: the
 in-process wrappers below call it directly, and the flopscope-server request
@@ -130,13 +134,24 @@ def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
 
 
 def _savez_billed_arrays(converted: dict[str, _np.ndarray]) -> list[_np.ndarray]:
-    """The saved arrays that count toward billing (everything but __meta__)."""
-    return [v for k, v in converted.items() if k != _META_KEY]
+    """The arrays that count toward billing: every array in *converted*,
+    including the serialized __meta__ blob when present.
+
+    The __meta__ dict (if any) was already turned into a uint8 byte array by
+    `_prepare` and is written to the archive exactly like any other named
+    array, so it must be billed the same way -- it is real data written to
+    disk. (Previously excluded here, which let a participant round-trip
+    unlimited data through __meta__ for a flat, size-independent cost.)
+    """
+    return list(converted.values())
 
 
 @_counted_wrapper
 def savez(file: str, **arrays: Any) -> None:
-    """Save multiple named arrays (+ optional __meta__ dict) to .npz. Cost: 4*sum(numel)."""
+    """Save multiple named arrays (+ optional __meta__ dict) to .npz.
+
+    Cost: 4*sum(numel), including any __meta__ blob's serialized byte length.
+    """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)
     _bill_save_egress("savez", billed)
@@ -147,7 +162,7 @@ def savez(file: str, **arrays: Any) -> None:
 def savez_compressed(file: str, **arrays: Any) -> None:
     """Save multiple named arrays (+ optional __meta__ dict) to compressed .npz.
 
-    Cost: 4*sum(numel).
+    Cost: 4*sum(numel), including any __meta__ blob's serialized byte length.
     """
     converted = _prepare(arrays)
     billed = _savez_billed_arrays(converted)

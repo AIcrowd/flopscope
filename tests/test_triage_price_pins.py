@@ -12,6 +12,7 @@ calls ``load_weights()`` itself, so every assertion here reads as
 """
 
 import array
+import json
 import math
 
 import numpy as np
@@ -655,26 +656,45 @@ def test_io_save_bills_load_stays_free(tmp_path):
     assert billed(lambda: fnp.from_dlpack(src)) == 0  # stays free everywhere (Q9)
 
 
-def test_io_savez_bills_sum_of_saved_arrays_excluding_meta(tmp_path):
+def test_io_savez_bills_sum_of_saved_arrays_including_meta(tmp_path):
+    """__meta__ is serialized to a uint8 byte blob and written to the archive
+    like any other array (see ``_prepare``), so it bills the same 4*numel
+    egress cost -- excluding it was a budget-bypass (a participant could
+    round-trip unlimited data through __meta__ for a flat, size-independent
+    cost); see test_io_savez_large_meta_bills_proportionally_not_flat below."""
     a = np.arange(250, dtype=np.float32)
     b = np.arange(150, dtype=np.float32)
+    meta = {"k": 1}
+    meta_len = len(json.dumps(meta).encode("utf-8"))
     fz = str(tmp_path / "wz.npz")
-    assert (
-        billed(
-            lambda: fnp.savez(fz, a=fnp.asarray(a), b=fnp.asarray(b), __meta__={"k": 1})
-        )
-        == 4 * 400
-    )
-    # savez_compressed shares savez's exact formula (4*sum(numel), meta excluded).
+    assert billed(
+        lambda: fnp.savez(fz, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta)
+    ) == 4 * (400 + meta_len)
+    # savez_compressed shares savez's exact formula (4*sum(numel), meta included).
     fzc = str(tmp_path / "wzc.npz")
-    assert (
-        billed(
-            lambda: fnp.savez_compressed(
-                fzc, a=fnp.asarray(a), b=fnp.asarray(b), __meta__={"k": 1}
-            )
+    assert billed(
+        lambda: fnp.savez_compressed(
+            fzc, a=fnp.asarray(a), b=fnp.asarray(b), __meta__=meta
         )
-        == 4 * 400
-    )
+    ) == 4 * (400 + meta_len)
+
+
+def test_io_savez_large_meta_bills_proportionally_not_flat(tmp_path):
+    """Exploit regression (budget bypass): before the fix, __meta__ was
+    excluded from billing entirely, so ``savez(path, __meta__={...huge...})``
+    billed only the floor-of-1 cost (4 FLOPs) no matter how much data the
+    blob smuggled to disk -- e.g. a 2,000,000-float payload (~10MB on disk)
+    billed 4 FLOPs. A large __meta__ must now bill 4*len(json-encoded-blob),
+    dominating a small named array's own cost, not a flat 4-FLOP floor."""
+    payload = {"payload": [0.0] * 100_000}
+    meta_len = len(json.dumps(payload).encode("utf-8"))
+    small = np.arange(10, dtype=np.float32)
+    f = str(tmp_path / "exploit.npz")
+    total = billed(lambda: fnp.savez(f, a=fnp.asarray(small), __meta__=payload))
+    assert total == 4 * (10 + meta_len)
+    array_only_cost = 4 * 10
+    assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
+    assert total != 4  # the pre-fix floor-of-1 exploit value
 
 
 # ---------------------------------------------------------------------------
