@@ -7,10 +7,20 @@ writing (see `_bill_save_on_server`): no array data crosses the wire, only
 handle references, but the SERVER -- the sole owner of the FLOP budget --
 bills the same 4*numel data-egress cost the in-process reference charges.
 Without this round-trip the client could write computed results to disk for
-free (fetch + local write never touched the budget)."""
+free (fetch + local write never touched the budget).
+
+`savez`/`savez_compressed`'s optional `__meta__` dict is billed the same way:
+`_write_npz` serializes it to the identical uint8 byte blob the local codec
+writes to the archive, ingests that blob to get a server handle (mirroring
+`_as_triple`'s treatment of a plain value), and includes it in the handles
+billed via `_bill_save_on_server` -- so the server sums its byte length into
+the egress cost exactly like a named array. Skipping this let a participant
+round-trip unlimited data through `__meta__` for a flat, size-independent
+cost."""
 
 from __future__ import annotations
 
+import json
 import struct
 from typing import Any
 
@@ -111,7 +121,19 @@ def _write_npz(file: str, arrays: dict, compressed: bool, op_name: str) -> None:
     meta = arrays.pop(_META_KEY, None)
     if meta is not None and not isinstance(meta, dict):
         raise ValueError(f"'{_META_KEY}' must be a JSON-serializable dict")
-    _bill_save_on_server(op_name, list(arrays.values()))
+    billed_values = list(arrays.values())
+    if meta is not None:
+        # Serialize to the identical uint8 blob `_codec.write_npz` will write
+        # to the archive (see below) and ingest it to get a server handle, so
+        # `_bill_save_on_server` sums its byte length into the egress cost --
+        # mirrors the in-process `flopscope._io._prepare`, which does the same
+        # json.dumps(...).encode("utf-8") before billing. Routing raw bytes
+        # through the generic non-RemoteArray branch of `_bill_save_on_server`
+        # would be wrong: `_as_triple` always encodes plain values as float64,
+        # which would misprice a uint8 byte blob.
+        meta_blob = json.dumps(meta).encode("utf-8")  # raises on non-JSON-safe values
+        billed_values.append(_ingest("uint8", (len(meta_blob),), meta_blob))
+    _bill_save_on_server(op_name, billed_values)
     triples = {}
     for key, val in arrays.items():
         if key == _META_KEY:

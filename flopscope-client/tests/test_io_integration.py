@@ -1,6 +1,7 @@
 """Client I/O integration tests — require a live subprocess server."""
 
 import glob
+import json
 import os
 import signal
 import subprocess
@@ -152,23 +153,56 @@ def test_save_bills_egress_on_server(tmp_path):
 
 
 def test_savez_bills_sum_of_egress_on_server(tmp_path):
-    """savez bills 4*(n1+n2) -- the sum across every array in the call, not
-    just one -- and the __meta__ block is excluded from billing."""
+    """savez bills 4*(n1+n2+meta_len) -- the sum across every array in the
+    call PLUS the __meta__ block's serialized byte length. __meta__ is
+    ingested to its own server handle and billed exactly like a named array
+    (see _write_npz) -- excluding it was a budget-bypass, see
+    test_savez_large_meta_bills_proportionally_on_server below."""
     import flopscope as we
 
     a_vals = [float(i) for i in range(300)]
     b_vals = [float(i) for i in range(200)]
+    meta = {"k": 1}
+    meta_len = len(json.dumps(meta).encode("utf-8"))
     with we.BudgetContext(flop_budget=1_000_000) as budget:
         a = we.array(a_vals, dtype="float32")
         b = we.array(b_vals, dtype="float32")
-        we.savez(str(tmp_path / "wz.npz"), a=a, b=b, __meta__={"k": 1})
-    assert _flops_used(budget) == 4 * (300 + 200)
+        we.savez(str(tmp_path / "wz.npz"), a=a, b=b, __meta__=meta)
+    assert _flops_used(budget) == 4 * (300 + 200 + meta_len)
 
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "wz.npz"))
         assert out["a"].tolist() == a_vals
         assert out["b"].tolist() == b_vals
-        assert out["__meta__"] == {"k": 1}
+        assert out["__meta__"] == meta
+
+
+def test_savez_large_meta_bills_proportionally_on_server(tmp_path):
+    """Exploit regression (budget bypass), client+server path: before the
+    fix, `_write_npz` never included __meta__ in the handles it billed to
+    the server, so `savez(path, __meta__={...huge...})` round-tripped
+    arbitrary data through __meta__ for a flat, size-independent cost --
+    e.g. a 2,000,000-float payload (~10MB on disk) billed 4 FLOPs. A large
+    __meta__ must now bill 4*len(json-encoded-blob), dominating a small
+    named array's own cost."""
+    import flopscope as we
+
+    payload = {"payload": [0.0] * 100_000}
+    meta_len = len(json.dumps(payload).encode("utf-8"))
+    a_vals = [float(i) for i in range(10)]
+    with we.BudgetContext(flop_budget=10_000_000) as budget:
+        a = we.array(a_vals, dtype="float32")
+        we.savez(str(tmp_path / "exploit.npz"), a=a, __meta__=payload)
+    total = _flops_used(budget)
+    assert total == 4 * (10 + meta_len)
+    array_only_cost = 4 * 10
+    assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
+    assert total != 4  # the pre-fix floor-of-1 exploit value
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        out = we.load(str(tmp_path / "exploit.npz"))
+        assert out["a"].tolist() == a_vals
+        assert out["__meta__"] == payload
 
 
 def test_savez_compressed_bills_sum_of_egress_on_server(tmp_path):
