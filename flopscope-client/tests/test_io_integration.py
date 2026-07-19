@@ -137,15 +137,16 @@ def test_load_numpy_authored_file(tmp_path):
 
 def test_save_bills_egress_on_server(tmp_path):
     """Exact repro: saving a 1000-element float32 RemoteArray now bills
-    4*1000 = 4000 FLOPs (dtype rate 1.0 keeps the arithmetic exact) -- was 0
-    before the fix."""
+    4*(1000 + 8) = 4032 FLOPs (numel plus the array's 1-D shape-header
+    channel, ndim*8 = 8 bytes; dtype rate 1.0 keeps the arithmetic exact) --
+    was 0 before the save-billing fix."""
     import flopscope as we
 
     values = [float(i) for i in range(1000)]
     with we.BudgetContext(flop_budget=1_000_000) as budget:
         a = we.array(values, dtype="float32")
         we.save(str(tmp_path / "x.npy"), a)
-    assert _flops_used(budget) == 4000
+    assert _flops_used(budget) == 4 * (1000 + 8)
 
     # Round-trip result is still correct: the local file write is unaffected.
     with we.BudgetContext(flop_budget=1_000_000):
@@ -153,13 +154,17 @@ def test_save_bills_egress_on_server(tmp_path):
 
 
 def test_savez_bills_sum_of_egress_on_server(tmp_path):
-    """savez bills 4*(n1+n2+meta_len+name_bytes) -- the sum across every
-    array in the call PLUS the __meta__ block's serialized byte length PLUS
-    the archive member names' own byte length ("a", "b", "__meta__").
-    __meta__ and the names blob are each ingested to their own server handle
-    and billed exactly like a named array (see _write_npz) -- excluding them
-    was a budget-bypass, see test_savez_large_meta_bills_proportionally_on_server
-    and test_savez_name_channel_bills_proportionally_on_server below."""
+    """savez bills 4*(n1+n2+meta_len+name_bytes+shape_header_bytes+
+    names_shape_header) -- the sum across every array in the call PLUS the
+    __meta__ block's serialized byte length PLUS the archive member names'
+    own byte length ("a", "b", "__meta__"). __meta__ and the names blob are
+    each ingested to their own server handle and billed exactly like a named
+    array (see _write_npz) -- excluding them was a budget-bypass, see
+    test_savez_large_meta_bills_proportionally_on_server and
+    test_savez_name_channel_bills_proportionally_on_server below. Every
+    billed array (a, b, the __meta__ blob) also bills an 8-byte-per-dimension
+    shape-header channel, and the names blob -- ingested server-side as one
+    synthetic 1-D uint8 array -- bills one more 8-byte header of its own."""
     import flopscope as we
 
     a_vals = [float(i) for i in range(300)]
@@ -171,7 +176,11 @@ def test_savez_bills_sum_of_egress_on_server(tmp_path):
         a = we.array(a_vals, dtype="float32")
         b = we.array(b_vals, dtype="float32")
         we.savez(str(tmp_path / "wz.npz"), a=a, b=b, __meta__=meta)
-    assert _flops_used(budget) == 4 * (300 + 200 + meta_len + name_bytes)
+    shape_header_bytes = 3 * 8  # a, b, __meta__ blob: all 1-D
+    names_shape_header = 8  # non-empty name blob
+    assert _flops_used(budget) == 4 * (
+        300 + 200 + meta_len + name_bytes + shape_header_bytes + names_shape_header
+    )
 
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "wz.npz"))
@@ -198,7 +207,11 @@ def test_savez_large_meta_bills_proportionally_on_server(tmp_path):
         a = we.array(a_vals, dtype="float32")
         we.savez(str(tmp_path / "exploit.npz"), a=a, __meta__=payload)
     total = _flops_used(budget)
-    assert total == 4 * (10 + meta_len + name_bytes)
+    shape_header_bytes = 2 * 8  # a + __meta__ blob: both 1-D
+    names_shape_header = 8  # non-empty name blob
+    assert total == 4 * (
+        10 + meta_len + name_bytes + shape_header_bytes + names_shape_header
+    )
     array_only_cost = 4 * 10
     assert total > 1000 * array_only_cost  # dominated by meta, not the tiny array
     assert total != 4  # the pre-fix floor-of-1 exploit value
@@ -233,7 +246,11 @@ def test_savez_name_channel_bills_proportionally_on_server(tmp_path):
         we.savez(str(tmp_path / "smuggle.npz"), **kwargs)
     total = _flops_used(budget)
     array_only_cost = 4 * n_arrays  # the pre-fix exploit value (80 FLOPs)
-    assert total == 4 * (n_arrays + name_bytes)
+    shape_header_bytes = n_arrays * 8  # 20 arrays, each 1-D
+    names_shape_header = 8  # non-empty name blob
+    assert total == 4 * (
+        n_arrays + name_bytes + shape_header_bytes + names_shape_header
+    )
     assert total > 1000 * array_only_cost  # dominated by names, not array values
     assert total != array_only_cost  # the pre-fix name-channel exploit value
 
@@ -243,7 +260,8 @@ def test_savez_name_channel_bills_proportionally_on_server(tmp_path):
 
 
 def test_savez_compressed_bills_sum_of_egress_on_server(tmp_path):
-    """savez_compressed shares savez's exact billing formula."""
+    """savez_compressed shares savez's exact billing formula, including the
+    per-array shape-header channel and the names blob's own header."""
     import flopscope as we
 
     a_vals = [float(i) for i in range(300)]
@@ -253,7 +271,11 @@ def test_savez_compressed_bills_sum_of_egress_on_server(tmp_path):
         a = we.array(a_vals, dtype="float32")
         b = we.array(b_vals, dtype="float32")
         we.savez_compressed(str(tmp_path / "wzc.npz"), a=a, b=b)
-    assert _flops_used(budget) == 4 * (300 + 200 + name_bytes)
+    shape_header_bytes = 2 * 8  # a, b: both 1-D
+    names_shape_header = 8  # non-empty name blob
+    assert _flops_used(budget) == 4 * (
+        300 + 200 + name_bytes + shape_header_bytes + names_shape_header
+    )
 
     with we.BudgetContext(flop_budget=1_000_000):
         out = we.load(str(tmp_path / "wzc.npz"))
@@ -279,13 +301,14 @@ def test_save_plain_value_bills_via_free_ingest_then_charges(tmp_path):
     non-RemoteArray branch ingests it via the existing free `create_from_data`
     path to get one, then bills exactly like every other save shape. Plain
     values always ingest as float64 (see `_as_triple`), so the bill is
-    4*numel*dtype_rate(float64) = 4*numel*2, not 4*numel."""
+    4*(numel+shape_header_bytes)*dtype_rate(float64) = 4*(100+8)*2 = 864,
+    not 4*numel*2 -- the array is 1-D, so shape_header_bytes = 1*8 = 8."""
     import flopscope as we
 
     values = [float(i) for i in range(100)]
     with we.BudgetContext(flop_budget=1_000_000) as budget:
         we.save(str(tmp_path / "plain.npy"), values)
-    assert _flops_used(budget) == 4 * 100 * 2
+    assert _flops_used(budget) == 4 * (100 + 8) * 2
 
     with we.BudgetContext(flop_budget=1_000_000):
         assert we.load(str(tmp_path / "plain.npy")).tolist() == values
