@@ -75,3 +75,46 @@ def test_method_choose_out_production_billing():
     billed, _ = _billed_with_production_rates(lambda: selector.choose(choices, out=out))
     # gather tier: numel(out) × weight 4.0 × float64 rate 2
     assert billed == 4 * 4 * 2
+
+
+def test_creation_rejected_before_allocation():
+    """Over-budget creation must be rejected by FLOP accounting BEFORE numpy
+    allocates the buffer (a tiny budget must never OOM on fnp.ones((1e12,)))."""
+    import pytest
+
+    from flopscope.errors import BudgetExhaustedError
+
+    with flops.BudgetContext(flop_budget=10, quiet=True):
+        with pytest.raises(BudgetExhaustedError):
+            fnp.ones((10**12,))
+        with pytest.raises(BudgetExhaustedError):
+            fnp.full((10**12,), 7.0)
+        with pytest.raises(BudgetExhaustedError):
+            fnp.ones_like(fnp.zeros(3), shape=(10**12,))
+
+
+def test_linspace_family_bills_produced_dtype():
+    """With dtype omitted, numpy produces float64 samples from integer
+    endpoints (and geomspace promotes even float32) — billing must follow the
+    PRODUCED dtype, not the inputs."""
+    from tests.test_dtype_cost import _billed_with_production_rates
+
+    billed, _ = _billed_with_production_rates(
+        lambda: fnp.linspace(np.int32(0), np.int32(8), 5)
+    )
+    assert billed == 2 * 5 * 2  # cost 2*num × float64 rate 2
+
+    billed, _ = _billed_with_production_rates(
+        lambda: fnp.linspace(np.float32(0), np.float32(8), 5)
+    )
+    assert billed == 2 * 5  # float32 stays rate 1
+
+    billed, _ = _billed_with_production_rates(
+        lambda: fnp.logspace(np.int32(0), np.int32(3), 4)
+    )
+    assert billed == 4 * 16 * 2  # num × weight 16 × float64 rate 2
+
+    billed, _ = _billed_with_production_rates(
+        lambda: fnp.geomspace(np.float32(1), np.float32(8), 4)
+    )
+    assert billed == 4 * 16 * 2  # geomspace promotes float32 -> float64

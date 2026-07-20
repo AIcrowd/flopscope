@@ -520,13 +520,7 @@ def logspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    _dtype = kwargs.get("dtype")
-    _billing_dtype = (
-        _np.dtype(_dtype) if _dtype is not None else _np.result_type(start, stop)
-    )
-    with budget.deduct_after(
-        "logspace", subscripts=None, shapes=(), dtypes=(_billing_dtype,)
-    ) as _op:
+    with budget.deduct_after("logspace", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(
             _np.logspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -534,6 +528,10 @@ def logspace(
             num=num,
             **kwargs,
         )
+        # Bill the dtype numpy actually PRODUCED: with ``dtype`` omitted,
+        # integer endpoints yield float64 samples, so resolving from the
+        # inputs would bill half the float64 rate (same fix as linspace).
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result  # type: ignore[return-value]
 
@@ -550,13 +548,7 @@ def geomspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    _dtype = kwargs.get("dtype")
-    _billing_dtype = (
-        _np.dtype(_dtype) if _dtype is not None else _np.result_type(start, stop)
-    )
-    with budget.deduct_after(
-        "geomspace", subscripts=None, shapes=(), dtypes=(_billing_dtype,)
-    ) as _op:
+    with budget.deduct_after("geomspace", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(
             _np.geomspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -564,6 +556,11 @@ def geomspace(
             num=num,
             **kwargs,
         )
+        # Bill the dtype numpy actually PRODUCED: geomspace promotes to at
+        # least float64 (float32 endpoints included), so input-derived
+        # resolution under-billed every omitted-dtype call (same fix as
+        # linspace/logspace).
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result  # type: ignore[return-value]
 

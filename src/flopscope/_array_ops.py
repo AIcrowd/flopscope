@@ -174,11 +174,16 @@ def ones(
 ) -> FlopscopeArray:
     """Return array of ones. Wraps ``numpy.ones``. Cost: numel(output)."""
     budget = require_budget()
-    result = _call_numpy(_np.ones, shape, dtype=dtype, **kwargs)
-    cost = result.size if hasattr(result, "size") else 1
+    # Deduct BEFORE allocating: cost and dtype are fully determined by the
+    # request, so an over-budget ``fnp.ones((10**12,))`` is rejected by FLOP
+    # accounting before numpy allocates the buffer. Negative dims clamp the
+    # cost to 0 and numpy raises inside the deduct as before.
+    dims = (shape,) if isinstance(shape, (int, _np.integer)) else tuple(shape)
+    cost = max(int(_math.prod(int(d) for d in dims)), 0)
     with budget.deduct(
-        "ones", flop_cost=cost, subscripts=None, shapes=(), dtypes=(result.dtype,)
+        "ones", flop_cost=cost, subscripts=None, shapes=(), dtypes=(_np.dtype(dtype),)
     ):
+        result = _call_numpy(_np.ones, shape, dtype=dtype, **kwargs)
         result = _wrap_constant_fill(result)
     return result
 
@@ -195,11 +200,17 @@ def full(
 ) -> FlopscopeArray:
     """Return array filled with *fill_value*. Cost: numel(output)."""
     budget = require_budget()
-    result = _np.full(shape, fill_value, dtype=dtype, **kwargs)
-    cost = result.size if hasattr(result, "size") else 1
+    # Deduct BEFORE allocating (see ``ones``): cost from the requested shape,
+    # dtype from the argument or numpy's fill_value inference.
+    dims = (shape,) if isinstance(shape, (int, _np.integer)) else tuple(shape)
+    cost = max(int(_math.prod(int(d) for d in dims)), 0)
+    _billing_dtype = (
+        _np.dtype(dtype) if dtype is not None else _np.asarray(fill_value).dtype
+    )
     with budget.deduct(
-        "full", flop_cost=cost, subscripts=None, shapes=(), dtypes=(result.dtype,)
+        "full", flop_cost=cost, subscripts=None, shapes=(), dtypes=(_billing_dtype,)
     ):
+        result = _call_numpy(_np.full, shape, fill_value, dtype=dtype, **kwargs)
         result = _wrap_constant_fill(result)
     return result
 
@@ -306,13 +317,7 @@ def linspace(
 ) -> FlopscopeArray:
     """Return evenly spaced numbers. Cost: 2*numel(output) FLOPs (start + i*step per element, FMA=2)."""
     budget = require_budget()
-    _dtype = kwargs.get("dtype")
-    _billing_dtype = (
-        _np.dtype(_dtype) if _dtype is not None else _np.result_type(start, stop)
-    )
-    with budget.deduct_after(
-        "linspace", subscripts=None, shapes=(), dtypes=(_billing_dtype,)
-    ) as _op:
+    with budget.deduct_after("linspace", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(  # type: ignore[arg-type, call-overload]
             _np.linspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -320,7 +325,13 @@ def linspace(
             num=num,
             **kwargs,
         )
-        samples = result[0] if isinstance(result, tuple) else result
+        samples: Any = result[0] if isinstance(result, tuple) else result
+        # Bill the dtype numpy actually PRODUCED: with ``dtype`` omitted,
+        # integer endpoints still yield float64 samples, so resolving from
+        # the inputs (result_type(start, stop) -> int rate 1) would bill
+        # half the float64 rate. Reading it off the result mirrors numpy's
+        # inference exactly, on every numpy version.
+        _op.set_dtypes((samples.dtype,) if hasattr(samples, "dtype") else ())
         _op.set_cost(2 * (samples.size if hasattr(samples, "size") else 1))
     return result  # pyright: ignore[reportReturnType]  # (samples, step) tuple when retstep=True
 
@@ -374,16 +385,28 @@ def ones_like(
 ) -> FlopscopeArray:
     """Return array of ones with same shape. Wraps ``numpy.ones_like``. Cost: numel(output)."""
     budget = require_budget()
-    base = _to_base_ndarray(a)
-    result = _call_numpy(_np.ones_like, base, dtype=dtype, **kwargs)
-    cost = result.size if hasattr(result, "size") else 1
+    base = _np.asarray(_to_base_ndarray(a))
+    # Deduct BEFORE allocating (see ``ones``): cost from the base's size (or
+    # the ``shape=`` override), dtype from the argument or the base.
+    _shape_override = kwargs.get("shape")
+    if _shape_override is None:
+        cost = int(base.size)
+    else:
+        dims = (
+            (_shape_override,)
+            if isinstance(_shape_override, (int, _np.integer))
+            else tuple(_shape_override)
+        )
+        cost = max(int(_math.prod(int(d) for d in dims)), 0)
+    _billing_dtype = _np.dtype(dtype) if dtype is not None else base.dtype
     with budget.deduct(
         "ones_like",
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(result.dtype,),
+        dtypes=(_billing_dtype,),
     ):
+        result = _call_numpy(_np.ones_like, base, dtype=dtype, **kwargs)
         propagated_symmetry = None
         if isinstance(a, SymmetricTensor):
             propagated_symmetry = _compatible_symmetry_for_shape(
