@@ -23,7 +23,6 @@ Complements ``test_local_opt_einsum_paths_cov.py``:
 from __future__ import annotations
 
 import importlib
-import sys
 from typing import Any
 
 import numpy as np
@@ -47,22 +46,18 @@ def paths() -> Any:
 
 @pytest.fixture
 def rewired_path_random(paths) -> Any:
-    """The local ``_path_random`` executed with ``paths`` bound to its on-disk
-    sibling (the binding its ``from . import _paths as paths`` line names)."""
-    saved_mod = sys.modules.pop("flopscope._opt_einsum._path_random", None)
-    saved_attr = _oe_pkg.__dict__.pop("_path_random", None)
-    _oe_pkg.__dict__["_paths"] = paths
-    try:
-        module = importlib.import_module("flopscope._opt_einsum._path_random")
-        assert module.paths is paths
-        yield module
-    finally:
-        sys.modules.pop("flopscope._opt_einsum._path_random", None)
-        _oe_pkg.__dict__.pop("_path_random", None)
-        if saved_mod is not None:
-            sys.modules["flopscope._opt_einsum._path_random"] = saved_mod
-        if saved_attr is not None:
-            _oe_pkg.__dict__["_path_random"] = saved_attr
+    """The local ``_path_random`` module.
+
+    Its ``paths`` global is now bound via ``importlib.import_module`` (not
+    ``from . import _paths``), so it references the on-disk sibling directly
+    without the manual package-attribute rewiring the shim used to require.
+    The autouse ``_restore_upstream_shim`` fixture drops the package
+    attributes that importing these submodules registers, keeping the
+    upstream redirect intact for ``tests/test_opt_einsum_paths.py``.
+    """
+    module = importlib.import_module("flopscope._opt_einsum._path_random")
+    assert module.paths is paths
+    return module
 
 
 # ── shared 4-cycle fixture: ij,jk,kl,li->  with four identical S2-symmetric ops ──
@@ -108,12 +103,10 @@ def _is_complete(path, n_operands: int) -> bool:
 
 
 def test_oracle_greedy_search_returns_valid_path(paths):
-    # greedy is the one vendored optimizer whose search accepts the oracle end
-    # to end (its ssa machinery prices candidates itself). The oracle-driven
-    # per-step costing used by optimal/branch/dp (calc_k12_flops with oracle)
-    # dereferences the retired 'use_inner_symmetry' setting and raises KeyError
-    # -- a latent defect in this dormant vendored module, deliberately not
-    # asserted as behavior here.
+    # greedy prices candidates through its own ssa machinery. The oracle-driven
+    # per-step costing used by optimal/branch (calc_k12_flops with oracle) is
+    # exercised separately below; it now threads use_inner_symmetry as a
+    # defaulted parameter instead of reading the retired config setting.
     input_sets, output_set, size_dict, arrays = _cycle_setup()
     oracle = _cycle_oracle()
 
@@ -122,6 +115,60 @@ def test_oracle_greedy_search_returns_valid_path(paths):
     assert _is_complete(path, 4), path
     got = np.einsum(_CYCLE_SUBS, *arrays, optimize=["einsum_path", *path])
     np.testing.assert_allclose(got, np.einsum(_CYCLE_SUBS, *arrays), rtol=1e-10)
+
+
+def test_oracle_optimal_branch_dp_search_end_to_end(paths):
+    # Regression for the retired 'use_inner_symmetry' config key: the oracle
+    # branch of calc_k12_flops used to read it from flopscope._config and raise
+    # KeyError, so every oracle-driven optimal/branch search died (only greedy
+    # and dp, which do not route through that branch, survived). The flag is now
+    # a defaulted parameter, so all four search families run end to end.
+    input_sets, output_set, size_dict, arrays = _cycle_setup()
+    reference = np.einsum(_CYCLE_SUBS, *arrays)
+    for fn in (
+        paths.optimal,
+        paths.branch_all,
+        paths.branch_2,
+        paths.dynamic_programming,
+    ):
+        path = fn(
+            input_sets,
+            output_set,
+            size_dict,
+            None,
+            symmetry_oracle=_cycle_oracle(),
+        )
+        assert _is_complete(path, 4), fn
+        got = np.einsum(_CYCLE_SUBS, *arrays, optimize=["einsum_path", *path])
+        np.testing.assert_allclose(got, reference, rtol=1e-10)
+
+
+def test_calc_k12_flops_oracle_branch_discounts_flops(paths):
+    # Directly exercise the fixed oracle branch of calc_k12_flops: contracting
+    # ij,jk out of the S2-per-operand 4-cycle. The pair carries output symmetry,
+    # so the oracle price is a strict discount on the dense (2K-1)*M cost and no
+    # KeyError is raised.
+    input_sets, output_set, size_dict, _ = _cycle_setup()
+    ssa_to_subset = {k: frozenset({k}) for k in range(4)}
+    remaining = frozenset({0, 1, 2, 3})
+
+    k12_dense, dense_cost, sym_dense = paths.calc_k12_flops(
+        tuple(input_sets), output_set, remaining, 0, 1, size_dict
+    )
+    k12_oracle, oracle_cost, sym_oracle = paths.calc_k12_flops(
+        tuple(input_sets),
+        output_set,
+        remaining,
+        0,
+        1,
+        size_dict,
+        oracle=_cycle_oracle(),
+        ssa_to_subset=ssa_to_subset,
+    )
+    assert k12_oracle == k12_dense == frozenset("ik")
+    assert sym_dense is None
+    assert sym_oracle is not None
+    assert 0 < oracle_cost < dense_cost
 
 
 def test_calc_k12_flops_dense_matches_flop_count(paths):
@@ -238,6 +285,31 @@ def test_rewired_random_greedy_finds_valid_paths(rewired_path_random, paths):
     optimizer.max_repeats = 2
     optimizer(input_sets, output_set, size_dict, None)
     assert len(optimizer.costs) == 8
+
+
+def test_rewired_random_greedy_with_oracle_end_to_end(rewired_path_random, paths):
+    # End-to-end random-greedy search WITH a symmetry oracle. This is unblocked
+    # only by both fixes together: item 1 (the module now binds the local
+    # _paths, so ssa_path_compute_cost/ssa_greedy_optimize accept the fork's
+    # symmetry_oracle/ssa_to_subset kwargs) and item 2 (calc_k12_flops's oracle
+    # branch no longer reads the retired 'use_inner_symmetry' setting). The
+    # returned path must stay valid and numerically correct, and the oracle
+    # discount must make every tracked trial cost strictly cheaper than the
+    # dense left-to-right chain (255 for this 4-cycle).
+    pr = rewired_path_random
+    input_sets, output_set, size_dict, arrays = _cycle_setup()
+
+    optimizer = pr.RandomGreedy(max_repeats=6, minimize="flops")
+    path = optimizer(
+        input_sets, output_set, size_dict, None, symmetry_oracle=_cycle_oracle()
+    )
+
+    assert _is_complete(path, 4)
+    got = np.einsum(_CYCLE_SUBS, *arrays, optimize=["einsum_path", *path])
+    np.testing.assert_allclose(got, np.einsum(_CYCLE_SUBS, *arrays), rtol=1e-10)
+    assert len(optimizer.costs) == 6
+    # Symmetry-discounted trials cost strictly less than the dense chain cost.
+    assert optimizer.best["flops"] < 255
 
 
 def test_rewired_random_greedy_choosers(rewired_path_random, paths):

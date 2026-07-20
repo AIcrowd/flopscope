@@ -142,6 +142,7 @@ def calc_k12_flops(
     size_dict: dict[str, int],
     oracle: SubgraphSymmetryOracle | None = None,
     ssa_to_subset: dict[int, frozenset[int]] | None = None,
+    use_inner_symmetry: bool = True,
 ) -> tuple[frozenset[str], int, SymmetryGroup | None]:
     """Calculate the resulting indices and flops for a potential pairwise
     contraction.
@@ -156,6 +157,14 @@ def calc_k12_flops(
     ssa_to_subset : dict[int, frozenset[int]] | None
         Mapping from SSA tensor id to the subset of original operand
         positions that tensor represents.
+    use_inner_symmetry : bool, optional
+        Whether to apply the inner (W-side) symmetry reduction in the
+        oracle branch. Threaded straight through to
+        :func:`symmetric_flop_count`, whose parameter of the same name
+        it mirrors (default ``True``). Passed as a parameter rather than
+        read from global config: the ``"use_inner_symmetry"`` setting was
+        retired from ``flopscope._config`` (see
+        ``tests/accumulation/test_einsum_path_no_oracle.py``).
 
     Returns
     -------
@@ -178,8 +187,6 @@ def calc_k12_flops(
         subset_sym = oracle.sym(merged_subset)
         sym12 = subset_sym.output
 
-        from flopscope._config import get_setting
-
         idx_removed = either - k12
         k1_sub = "".join(sorted(k1))
         k2_sub = "".join(sorted(k2))
@@ -193,7 +200,7 @@ def calc_k12_flops(
             output_indices=k12,
             inner_group=subset_sym.inner,
             inner_indices=idx_removed if idx_removed else None,
-            use_inner_symmetry=bool(get_setting("use_inner_symmetry")),
+            use_inner_symmetry=use_inner_symmetry,
             input_subscripts=(k1_sub, k2_sub),
             output_subscript=out_sub,
             input_shapes=(
