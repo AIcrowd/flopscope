@@ -44,9 +44,18 @@ class PreReduction:
     (`aten/src/ATen/native/Linear.cpp`).
 
     Attributes:
-        operand_index: 0 or 1 — which input of the binary step (left or right).
+        operand_index: 0 or 1 — which input of the binary step (left or right),
+            in the accumulation's operand order. For the 2-op single-step path
+            this is the ORIGINAL einsum operand order, which can differ from the
+            upstream-reordered ``StepInfo.subscript``; renderers must therefore
+            locate the operand via ``original_subscript`` rather than indexing
+            ``subscript`` by ``operand_index``.
         removed_labels: labels dropped from this input's subscript (sorted tuple).
         cost: flops charged by this pre-reduction (from reduction_accumulation_cost).
+        original_subscript: this input's subscript BEFORE dropping removed_labels
+            (i.e. the pre-reduction operand subscript). Carried so renderers can
+            display the correct operand independently of the step's operand
+            ordering.
         surviving_subscript: this input's subscript after dropping removed_labels.
         reduced_symmetry_fingerprint: canonical sym fingerprint of the post-
             reduction operand symmetry; fed to the residual contraction's
@@ -58,7 +67,56 @@ class PreReduction:
     removed_labels: tuple[str, ...]
     cost: int
     surviving_subscript: str
+    original_subscript: str = ""
     reduced_symmetry_fingerprint: tuple | None = None
+
+
+def _map_pre_reduction_positions(
+    operand_subs: list[str],
+    pre_reductions: tuple[PreReduction, ...],
+) -> list[int | None]:
+    """Map each pre-reduction to its operand position within a step's lhs.
+
+    ``PreReduction.operand_index`` is expressed in the accumulation's operand
+    order, which for a 2-op single-step path is the ORIGINAL einsum order and
+    can differ from the upstream-reordered ``StepInfo.subscript``.  Resolve the
+    true position by matching the carried ``original_subscript`` against the
+    step's lhs operands, preferring the recorded ``operand_index`` when it
+    already agrees (the multi-step case, where the accumulation walk derives its
+    operands from the step subscript itself), and consuming matched positions so
+    duplicate operand subscripts resolve left-to-right.  Returns a list parallel
+    to ``pre_reductions``; an entry is ``None`` only when nothing resolves (a
+    stale PreReduction with no ``original_subscript``).
+    """
+    positions: list[int | None] = []
+    used: set[int] = set()
+    for pre in pre_reductions:
+        oi = pre.operand_index
+        orig = pre.original_subscript
+        # Fast path: the recorded index already names the matching operand.
+        if (
+            orig
+            and 0 <= oi < len(operand_subs)
+            and oi not in used
+            and operand_subs[oi] == orig
+        ):
+            used.add(oi)
+            positions.append(oi)
+            continue
+        # Otherwise locate the operand by its original (pre-reduction) subscript.
+        pos: int | None = None
+        if orig:
+            for k, sub in enumerate(operand_subs):
+                if k not in used and sub == orig:
+                    pos = k
+                    break
+        # Last resort for stale metadata: fall back to the raw index.
+        if pos is None and 0 <= oi < len(operand_subs) and oi not in used:
+            pos = oi
+        if pos is not None:
+            used.add(pos)
+        positions.append(pos)
+    return positions
 
 
 @dataclass
@@ -793,12 +851,13 @@ class PathInfo:
 
                 lhs = step.subscript.split("->")[0]
                 operand_subs = lhs.split(",")
-                for pre in pre_reductions:
+                positions = _map_pre_reduction_positions(operand_subs, pre_reductions)
+                for pre, pos in zip(pre_reductions, positions, strict=True):
                     op_name = f"op{pre.operand_index}"
                     labels_str = ",".join(pre.removed_labels)
-                    original_sub = (
-                        operand_subs[pre.operand_index]
-                        if 0 <= pre.operand_index < len(operand_subs)
+                    original_sub = pre.original_subscript or (
+                        operand_subs[pos]
+                        if pos is not None and 0 <= pos < len(operand_subs)
                         else ""
                     )
                     sub_text = Text(
@@ -813,9 +872,9 @@ class PathInfo:
                 # Residual contraction sub-row
                 residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
                 effective_subs = list(operand_subs)
-                for pre in pre_reductions:
-                    if 0 <= pre.operand_index < len(effective_subs):
-                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                for pre, pos in zip(pre_reductions, positions, strict=True):
+                    if pos is not None and 0 <= pos < len(effective_subs):
+                        effective_subs[pos] = pre.surviving_subscript
                 step_output_part = (
                     step.subscript.split("->")[1] if "->" in step.subscript else ""
                 )
@@ -936,13 +995,14 @@ class PathInfo:
                 indent = " " * 8
                 lhs = step.subscript.split("->")[0]
                 operand_subs = lhs.split(",")
+                positions = _map_pre_reduction_positions(operand_subs, pre_reductions)
                 # Per-pre-reduction sub-row
-                for pre in pre_reductions:
+                for pre, pos in zip(pre_reductions, positions, strict=True):
                     op_name = f"op{pre.operand_index}"
                     labels_str = ",".join(pre.removed_labels)
-                    original_sub = (
-                        operand_subs[pre.operand_index]
-                        if 0 <= pre.operand_index < len(operand_subs)
+                    original_sub = pre.original_subscript or (
+                        operand_subs[pos]
+                        if pos is not None and 0 <= pos < len(operand_subs)
                         else ""
                     )
                     sub_line = (
@@ -954,9 +1014,9 @@ class PathInfo:
                 # Residual contraction sub-row
                 residual_cost = step.flop_cost - sum(p.cost for p in pre_reductions)
                 effective_subs = list(operand_subs)
-                for pre in pre_reductions:
-                    if 0 <= pre.operand_index < len(effective_subs):
-                        effective_subs[pre.operand_index] = pre.surviving_subscript
+                for pre, pos in zip(pre_reductions, positions, strict=True):
+                    if pos is not None and 0 <= pos < len(effective_subs):
+                        effective_subs[pos] = pre.surviving_subscript
                 step_output_part = (
                     step.subscript.split("->")[1] if "->" in step.subscript else ""
                 )

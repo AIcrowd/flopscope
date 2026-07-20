@@ -764,6 +764,7 @@ def _walk_path_and_aggregate(
                     operand_index=0,
                     removed_labels=tuple(sorted(left_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=step_input_parts[0],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -804,6 +805,7 @@ def _walk_path_and_aggregate(
                     operand_index=1,
                     removed_labels=tuple(sorted(right_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=step_input_parts[1],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -1304,6 +1306,7 @@ def compute_accumulation_cost(
                     operand_index=0,
                     removed_labels=tuple(sorted(left_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=input_parts_list[0],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -1343,6 +1346,7 @@ def compute_accumulation_cost(
                     operand_index=1,
                     removed_labels=tuple(sorted(right_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=input_parts_list[1],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
