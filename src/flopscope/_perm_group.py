@@ -575,6 +575,24 @@ class SymmetryGroup:
 
     @classmethod
     def direct_product(cls, *groups: SymmetryGroup) -> SymmetryGroup:
+        """Combine groups with disjoint axis supports into their direct product.
+
+        This is a factory **classmethod**, like :meth:`symmetric`,
+        :meth:`cyclic`, :meth:`dihedral`, and :meth:`young`. Call it on the
+        class with every factor passed explicitly::
+
+            SymmetryGroup.direct_product(g1, g2, ...)
+
+        Do NOT call it as an instance method (``g1.direct_product(g2)``):
+        because it is a classmethod, the receiver ``g1`` is bound to ``cls``
+        and dropped from ``groups``, so the call silently returns just ``g2``
+        (order and axes of ``g2`` alone) instead of the product ``g1 × g2``.
+        For the common case of several symmetric blocks, prefer
+        :meth:`young`, which routes through this method correctly.
+
+        Every factor must carry ``axes`` and the supports must be pairwise
+        disjoint; otherwise ``ValueError`` is raised.
+        """
         if not groups:
             raise ValueError("direct_product() requires at least one group")
         supports = []
