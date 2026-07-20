@@ -6,7 +6,7 @@
 
 Lightweight drop-in replacement for [flopscope](https://pypi.org/project/flopscope/) that proxies all operations to a remote [`flopscope-server`](https://pypi.org/project/flopscope-server/) over ZMQ + msgpack.
 
-`flopscope-client` provides the same `import flopscope` Python module as the main `flopscope` distribution, but with **no NumPy dependency** — it forwards every counted operation to a `flopscope-server` process. Use this in constrained environments where you want flopscope's FLOP-counting API but cannot ship numpy + the full library (e.g. sandboxed participant containers in the [ARC Whitebox Estimation Challenge](https://www.alignment.org/blog/will-whitebox-runtime-monitoring-defeat-scheming-models/)).
+`flopscope-client` provides the same `import flopscope` Python module as the main `flopscope` distribution, but with **no NumPy dependency** — it forwards every counted operation to a `flopscope-server` process. Use this in constrained environments where you want flopscope's FLOP-counting API but cannot ship numpy + the full library (e.g. sandboxed participant containers in the [ARC Whitebox Estimation Challenge](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026)).
 
 ## Install instead of, not alongside
 
@@ -89,4 +89,4 @@ The client serializes each operation (op name, args, kwargs) as msgpack, sends i
 
 ## License
 
-[MIT](https://github.com/AIcrowd/flopscope/blob/main/LICENSE)
+[MIT](https://opensource.org/licenses/MIT)

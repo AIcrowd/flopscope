@@ -6,7 +6,7 @@
 
 Server-side runtime for the [flopscope](https://pypi.org/project/flopscope/) client-server architecture.
 
-`flopscope-server` runs the heavy NumPy-backed `flopscope` library on behalf of remote `flopscope-client` processes that connect over ZMQ + msgpack. Use it when you want to isolate untrusted or sandboxed code (typically participant submissions in the [ARC Whitebox Estimation Challenge](https://www.alignment.org/blog/will-whitebox-runtime-monitoring-defeat-scheming-models/)) from the actual computation environment.
+`flopscope-server` runs the heavy NumPy-backed `flopscope` library on behalf of remote `flopscope-client` processes that connect over ZMQ + msgpack. Use it when you want to isolate untrusted or sandboxed code (typically participant submissions in the [ARC Whitebox Estimation Challenge](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026)) from the actual computation environment.
 
 ## When to install this
 
@@ -76,4 +76,4 @@ Every counted operation (matmul, einsum, FFT, reductions, …) is dispatched to 
 
 ## License
 
-[MIT](https://github.com/AIcrowd/flopscope/blob/main/LICENSE)
+[MIT](https://opensource.org/licenses/MIT)
