@@ -64,6 +64,33 @@ class TestPermutation:
             merandom.permutation(n)
             assert budget.flops_used == n
 
+    def test_list_arg_matches_numpy_and_bills_like_array(self):
+        # numpy.random.permutation converts array-likes; flopscope must too.
+        # Previously the raw list tripped over the missing ``.shape`` attribute
+        # (AttributeError). A list must now return a real permutation and bill
+        # exactly like its equivalent array (same flop_cost -> same weighted
+        # cost); the int-arg path is unchanged.
+        seq = [10, 20, 30, 40, 50]
+        n = len(seq)
+        with BudgetContext(flop_budget=10**6, quiet=True) as b_list:
+            result = merandom.permutation(seq)
+            list_cost = b_list.flops_used
+        with BudgetContext(flop_budget=10**6, quiet=True) as b_arr:
+            merandom.permutation(numpy.asarray(seq))
+            arr_cost = b_arr.flops_used
+        assert sorted(numpy.asarray(result).tolist()) == sorted(seq)
+        assert list_cost == arr_cost == n
+
+    def test_2d_list_permutes_along_axis0(self):
+        # Parity with numpy: a 2D array-like is permuted along axis 0, and the
+        # cost keys off shape[0].
+        rows = [[1, 2], [3, 4], [5, 6]]
+        with BudgetContext(flop_budget=10**6, quiet=True) as budget:
+            result = merandom.permutation(rows)
+            assert numpy.asarray(result).shape == (3, 2)
+            assert budget.flops_used == 3  # shape[0]
+        assert numpy.random.permutation(rows).shape == (3, 2)
+
 
 class TestShuffle:
     def test_cost(self):

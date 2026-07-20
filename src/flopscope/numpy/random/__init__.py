@@ -513,7 +513,18 @@ def permutation(x):
     """
     budget = require_budget()
     is_int_arg = isinstance(x, (int, _np.integer))
-    n = int(x) if is_int_arg else x.shape[0]
+    if is_int_arg:
+        n = int(x)
+    else:
+        # numpy.random.permutation converts array-likes (lists, tuples) via
+        # asarray and permutes along axis 0; mirror that so a raw sequence no
+        # longer trips over the missing ``.shape`` attribute. Billing is
+        # unchanged — still max(shape[0], 1) on the converted array — so a list
+        # bills exactly like its equivalent array (registry weight applies
+        # identically to both).
+        if not hasattr(x, "shape"):
+            x = _np.asarray(x)
+        n = x.shape[0]
     cost = _builtins.max(n, 1)
     # permutation relocates caller-supplied values (a movement op,
     # complex_factor 1.0 in the registry). Its shape[0] cost counts the
