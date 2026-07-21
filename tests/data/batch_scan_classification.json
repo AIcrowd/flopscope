@@ -1065,7 +1065,7 @@
   },
   "random.Generator.choice": {
     "class": "OK-SCALES",
-    "reason": "probe C:choice scales correctly"
+    "reason": "probe R:choice-list-axis scales correctly (nested Python list bills axis-0 len(a), not shape[axis])"
   },
   "random.Generator.dirichlet": {
     "class": "OK-SCALES",

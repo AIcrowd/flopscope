@@ -280,11 +280,15 @@ def test_mvhg_count_colors_as_flopscope_array_does_not_crash():
     g = fnp.random.default_rng(10)
     colors = fnp.asarray([3, 3, 3])
     billed = _bill(lambda: g.multivariate_hypergeometric(colors, 4, method="count"))
-    # sum(colors)=9 + draws(num_variates=1 x min(nsample=4, total-nsample=5)=4)
-    # + numel(output)=3 = 16. (Was pinned to 12 = sum(colors)+numel(output)
+    # sum(colors)=9 + draws(2 x num_variates=1 x min(nsample=4, total-nsample=5)=4)
+    # + numel(output)=3 = 9+8+3 = 20. (Was pinned to 12 = sum(colors)+numel(output)
     # before the draw term below existed -- see test_mvhg_count_scales_with_
-    # nsample_and_size for why that flat value was itself an under-bill.)
-    assert billed == 16
+    # nsample_and_size for why that flat value was itself an under-bill. Then
+    # 16 with a 1x draw coefficient, before numpy's real shuffle-pass +
+    # count-pass over the same drawn entries was found to be 2 full passes,
+    # not 1 -- see random_multivariate_hypergeometric_count in numpy's C
+    # source.)
+    assert billed == 20
 
 
 def test_permuted_list_counts_all_elements():
@@ -308,12 +312,14 @@ def test_mvhg_count_scales_with_nsample_and_size():
     # blind to nsample and to num_variates (from `size`) beyond
     # numel(output)'s own num_variates*num_colors contribution. numpy's real
     # "count" algorithm (random_multivariate_hypergeometric_count in numpy's
-    # C source) partially Fisher-Yates-shuffles
+    # C source) does TWO separate passes -- a partial Fisher-Yates shuffle,
+    # then a distinct counting pass -- over the same
     # min(nsample, sum(colors)-nsample) entries of a sum(colors)-length
     # buffer for EVERY variate, so the true cost scales with
-    # num_variates * nsample -- a dimension the old formula never looked at.
-    # Before this fix, nsample=1 and nsample=500 billed identically here:
-    # flat sum(colors)+numel(output) = 1000 + 10000*2 = 21000 either way.
+    # 2 * num_variates * nsample -- a dimension the old formula never looked
+    # at (and, before the 2x-draws fix, under-counted by half). Before this
+    # fix, nsample=1 and nsample=500 billed identically here: flat
+    # sum(colors)+numel(output) = 1000 + 10000*2 = 21000 either way.
     g = fnp.random.default_rng(12)
     colors = [500, 500]
     small_nsample = _bill(
@@ -322,12 +328,12 @@ def test_mvhg_count_scales_with_nsample_and_size():
     big_nsample = _bill(
         lambda: g.multivariate_hypergeometric(colors, 500, size=10000, method="count")
     )
-    # small_nsample: sum(colors)=1000 + draws(10000 variates x min(1,999)=1)
-    #   + numel(output)=20000 = 31000.
-    assert small_nsample == 31_000
-    # big_nsample: sum(colors)=1000 + draws(10000 variates x min(500,500)=500)
-    #   + numel(output)=20000 = 5_021_000.
-    assert big_nsample == 5_021_000
+    # small_nsample: sum(colors)=1000 + draws(2 x 10000 variates x min(1,999)=1)
+    #   + numel(output)=20000 = 1000+20000+20000 = 41000.
+    assert small_nsample == 41_000
+    # big_nsample: sum(colors)=1000 + draws(2 x 10000 variates x min(500,500)=500)
+    #   + numel(output)=20000 = 1000+10_000_000+20000 = 10_021_000.
+    assert big_nsample == 10_021_000
     assert big_nsample > 100 * small_nsample  # scales with nsample, not flat
     assert big_nsample > 200 * sum(colors)  # far past the sum(colors)-only floor
 
@@ -357,12 +363,60 @@ def test_permutation_list_scales_with_axis_not_outer_len():
     assert b_1d_list == b_1d_arr == len(seq)
 
 
+def test_choice_list_replace_false_scales_with_sampled_axis():
+    # _choice_pool_size's non-ndarray fallback used len(a) regardless of
+    # `axis` -- len() only ever reports the outer dimension (shape[0]), so
+    # Generator.choice(pool, replace=False, axis=1) billed shape[0] no
+    # matter how wide the sampled axis was. A raw list is never coerced
+    # before reaching the cost formula (see _numel_input's comment for why),
+    # so this diverged arbitrarily from the equivalent-ndarray bill as soon
+    # as axis != 0 -- the exact sibling of the permutation/_shape_axis bug
+    # fixed above, and an unbounded under-bill (billed the fixed axis-0
+    # length no matter how large the sampled axis grew).
+    g = fnp.random.default_rng(14)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.choice(thin, size=1, replace=False, axis=1))
+    b_wide = _bill(lambda: g.choice(wide, size=1, replace=False, axis=1))
+    assert b_thin == 4  # shape[1], not shape[0]=2
+    assert b_wide == 4000  # shape[1], not shape[0]=2
+    assert b_wide == 1000 * b_thin
+
+    # list bills exactly the same as the ndarray equivalent.
+    nd_thin = fnp.asarray(np.asarray(thin))
+    nd_wide = fnp.asarray(np.asarray(wide))
+    b_nd_thin = _bill(lambda: g.choice(nd_thin, size=1, replace=False, axis=1))
+    b_nd_wide = _bill(lambda: g.choice(nd_wide, size=1, replace=False, axis=1))
+    assert b_thin == b_nd_thin
+    assert b_wide == b_nd_wide
+
+    # axis=0 (the only dimension len() ever sees) was never affected --
+    # len(a) already agreed with asarray(a).shape[0] -- and stays so.
+    b_thin_axis0 = _bill(lambda: g.choice(thin, size=1, replace=False, axis=0))
+    b_wide_axis0 = _bill(lambda: g.choice(wide, size=1, replace=False, axis=0))
+    assert b_thin_axis0 == b_wide_axis0 == 2  # shape[0], same for both pools
+
+    # replace=True bills numel(output) regardless of pool size, so it stays
+    # unaffected by the axis-bug fix: same `size` -> same output shape ->
+    # same bill, whether the pool is thin or wide along axis 1.
+    b_thin_replace_true = _bill(lambda: g.choice(thin, size=3, replace=True, axis=1))
+    b_wide_replace_true = _bill(lambda: g.choice(wide, size=3, replace=True, axis=1))
+    assert b_thin_replace_true == b_wide_replace_true
+
+
 def test_pad_stat_bills_all_reduced_axes():
     a = fnp.asarray(np.random.default_rng(7).standard_normal((20, 20, 20)))
     # pad only the LAST axis in mean mode: numpy still reduces all 3 axes.
     billed = _bill(lambda: fnp.pad(a, ((0, 0), (0, 0), (2, 2)), mode="mean"))
-    # the two unpadded axes must contribute (>0), not be skipped:
-    assert billed > 20 * 20  # far above the last-axis-only cost
+    # Exact pin (not just `> 20*20`): the old bound passed even under the
+    # pre-fix pad bug, which billed ~36000 here -- comfortably clearing
+    # `> 400` without actually proving the two unpadded axes were counted.
+    # The precise honest value (_pad_true_stat_cost in tests/batch_scan.py,
+    # fuzz-validated against a monkeypatched numpy trace) pins the real
+    # per-axis reduction cost exactly, so a regression that drops either
+    # unpadded axis's contribution -- or otherwise perturbs the formula --
+    # is caught immediately instead of hiding under a loose inequality.
+    assert billed == 34800
 
 
 def test_polyadd_sub_scale_with_inner_width():

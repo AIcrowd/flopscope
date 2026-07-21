@@ -122,10 +122,13 @@ def _choice_pool_size(args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
     the ``axis=0`` default keeps their billing exactly as before.
 
     Mirrors ``_shape_axis``: ``int`` pool -> ``int(a)``; 0-D ndarray ->
-    ``int(a)``; ndarray -> ``shape[axis]``; ``__len__`` fallback for
-    non-ndarray sequences (axis-0 semantics -- numpy converts them anyway);
-    ``axis=None`` (not valid for numpy choice, handled defensively) -> numel.
-    Floors at 1.
+    ``int(a)``; ndarray -> ``shape[axis]``; ``axis=None`` (not valid for
+    numpy choice, handled defensively) -> numel. Non-ndarray array-likes
+    (e.g. a raw Python list) are routed through ``asarray()`` first so they
+    are billed by the same shape/axis logic as an equivalent ndarray, rather
+    than by axis-blind ``len(a)`` (which only ever reports the outer
+    dimension no matter what axis was requested -- the same bug ``_shape_axis``
+    fixes for shuffle/permutation). Floors at 1.
     """
     a = args[0] if args else kwargs.get("a")
     if a is None:
@@ -133,22 +136,19 @@ def _choice_pool_size(args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
     if isinstance(a, (int, _np.integer)):
         return _builtins.max(int(a), 1)
 
+    if not isinstance(a, _np.ndarray):
+        if not hasattr(a, "__len__"):
+            return 1
+        a = _np.asarray(a)
+
     axis = args[4] if len(args) >= 5 else kwargs.get("axis", 0)
     if axis is None:
-        if isinstance(a, _np.ndarray):
-            return _builtins.max(int(a.size), 1)
-        if hasattr(a, "__len__"):
-            return _builtins.max(len(a), 1)
-        return 1
+        return _builtins.max(int(a.size), 1)
 
-    if isinstance(a, _np.ndarray):
-        if a.ndim == 0:
-            # 0-D scalar array; numpy choice treats as int(a)
-            return _builtins.max(int(a), 1)
-        return _builtins.max(int(a.shape[int(axis)]), 1)
-    if hasattr(a, "__len__"):
-        return _builtins.max(len(a), 1)
-    return 1
+    if a.ndim == 0:
+        # 0-D scalar array; numpy choice treats as int(a)
+        return _builtins.max(int(a), 1)
+    return _builtins.max(int(a.shape[int(axis)]), 1)
 
 
 def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
@@ -190,20 +190,21 @@ def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> in
     Base cost is numel(output). ``method="count"`` builds a temporary array
     of integers with length ``sum(colors)`` (numpy's own docstring for the
     method), then for each of the ``num_variates`` output vectors does a
-    partial Fisher-Yates shuffle-and-count over the first
-    ``min(nsample, sum(colors) - nsample)`` entries of that buffer -- numpy's
-    C implementation (``random_multivariate_hypergeometric_count``) samples
-    whichever of "the nsample chosen" / "the sum(colors)-nsample excluded" is
-    smaller and inverts the count if it took the exclusion path, so the
-    shuffle length is never more than half of ``sum(colors)``. So
-    ``method="count"`` bills ``sum(colors) + num_variates*min(nsample,
-    sum(colors)-nsample) + numel(output)``. That draw term is a conservative
-    floor -- numpy's real per-variate cost is closer to double it (a
-    Fisher-Yates shuffle pass plus a separate counting pass over the same
-    entries) -- but it now scales correctly in both ``nsample`` and ``size``,
-    the two dimensions the old flat ``numel(output)`` bill was completely
-    blind to. ``method="marginals"`` (the default) never allocates that
-    buffer or shuffles, and stays at numel(output).
+    partial Fisher-Yates shuffle over the first ``min(nsample, sum(colors) -
+    nsample)`` entries of that buffer, followed by a separate pass counting
+    the colors of those same shuffled entries -- numpy's C implementation
+    (``random_multivariate_hypergeometric_count``) samples whichever of "the
+    nsample chosen" / "the sum(colors)-nsample excluded" is smaller and
+    inverts the count if it took the exclusion path, so the shuffle length is
+    never more than half of ``sum(colors)``. Two full passes (shuffle, then
+    count) over that length is the real per-variate cost, so
+    ``method="count"`` bills ``sum(colors) + 2*num_variates*min(nsample,
+    sum(colors)-nsample) + numel(output)``. That draw term is a safe ceiling
+    -- it now scales correctly in both ``nsample`` and ``size``, the two
+    dimensions the old flat ``numel(output)`` bill was completely blind to,
+    with a 2x coefficient covering both passes over the shuffled entries
+    instead of just the first. ``method="marginals"`` (the default) never
+    allocates that buffer or shuffles, and stays at numel(output).
 
     ``method`` accepts the call's positional-or-keyword form, matching
     ``_choice_cost``'s handling of ``replace``/``p``/``axis``: it is the 4th
@@ -230,7 +231,9 @@ def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> in
         shape = getattr(result, "shape", ())
         num_colors = int(shape[-1]) if shape else 1
         num_variates = out // num_colors if num_colors else 1
-        draws = num_variates * _builtins.min(nsample, _builtins.max(total - nsample, 0))
+        draws = (
+            2 * num_variates * _builtins.min(nsample, _builtins.max(total - nsample, 0))
+        )
         return _builtins.max(total + draws + out, out)
     return out
 

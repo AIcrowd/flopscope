@@ -6713,7 +6713,7 @@
       "free": false,
       "module": "numpy.random",
       "name": "random.Generator.multivariate_hypergeometric",
-      "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) + num_variates*min(nsample, sum(colors)-nsample) when method='count' (temporary counting buffer plus a per-variate partial Fisher-Yates shuffle/count; method='marginals', the default, stays at numel(output)).",
+      "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) + 2*num_variates*min(nsample, sum(colors)-nsample) when method='count' (temporary counting buffer plus a per-variate partial Fisher-Yates shuffle pass and a separate counting pass over the same drawn entries; method='marginals', the default, stays at numel(output)).",
       "numpy_ref": "np.random.Generator.multivariate_hypergeometric",
       "slug": "random-Generator-multivariate_hypergeometric",
       "status": "supported",

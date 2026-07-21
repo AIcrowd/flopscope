@@ -866,6 +866,47 @@ def recipe_permuted(bound_op):
     ]
 
 
+def recipe_choice(bound_op):
+    """Generator.choice(a, size, replace=False, axis=...) bills the pool's
+    extent ALONG axis (_choice_pool_size), not numel and not output size --
+    so unlike recipe_permuted, growing the OUTER (row) dimension is not the
+    right probe shape here: numpy computes one shared index permutation of
+    length shape[axis] and gathers it across every other axis for free, so
+    the honest bill does NOT scale with the row count. Instead this widens
+    ONLY the sampled axis (axis=1) while holding the outer axis-0 length
+    fixed at 2 for both calls -- isolating the axis-handling bug (a raw
+    Python list reaches the cost formula uncoerced and a buggy fallback
+    would report len(a), the OUTER dimension, regardless of `axis`) from any
+    row-count confound. `size` draws the FULL sampled axis each time
+    (replace=False requires size <= the pool's length along that axis), so
+    the output also scales with the axis width and the harness's
+    output-propagation gate sees a genuine batch.
+
+    RandomState.choice has no `axis` parameter, so the probe below's base
+    call raises and `evaluate()` returns None for it (see `bill()`/
+    `evaluate()`); the harness then falls through to the original
+    replace=True/numel(output) probe kept below as `C:choice`, so
+    RandomState.choice's coverage is unchanged.
+    """
+    thin_pool = [[float(j) for j in range(4)] for _ in range(2)]  # (2, 4)
+    wide_pool = [[float(j) for j in range(4 * K)] for _ in range(2)]  # (2, 4*K)
+    axis_probe = probe(
+        "R:choice-list-axis",
+        lambda: bound_op(thin_pool, size=4, replace=False, axis=1),
+        lambda: bound_op(wide_pool, size=4 * K, replace=False, axis=1),
+        "output",
+        note="nested Python list bills axis-0 len(a), not shape[axis]",
+    )
+    pool = arr((256,))
+    replace_true_probe = probe(
+        "C:choice",
+        lambda: bound_op(pool, size=(64,)),
+        lambda: bound_op(pool, size=(K, 64)),
+        "output",
+    )
+    return [axis_probe, replace_true_probe]
+
+
 def _bp(label, op, base_args, bat_args, note="", base_kw=None, bat_kw=None, k=K):
     """One batch-prepend probe with explicit base/batched positional args."""
     bk = base_kw or {}
@@ -1407,6 +1448,7 @@ RECIPES_RANDOM_LEAF = {
     "multivariate_hypergeometric": recipe_mvhg,
     "permuted": recipe_permuted,
     "bytes": recipe_bytes,
+    "choice": recipe_choice,
 }
 
 
