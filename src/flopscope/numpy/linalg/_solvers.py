@@ -19,12 +19,9 @@ from flopscope.errors import SymmetryError
 
 def _batch_size(shape):
     """Number of matrices in a batched array."""
-    if len(shape) <= 2:
-        return 1
-    result = 1
-    for d in shape[:-2]:
-        result *= d
-    return result
+    from flopscope._batch import _broadcast_batch
+
+    return _broadcast_batch(tuple(shape), core_ranks=(2,))
 
 
 def _has_zero_dim(shape):
