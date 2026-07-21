@@ -1325,19 +1325,36 @@ is **rejected with a clear error**. These three ops carry weight **1.0** with a 
 
 | Op | free path (`flop_cost = 0`) | charged / rejected path |
 |---|---|---|
-| `pad` | — (no free path — every mode writes a fresh output buffer) | `numel(output)` base for **every** mode; movement modes (`constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` with `reflect_type='even'`) add nothing further on top of the base; `linear_ramp` and `reflect_type='odd'` add `(numel_out − numel_in)` on top of the base; stat modes `maximum`/`minimum`/`mean`/`median` add `Σᵢ stats_i·stat_len_i·cross_i` (lanes from the input cross-section) on top of the base; **`mode=<callable>` raises** |
+| `pad` | — (no free path — every mode writes a fresh output buffer) | `numel(output)` base for **every** mode; movement modes (`constant`, `edge`, `empty`, `wrap`, `reflect`/`symmetric` with `reflect_type='even'`) add nothing further on top of the base; `linear_ramp` and `reflect_type='odd'` add `(numel_out − numel_in)` on top of the base; stat modes `maximum`/`minimum`/`mean`/`median` reduce **every** axis — not only the ones actually padded — over a cross-section that **grows** as earlier axes get padded, adding `Σᵢ stats_i·stat_len_i·cross_i` on top of the base; **`mode=<callable>` raises** |
 | `trim_zeros` | — | `numel(input)` (value scan for the nonzero boundary) |
 | `copyto` | — | `numel(dst)` (or popcount(`where`) when masked) — every write is priced, same-dtype or not |
 
-For `pad` stat modes: `cross_i = numel_in // in_shape[i]`, `stat_len_i = min(stat_length_i,
-in_shape[i])` (default = full axis), summed over padded axes only; a full-axis stat serves
-both sides (one reduction). `mean` adds one divide per stat output cell.
+For `pad` stat modes: numpy pads axes in order `0..ndim-1`, mutating one shared output
+buffer in place, so axis `i`'s reduction reads a cross-section built from axes `< i` at
+their *already-padded* size and axes `> i` at their original size:
+`cross_i = ∏_{j<i} grown_j · ∏_{j>i} in_shape[j]`, where `grown_j = in_shape[j] +
+before_j + after_j` is axis `j`'s final padded length. `stat_len_i = min(stat_length_i,
+in_shape[i])` (default = full axis). This reduction happens on **every** axis,
+including one with pad width `(0, 0)` — its result is simply discarded into a width-0
+output region, but the FLOPs are real; only a wholly **empty** input (`numel_in == 0`,
+any axis length 0) skips the reduction loop entirely, mirroring numpy's own early-out.
+A full-axis stat (`stat_len` covering the whole axis on both sides) serves both sides
+from one reduction; otherwise numpy computes each side separately, even when one side's
+width is 0. `mean` adds one divide per stat output cell.
 
 Worked example (`a = arange(5, dtype=int32)`, `pad_width=2` ⇒ `numel_out=9`,
 `numel_in=5`): `constant`, `edge`, `wrap`, `empty`, `reflect`, and `symmetric` each
 bill **9** (the `numel_out` base, no surcharge); `linear_ramp` and `reflect_type='odd'`
 bill **13** (`9 + (9−5)`); `maximum` bills **14** (`9 + 5`); `mean` bills **15**
-(`9 + (5 + 1 divide)`).
+(`9 + (5 + 1 divide)`). This single-axis case can't show the cross-section growing, so
+a second example: `a.shape == (3, 4)`, `pad_width=((1, 1), (0, 0))` (axis 0 padded on
+both sides, axis 1 left completely unpadded) ⇒ `numel_out = 5·4 = 20`. `maximum` bills
+**52**: axis 0's reduction has `cross_0 = in_shape[1] = 4` and `stat_len_0 = 3`, costing
+`4·3 = 12`; axis 1's reduction — even though its pad width is `(0, 0)` — has
+`cross_1 = grown_0 = 5` (axis 0's *padded* length) and `stat_len_1 = 4`, costing
+`5·4 = 20`; total `20 + 12 + 20 = 52`. `mean` bills **61** (the same `12 + 20 = 32`
+reduction cost plus one divide per axis: `cross_0 + cross_1 = 4 + 5 = 9`;
+`20 + 32 + 9 = 61`).
 
 (`ravel_multi_index` — an index-math op with no free path — lives in the [Index
 generators](#index-generators) table, billed `numel(output)` and dtype-neutral.)

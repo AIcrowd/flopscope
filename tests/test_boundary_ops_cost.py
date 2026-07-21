@@ -43,9 +43,12 @@ def test_pad_mean_1d_charged():
 
 def test_pad_maximum_2d_charged():
     a = fnp.asarray(np.arange(20.0).reshape(4, 5))
-    # numel(out) = 6*7 = 42; stat extra: axis0 (1,1) cross=5,sl=4 -> 20 ;
-    # axis1 (0,2) cross=4,sl=5 -> 20 ; stat extra 40; total 42 + 40 = 82
-    assert billed(lambda: fnp.pad(a, ((1, 1), (0, 2)), mode="maximum")) == 82
+    # numel(out) = 6*7 = 42; stat extra: axis0 is processed first, so its
+    # cross-section still uses axis1's ORIGINAL size: cross=5,sl=4 -> 20;
+    # axis1 is processed second, so its cross-section uses axis0's ALREADY
+    # GROWN size (4+1+1=6), not axis0's original size 4: cross=6,sl=5 -> 30;
+    # stat extra 50; total 42 + 50 = 92
+    assert billed(lambda: fnp.pad(a, ((1, 1), (0, 2)), mode="maximum")) == 92
 
 
 def test_pad_median_charged():
@@ -81,28 +84,42 @@ def test_pad_mean_asymmetric_stat_length():
     assert billed(lambda: fnp.pad(a, (1, 1), mode="mean", stat_length=(3, 4))) == 21
 
 
-def test_pad_one_sided_only_charges_padded_side():
+def test_pad_one_sided_bills_the_discarded_side_too():
     a = fnp.asarray(np.arange(10.0))
-    # numel(out) = 13; pad after only, stat_length=2 -> charge only the after
-    # side: cross(1)*2 = 2 stat extra (numpy also computes a discarded
-    # before-stat; we intentionally do not bill it); total 13 + 2 = 15
-    assert billed(lambda: fnp.pad(a, (0, 3), mode="maximum", stat_length=2)) == 15
+    # numel(out) = 13; pad after only (before=0), stat_length=2 -> numpy's
+    # _get_stats ALWAYS computes a left-side reduction (even though before=0
+    # means its result is discarded into a width-0 output region), plus the
+    # right-side reduction the output actually uses: cross(1)*2 [left] +
+    # cross(1)*2 [right] = 4 stat extra; total 13 + 4 = 17. (Previously this
+    # test asserted the discarded left-side reduction was NOT billed -- that
+    # was an under-bill: numpy really performs that reduction.)
+    assert billed(lambda: fnp.pad(a, (0, 3), mode="maximum", stat_length=2)) == 17
 
 
 def test_pad_2d_mean_charged():
     a = fnp.asarray(np.arange(20.0).reshape(4, 5))
-    # numel(out) = 6*7 = 42; stat extra: axis0 (1,1) full-axis dedup:
-    # 5*4 reduce + 5 divides = 25 ; axis1 (1,1) full-axis dedup: 4*5 reduce
-    # + 4 divides = 24 ; stat extra 49; total 42 + 49 = 91
-    assert billed(lambda: fnp.pad(a, ((1, 1), (1, 1)), mode="mean")) == 91
+    # numel(out) = 6*7 = 42; stat extra: axis0 (1,1) full-axis dedup, cross=5
+    # (axis1's ORIGINAL size -- axis0 is processed first): 5*4 reduce + 5
+    # divides = 25; axis1 (1,1) full-axis dedup, cross=6 (axis0's ALREADY
+    # GROWN size 4+1+1=6, not its original 4 -- axis0 was padded first):
+    # 6*5 reduce + 6 divides = 36; stat extra 61; total 42 + 61 = 103
+    assert billed(lambda: fnp.pad(a, ((1, 1), (1, 1)), mode="mean")) == 103
 
 
-def test_pad_zero_width_free():
+def test_pad_zero_width_still_reduces_the_full_axis():
     a = fnp.asarray(np.arange(10.0))
-    # pad_width=(0,0) -> numel(out) == numel(in) == 10, no padding actually
-    # placed so the stat extra is 0, but numpy still allocates and writes a
-    # full copy: base numel(out) = 10 is billed regardless.
-    assert billed(lambda: fnp.pad(a, (0, 0), mode="maximum")) == 10
+    # pad_width=(0,0) -> numel(out) == numel(in) == 10, nothing is actually
+    # placed in the output from this axis's stat -- but numpy's per-axis
+    # stat loop runs unconditionally on pad width (it iterates every axis
+    # and always computes at least the left-side reduction), so it still
+    # performs a full-axis maximum reduction here; the result is simply
+    # discarded into a width-0 output region. stat extra = cross(1)*10 = 10;
+    # total 10 + 10 = 20. (Previously this test asserted a (0, 0) axis was
+    # "free" -- that was an under-bill: numpy really performs the reduction.
+    # A wholly EMPTY input -- some axis length 0 -- is the one case that
+    # truly skips the reduction loop; see test_pad_empty_input_floors_at_one
+    # in test_triage_price_pins.py, which uses mode='constant'.)
+    assert billed(lambda: fnp.pad(a, (0, 0), mode="maximum")) == 20
 
 
 def test_pad_constant_malformed_pad_width_raises_numpy_error():

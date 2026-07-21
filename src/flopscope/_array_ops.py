@@ -1291,35 +1291,50 @@ def _pad_flop_cost(in_shape, pad_width, mode, kwargs):
     if mode == "linear_ramp":
         return max(numel_out + (numel_out - numel_in), 1)
     if mode in _PAD_STAT_MODES:
+        if numel_in == 0:
+            # numpy.pad takes an entirely different code path when the input
+            # has 0 elements (any axis length 0): it only checks that every
+            # zero-length axis keeps pad_width (0, 0) -- raising if not --
+            # then returns the allocated buffer as-is. The per-axis
+            # stat_func loop below is never reached in that case, so there
+            # is no reduction cost at all, regardless of other axes' pad or
+            # stat_length widths.
+            return max(numel_out, 1)
         stat_length = kwargs.get("stat_length", None)
         if stat_length is None:
             stat_pairs = [(in_shape[i], in_shape[i]) for i in range(ndim)]
         else:
             stat_pairs = _pad_pairs(stat_length, ndim)
         cost = 0
+        # numpy pads axes in order 0..ndim-1, mutating the SAME output buffer
+        # in place: by the time axis i's stat is computed, every earlier axis
+        # is already grown to its final padded size (and filled with valid
+        # data), while later axes are still at their original size (their
+        # border is uninitialized until their own turn). So the cross-section
+        # each axis reduces over is prod(grown axes before it) * prod(original
+        # axes after it) -- NOT the static numel_in // axis_len this used to
+        # assume.
+        grown = list(in_shape)
         for i in range(ndim):
             before, after = pad_pairs[i]
             axis_len = in_shape[i]
-            if (before == 0 and after == 0) or axis_len == 0:
-                continue
-            cross = numel_in // axis_len
+            cross = _math.prod(grown[:i]) * _math.prod(in_shape[i + 1 :])
             sl_b = min(stat_pairs[i][0], axis_len)
             sl_a = min(stat_pairs[i][1], axis_len)
-            # Charge only the PADDED sides (the stats actually placed in the
-            # output). numpy also computes a stat for an unpadded side but discards
-            # it (placed into a width-0 region, unreadable), so billing it would
-            # over-charge for work the caller gets no value from.
-            stats = []
-            if before > 0:
-                stats.append(sl_b)
-            if after > 0:
-                stats.append(sl_a)
-            # A full-axis stat is identical for both sides -> numpy computes it once.
-            if before > 0 and after > 0 and sl_b == axis_len and sl_a == axis_len:
+            # numpy ALWAYS computes the left-side reduction for every axis,
+            # and a separate right-side reduction unless both sides read the
+            # identical full axis (in which case it reuses the left result) --
+            # this happens regardless of before/after being 0. A (0, 0) axis
+            # still gets reduced; the result is just discarded into a
+            # width-0 output region instead of being written anywhere.
+            if sl_b == sl_a == axis_len:
                 stats = [axis_len]
+            else:
+                stats = [sl_b, sl_a]
             cost += cross * sum(stats)
             if mode == "mean":
                 cost += cross * len(stats)  # one divide per stat output cell
+            grown[i] = axis_len + before + after
         return max(numel_out + cost, 1)
     return max(numel_out, 1)  # unknown string mode: let numpy raise its own ValueError
 

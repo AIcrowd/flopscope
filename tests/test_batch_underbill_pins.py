@@ -355,3 +355,11 @@ def test_permutation_list_scales_with_axis_not_outer_len():
     b_1d_list = _bill(lambda: g.permutation(seq))
     b_1d_arr = _bill(lambda: g.permutation(np.asarray(seq)))
     assert b_1d_list == b_1d_arr == len(seq)
+
+
+def test_pad_stat_bills_all_reduced_axes():
+    a = fnp.asarray(np.random.default_rng(7).standard_normal((20, 20, 20)))
+    # pad only the LAST axis in mean mode: numpy still reduces all 3 axes.
+    billed = _bill(lambda: fnp.pad(a, ((0, 0), (0, 0), (2, 2)), mode="mean"))
+    # the two unpadded axes must contribute (>0), not be skipped:
+    assert billed > 20 * 20  # far above the last-axis-only cost
