@@ -975,7 +975,7 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 | Op | flop_cost | basis | source |
 |---|---|---|---|
 | `polyval` | `2 × deg × points` (Horner: 1 mul + 1 add per coefficient per point, FMA=2) | DERIVED | `_polynomial.py` |
-| `polyfit` | `2 × m × (deg+1)² × ncols` (Vandermonde least-squares estimate; `ncols = y.shape[1]` for 2-D `y`, else 1 — one independent system solved per RHS column) | DERIVED: Vandermonde matrix construction + normal-equations cost; NOT an SVD path | `_polynomial.py` |
+| `polyfit` | `m×deg` (Vandermonde build) `+ lstsq_cost(m, deg+1, ncols)` (`ncols = y.shape[1]` for 2-D `y`, else 1) | DERIVED: builds an `(m, deg+1)` Vandermonde matrix and solves it via `lstsq` (SVD least-squares) — prices the identical solve `linalg.lstsq` charges for the same shape, rather than a cheaper standalone normal-equations estimate; the SVD factorization is shared across `ncols` RHS columns, so cost grows sublinearly in `ncols`, not linearly | `_polynomial.py:polyfit_cost` |
 | `polyadd`, `polysub` | size of the axis-0 zero-padded, broadcast-aligned result (= `numpy.polyadd(a1, a2).size`; reduces to `max(n1, n2, 1)` for 1-D inputs) | DERIVED: mirrors numpy's own zero-pad-then-broadcast algorithm on shapes, including higher-rank/broadcasting operands | `_polynomial.py` |
 | `polymul` | `2nm − n − m` (direct conv, FMA=2) | DERIVED | `_polynomial.py` |
 | `convolve` | `full`: `2nm − n − m`; `valid`: `(2·min−1)·(max−min+1)`; `same`: exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:convolve` |

@@ -3528,7 +3528,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Least squares polynomial fit. Cost: 2*m*(deg+1)^2 per RHS column (ncols = y.shape[1] for 2-D y, else 1).",
+        "notes": "Least squares polynomial fit. Cost: m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) (ncols = y.shape[1] for 2-D y, else 1); the SVD factorization inside lstsq_cost is shared across RHS columns, so cost grows sublinearly in ncols.",
     },
     "polyint": {
         "category": "counted_custom",

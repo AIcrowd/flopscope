@@ -1108,21 +1108,6 @@ def recipe_unravel_index(op):
     return [_bp("A:unravel_index", op, (i1, (8, 8)), (ik, (8, 8)))]
 
 
-def recipe_polyfit(op):
-    x = fnp.asarray(np.linspace(0, 1, 64))
-    y1 = arr((64,))
-    yk = fnp.asarray(_rng.random((64, K)))  # K columns = K simultaneous fits
-    return [
-        _bp(
-            "A:polyfit-cols",
-            op,
-            (x, y1, 3),
-            (x, yk, 3),
-            note="batched y columns = simultaneous fits",
-        )
-    ]
-
-
 # ---- stats recipes (extra shape params; batch the x argument) ----
 def _stats_recipe(op, extra):
     x1 = arr((64,), "pos")
@@ -1328,7 +1313,6 @@ RECIPES_FUNC = {
     "corrcoef": recipe_corrcoef,
     "pad": recipe_pad,
     "polyval": recipe_polyval,
-    "polyfit": recipe_polyfit,
     # index / movement / gather
     "take": recipe_take,
     "take_along_axis": recipe_take_along_axis,
@@ -1428,6 +1412,13 @@ NA_REASONS = {
     # matrix chains / whole-tensor ops -- no batch/broadcast dimension
     "linalg.multi_dot": "2-D matrix chain; no batch/broadcast dimension",
     "linalg.tensorinv": "single tensor inverse; folds all leading axes",
+    "polyfit": (
+        "x is 1-D only (no batch axis); y's RHS columns (ncols) share "
+        "lstsq_cost's SVD factorization -- the same shared-factorization "
+        "axis linalg.lstsq's own b_cols has (also un-probed here) -- not an "
+        "independent-repeat batch dimension, so cost is legitimately "
+        "sublinear in ncols, not linear"
+    ),
     "einsum_path": "returns a contraction path (planning), not array data",
     # in-place scatter (data movement) -- returns None, movement is free-tier
     "put": "in-place scatter (movement); returns None",

@@ -584,8 +584,8 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "polymul": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polydiv": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polyfit": (
-        "2m * (deg+1)^2 * ncols",
-        r"$2m \cdot (\text{deg}+1)^2 \cdot \text{ncols}$",
+        "m*deg + lstsq_cost(m, deg+1, ncols)",
+        r"$m \cdot \text{deg} + \text{lstsq\_cost}(m, \text{deg}+1, \text{ncols})$",
     ),
     "poly": ("n^2", r"$n^2$"),
     "roots": ("10n^3", r"$10n^3$"),

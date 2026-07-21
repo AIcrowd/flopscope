@@ -700,8 +700,13 @@ class TestPolynomial:
         assert _cost_of(we.polydiv, numpy.ones(5), numpy.ones(3)) == 22
 
     def test_polyfit(self, we):
+        # m=20, deg=2 (n=3 Vandermonde columns): m*deg (Vandermonde build)
+        # + lstsq_cost(20, 3, ncols=1) = 40 + 1755 = 1795. polyfit_cost now
+        # delegates to lstsq_cost (SVD least-squares), replacing the old
+        # normal-equations-shaped 2*m*(deg+1)^2 estimate (360 here) that
+        # billed 3-13x cheaper than the identical solve through lstsq.
         x = numpy.random.rand(20)
-        assert _cost_of(we.polyfit, x, numpy.random.rand(20), 2) == 360
+        assert _cost_of(we.polyfit, x, numpy.random.rand(20), 2) == 1795
 
     def test_poly(self, we):
         # n=5: (3*25 + 5) // 2 = 80 // 2 = 40  (was 2*25=50)

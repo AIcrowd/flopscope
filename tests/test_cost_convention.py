@@ -472,8 +472,12 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     ),
     "polyfit": (
         # plain numpy arrays required (FlopscopeArray causes internal tripwire)
+        # polyfit_cost now delegates to lstsq_cost (Vandermonde build + SVD
+        # least-squares solve), replacing the old normal-equations-shaped
+        # 2*m*(deg+1)^2 estimate (7200 here) that billed 3-13x cheaper than
+        # the identical solve billed through linalg.lstsq.
         lambda: fnp.polyfit(_v100_np, _v100_np, 5),
-        2 * 100 * (5 + 1) ** 2,  # 7200
+        100 * 5 + 27186,  # m*deg + lstsq_cost(100, 6, ncols=1) == 27686
     ),
     "roots": (
         # 10-coeff poly → 9×9 companion matrix; eigvals cost = 10*9^3

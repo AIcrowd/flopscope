@@ -988,8 +988,8 @@
     "reason": "ValueError: setting an array element with a sequence."
   },
   "polyfit": {
-    "class": "OK-SCALES",
-    "reason": "batched y columns = simultaneous fits"
+    "class": "NO-BATCH",
+    "reason": "x is 1-D only (no batch axis); y's RHS columns (ncols) share lstsq_cost's SVD factorization -- the same shared-factorization axis linalg.lstsq's own b_cols has (also un-probed here) -- not an independent-repeat batch dimension, so cost is legitimately sublinear in ncols, not linear"
   },
   "polyint": {
     "class": "NO-BATCH",

@@ -179,15 +179,47 @@ def polydiv_cost(n1: int, n2: int) -> int:
 
 
 def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
-    """Cost for polyfit: 2 * m * (deg+1)^2 * ncols FLOPs.
+    """Cost for polyfit: Vandermonde build + lstsq solve.
 
-    ``ncols`` is the number of right-hand-side columns being fit: 1 for a
-    1-D ``y`` (the usual case), or ``y.shape[1]`` when ``y`` is 2-D (numpy
-    solves one independent least-squares system per column, so the work
-    scales linearly with it). Defaults to 1 so every pre-existing 1-D-``y``
-    caller is bit-identical to the old ``2 * m * (deg+1)^2`` formula.
+    ``numpy.polyfit`` builds an ``(m, deg+1)`` Vandermonde matrix from ``x``
+    and solves it against ``y`` with ``numpy.linalg.lstsq`` (an SVD-based
+    least-squares solve). The billed cost is therefore the Vandermonde
+    build plus ``lstsq_cost(m, deg+1, ncols)`` -- the identical solve
+    ``linalg.lstsq`` itself would charge for the same shape -- rather than a
+    standalone normal-equations-shaped estimate. The prior
+    ``2*m*(deg+1)^2*ncols`` formula billed 3-13x cheaper than routing the
+    same solve through ``lstsq`` directly, so a least-squares solve could
+    dodge its true price by going through ``polyfit`` instead.
+
+    The SVD factorization inside ``lstsq_cost`` is shared across every
+    right-hand-side column -- only the final back-substitution scales with
+    ``ncols`` -- so this cost grows *sublinearly* in ``ncols``, unlike the
+    old formula, which scaled every term linearly with ``ncols``.
+
+    Parameters
+    ----------
+    m : int
+        Number of data points (``len(x)``).
+    deg : int
+        Fit degree; the Vandermonde matrix has ``deg + 1`` columns.
+    ncols : int, default 1
+        Number of right-hand-side columns being fit: 1 for a 1-D ``y`` (the
+        usual case), or ``y.shape[1]`` when ``y`` is 2-D (numpy solves one
+        independent least-squares system per column, sharing the same
+        Vandermonde factorization).
+
+    Returns
+    -------
+    int
+        Estimated FLOP count: ``m*deg`` (Vandermonde build) plus
+        ``lstsq_cost(m, deg+1, ncols)`` (SVD least-squares solve).
     """
-    return max(2 * m * (deg + 1) ** 2 * ncols, 1)
+    from flopscope.numpy.linalg import lstsq_cost
+
+    n = deg + 1
+    vandermonde = m * deg  # build the (m, deg+1) Vandermonde: ~m*deg mults
+    solve = lstsq_cost(m, n, b_cols=ncols, b_ndim=1 if ncols == 1 else 2)
+    return max(vandermonde + solve, 1)
 
 
 def poly_cost(n: int) -> int:
@@ -507,7 +539,9 @@ attach_docstring(
     polyfit,
     _np.polyfit,
     "counted_custom",
-    "2 * m * (deg+1)^2 * ncols FLOPs (ncols = y.shape[1] for 2-D y, else 1)",
+    "m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) FLOPs "
+    "(ncols = y.shape[1] for 2-D y, else 1; SVD factorization is shared "
+    "across ncols, so cost grows sublinearly in ncols)",
 )
 polyfit.__signature__ = _inspect.signature(_np.polyfit)  # type: ignore[attr-defined]
 

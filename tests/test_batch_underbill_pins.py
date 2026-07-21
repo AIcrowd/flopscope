@@ -457,14 +457,30 @@ def test_polyadd_sub_scalar_broadcast_blowup_bills_true_output_size():
 
 
 def test_polyfit_scales_with_rhs_columns():
-    # polyfit billed 2*m*(deg+1)^2 regardless of how many RHS columns `y`
-    # had -- numpy.polyfit solves one independent least-squares system per
-    # column of a 2-D y, so a (50, 1) and a (50, 100) y used to bill
-    # identically even though the real solve does ~100x the work.
+    # polyfit_cost now delegates to lstsq_cost (numpy.polyfit builds a
+    # Vandermonde matrix and solves it via SVD least-squares), replacing the
+    # old normal-equations-shaped 2*m*(deg+1)^2*ncols estimate -- which billed
+    # 3-13x CHEAPER than the identical solve billed through linalg.lstsq,
+    # letting a least-squares solve dodge its true price by routing through
+    # polyfit instead. See polyfit_cost's docstring.
+    #
+    # That old formula also scaled *linearly* in ncols (the number of RHS
+    # columns in a 2-D y): a (50, 100) y billed exactly 100x a (50, 1) y.
+    # lstsq_cost does not: its SVD factorization -- the dominant cost term,
+    # fixed by (m, deg+1) alone -- is shared across every RHS column; only
+    # the back-substitution (U^T b, divide-by-s, reconstruction) scales with
+    # ncols. So more columns is still more work (b100 > b1), just
+    # *sublinearly* -- a (50, 100) y now bills ~5.1x a (50, 1) y, not ~100x.
     x = np.linspace(0, 1, 50)
     y1 = fnp.asarray(np.random.default_rng(10).standard_normal((50, 1)))
     y100 = fnp.asarray(np.random.default_rng(11).standard_normal((50, 100)))
     b1 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y1, 5))
     b100 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y100, 5))
-    assert b100 > b1
-    assert b100 == 100 * b1  # linear in ncols: 2*50*36*100 == 100 * (2*50*36*1)
+    assert b1 == 16036  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=1)
+    assert b100 == 81970  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=100)
+    assert b100 > b1  # still scales with ncols ...
+    assert b100 < 100 * b1  # ... but sublinearly: SVD factorization is shared
+    # The under-bill is closed: the OLD formula would have billed the 1-D-y
+    # (ncols=1) fit at only 3600 -- the new bill is well over 4x that.
+    old_model_b1 = 2 * 50 * (5 + 1) ** 2 * 1
+    assert b1 > old_model_b1
