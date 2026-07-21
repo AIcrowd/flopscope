@@ -2822,7 +2822,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "mvhg_cost",
-        "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) when method='count' (temporary counting buffer of that length; method='marginals', the default, stays at numel(output)).",
+        "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) + num_variates*min(nsample, sum(colors)-nsample) when method='count' (temporary counting buffer plus a per-variate partial Fisher-Yates shuffle/count; method='marginals', the default, stays at numel(output)).",
     },
     "random.Generator.multivariate_normal": {
         "category": "counted_random_method",

@@ -33,11 +33,15 @@ def _numel_input(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
         return _builtins.max(int(a.size), 1)
     if hasattr(a, "__len__"):
         # Non-ndarray array-likes (e.g. a raw Python list) reach here
-        # uncoerced -- permuted's movement-method dispatch only strips
-        # ndarray operands to a base ndarray, so a nested list is forwarded
-        # to numpy as-is. len() on a nested list counts only the outer
-        # dimension; asarray(a).size counts every element numpy actually
-        # shuffles, matching the true work for any nesting depth.
+        # uncoerced: every cost formula is invoked with the wrapper's
+        # original args tuple, never the ndarray-stripped call_args that
+        # _make_counted_method's movement-method branch builds for the real
+        # numpy call (that stripping exists so a FlopscopeArray operand
+        # doesn't re-enter numpy's C dispatch; it never touches what a
+        # formula sees). So nothing coerces a list before it gets here.
+        # len() on a nested list counts only the outer dimension;
+        # asarray(a).size counts every element numpy actually shuffles,
+        # matching the true work for any nesting depth.
         return _builtins.max(int(_np.asarray(a).size), 1)
     return 1
 
@@ -76,6 +80,9 @@ def _shape_axis(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> i
     regardless of how wide each slice is. For integer input (the
     ``permutation(int_n)`` case), cost = ``int(n)``. For ``axis=None`` —
     which numpy interprets as "flatten then operate" — cost = numel.
+    Non-ndarray array-likes (e.g. a raw Python list) are routed through
+    ``asarray()`` first so they are billed by the same shape/axis logic as
+    an equivalent ndarray, rather than by axis-blind ``len(a)``.
     """
     a = args[0] if args else kwargs.get("x")
     if a is None:
@@ -83,22 +90,25 @@ def _shape_axis(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> i
     if isinstance(a, (int, _np.integer)):
         return _builtins.max(int(a), 1)
 
+    if not isinstance(a, _np.ndarray):
+        if not hasattr(a, "__len__"):
+            return 1
+        # Cost formulas always see the wrapper's original, uncoerced args
+        # (see _numel_input's comment for the full explanation) -- so a raw
+        # Python list reaches here exactly as the caller wrote it. Route it
+        # through asarray() so it gets real shape/axis semantics instead of
+        # len(a), which only ever reports the outer dimension no matter
+        # what axis was requested.
+        a = _np.asarray(a)
+
     axis = args[1] if len(args) >= 2 else kwargs.get("axis", 0)
     if axis is None:
-        if isinstance(a, _np.ndarray):
-            return _builtins.max(int(a.size), 1)
-        if hasattr(a, "__len__"):
-            return _builtins.max(len(a), 1)
-        return 1
+        return _builtins.max(int(a.size), 1)
 
-    if isinstance(a, _np.ndarray):
-        if a.ndim == 0:
-            # 0-D scalar array; numpy choice/permutation treats as int(a)
-            return _builtins.max(int(a), 1)
-        return _builtins.max(int(a.shape[int(axis)]), 1)
-    if hasattr(a, "__len__"):
-        return _builtins.max(len(a), 1)
-    return 1
+    if a.ndim == 0:
+        # 0-D scalar array; numpy choice/permutation treats as int(a)
+        return _builtins.max(int(a), 1)
+    return _builtins.max(int(a.shape[int(axis)]), 1)
 
 
 def _choice_pool_size(args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
@@ -177,15 +187,34 @@ def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
 def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
     """multivariate_hypergeometric(colors, nsample, size=None, method='marginals').
 
-    Base cost is numel(output). ``method="count"`` additionally builds a
-    temporary array of integers with length ``sum(colors)`` (numpy's own
-    docstring for the method) before reducing it down to the output, so that
-    method bills ``sum(colors) + numel(output)``. ``method="marginals"``
-    (the default) never allocates that buffer and stays at numel(output).
+    Base cost is numel(output). ``method="count"`` builds a temporary array
+    of integers with length ``sum(colors)`` (numpy's own docstring for the
+    method), then for each of the ``num_variates`` output vectors does a
+    partial Fisher-Yates shuffle-and-count over the first
+    ``min(nsample, sum(colors) - nsample)`` entries of that buffer -- numpy's
+    C implementation (``random_multivariate_hypergeometric_count``) samples
+    whichever of "the nsample chosen" / "the sum(colors)-nsample excluded" is
+    smaller and inverts the count if it took the exclusion path, so the
+    shuffle length is never more than half of ``sum(colors)``. So
+    ``method="count"`` bills ``sum(colors) + num_variates*min(nsample,
+    sum(colors)-nsample) + numel(output)``. That draw term is a conservative
+    floor -- numpy's real per-variate cost is closer to double it (a
+    Fisher-Yates shuffle pass plus a separate counting pass over the same
+    entries) -- but it now scales correctly in both ``nsample`` and ``size``,
+    the two dimensions the old flat ``numel(output)`` bill was completely
+    blind to. ``method="marginals"`` (the default) never allocates that
+    buffer or shuffles, and stays at numel(output).
 
     ``method`` accepts the call's positional-or-keyword form, matching
     ``_choice_cost``'s handling of ``replace``/``p``/``axis``: it is the 4th
     positional argument if given positionally, else the ``method`` kwarg.
+    ``nsample`` is the 2nd positional argument or the ``nsample`` kwarg --
+    it is a required parameter, so by the time this formula runs numpy's own
+    call has already succeeded and nsample is never actually missing.
+    ``num_variates`` is read off ``result.shape`` (trailing axis =
+    num_colors, the same convention ``_multivariate_normal_cost`` uses)
+    instead of re-parsing the ``size`` argument, so it stays correct whether
+    the caller passed ``size`` as ``None``, an int, or a tuple.
     """
     colors = args[0] if args else kwargs.get("colors")
     method = args[3] if len(args) >= 4 else kwargs.get("method", "marginals")
@@ -196,7 +225,13 @@ def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> in
         # __array_function__ dispatch from inside this wrapper's call frame
         # (the _called_from_wrapper() tripwire raises on exactly that).
         colors = _to_base_ndarray(colors)
-        return _builtins.max(int(_np.sum(colors)) + out, out)
+        total = int(_np.sum(colors))
+        nsample = int(args[1]) if len(args) >= 2 else int(kwargs.get("nsample", 0))
+        shape = getattr(result, "shape", ())
+        num_colors = int(shape[-1]) if shape else 1
+        num_variates = out // num_colors if num_colors else 1
+        draws = num_variates * _builtins.min(nsample, _builtins.max(total - nsample, 0))
+        return _builtins.max(total + draws + out, out)
     return out
 
 

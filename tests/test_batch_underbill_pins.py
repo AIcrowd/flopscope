@@ -280,7 +280,11 @@ def test_mvhg_count_colors_as_flopscope_array_does_not_crash():
     g = fnp.random.default_rng(10)
     colors = fnp.asarray([3, 3, 3])
     billed = _bill(lambda: g.multivariate_hypergeometric(colors, 4, method="count"))
-    assert billed == 12  # sum(colors)=9 + numel(output)=3
+    # sum(colors)=9 + draws(num_variates=1 x min(nsample=4, total-nsample=5)=4)
+    # + numel(output)=3 = 16. (Was pinned to 12 = sum(colors)+numel(output)
+    # before the draw term below existed -- see test_mvhg_count_scales_with_
+    # nsample_and_size for why that flat value was itself an under-bill.)
+    assert billed == 16
 
 
 def test_permuted_list_counts_all_elements():
@@ -297,3 +301,57 @@ def test_permuted_list_counts_all_elements():
     b_thin = _bill(lambda: g.permuted(thin, axis=1))
     b_wide = _bill(lambda: g.permuted(wide, axis=1))
     assert b_wide >= 900 * b_thin
+
+
+def test_mvhg_count_scales_with_nsample_and_size():
+    # _mvhg_cost's "count" branch billed a flat sum(colors) + numel(output),
+    # blind to nsample and to num_variates (from `size`) beyond
+    # numel(output)'s own num_variates*num_colors contribution. numpy's real
+    # "count" algorithm (random_multivariate_hypergeometric_count in numpy's
+    # C source) partially Fisher-Yates-shuffles
+    # min(nsample, sum(colors)-nsample) entries of a sum(colors)-length
+    # buffer for EVERY variate, so the true cost scales with
+    # num_variates * nsample -- a dimension the old formula never looked at.
+    # Before this fix, nsample=1 and nsample=500 billed identically here:
+    # flat sum(colors)+numel(output) = 1000 + 10000*2 = 21000 either way.
+    g = fnp.random.default_rng(12)
+    colors = [500, 500]
+    small_nsample = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 1, size=10000, method="count")
+    )
+    big_nsample = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 500, size=10000, method="count")
+    )
+    # small_nsample: sum(colors)=1000 + draws(10000 variates x min(1,999)=1)
+    #   + numel(output)=20000 = 31000.
+    assert small_nsample == 31_000
+    # big_nsample: sum(colors)=1000 + draws(10000 variates x min(500,500)=500)
+    #   + numel(output)=20000 = 5_021_000.
+    assert big_nsample == 5_021_000
+    assert big_nsample > 100 * small_nsample  # scales with nsample, not flat
+    assert big_nsample > 200 * sum(colors)  # far past the sum(colors)-only floor
+
+
+def test_permutation_list_scales_with_axis_not_outer_len():
+    # _shape_axis's non-ndarray fallback used len(a) regardless of `axis` --
+    # len() only ever reports the outer dimension (shape[0]), so
+    # permutation(rows, axis=1) billed shape[0] no matter how wide each row
+    # was. A raw list is never coerced before reaching the cost formula (see
+    # _numel_input's comment for why), so this diverged arbitrarily from the
+    # equivalent-ndarray bill as soon as axis != 0.
+    g = fnp.random.default_rng(13)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.permutation(thin, axis=1))
+    b_wide = _bill(lambda: g.permutation(wide, axis=1))
+    assert b_thin == 4  # shape[1], not shape[0]=2
+    assert b_wide == 4000  # shape[1], not shape[0]=2
+    assert b_wide == 1000 * b_thin
+
+    # 1-D lists are unaffected: shape[0] is the only axis either way, and
+    # len(a) already agreed with asarray(a).shape[0] -- the bug only shows
+    # up once axis picks out a dimension len() cannot see.
+    seq = [10, 20, 30, 40, 50]
+    b_1d_list = _bill(lambda: g.permutation(seq))
+    b_1d_arr = _bill(lambda: g.permutation(np.asarray(seq)))
+    assert b_1d_list == b_1d_arr == len(seq)
