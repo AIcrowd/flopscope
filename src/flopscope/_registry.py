@@ -1312,7 +1312,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Tensor solve. Cost: $\\frac{2}{3}n^3 + 2n^2$ after reshape, n=prod(a.shape[b.ndim:]) (delegates to solve); the reshape split point follows b's rank, not a fixed ind=2.",
+        "notes": "Tensor solve. Cost: $\\frac{2}{3}n^3 + 2n^2$ after reshape, n=isqrt(prod(a.shape)) (delegates to solve); n is the solved system's true dimension, so the cost is unaffected by `axes` reordering or where the reshape splits.",
     },
     "linalg.trace": {
         "category": "counted_custom",

@@ -876,7 +876,7 @@ factorization does roughly `4×` the real arithmetic of its real counterpart.
 | `linalg.matrix_norm` | same as `linalg.norm` | DERIVED | `_properties.py` |
 | `linalg.trace` | `min(m,n) × batch` | DERIVED: n−1 diagonal adds, batch-multiplied | `_properties.py:trace_cost` |
 | `linalg.tensorinv` | `2n³`, `n = prod(shape[:ind])` | DERIVED: via inv | `_solvers.py:tensorinv_cost` |
-| `linalg.tensorsolve` | `2n³/3 + 2n²`, `n = prod(shape[ind:])` | DERIVED: via solve | `_solvers.py:tensorsolve_cost` |
+| `linalg.tensorsolve` | `2n³/3 + 2n²`, `n = isqrt(prod(shape))` | DERIVED: via solve; n is the solved system's true dimension, independent of `axes` reordering | `_solvers.py:tensorsolve_cost` |
 | `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: values-only SVD + `min(m,n)` threshold comparisons | `_properties.py:matrix_rank_cost` |
 | `linalg.cond` | `2ab² + 2b³ + 1` for `ord∈{None,2,−2}` (values-only SVD + 1 divide); `2k³ + 4mn + 1`, `k=min(m,n)` for other ords (inv-based) | DERIVED | `_properties.py:cond_cost` |
 | `linalg.pinv` | `6ab² + 20b³ + min(m,n) + n·min(m,n) + matmul\_cost(n, min(m,n), m)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: thin SVD (with vectors) + threshold + diagonal scale + reconstruction matmul | `_solvers.py:pinv_cost` |

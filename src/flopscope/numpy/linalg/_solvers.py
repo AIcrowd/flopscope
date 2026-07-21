@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as _np
@@ -358,31 +359,35 @@ attach_docstring(
 )
 
 
-def tensorsolve_cost(a_shape: tuple, ind: int | None = None) -> int:
-    """FLOP cost of tensor solve.
+def tensorsolve_cost(a_shape: tuple) -> int:
+    r"""FLOP cost of tensor solve.
 
     Parameters
     ----------
     a_shape : tuple of int
-        Shape of the coefficient tensor.
-    ind : int or None, optional
-        Number of leading indices for the solution. Default is 2.
+        Shape of the coefficient tensor, as passed to ``tensorsolve`` (i.e.
+        before any ``axes`` reordering numpy performs internally).
 
     Returns
     -------
     int
-        Estimated FLOP count: $\frac{2}{3}n^3 + 2n^2$ where $n$ = product of
-        trailing dims. Reduces to ``solve_cost(n, 1)``.
+        Estimated FLOP count: $\frac{2}{3}n^3 + 2n^2$ where $n$ is the
+        dimension of the linear system numpy actually solves. Reduces to
+        ``solve_cost(n, 1)``.
 
     Notes
     -----
-    Reduces to a standard linear solve after reshaping.
+    ``numpy.linalg.tensorsolve(a, b, axes=...)`` optionally transposes ``a``
+    to move ``axes`` to the trailing positions, then reshapes the result to
+    a square ``(n, n)`` system before delegating to ``solve``. A transpose
+    only reorders axes, so it never changes ``a``'s total element count, and
+    numpy requires ``a.size == n**2`` for any valid call (it raises
+    otherwise) -- both regardless of ``axes`` and of ``b``'s rank. So
+    ``n = isqrt(prod(a_shape))`` recovers the true solved dimension directly
+    from ``a``'s original (untransposed) shape, without needing to locate
+    the reshape split point.
     """
-    if ind is None:
-        ind = 2
-    n = 1
-    for d in a_shape[ind:]:
-        n *= d
+    n = math.isqrt(math.prod(a_shape))
     return solve_cost(n, nrhs=1)
 
 
@@ -394,7 +399,7 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     b_arr = _np.asarray(b)
-    cost = tensorsolve_cost(a.shape, ind=b_arr.ndim)
+    cost = tensorsolve_cost(a.shape)
     with budget.deduct(
         "linalg.tensorsolve",
         flop_cost=cost,
@@ -421,8 +426,8 @@ attach_docstring(
     tensorsolve,
     _np.linalg.tensorsolve,
     "linalg",
-    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = prod(a.shape[b.ndim:]) (reduces to solve); "
-    r"the split point follows b's rank, not a fixed ind=2",
+    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = isqrt(prod(a.shape)) (reduces to solve); "
+    r"n is the solved system's true dimension regardless of axes reordering",
 )
 
 
