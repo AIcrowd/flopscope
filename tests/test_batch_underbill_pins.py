@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 import flopscope as flops
@@ -69,3 +71,78 @@ def test_percentile_family_scales_with_q_count():
         many = _bill(lambda op=op, hi=hi: op(a, np.linspace(0, hi, 1000)))
         assert many > scalar, f"{op.__name__} flat-bills q-array"
         assert many >= scalar + 999  # at least +1 FLOP per extra quantile
+
+
+def test_fftn_family_bills_leading_batch_when_s_given():
+    # numpy: when `s` is given and `axes` is omitted, the transform runs
+    # over the TRAILING len(s) axes and batches over every leading axis.
+    # `_batch_count_nd` short-circuits `axes is None` to batch=1, which is
+    # only correct when `s` is also None -- so this path was silently
+    # dropping the leading batch dimension from the bill.
+    rng = np.random.default_rng(3)
+    a1 = fnp.asarray(rng.standard_normal((16, 16)))
+    a8 = fnp.asarray(rng.standard_normal((8, 16, 16)))
+    with warnings.catch_warnings():
+        # numpy 2.x DeprecationWarning: "`axes` should not be `None` if `s`
+        # is not `None`" -- expected on this path, not under test here.
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        for op in (fnp.fft.fftn, fnp.fft.ifftn):
+            b1 = _bill(lambda op=op: op(a1, s=(16, 16)))
+            b8 = _bill(lambda op=op: op(a8, s=(16, 16)))
+            assert b8 == 8 * b1, (
+                f"{op.__name__} drops leading batch on axes=None,s given"
+            )
+
+
+def test_rfftn_family_bills_leading_batch_when_s_given():
+    # Same bug, real-FFT siblings: rfftn transforms real input, irfftn
+    # consumes the (conjugate-symmetric) complex spectrum rfftn produces.
+    rng = np.random.default_rng(4)
+    raw1 = rng.standard_normal((16, 16))
+    raw8 = rng.standard_normal((8, 16, 16))
+    a1 = fnp.asarray(raw1)
+    a8 = fnp.asarray(raw8)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        b1 = _bill(lambda: fnp.fft.rfftn(a1, s=(16, 16)))
+        b8 = _bill(lambda: fnp.fft.rfftn(a8, s=(16, 16)))
+        assert b8 == 8 * b1, "rfftn drops leading batch on axes=None,s given"
+
+        # Reference complex spectra built with plain numpy (outside any
+        # BudgetContext, so building them doesn't pollute the bill below).
+        c1 = fnp.asarray(np.fft.rfftn(raw1, s=(16, 16)))
+        c8 = fnp.asarray(np.fft.rfftn(raw8, s=(16, 16)))
+        i1 = _bill(lambda: fnp.fft.irfftn(c1, s=(16, 16)))
+        i8 = _bill(lambda: fnp.fft.irfftn(c8, s=(16, 16)))
+        assert i8 == 8 * i1, "irfftn drops leading batch on axes=None,s given"
+
+
+def test_fft2_family_bills_leading_batch_when_axes_explicitly_none():
+    # fft2/ifft2/rfft2/irfft2 route through the same `_batch_count_nd`
+    # helper as the fftn family, and `axes` defaults to (-2, -1) rather
+    # than None -- but numpy still accepts an explicit `axes=None`
+    # (fft2(a, s, axes) delegates straight to fftn(a, s, axes)), so the
+    # same leading-batch-axis under-bill is reachable here too.
+    rng = np.random.default_rng(5)
+    raw1 = rng.standard_normal((16, 16))
+    raw8 = rng.standard_normal((8, 16, 16))
+    a1 = fnp.asarray(raw1)
+    a8 = fnp.asarray(raw8)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        for op in (fnp.fft.fft2, fnp.fft.ifft2):
+            b1 = _bill(lambda op=op: op(a1, s=(16, 16), axes=None))
+            b8 = _bill(lambda op=op: op(a8, s=(16, 16), axes=None))
+            assert b8 == 8 * b1, (
+                f"{op.__name__} drops leading batch on axes=None,s given"
+            )
+
+        r1 = _bill(lambda: fnp.fft.rfft2(a1, s=(16, 16), axes=None))
+        r8 = _bill(lambda: fnp.fft.rfft2(a8, s=(16, 16), axes=None))
+        assert r8 == 8 * r1, "rfft2 drops leading batch on axes=None,s given"
+
+        c1 = fnp.asarray(np.fft.rfft2(raw1, s=(16, 16)))
+        c8 = fnp.asarray(np.fft.rfft2(raw8, s=(16, 16)))
+        j1 = _bill(lambda: fnp.fft.irfft2(c1, s=(16, 16), axes=None))
+        j8 = _bill(lambda: fnp.fft.irfft2(c8, s=(16, 16), axes=None))
+        assert j8 == 8 * j1, "irfft2 drops leading batch on axes=None,s given"

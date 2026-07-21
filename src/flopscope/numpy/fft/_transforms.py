@@ -334,7 +334,13 @@ def fft2(
         s_for_cost = tuple(
             a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fft2",
         flop_cost=cost,
@@ -378,7 +384,13 @@ def ifft2(
         s_for_cost = tuple(
             a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifft2",
         flop_cost=cost,
@@ -422,7 +434,13 @@ def rfft2(
         s_for_cost = tuple(
             a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfft2",
         flop_cost=cost,
@@ -469,7 +487,13 @@ def irfft2(
             else si
             for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfft2",
         flop_cost=cost,
@@ -515,7 +539,13 @@ def fftn(
         s_for_cost = tuple(
             a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fftn",
         flop_cost=cost,
@@ -560,7 +590,13 @@ def ifftn(
         s_for_cost = tuple(
             a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifftn",
         flop_cost=cost,
@@ -605,7 +641,13 @@ def rfftn(
         s_for_cost = tuple(
             a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfftn",
         flop_cost=cost,
@@ -662,7 +704,13 @@ def irfftn(
             else si
             for i, si in enumerate(s)
         )
-    cost = _batch_count_nd(a, axes) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    if axes is None:
+        eff = (
+            tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
+        )
+    else:
+        eff = tuple(axes)
+    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfftn",
         flop_cost=cost,
