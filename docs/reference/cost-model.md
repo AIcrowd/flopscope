@@ -866,7 +866,7 @@ factorization does roughly `4×` the real arithmetic of its real counterpart.
 | `linalg.cholesky` | `n³/3` | DERIVED: Cholesky factorization (dpotrf) | `_decompositions.py:cholesky_cost` |
 | `linalg.qr` (reduced/complete) | `2(2mnk − 2k³/3)`, `k = min(m,n)` | DERIVED: factorization (dgeqrf) + Q-formation (dorgqr) ≈ same count | `_decompositions.py:qr_cost` |
 | `linalg.qr` (r/raw) | `2mnk − 2k³/3` | DERIVED: factorization only | `_decompositions.py:qr_cost` |
-| `linalg.solve` | `2n³/3 + 2n²×nrhs` | DERIVED: LU solve (dgesv = dgetrf + dgetrs) | `_solvers.py:solve_cost` |
+| `linalg.solve` | `2n³/3 + 2n²×nrhs` | DERIVED: LU solve (dgesv = dgetrf + dgetrs); batch is the numpy-broadcast of `a`'s and `b`'s leading dims, not just `a`'s | `_solvers.py:solve_cost` |
 | `linalg.inv` | `2n³` | DERIVED: LU factorization + inversion (dgetrf + dgetri ≈ 2n³) | `_solvers.py:inv_cost` |
 | `linalg.det` | `2n³/3 + n` | DERIVED: LU factorization (dgetrf) + diagonal product | `_properties.py:det_cost` |
 | `linalg.slogdet` | `2n³/3 + 18n` | DERIVED: LU (dgetrf) + sum of log\|diag\| (abs + 16/elem log + reduce) | `_properties.py:slogdet_cost` |
@@ -954,6 +954,13 @@ constant is the standard textbook estimate.
 | `fft.rfftfreq` | `n//2 + 1` (real-spectrum grid has `n//2 + 1` elements) | DECLARED: `n//2 + 1` divides |
 | `fft.fftshift`, `fft.ifftshift` | `numel(output)` | DERIVED: `numpy.roll`-based data-movement reindex, billed at weight 1.0 like a materializing copy (not part of the FFT priced-in family) — see [Copy and gather](#copy-and-gather) |
 
+The table above gives the **per-transform** cost; every transform op also multiplies by
+however many independent transforms the call performs. `fft`/`ifft`/`rfft`/`irfft`
+transform a single `axis` and batch over every other axis (`numel(input) / N`).
+`fft2`/`ifft2`/`rfft2`/`irfft2`/`fftn`/`ifftn`/`rfftn`/`irfftn` transform the given
+`axes` — or, when `axes` is omitted but `s` is given, the trailing `len(s)` axes, not
+every axis — and batch over whatever axes remain.
+
 **Complex dtypes**: `complex_factor` is **1** (priced in) — `5N·log₂N` already counts the
 complex transform's real FLOPs (10 per radix-2 butterfly), so a complex128 transform bills
 only the `2.0` dtype rate over its float32 counterpart, with no extra structural factor
@@ -1009,11 +1016,12 @@ Weight tiers:
 - **weight 16.0** — transcendental samplers (every continuous/transformed
   distribution): `normal`, `standard_normal`, `randn`, `exponential`,
   `standard_exponential`, `poisson`, `binomial`, `geometric`,
-  `hypergeometric`, `negative_binomial`, `multinomial`, `beta`, `dirichlet`,
-  `f`, `gamma`, `gumbel`, `laplace`, `logistic`, `lognormal`, `logseries`,
-  `pareto`, `power`, `rayleigh`, `standard_cauchy`, `standard_gamma`,
-  `standard_t`, `triangular`, `vonmises`, `wald`, `weibull`, `zipf`, and all
-  their Generator / RandomState counterparts.
+  `hypergeometric`, `multivariate_hypergeometric`, `negative_binomial`,
+  `multinomial`, `beta`, `dirichlet`, `f`, `gamma`, `gumbel`, `laplace`,
+  `logistic`, `lognormal`, `logseries`, `pareto`, `power`, `rayleigh`,
+  `standard_cauchy`, `standard_gamma`, `standard_t`, `triangular`,
+  `vonmises`, `wald`, `weibull`, `zipf`, and all their Generator /
+  RandomState counterparts.
 
 | Op / family | flop_cost | weight | basis | source |
 |---|---|---|---|---|
@@ -1028,10 +1036,12 @@ Weight tiers:
 | `Generator.choice`, `RandomState.choice` | same formula shape as module-level `random.choice` above (`Generator.choice` additionally adds `3n + m×⌈log₂ n⌉` — CDF build + binary search — when `p` is given and `replace=True`) | 4.0 | DECLARED/DERIVED | `_cost_formulas.py` |
 | `random.shuffle`, `random.permutation` (module-level) | `max(n, 1)`, `n = x.shape[0]` for array input or the int argument itself | 4.0 | DECLARED: in-place Fisher-Yates draws, dtype-neutral | `_cost_formulas.py` |
 | `Generator.permutation`, `Generator.shuffle`, `RandomState.permutation`, `RandomState.shuffle` | `max(shape[axis], 1)` (`axis` defaults to 0; `RandomState` has no `axis` kwarg) | 4.0 | DECLARED: Fisher-Yates draws | `_cost_formulas.py` |
-| `Generator.permuted` | cost from the input array's size along the permuted axis | 4.0 | DECLARED | `_cost_formulas.py` |
+| `Generator.permuted` | `numel(input)` (every element is reordered within its axis-slice, not just `shape[axis]` slices as `shuffle`/`permutation` bill; a nested Python-list input is routed through `asarray` first, so it bills every element regardless of nesting depth, not just the outer dimension) | 4.0 | DECLARED | `_cost_formulas.py` |
 | `random.exponential` | `numel(output)` | 16.0 | DECLARED: transcendental weight 16.0; float64 by default (see the preamble above) → `32 × numel` in practice | `_cost_formulas.py` |
 | `random.poisson`, `random.binomial`, `random.geometric`, `random.hypergeometric`, `random.negative_binomial`, `random.multinomial` | `numel(output)` | 16.0 | DECLARED: transcendental weight 16.0; these draws resolve to int64 (rate 2.0, same as the float64 case above) → `32 × numel` in practice | `_cost_formulas.py` |
 | `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | 1.0 | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
+| `Generator.multivariate_hypergeometric` (`method='marginals'`, the default) | `numel(output)` | 16.0 | DECLARED | `_cost_formulas.py` |
+| `Generator.multivariate_hypergeometric` (`method='count'`) | `sum(colors) + num_variates × min(nsample, sum(colors) − nsample) + numel(output)` | 16.0 | DERIVED composite: numpy builds a temporary counting buffer of length `sum(colors)`, then for each of the `num_variates` output draws does a partial Fisher-Yates shuffle-and-count over `min(nsample, sum(colors) − nsample)` buffer entries (whichever of the sampled/excluded side is smaller); this term is a conservative floor — numpy's real per-variate cost is closer to double it (a shuffle pass plus a separate counting pass) | `_cost_formulas.py` |
 | `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions; each draw resolves to its actual output dtype — float64 (rate 2.0) for the continuous members, int64 (rate 2.0) for the discrete `logseries`/`zipf` — so the full bill is `32 × numel` in practice | `_cost_formulas.py` |
 
 **Complex dtypes**: the distribution samplers produce **real-only** outputs, so a complex

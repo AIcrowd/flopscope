@@ -271,9 +271,9 @@ GENERATED_PAGES: dict[str, dict] = {
             | Operation | Cost Formula |
             |-----------|-------------|
             | `polyval` | $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2) |
-            | `polyadd`, `polysub` | $\\max(n_1, n_2)$ |
+            | `polyadd`, `polysub` | $\\text{numel}(\\text{polyadd}(a_1, a_2))$ (broadcast-aligned; $\\max(n_1, n_2)$ for 1-D) |
             | `polymul`, `polydiv` | $n_1 \\cdot n_2$ |
-            | `polyfit` | $2m \\cdot (\\text{deg}+1)^2$ |
+            | `polyfit` | $2m \\cdot (\\text{deg}+1)^2 \\cdot \\text{ncols}$ |
             | `poly` | $n^2$ |
             | `roots` | $10n^3$ (companion matrix eigendecomposition) |
             | `polyder`, `polyint` | $n$ |
@@ -571,13 +571,22 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "fft.hfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
     "fft.ihfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
     "polyval": ("2 * m * deg (FMA=2)", r"$2 \cdot m \cdot \text{deg}$"),
-    "polyadd": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
-    "polysub": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
+    "polyadd": (
+        "size of broadcast-aligned result (numpy.polyadd(a1, a2).size; = max(n1, n2) for 1-D)",
+        r"$\text{numel}(\text{polyadd}(a_1, a_2))$",
+    ),
+    "polysub": (
+        "size of broadcast-aligned result (numpy.polysub(a1, a2).size; = max(n1, n2) for 1-D)",
+        r"$\text{numel}(\text{polysub}(a_1, a_2))$",
+    ),
     "polyder": ("n", "$n$"),
     "polyint": ("n", "$n$"),
     "polymul": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polydiv": ("n1 * n2", r"$n_1 \cdot n_2$"),
-    "polyfit": ("2m * (deg+1)^2", r"$2m \cdot (\text{deg}+1)^2$"),
+    "polyfit": (
+        "2m * (deg+1)^2 * ncols",
+        r"$2m \cdot (\text{deg}+1)^2 \cdot \text{ncols}$",
+    ),
     "poly": ("n^2", r"$n^2$"),
     "roots": ("10n^3", r"$10n^3$"),
     "bartlett": ("4n", "$4n$"),
