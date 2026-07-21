@@ -8,6 +8,7 @@ from typing import Any
 import numpy as _np
 from numpy.typing import ArrayLike
 
+from flopscope._batch import _broadcast_batch
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import linalg_billing_dtypes
@@ -71,8 +72,9 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     n = a.shape[-1]
-    batch = _batch_size(a.shape)
     nrhs = b.shape[-1] if b.ndim >= 2 else 1
+    b_core = 2 if b.ndim >= 2 else 1
+    batch = _broadcast_batch(a.shape, b.shape, core_ranks=(2, b_core))
     cost = solve_cost(n, nrhs=nrhs) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
         "linalg.solve",
@@ -91,7 +93,8 @@ attach_docstring(
     solve,
     _np.linalg.solve,
     "linalg",
-    r"$\frac{2}{3}n^3 + 2n^2 \cdot nrhs$ FLOPs (LU + triangular solves)",
+    r"($\frac{2}{3}n^3 + 2n^2 \cdot nrhs$) $\times$ batch FLOPs (LU + triangular solves); "
+    r"batch broadcasts a's and b's leading dims, not just a's",
 )
 
 
@@ -391,7 +394,7 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     b_arr = _np.asarray(b)
-    cost = tensorsolve_cost(a.shape)
+    cost = tensorsolve_cost(a.shape, ind=b_arr.ndim)
     with budget.deduct(
         "linalg.tensorsolve",
         flop_cost=cost,
@@ -418,7 +421,8 @@ attach_docstring(
     tensorsolve,
     _np.linalg.tensorsolve,
     "linalg",
-    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = product of trailing dims (reduces to solve)",
+    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = prod(a.shape[b.ndim:]) (reduces to solve); "
+    r"the split point follows b's rank, not a fixed ind=2",
 )
 
 
