@@ -1118,13 +1118,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 4.0,
-        "notes": "Pearson correlation coefficients.",
+        "notes": "Pearson correlation coefficients. Cost: (2*f^2*s + 2*f*s) + 2*f^2 + f, f=features/s=samples; rowvar=True (default) reads f=shape[0], s=shape[1] -- transposed under rowvar=False (f=shape[1], s=shape[0]); y follows the same orientation.",
     },
     "cov": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 4.0,
-        "notes": "Covariance matrix.",
+        "notes": "Covariance matrix. Cost: 2*f^2*s + 2*f*s, f=features/s=samples; rowvar=True (default) reads f=shape[0], s=shape[1] -- transposed under rowvar=False (f=shape[1], s=shape[0]); y follows the same orientation.",
     },
     "trapezoid": {
         "category": "counted_custom",

@@ -184,3 +184,44 @@ def test_fftn_s_none_sentinel_resolves_to_transform_axis_not_leading_axis():
         billed_none = _bill(lambda: fnp.fft.fftn(a, s=(None, 8)))
         billed_concrete = _bill(lambda: fnp.fft.fftn(a, s=(8, 8)))
     assert billed_none == billed_concrete
+
+
+def test_cov_corrcoef_bill_rowvar_false_orientation():
+    # numpy's cov/corrcoef treat `rowvar` as an orientation switch, not a
+    # cosmetic flag: rowvar=True (default) reads m as (features, samples) --
+    # f=m.shape[0], s=m.shape[1]. rowvar=False transposes that reading --
+    # each COLUMN is a variable, each ROW an observation -- so f=m.shape[1],
+    # s=m.shape[0]. `_cov_cost`/`_corrcoef_cost` hardcoded the rowvar=True
+    # binding regardless of what was actually passed, so a (3, 2000) input
+    # billed identically under both orientations even though numpy's real
+    # rowvar=False path builds a much larger 2000x2000 Gram matrix (f=2000,
+    # s=3) instead of the cheap 3x3 one (f=3, s=2000) -- an unbounded
+    # under-bill as the "wrong-axis" dimension grows.
+    m = fnp.asarray(np.random.default_rng(4).standard_normal((3, 2000)))
+    for op in (fnp.cov, fnp.corrcoef):
+        t = _bill(lambda op=op: op(m, rowvar=True))
+        f = _bill(lambda op=op: op(m, rowvar=False))
+        assert f > 100 * t  # ~ (2000/3) orientation factor
+
+
+def test_cov_corrcoef_rowvar_false_y_orientation_matches_transposed_rowvar_true():
+    # `y` follows the same rowvar-dependent orientation as `x`: numpy
+    # transposes `y` under rowvar=False before stacking it onto `x` (checked
+    # against real numpy: `cov(m, y, rowvar=False)` is bit-identical to
+    # `cov(m.T, y.T, rowvar=True)`), so the two equivalent call forms must
+    # bill identically too. This exercises the `y_arr.shape[1]` branch in
+    # `_cov_cost`/`_corrcoef_cost` (and `_corrcoef_cost`'s own duplicated f/f2
+    # computation for its normalization term) independently of the no-y pin
+    # above, which never passes `y` and so never reaches this branch.
+    rng = np.random.default_rng(9)
+    raw_m = rng.standard_normal((4, 2))
+    raw_y = rng.standard_normal((4, 3))
+    m = fnp.asarray(raw_m)
+    y = fnp.asarray(raw_y)
+    m_t = fnp.asarray(raw_m.T)
+    y_t = fnp.asarray(raw_y.T)
+    for op in (fnp.cov, fnp.corrcoef):
+        billed_false = _bill(lambda op=op: op(m, y, rowvar=False))
+        billed_true_transposed = _bill(lambda op=op: op(m_t, y_t, rowvar=True))
+        assert billed_false == billed_true_transposed
+        assert billed_false > 0

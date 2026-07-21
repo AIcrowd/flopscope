@@ -3708,32 +3708,52 @@ attach_docstring(
 )
 
 
-def _cov_cost(x, y=None):
+def _cov_cost(x, y=None, rowvar=True):
     """Cost for cov: 2 * f^2 * s + 2 * f * s FLOPs.
 
-    For a (f, s) input: f features, s samples.
+    For a (f, s) input: f features, s samples. ``rowvar=True`` (numpy's
+    default) reads x as (features, samples) -- f=shape[0], s=shape[1].
+    ``rowvar=False`` transposes that reading: each COLUMN is a variable and
+    each ROW an observation -- f=shape[1], s=shape[0]. Same for ``y``: numpy
+    transposes it under ``rowvar=False`` before stacking, so its variable
+    count is read off ``shape[1]`` there too.
 
     - Gram term:      f^2 dot products of length s → ``2 * f^2 * s`` FLOPs (FMA=2)
     - Centering pass: subtract per-feature mean from each sample → ``2 * f * s``
       FLOPs (1 mean divide + 1 subtract per element, 2 * f * s total).
 
     Previously only the Gram term was counted, under-counting by ``2 * f * s``.
+    Previously ``rowvar`` was also ignored entirely, pinning every call to the
+    ``rowvar=True`` binding regardless of what was passed -- an unbounded
+    under-bill under ``rowvar=False`` whenever the sample axis is larger than
+    the feature axis (the common observations-as-rows layout).
     """
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     if x.ndim == 1:
         f, s = 1, x.shape[0]
-    else:
+    elif rowvar:
         f, s = x.shape[0], x.shape[1]
+    else:
+        f, s = x.shape[1], x.shape[0]
     if y is not None:
         y_arr = _np.asarray(y)
-        f2 = 1 if y_arr.ndim == 1 else y_arr.shape[0]
+        if y_arr.ndim == 1:
+            f2 = 1
+        elif rowvar:
+            f2 = y_arr.shape[0]
+        else:
+            f2 = y_arr.shape[1]  # numpy transposes y under rowvar=False
         f += f2
     return _builtins.max(2 * f * f * s + 2 * f * s, 1)
 
 
-def _corrcoef_cost(x, y=None):
+def _corrcoef_cost(x, y=None, rowvar=True):
     """Cost for corrcoef: cov_cost(x, y) + 2 * f^2 + f FLOPs.
+
+    ``f`` here is the same rowvar-dependent feature count as ``_cov_cost``
+    (the output correlation matrix is f x f, so the normalization term must
+    track the same orientation as the Gram/centering term it wraps).
 
     Normalization step: f^2 divides (divide cov[i,j] by std_i * std_j) plus
     f sqrt calls (one per feature) → ``2 * f^2 + f`` additional FLOPs.
@@ -3745,13 +3765,20 @@ def _corrcoef_cost(x, y=None):
         x = _np.asarray(x)
     if x.ndim == 1:
         f = 1
-    else:
+    elif rowvar:
         f = x.shape[0]
+    else:
+        f = x.shape[1]
     if y is not None:
         y_arr = _np.asarray(y)
-        f2 = 1 if y_arr.ndim == 1 else y_arr.shape[0]
+        if y_arr.ndim == 1:
+            f2 = 1
+        elif rowvar:
+            f2 = y_arr.shape[0]
+        else:
+            f2 = y_arr.shape[1]
         f += f2
-    return _builtins.max(_cov_cost(x, y) + 2 * f * f + f, 1)
+    return _builtins.max(_cov_cost(x, y, rowvar) + 2 * f * f + f, 1)
 
 
 @_counted_wrapper
@@ -3760,7 +3787,7 @@ def corrcoef(x: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> Flopsco
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
-    cost = _corrcoef_cost(x, y)
+    cost = _corrcoef_cost(x, y, rowvar=kwargs.get("rowvar", True))
     # np.corrcoef always computes at least in float64 (numpy internally uses
     # np.result_type(x, y, np.float64)), regardless of the input dtype.
     billing_dtypes: tuple = (x.dtype, _np.dtype("float64"))
@@ -3798,7 +3825,7 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
     budget = require_budget()
     if not isinstance(m, _np.ndarray):
         m = _np.asarray(m)
-    cost = _cov_cost(m, y)
+    cost = _cov_cost(m, y, rowvar=kwargs.get("rowvar", True))
     # np.cov always computes at least in float64 (numpy internally uses
     # np.result_type(m, y, np.float64)), regardless of the input dtype.
     billing_dtypes: tuple = (m.dtype, _np.dtype("float64"))
