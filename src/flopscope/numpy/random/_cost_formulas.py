@@ -16,6 +16,7 @@ import numpy as _np
 from flopscope._flops import _ceil_log2 as _ceil_log2
 from flopscope._flops import sort_cost as _sort_cost
 from flopscope._flops import svd_cost as _svd_cost
+from flopscope._ndarray import _to_base_ndarray
 
 
 def _numel_output(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
@@ -31,7 +32,13 @@ def _numel_input(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
     if isinstance(a, _np.ndarray):
         return _builtins.max(int(a.size), 1)
     if hasattr(a, "__len__"):
-        return _builtins.max(len(a), 1)
+        # Non-ndarray array-likes (e.g. a raw Python list) reach here
+        # uncoerced -- permuted's movement-method dispatch only strips
+        # ndarray operands to a base ndarray, so a nested list is forwarded
+        # to numpy as-is. len() on a nested list counts only the outer
+        # dimension; asarray(a).size counts every element numpy actually
+        # shuffles, matching the true work for any nesting depth.
+        return _builtins.max(int(_np.asarray(a).size), 1)
     return 1
 
 
@@ -167,6 +174,32 @@ def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
     return _sort_cost(n)
 
 
+def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
+    """multivariate_hypergeometric(colors, nsample, size=None, method='marginals').
+
+    Base cost is numel(output). ``method="count"`` additionally builds a
+    temporary array of integers with length ``sum(colors)`` (numpy's own
+    docstring for the method) before reducing it down to the output, so that
+    method bills ``sum(colors) + numel(output)``. ``method="marginals"``
+    (the default) never allocates that buffer and stays at numel(output).
+
+    ``method`` accepts the call's positional-or-keyword form, matching
+    ``_choice_cost``'s handling of ``replace``/``p``/``axis``: it is the 4th
+    positional argument if given positionally, else the ``method`` kwarg.
+    """
+    colors = args[0] if args else kwargs.get("colors")
+    method = args[3] if len(args) >= 4 else kwargs.get("method", "marginals")
+    out = _builtins.max(int(getattr(result, "size", 1)), 1)
+    if method == "count" and colors is not None:
+        # Strip to a base ndarray first: colors may be a caller-supplied
+        # FlopscopeArray, and summing it directly would re-enter NumPy's
+        # __array_function__ dispatch from inside this wrapper's call frame
+        # (the _called_from_wrapper() tripwire raises on exactly that).
+        colors = _to_base_ndarray(colors)
+        return _builtins.max(int(_np.sum(colors)) + out, out)
+    return out
+
+
 def multivariate_normal_flops(N: int, d: int) -> int:
     """Composite mvn cost: covariance factorization (SVD of the d×d covariance,
     matching numpy's default method='svd' which calls np.linalg.svd(cov) with
@@ -207,5 +240,6 @@ COST_FORMULAS: dict[str, Callable[[tuple[Any, ...], dict[str, Any], Any], int]] 
     "length": _length,
     "sort_cost(n)": _sort_cost_formula,
     "choice_cost": _choice_cost,
+    "mvhg_cost": _mvhg_cost,
     "multivariate_normal": _multivariate_normal_cost,
 }

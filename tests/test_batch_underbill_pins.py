@@ -225,3 +225,75 @@ def test_cov_corrcoef_rowvar_false_y_orientation_matches_transposed_rowvar_true(
         billed_true_transposed = _bill(lambda op=op: op(m_t, y_t, rowvar=True))
         assert billed_false == billed_true_transposed
         assert billed_false > 0
+
+
+def test_mvhg_count_scales_with_sum_colors():
+    # method="count" allocates and fills a temporary int64 array of length
+    # sum(colors) (numpy's own docstring: "The 'count' algorithm uses a
+    # temporary array of integers with length sum(colors)") -- real work
+    # that scales with sum(colors), not with the output shape. The old
+    # formula was flat "numel(output)", blind to sum(colors) entirely: the
+    # same len(colors)=2 output shape bills identically whether sum(colors)
+    # is 6 or 2*10**6.
+    g = fnp.random.default_rng(5)
+    small = _bill(lambda: g.multivariate_hypergeometric([3, 3, 3], 4, method="count"))
+    big = _bill(
+        lambda: g.multivariate_hypergeometric([10**6, 10**6], 4, method="count")
+    )
+    assert big > 1000 * small
+
+
+def test_mvhg_count_detected_when_method_passed_positionally():
+    # Generator.multivariate_hypergeometric(colors, nsample, size=None,
+    # method='marginals') accepts `method` as the 4th positional argument,
+    # not just as a kwarg. A formula that only checks kwargs.get("method")
+    # would silently default to "marginals" for a positional "count" call
+    # and re-introduce the same under-bill this task fixes.
+    g = fnp.random.default_rng(9)
+    small = _bill(lambda: g.multivariate_hypergeometric([3, 3, 3], 4, None, "count"))
+    big = _bill(lambda: g.multivariate_hypergeometric([10**6, 10**6], 4, None, "count"))
+    assert big > 1000 * small
+
+
+def test_mvhg_marginals_default_stays_at_numel_output():
+    # Global constraint: the fix must only RAISE the bill for method="count";
+    # method="marginals" (the default -- never allocates the sum(colors)
+    # buffer) must stay exactly at numel(output), same as before this task.
+    g = fnp.random.default_rng(11)
+    colors = [10**6, 10**6]  # huge sum(colors); must not leak into the bill
+    implicit_default = _bill(lambda: g.multivariate_hypergeometric(colors, 4))
+    explicit = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 4, method="marginals")
+    )
+    assert implicit_default == 2  # len(colors) == numel(output), not sum(colors)
+    assert explicit == 2
+
+
+def test_mvhg_count_colors_as_flopscope_array_does_not_crash():
+    # `colors` can be a caller-supplied FlopscopeArray (e.g. fnp.asarray(...))
+    # rather than a plain list. Summing it directly from inside the cost
+    # formula (itself called from inside the counted-method wrapper) would
+    # re-enter NumPy's __array_function__ dispatch and trip flopscope's
+    # from-inside-a-wrapper tripwire (RuntimeError) -- verified this is a
+    # real, not theoretical, risk by reproducing the crash against a bare
+    # `np.sum(FlopscopeArray)` call from inside a @_counted_wrapper frame.
+    g = fnp.random.default_rng(10)
+    colors = fnp.asarray([3, 3, 3])
+    billed = _bill(lambda: g.multivariate_hypergeometric(colors, 4, method="count"))
+    assert billed == 12  # sum(colors)=9 + numel(output)=3
+
+
+def test_permuted_list_counts_all_elements():
+    # _numel_input's non-ndarray fallback used len(a), which for a nested
+    # Python list counts only the OUTER dimension -- a raw list is never
+    # coerced to ndarray before reaching the cost formula (only ndarray
+    # operands get the _to_base_ndarray treatment in _make_counted_method's
+    # movement-method branch), so a (2, N) nested list forwarded uncoerced
+    # bills len==2 regardless of how wide each row is, while numpy actually
+    # shuffles all 2*N elements.
+    g = fnp.random.default_rng(6)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.permuted(thin, axis=1))
+    b_wide = _bill(lambda: g.permuted(wide, axis=1))
+    assert b_wide >= 900 * b_thin
