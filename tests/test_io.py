@@ -106,3 +106,79 @@ def test_save_bills_numel_plus_shape_header(tmp_path):
             str(tmp_path / "a.npy"), fnp.asarray(np.ones((3, 4), dtype=np.float64))
         )
     assert bc.flops_used == 4 * (12 + 2 * 8)
+
+
+# ---------------------------------------------------------------------------
+# savez/savez_compressed positional arrays (numpy's *args -> arr_0, arr_1, ...)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "savez_fn", [fnp.savez, fnp.savez_compressed], ids=["savez", "savez_compressed"]
+)
+def test_savez_positional_roundtrip(tmp_path, savez_fn):
+    """Positional arrays are auto-named arr_0, arr_1, ... (matching
+    numpy.savez), merged with any keyword arrays -- both plain numpy and our
+    own loader must read all of them back correctly."""
+    p = tmp_path / "positional.npz"
+    a = np.arange(6, dtype=np.float64).reshape(2, 3)
+    b = np.array([1, 2, 3], dtype=np.int32)
+    c = np.array([9.5, 8.5])
+    savez_fn(str(p), a, b, x=c)
+
+    with np.load(str(p)) as z:
+        assert sorted(z.files) == ["arr_0", "arr_1", "x"]
+        np.testing.assert_array_equal(z["arr_0"], a)
+        np.testing.assert_array_equal(z["arr_1"], b)
+        np.testing.assert_array_equal(z["x"], c)
+
+    out = fnp.load(str(p))
+    np.testing.assert_array_equal(np.asarray(out["arr_0"]), a)
+    np.testing.assert_array_equal(np.asarray(out["arr_1"]), b)
+    np.testing.assert_array_equal(np.asarray(out["x"]), c)
+
+
+@pytest.mark.parametrize(
+    "savez_fn", [fnp.savez, fnp.savez_compressed], ids=["savez", "savez_compressed"]
+)
+def test_savez_positional_bills_same_as_keyword(tmp_path, savez_fn):
+    """A positional array must bill exactly like the same array passed under
+    its auto-generated arr_N keyword name: the merge into a single
+    name->value mapping happens before billing, so both call shapes hit the
+    identical _bill_save_egress formula (data + shape header + name bytes)."""
+    a = np.arange(500, dtype=np.float64).reshape(20, 25)
+
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as bc_positional:
+        savez_fn(str(tmp_path / "positional.npz"), a)
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as bc_keyword:
+        savez_fn(str(tmp_path / "keyword.npz"), arr_0=a)
+
+    assert bc_positional.flops_used == bc_keyword.flops_used
+    # numel=500, shape header ndim(2)*8=16, name "arr_0" (5 bytes) + 8-byte
+    # header for the names blob itself.
+    assert bc_positional.flops_used == 4 * (500 + 2 * 8 + len("arr_0") + 8)
+
+
+@pytest.mark.parametrize(
+    "savez_fn", [fnp.savez, fnp.savez_compressed], ids=["savez", "savez_compressed"]
+)
+def test_savez_positional_keyword_collision_raises_and_bills_nothing(
+    tmp_path, savez_fn
+):
+    """A positional array together with a colliding arr_N keyword must raise
+    the exact same ValueError numpy raises (numpy.lib._npyio_impl._savez),
+    and must bill nothing -- the collision is detected before any dtype
+    conversion or billing happens, so a call numpy would reject is never
+    billed."""
+    p = tmp_path / "collide.npz"
+    a = np.arange(4, dtype=np.float64)
+    b = np.arange(4, dtype=np.float64)
+
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as bc:
+        with pytest.raises(
+            ValueError, match=r"^Cannot use un-named variables and keyword arr_0$"
+        ):
+            savez_fn(str(p), a, arr_0=b)
+
+    assert bc.flops_used == 0
+    assert not p.exists()

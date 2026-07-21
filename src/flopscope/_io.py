@@ -11,8 +11,18 @@ is written to the archive as a uint8 array like any other member (see
 let a participant round-trip unlimited data through `__meta__` for a flat,
 size-independent cost).
 
+`savez`/`savez_compressed` accept arrays positionally as well as by keyword,
+matching `numpy.savez`: positional arrays are stored under auto-generated
+member names `arr_0`, `arr_1`, ... in call order (see `_savez_merge_args`),
+keyword arrays keep their given names, and a keyword name that collides with
+a positional array's auto-generated name raises the same `ValueError` numpy
+raises -- checked before any dtype conversion or billing happens, so a call
+numpy would reject is never billed. A positional array bills identically to
+the same array passed under its auto-generated keyword name.
+
 `savez`/`savez_compressed` ALSO bill the archive's MEMBER NAMES -- the keyword
-argument names themselves, plus the literal `"__meta__"` name when a meta
+argument names themselves (or the auto-generated `arr_0`, `arr_1`, ... names
+for positional arrays), plus the literal `"__meta__"` name when a meta
 block is present. Those strings are written into the .npz archive and read
 back verbatim by `load` at 0 FLOPs, exactly like array data, but a `.npz`
 member name can be tens of thousands of bytes long -- so without billing them,
@@ -148,6 +158,32 @@ def save(file: str, arr: Any) -> None:
     _call_numpy(_np.save, file, base, allow_pickle=False)
 
 
+def _savez_merge_args(args: tuple[Any, ...], arrays: dict[str, Any]) -> dict[str, Any]:
+    """Merge positional and keyword arrays into a single name->value mapping,
+    mirroring ``numpy.savez``'s own naming (``numpy.lib._npyio_impl._savez``):
+    positional arrays are named ``arr_0``, ``arr_1``, ... in call order and
+    appended after the keyword arrays, which keep their given names and
+    order.
+
+    Raises the same ``ValueError`` numpy raises when a keyword name collides
+    with a positional array's auto-generated name -- e.g. a positional array
+    together with ``arr_0=...``. This is checked here, against the ORIGINAL
+    keyword names only, before any dtype conversion or billing happens, so a
+    call numpy would reject is never billed (positional auto-names can never
+    collide with each other, only with a pre-existing keyword name, so a
+    single membership check per positional index is equivalent to numpy's
+    incremental insert-and-check loop).
+    """
+    for i in range(len(args)):
+        key = f"arr_{i}"
+        if key in arrays:
+            raise ValueError(f"Cannot use un-named variables and keyword {key}")
+    merged = dict(arrays)
+    for i, val in enumerate(args):
+        merged[f"arr_{i}"] = val
+    return merged
+
+
 def _prepare(arrays: dict[str, Any]) -> dict[str, _np.ndarray]:
     meta = arrays.pop(_META_KEY, None)
     converted: dict[str, _np.ndarray] = {}
@@ -193,14 +229,21 @@ def _savez_name_bytes(converted: dict[str, _np.ndarray]) -> int:
 
 
 @_counted_wrapper
-def savez(file: str, **arrays: Any) -> None:
-    """Save multiple named arrays (+ optional __meta__ dict) to .npz.
+def savez(file: str, *args: Any, **arrays: Any) -> None:
+    """Save multiple arrays (+ optional __meta__ dict) to .npz.
+
+    Arrays given positionally are stored under auto-generated names
+    ``arr_0``, ``arr_1``, ...; arrays given as keywords keep their given
+    names (matching ``numpy.savez``). A keyword name that collides with a
+    positional array's auto-generated name raises the same ``ValueError``
+    numpy raises.
 
     Cost: 4*(sum(numel) + sum(len(member name bytes))), including any
     __meta__ blob's serialized byte length and the "__meta__" member name
-    itself when present.
+    itself when present. A positional array bills identically to the same
+    array passed under its auto-generated keyword name.
     """
-    converted = _prepare(arrays)
+    converted = _prepare(_savez_merge_args(args, arrays))
     billed = _savez_billed_arrays(converted)
     name_bytes = _savez_name_bytes(converted)
     # The server ingests the concatenated member-names as one 1-D uint8 blob;
@@ -214,12 +257,20 @@ def savez(file: str, **arrays: Any) -> None:
 
 
 @_counted_wrapper
-def savez_compressed(file: str, **arrays: Any) -> None:
-    """Save multiple named arrays (+ optional __meta__ dict) to compressed .npz.
+def savez_compressed(file: str, *args: Any, **arrays: Any) -> None:
+    """Save multiple arrays (+ optional __meta__ dict) to compressed .npz.
 
-    Cost: 4*(sum(numel) + sum(len(member name bytes))).
+    Arrays given positionally are stored under auto-generated names
+    ``arr_0``, ``arr_1``, ...; arrays given as keywords keep their given
+    names (matching ``numpy.savez_compressed``). A keyword name that
+    collides with a positional array's auto-generated name raises the same
+    ``ValueError`` numpy raises.
+
+    Cost: 4*(sum(numel) + sum(len(member name bytes))). A positional array
+    bills identically to the same array passed under its auto-generated
+    keyword name.
     """
-    converted = _prepare(arrays)
+    converted = _prepare(_savez_merge_args(args, arrays))
     billed = _savez_billed_arrays(converted)
     name_bytes = _savez_name_bytes(converted)
     # The server ingests the concatenated member-names as one 1-D uint8 blob;

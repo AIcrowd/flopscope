@@ -1416,13 +1416,21 @@ rate) and counts toward the `Σ numel(array_i)` sum above. It is not a free side
 billing it separately from the named arrays would let a participant round-trip arbitrary
 data through `__meta__` at a flat, size-independent cost.
 
-The archive's MEMBER NAMES — the `savez`/`savez_compressed` keyword-argument names
-themselves, plus the literal `"__meta__"` member when a meta block is present — are
+The archive's MEMBER NAMES — the `savez`/`savez_compressed` keyword-argument names,
+plus the auto-generated `arr_0`, `arr_1`, ... names for arrays passed positionally,
+plus the literal `"__meta__"` member when a meta block is present — are
 written into the archive and read back verbatim by `load`, exactly like array data, so
 their UTF-8 byte length is billed too, folded into the same total above. Without this, a
 participant could smuggle data through many tiny arrays given very large names (an
 archive member name can be tens of thousands of bytes) instead of through the array
 values, at a near-zero, name-independent cost.
+
+`savez`/`savez_compressed` accept arrays positionally as well as by keyword, matching
+`numpy.savez`: a positional array is stored under its auto-generated `arr_N` name and
+bills exactly the same as the identical array passed under that name as a keyword (the
+member-name byte cost above is identical either way). A keyword name that collides with
+a positional array's auto-generated name raises the same error numpy raises, before any
+billing happens.
 
 Source: `src/flopscope/_io.py`.
 
