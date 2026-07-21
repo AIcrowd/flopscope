@@ -3510,7 +3510,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 2.0,
-        "notes": "Add two polynomials. Cost: max(n1, n2) FLOPs.",
+        "notes": "Add two polynomials. Cost: size of the axis-0 zero-padded, broadcast-aligned add result (== numpy.polyadd(a1, a2).size; reduces to max(n1, n2) for 1-D inputs).",
     },
     "polyder": {
         "category": "counted_custom",
@@ -3528,7 +3528,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Least squares polynomial fit. Cost: 2 * m * (deg+1)^2 FLOPs.",
+        "notes": "Least squares polynomial fit. Cost: 2*m*(deg+1)^2 per RHS column (ncols = y.shape[1] for 2-D y, else 1).",
     },
     "polyint": {
         "category": "counted_custom",
@@ -3546,7 +3546,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 2.0,
-        "notes": "Difference (subtraction) of two polynomials. Cost: max(n1, n2) FLOPs.",
+        "notes": "Difference (subtraction) of two polynomials. Cost: size of the axis-0 zero-padded, broadcast-aligned subtract result (== numpy.polysub(a1, a2).size; reduces to max(n1, n2) for 1-D inputs).",
     },
     "polyval": {
         "category": "counted_custom",

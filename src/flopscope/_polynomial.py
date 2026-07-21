@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect as _inspect
+import math as _math
 from typing import Any
 
 import numpy as _np
@@ -29,13 +30,97 @@ def polyval_cost(deg: int, m: int) -> int:
 
 
 def polyadd_cost(n1: int, n2: int) -> int:
-    """Cost for polyadd: max(n1, n2) FLOPs."""
+    """Cost for polyadd: max(n1, n2) FLOPs.
+
+    Legacy length-based formula, kept for the public ``flops.polyadd_cost``
+    analytical-cost API (1-D coefficient arrays, where axis-0 length *is*
+    the element count). The ``polyadd`` wrapper itself bills via
+    ``_polyaddsub_cost``, which also covers higher-rank/broadcasting inputs
+    -- see that function's docstring for why axis-0 length alone is not
+    enough there.
+    """
     return max(n1, n2, 1)
 
 
 def polysub_cost(n1: int, n2: int) -> int:
-    """Cost for polysub: max(n1, n2) FLOPs."""
+    """Cost for polysub: max(n1, n2) FLOPs.
+
+    Legacy length-based formula, kept for the public ``flops.polysub_cost``
+    analytical-cost API (1-D coefficient arrays, where axis-0 length *is*
+    the element count). The ``polysub`` wrapper itself bills via
+    ``_polyaddsub_cost``, which also covers higher-rank/broadcasting inputs
+    -- see that function's docstring for why axis-0 length alone is not
+    enough there.
+    """
     return max(n1, n2, 1)
+
+
+def _polyaddsub_cost(a1: ArrayLike, a2: ArrayLike) -> int:
+    """Exact FLOP cost for polyadd/polysub: the true size of numpy's result.
+
+    ``numpy.polyadd``/``numpy.polysub`` share this recipe (see
+    ``numpy/lib/_polynomial_impl.py``)::
+
+        a1 = atleast_1d(a1); a2 = atleast_1d(a2)
+        diff = len(a2) - len(a1)                      # len() reads axis-0 size
+        if diff == 0:
+            val = a1 + a2                              # plain broadcast, ANY rank
+        elif diff > 0:
+            val = concatenate((zeros(diff), a1)) + a2  # requires a1 to be 1-D
+        else:
+            val = a1 + concatenate((zeros(-diff), a2)) # requires a2 to be 1-D
+
+    A naive "zero-pad axis 0 to max(len), then broadcast the trailing axes"
+    model gets two things wrong here:
+
+    * When axis-0 lengths already match (``diff == 0``), numpy does a
+      *plain* ``a1 + a2`` over the FULL shapes. Broadcasting aligns from the
+      trailing axis, not from axis 0 -- if the two inputs have different
+      rank this is not "axis-0 aligned, trailing broadcast" at all (e.g. a
+      1-D array of the same axis-0 length as a 2-D array's axis 0 does not
+      broadcast against it the way trailing-axis alignment would suggest).
+    * When axis-0 lengths differ, the zero-pad array numpy builds is always
+      1-D, so ``concatenate`` only succeeds if the shorter-by-axis-0 operand
+      is itself exactly 1-D (a 0-d/scalar operand qualifies once promoted by
+      ``atleast_1d``) -- anything higher-rank raises. When it *does*
+      succeed, the padded 1-D array is broadcast (from the trailing axis)
+      against the other operand's full shape, which can blow the result
+      size up far past ``max(len(a1), len(a2))``: e.g.
+      ``polyadd(5.0, ones((1000, 1)))`` pads the scalar to a length-1000
+      vector and broadcasts it against a (1000, 1) array, yielding a
+      (1000, 1000) result (1e6 elements) for a call a naive axis-0-only
+      formula would bill at 1000 -- a 1000x under-bill.
+
+    This mirrors that exact algorithm on shapes alone (no data is
+    allocated), so the billed cost always equals
+    ``numpy.polyadd(a1, a2).size`` for every input numpy accepts, and raises
+    ``ValueError`` in precisely the cases numpy itself rejects (verified by
+    fuzzing both against real numpy; see tests/test_batch_underbill_pins.py).
+    """
+    a1 = _np.asarray(a1)
+    a2 = _np.asarray(a2)
+    s1 = a1.shape if a1.ndim >= 1 else (1,)
+    s2 = a2.shape if a2.ndim >= 1 else (1,)
+    diff = s2[0] - s1[0]
+    if diff == 0:
+        result_shape = _np.broadcast_shapes(s1, s2)
+    elif diff > 0:
+        if len(s1) != 1:
+            raise ValueError(
+                f"polyadd/polysub: a1 with shape {a1.shape} cannot be "
+                "zero-padded against a longer a2 (numpy's concatenate "
+                "requires the shorter-by-axis-0 operand to be 1-D)"
+            )
+        result_shape = _np.broadcast_shapes((s2[0],), s2)
+    else:
+        if len(s2) != 1:
+            raise ValueError(
+                f"polyadd/polysub: a2 with shape {a2.shape} cannot be "
+                "zero-padded against a longer a1 (numpy's concatenate "
+                "requires the shorter-by-axis-0 operand to be 1-D)"
+            )
+        result_shape = _np.broadcast_shapes(s1, (s1[0],))
+    return max(int(_math.prod(result_shape)), 1)
 
 
 def polyder_cost(n: int, m: int = 1) -> int:
@@ -93,9 +178,16 @@ def polydiv_cost(n1: int, n2: int) -> int:
     return max(1 + q * (2 * n2 + 1), 1)
 
 
-def polyfit_cost(m: int, deg: int) -> int:
-    """Cost for polyfit: 2 * m * (deg+1)^2 FLOPs."""
-    return max(2 * m * (deg + 1) ** 2, 1)
+def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
+    """Cost for polyfit: 2 * m * (deg+1)^2 * ncols FLOPs.
+
+    ``ncols`` is the number of right-hand-side columns being fit: 1 for a
+    1-D ``y`` (the usual case), or ``y.shape[1]`` when ``y`` is 2-D (numpy
+    solves one independent least-squares system per column, so the work
+    scales linearly with it). Defaults to 1 so every pre-existing 1-D-``y``
+    caller is bit-identical to the old ``2 * m * (deg+1)^2`` formula.
+    """
+    return max(2 * m * (deg + 1) ** 2 * ncols, 1)
 
 
 def poly_cost(n: int) -> int:
@@ -182,9 +274,7 @@ def polyadd(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     budget = require_budget()
     a1 = _np.asarray(a1)
     a2 = _np.asarray(a2)
-    n1 = len(a1)
-    n2 = len(a2)
-    cost = polyadd_cost(n1, n2)
+    cost = _polyaddsub_cost(a1, a2)
     with budget.deduct(
         "polyadd",
         flop_cost=cost,
@@ -196,7 +286,13 @@ def polyadd(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polyadd, _np.polyadd, "counted_custom", "max(n1, n2) FLOPs")
+attach_docstring(
+    polyadd,
+    _np.polyadd,
+    "counted_custom",
+    "size of the axis-0 zero-padded, broadcast-aligned add result "
+    "(== numpy.polyadd(a1, a2).size; reduces to max(n1, n2) for 1-D inputs)",
+)
 
 
 @_counted_wrapper
@@ -205,9 +301,7 @@ def polysub(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     budget = require_budget()
     a1 = _np.asarray(a1)
     a2 = _np.asarray(a2)
-    n1 = len(a1)
-    n2 = len(a2)
-    cost = polysub_cost(n1, n2)
+    cost = _polyaddsub_cost(a1, a2)
     with budget.deduct(
         "polysub",
         flop_cost=cost,
@@ -219,7 +313,13 @@ def polysub(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polysub, _np.polysub, "counted_custom", "max(n1, n2) FLOPs")
+attach_docstring(
+    polysub,
+    _np.polysub,
+    "counted_custom",
+    "size of the axis-0 zero-padded, broadcast-aligned subtract result "
+    "(== numpy.polysub(a1, a2).size; reduces to max(n1, n2) for 1-D inputs)",
+)
 
 
 @_counted_wrapper
@@ -379,7 +479,11 @@ def polyfit(
     if kwargs.get("w") is not None:
         kwargs["w"] = _to_base_ndarray(_np.asarray(kwargs["w"]))
     m = len(x_arr)
-    cost = polyfit_cost(m, deg)
+    # numpy.polyfit accepts only 1-D or 2-D y (anything else is rejected by
+    # numpy itself downstream); a 2-D y fits one independent least-squares
+    # system per column, so the solve cost scales with ncols, not just m.
+    ncols = y_arr.shape[1] if y_arr.ndim == 2 else 1
+    cost = polyfit_cost(m, deg, ncols)
     # np.polyfit's least-squares solve always runs in (at least) float64 --
     # even from float32 x/y (verified: polyfit(f32, f32, deg).dtype ==
     # float64) -- and complex64 y computes complex128, so the float64
@@ -400,7 +504,12 @@ def polyfit(
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polyfit, _np.polyfit, "counted_custom", "2 * m * (deg+1)^2 FLOPs")
+attach_docstring(
+    polyfit,
+    _np.polyfit,
+    "counted_custom",
+    "2 * m * (deg+1)^2 * ncols FLOPs (ncols = y.shape[1] for 2-D y, else 1)",
+)
 polyfit.__signature__ = _inspect.signature(_np.polyfit)  # type: ignore[attr-defined]
 
 

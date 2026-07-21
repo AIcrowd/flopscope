@@ -968,8 +968,8 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 | Op | flop_cost | basis | source |
 |---|---|---|---|
 | `polyval` | `2 × deg × points` (Horner: 1 mul + 1 add per coefficient per point, FMA=2) | DERIVED | `_polynomial.py` |
-| `polyfit` | `2 × m × (deg+1)²` (Vandermonde least-squares estimate) | DERIVED: Vandermonde matrix construction + normal-equations cost; NOT an SVD path | `_polynomial.py` |
-| `polyadd`, `polysub` | `max(len_a, len_b)` (= `max(n1, n2, 1)`) | DERIVED: output length equals the longer polynomial | `_polynomial.py` |
+| `polyfit` | `2 × m × (deg+1)² × ncols` (Vandermonde least-squares estimate; `ncols = y.shape[1]` for 2-D `y`, else 1 — one independent system solved per RHS column) | DERIVED: Vandermonde matrix construction + normal-equations cost; NOT an SVD path | `_polynomial.py` |
+| `polyadd`, `polysub` | size of the axis-0 zero-padded, broadcast-aligned result (= `numpy.polyadd(a1, a2).size`; reduces to `max(n1, n2, 1)` for 1-D inputs) | DERIVED: mirrors numpy's own zero-pad-then-broadcast algorithm on shapes, including higher-rank/broadcasting operands | `_polynomial.py` |
 | `polymul` | `2nm − n − m` (direct conv, FMA=2) | DERIVED | `_polynomial.py` |
 | `convolve` | `full`: `2nm − n − m`; `valid`: `(2·min−1)·(max−min+1)`; `same`: exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:convolve` |
 | `poly` (1-D, build from roots) | `(3n² + n) // 2`, `n = len(roots)` (iterative convolution with length-2 kernel per root; FMA=2) | DERIVED | `_polynomial.py:poly_cost` |

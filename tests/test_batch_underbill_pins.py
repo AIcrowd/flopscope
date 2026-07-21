@@ -363,3 +363,54 @@ def test_pad_stat_bills_all_reduced_axes():
     billed = _bill(lambda: fnp.pad(a, ((0, 0), (0, 0), (2, 2)), mode="mean"))
     # the two unpadded axes must contribute (>0), not be skipped:
     assert billed > 20 * 20  # far above the last-axis-only cost
+
+
+def test_polyadd_sub_scale_with_inner_width():
+    # polyadd/polysub billed only max(len(a1), len(a2)) -- axis-0 length --
+    # regardless of how wide the trailing axes were. Two (3, N) inputs with
+    # the SAME axis-0 length (3) but very different inner width (4 vs 4096)
+    # used to bill identically; numpy's real elementwise add scales with the
+    # full (broadcast) size, not just axis 0.
+    a1n = fnp.asarray(np.random.default_rng(8).standard_normal((3, 4)))
+    a2n = fnp.asarray(np.random.default_rng(9).standard_normal((3, 4)))
+    a1w = fnp.asarray(np.random.default_rng(8).standard_normal((3, 4096)))
+    a2w = fnp.asarray(np.random.default_rng(9).standard_normal((3, 4096)))
+    for op in (fnp.polyadd, fnp.polysub):
+        assert _bill(lambda op=op: op(a1w, a2w)) > _bill(lambda op=op: op(a1n, a2n))
+
+
+def test_polyadd_sub_scalar_broadcast_blowup_bills_true_output_size():
+    # A far more severe instance of the same family: numpy.polyadd/polysub
+    # zero-pad the axis-0-SHORTER operand (a bare 1-D vector, even a 0-d
+    # scalar promoted via atleast_1d qualifies) and then broadcast it
+    # against the other operand's FULL shape -- broadcasting aligns from
+    # the TRAILING axis, not axis 0. A naive "zero-pad axis 0 to
+    # max(len), then broadcast the trailing dims" formula (i.e. treating
+    # axis 0 as the leading/aligned axis even when ranks differ) gets this
+    # case badly wrong: it would bill len0 * prod(trailing) = 1000 * 1 =
+    # 1000, but numpy actually pads the scalar to a length-1000 vector and
+    # broadcasts it against a (1000, 1) array, producing a real (1000,
+    # 1000) result -- 1_000_000 elements, a 1000x under-bill if missed.
+    scalar = fnp.asarray(np.array(5.0))
+    tall = fnp.asarray(np.random.default_rng(12).standard_normal((1000, 1)))
+    for op in (fnp.polyadd, fnp.polysub):
+        billed = _bill(lambda op=op: op(scalar, tall))
+        assert billed == 1_000_000, (
+            f"{op.__name__}(scalar, (1000,1)) billed {billed}, expected the "
+            "true broadcast result size 1_000_000 (not the naive axis-0 "
+            "estimate 1000)"
+        )
+
+
+def test_polyfit_scales_with_rhs_columns():
+    # polyfit billed 2*m*(deg+1)^2 regardless of how many RHS columns `y`
+    # had -- numpy.polyfit solves one independent least-squares system per
+    # column of a 2-D y, so a (50, 1) and a (50, 100) y used to bill
+    # identically even though the real solve does ~100x the work.
+    x = np.linspace(0, 1, 50)
+    y1 = fnp.asarray(np.random.default_rng(10).standard_normal((50, 1)))
+    y100 = fnp.asarray(np.random.default_rng(11).standard_normal((50, 100)))
+    b1 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y1, 5))
+    b100 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y100, 5))
+    assert b100 > b1
+    assert b100 == 100 * b1  # linear in ncols: 2*50*36*100 == 100 * (2*50*36*1)
