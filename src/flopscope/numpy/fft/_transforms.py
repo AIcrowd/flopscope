@@ -328,18 +328,23 @@ def fft2(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = tuple(a.shape[ax] for ax in axes)
-    else:
-        s_for_cost = tuple(
-            a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # fftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fft2",
@@ -378,18 +383,23 @@ def ifft2(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = tuple(a.shape[ax] for ax in axes)
-    else:
-        s_for_cost = tuple(
-            a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # fftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifft2",
@@ -428,18 +438,23 @@ def rfft2(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = tuple(a.shape[ax] for ax in axes)
-    else:
-        s_for_cost = tuple(
-            a.shape[axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # rfftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfft2",
@@ -478,21 +493,40 @@ def irfft2(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = (a.shape[axes[0]], 2 * (a.shape[axes[1]] - 1))
-    else:
-        s_for_cost = tuple(
-            (a.shape[axes[i]] if i < len(s) - 1 else 2 * (a.shape[axes[i]] - 1))
-            if si is None
-            else si
-            for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        # Hermitian reconstruction: every transform axis uses the input size
+        # except the last, which doubles (2*(m-1)) to recover the real
+        # output length numpy assumes when `s` is omitted entirely.
+        last = len(eff) - 1
+        s_for_cost = tuple(
+            int(a.shape[ax]) if i < last else 2 * (int(a.shape[ax]) - 1)
+            for i, ax in enumerate(eff)
+        )
+    else:
+        # `None` in the last position still means "omitted" -> doubles, same
+        # as numpy's irfft(n=None) default. `-1` (any position, including
+        # last) means "use the input size as-is" -- numpy resolves it
+        # BEFORE the Hermitian reconstruction, so it is never doubled (see
+        # numpy.fft._pocketfft._cook_nd_args). Passing either sentinel
+        # through unresolved collapses rfftn_cost's `prod(shape)` to <= 1
+        # and bills 0.
+        last = len(s) - 1
+        s_for_cost = tuple(
+            int(sv)
+            if (sv is not None and sv >= 0)
+            else (
+                2 * (int(a.shape[ax]) - 1)
+                if (sv is None and i == last)
+                else int(a.shape[ax])
+            )
+            for i, (sv, ax) in enumerate(zip(s, eff, strict=True))
+        )
     cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfft2",
@@ -532,19 +566,23 @@ def fftn(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = a.shape if axes is None else tuple(a.shape[ax] for ax in axes)
-    else:
-        eff_axes = tuple(range(a.ndim)) if axes is None else tuple(axes)
-        s_for_cost = tuple(
-            a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # fftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fftn",
@@ -583,19 +621,23 @@ def ifftn(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = a.shape if axes is None else tuple(a.shape[ax] for ax in axes)
-    else:
-        eff_axes = tuple(range(a.ndim)) if axes is None else tuple(axes)
-        s_for_cost = tuple(
-            a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # fftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifftn",
@@ -634,19 +676,23 @@ def rfftn(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        s_for_cost = a.shape if axes is None else tuple(a.shape[ax] for ax in axes)
-    else:
-        eff_axes = tuple(range(a.ndim)) if axes is None else tuple(axes)
-        s_for_cost = tuple(
-            a.shape[eff_axes[i]] if si is None else si for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        s_for_cost = tuple(int(a.shape[ax]) for ax in eff)
+    else:
+        # numpy resolves both `None` and `-1` in `s` to the input size along
+        # the corresponding transform axis (NumPy >= 2.0 treats `-1` as "use
+        # the whole input"); a raw `-1`/`None` passed straight into
+        # rfftn_cost's `prod(shape)` collapses N to <= 1 and bills 0.
+        s_for_cost = tuple(
+            int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
+            for sv, ax in zip(s, eff, strict=True)
+        )
     cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfftn",
@@ -685,31 +731,40 @@ def irfftn(
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    if s is None:
-        if axes is None:
-            s_for_cost = tuple(
-                d if i < len(a.shape) - 1 else 2 * (d - 1)
-                for i, d in enumerate(a.shape)
-            )
-        else:
-            s_for_cost = tuple(
-                a.shape[ax] if i < len(axes) - 1 else 2 * (a.shape[ax] - 1)
-                for i, ax in enumerate(axes)
-            )
-    else:
-        eff_axes = tuple(range(a.ndim)) if axes is None else tuple(axes)
-        s_for_cost = tuple(
-            (a.shape[eff_axes[i]] if i < len(s) - 1 else 2 * (a.shape[eff_axes[i]] - 1))
-            if si is None
-            else si
-            for i, si in enumerate(s)
-        )
     if axes is None:
         eff = (
             tuple(range(a.ndim)) if s is None else tuple(range(a.ndim - len(s), a.ndim))
         )
     else:
         eff = tuple(axes)
+    if s is None:
+        # Hermitian reconstruction: every transform axis uses the input size
+        # except the last, which doubles (2*(m-1)) to recover the real
+        # output length numpy assumes when `s` is omitted entirely.
+        last = len(eff) - 1
+        s_for_cost = tuple(
+            int(a.shape[ax]) if i < last else 2 * (int(a.shape[ax]) - 1)
+            for i, ax in enumerate(eff)
+        )
+    else:
+        # `None` in the last position still means "omitted" -> doubles, same
+        # as numpy's irfft(n=None) default. `-1` (any position, including
+        # last) means "use the input size as-is" -- numpy resolves it
+        # BEFORE the Hermitian reconstruction, so it is never doubled (see
+        # numpy.fft._pocketfft._cook_nd_args). Passing either sentinel
+        # through unresolved collapses rfftn_cost's `prod(shape)` to <= 1
+        # and bills 0.
+        last = len(s) - 1
+        s_for_cost = tuple(
+            int(sv)
+            if (sv is not None and sv >= 0)
+            else (
+                2 * (int(a.shape[ax]) - 1)
+                if (sv is None and i == last)
+                else int(a.shape[ax])
+            )
+            for i, (sv, ax) in enumerate(zip(s, eff, strict=True))
+        )
     cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfftn",

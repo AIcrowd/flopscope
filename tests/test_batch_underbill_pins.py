@@ -146,3 +146,41 @@ def test_fft2_family_bills_leading_batch_when_axes_explicitly_none():
         j1 = _bill(lambda: fnp.fft.irfft2(c1, s=(16, 16), axes=None))
         j8 = _bill(lambda: fnp.fft.irfft2(c8, s=(16, 16), axes=None))
         assert j8 == 8 * j1, "irfft2 drops leading batch on axes=None,s given"
+
+
+def test_fftn_s_negative_one_sentinel_bills_real_cost():
+    # numpy >= 2.0 treats `-1` in `s` as "use the whole input" along that
+    # transform axis. The old s_for_cost builder passed `-1` straight
+    # through into fftn_cost's `prod(shape)`, collapsing N to <= 1 and
+    # billing 0 for a transform that numpy actually runs at full size -- a
+    # live budget bypass (the real result is still computed and returned).
+    from tests.test_dtype_cost import _billed_with_production_rates
+
+    rng = np.random.default_rng(6)
+    a = fnp.asarray(rng.standard_normal((6, 5, 8, 8)))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        billed_neg1, _ = _billed_with_production_rates(
+            lambda: fnp.fft.fftn(a, s=(-1, 8))
+        )
+    assert billed_neg1 > 0
+    # -1 on axis 2 (size 8) resolves to the same real cost as writing the
+    # size out explicitly: fftn(a, s=(8, 8)) bills 115200 (production
+    # rates: float64 input -> complex128 compute dtype, rate 2.0).
+    assert billed_neg1 == 115200
+
+
+def test_fftn_s_none_sentinel_resolves_to_transform_axis_not_leading_axis():
+    # When `axes` is omitted and `s` is given, numpy transforms the
+    # TRAILING len(s) axes (here axes (2, 3), both size 8) and a `None`
+    # entry in `s` resolves to the input size along ITS transform axis. The
+    # s_for_cost None-fill used `range(a.ndim)` (leading axes 0, 1 = sizes
+    # 6, 5) instead of the same trailing axes the batch count uses,
+    # under-billing 86400 vs the real 115200 for this shape.
+    rng = np.random.default_rng(6)
+    a = fnp.asarray(rng.standard_normal((6, 5, 8, 8)))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        billed_none = _bill(lambda: fnp.fft.fftn(a, s=(None, 8)))
+        billed_concrete = _bill(lambda: fnp.fft.fftn(a, s=(8, 8)))
+    assert billed_none == billed_concrete
