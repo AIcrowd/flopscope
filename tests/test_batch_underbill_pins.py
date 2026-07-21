@@ -404,6 +404,48 @@ def test_choice_list_replace_false_scales_with_sampled_axis():
     assert b_thin_replace_true == b_wide_replace_true
 
 
+def test_choice_replace_true_with_p_bills_cdf_term_over_sampled_axis():
+    # Sibling pin to test_choice_list_replace_false_scales_with_sampled_axis
+    # above, for the OTHER branch of _choice_cost: replace=True WITH `p`
+    # given adds a CDF-build term (cumsum + normalise + a final pass, then a
+    # binary search per draw) on top of the numel(output) base cost --
+    # `3*n + numel(output)*ceil_log2(n)`, where `n` is the pool size along
+    # the sampled `axis` (the 5th positional / `axis` kwarg). That `n` is
+    # read via the same axis-aware `_choice_pool_size` helper the
+    # replace=False path above uses (already fixed to route non-ndarray
+    # array-likes through `asarray()` instead of axis-blind `len(a)`), so
+    # this path already bills correctly today -- this pins it down so it
+    # can't silently regress.
+    #
+    # This is NOT a fix -- both assertions below already hold on unmodified
+    # code. If either ever fails, that is a real regression, not a stale
+    # test: stop and report it rather than "fixing" the assertion.
+    g = fnp.random.default_rng(15)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    # p is a uniform vector over the sampled axis (shape[1]): required to
+    # sum to 1 and match the pool's extent along `axis` for numpy to accept
+    # the call at all; its actual values never affect the bill (only its
+    # presence and `n` do -- see _choice_cost), so uniform is as good as any.
+    p_thin = np.full(4, 1.0 / 4)
+    p_wide = np.full(4000, 1.0 / 4000)
+
+    b_thin = _bill(lambda: g.choice(thin, size=3, replace=True, p=p_thin, axis=1))
+    b_wide = _bill(lambda: g.choice(wide, size=3, replace=True, p=p_wide, axis=1))
+    # out_size = numel((2, 3)) = 6; cost = out_size + 3*n + out_size*ceil_log2(n).
+    assert b_thin == 30  # 6 + 3*4 + 6*ceil_log2(4)   = 6 + 12 + 12
+    assert b_wide == 12078  # 6 + 3*4000 + 6*ceil_log2(4000) = 6 + 12000 + 72
+    assert b_wide > b_thin  # the CDF term scales with the sampled axis (shape[1])
+
+    # list pool bills exactly the same as the equivalent ndarray pool.
+    nd_thin = fnp.asarray(np.asarray(thin))
+    nd_wide = fnp.asarray(np.asarray(wide))
+    b_nd_thin = _bill(lambda: g.choice(nd_thin, size=3, replace=True, p=p_thin, axis=1))
+    b_nd_wide = _bill(lambda: g.choice(nd_wide, size=3, replace=True, p=p_wide, axis=1))
+    assert b_thin == b_nd_thin
+    assert b_wide == b_nd_wide
+
+
 def test_pad_stat_bills_all_reduced_axes():
     a = fnp.asarray(np.random.default_rng(7).standard_normal((20, 20, 20)))
     # pad only the LAST axis in mean mode: numpy still reduces all 3 axes.
