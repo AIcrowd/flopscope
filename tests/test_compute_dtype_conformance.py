@@ -560,15 +560,14 @@ PROBES["isnat"] = lambda: fnp.isnat(
 )
 
 # ---------------------------------------------------------------------------
-# astype/asarray are deliberately NOT probed or skipped here (compare the
-# row_stack note below, same pattern). Both are now weight 0.0 in
-# default_weights.json: a free representation change -- conversion computes
-# no values; the structural cost formula (numel at the heavier of
-# source/dest for a value-changing cast) and astype's complex factor are
-# still tracked internally, inert until a weight makes them matter again,
-# but neither op bills. So neither is in _charged_ops() and both correctly
-# fall outside this sweep entirely.
+# astype/asarray (Option B billing fix: both now weight 1.0 in
+# default_weights.json -- a real cast/copy bills like `copy`, numel at the
+# heavier of source/dest rate via heavier_billing_dtype). Cast int32 -> a
+# heavier dtype so the oracle actually discriminates: numpy's real output
+# dtype is the cast destination, and the billed dtype must cover its rate.
 # ---------------------------------------------------------------------------
+PROBES["astype"] = lambda: fnp.astype(V, np.float64)
+PROBES["asarray"] = lambda: fnp.asarray(V, dtype=np.float64)
 
 # ---------------------------------------------------------------------------
 # Everything else: simple composites/manipulation ops that already resolve

@@ -40,6 +40,9 @@ def test_charged_copies_are_copies():
     assert not _views(np.tile(V1, 2), V1)
     assert not _views(np.fft.fftshift(V1), V1)
     assert not _views(np.copy(C2), C2)
-    # astype is deliberately FREE (conversions policy) — locked here only as
-    # the semantics fact behind that accepted copy-tier bypass.
+    # astype performs a real copy here, same as np.copy above — as of the
+    # Option B billing fix (astype bills like copy for every real cast/copy;
+    # see docs/reference/cost-model.md), this is no longer a free bypass:
+    # flopscope now prices it the same as the copy right above. Locked here
+    # as the semantics fact the cost model prices against.
     assert not _views(np.astype(C2, np.float64), C2)

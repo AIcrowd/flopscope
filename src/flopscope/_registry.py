@@ -1703,15 +1703,16 @@ REGISTRY: dict[str, dict] = {
         "notes": "Coordinate matrices from coordinate vectors. Cost: numel(output).",
     },
     "astype": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Cast array to specified type.",
+        "notes": "Cast array to specified type. Cost: numel(input) at the heavier of source/destination dtype rate (matches copy); free only for the true no-op (copy=False with dtype already matching).",
     },
     "asarray": {
-        "category": "free",
+        "category": "counted_custom",
         "module": "numpy",
-        "notes": "Convert input to array. Cost: 0 -- representation change.",
+        "complex_factor": 2.0,
+        "notes": "Convert input to array. Cost: numel(input) at the heavier of source/destination dtype rate when dtype= actually converts the buffer; 0 when no conversion happens (no dtype=, or dtype already matches).",
     },
     "isnan": {
         "category": "counted_custom",

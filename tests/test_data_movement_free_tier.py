@@ -229,7 +229,13 @@ def test_nonzero_method_matches_function():
 
 
 # ---------------------------------------------------------------------------
-# Task 6: value-changing astype is charged; lossless cast stays free
+# Option B: astype bills every real cast/copy like copy(); only the
+# copy=False + unchanged-dtype no-op stays free (see the astype/asarray
+# billing fix -- docs/reference/cost-model.md, "representation vs. value
+# change"). Under unit weights (this file's default -- no load_weights()
+# call), every dtype rate is 1.0 and no destination here is complex, so
+# every real copy bills exactly numel(input) = 100 regardless of which
+# dtype it targets; only copy=False + unchanged dtype is exempt.
 # ---------------------------------------------------------------------------
 
 
@@ -242,30 +248,41 @@ def _flop_cost(call):
 
 
 @pytest.mark.parametrize(
-    "dtype, changes_values",
-    [
-        (bool, True),  # !=0 test
-        ("int64", True),  # float->int truncation
-        ("float32", True),  # narrowing (round)
-        ("float64", False),  # width cast (lossless) - stays free
-    ],
+    "dtype",
+    [bool, "int64", "float32", "float64"],
 )
-def test_astype_function_charges_value_changing_casts(dtype, changes_values):
+def test_astype_function_charges_every_real_cast(dtype):
     a = fnp.asarray([float(i) - 50 for i in range(100)])  # float64 source
     cost, names = _flop_cost(lambda: fnp.astype(a, dtype))
     assert "astype" in names, "astype must produce an op-log record"
-    assert cost == (100 if changes_values else 0)
+    assert cost == 100  # default copy=True always performs a real write
 
 
-@pytest.mark.parametrize(
-    "dtype, changes_values",
-    [(bool, True), ("int64", True), ("float64", False)],
-)
-def test_astype_method_charges_value_changing_casts(dtype, changes_values):
+def test_astype_function_copy_false_same_dtype_is_the_only_free_case():
+    a = fnp.asarray([float(i) - 50 for i in range(100)])  # float64 source
+    cost, names = _flop_cost(lambda: fnp.astype(a, "float64", copy=False))
+    assert "astype" in names
+    assert cost == 0  # true no-op: numpy returns the identical object
+    # copy=False cannot be honored across a real dtype change -- numpy
+    # copies anyway, and so must billing.
+    cost2, names2 = _flop_cost(lambda: fnp.astype(a, "int64", copy=False))
+    assert "astype" in names2
+    assert cost2 == 100
+
+
+@pytest.mark.parametrize("dtype", [bool, "int64", "float64"])
+def test_astype_method_charges_every_real_cast(dtype):
     a = fnp.asarray([float(i) - 50 for i in range(100)])
     cost, names = _flop_cost(lambda: a.astype(dtype))
     assert "astype" in names
-    assert cost == (100 if changes_values else 0)
+    assert cost == 100
+
+
+def test_astype_method_copy_false_same_dtype_is_the_only_free_case():
+    a = fnp.asarray([float(i) - 50 for i in range(100)])
+    cost, names = _flop_cost(lambda: a.astype("float64", copy=False))
+    assert "astype" in names
+    assert cost == 0
 
 
 def test_astype_method_honors_casting_kwarg():

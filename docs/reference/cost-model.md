@@ -194,8 +194,7 @@ but nothing is written into it:
 1. **Views / metadata** — operations that return a view of existing memory or inspect
    metadata without touching element values: `transpose`, `swapaxes`,
    `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
-   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `astype` (both directions,
-   including value-changing casts — see below), `asarray`, `asfortranarray`,
+   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `asfortranarray`,
    `ascontiguousarray`, `view`, `real`/`imag` (component extraction), `split`,
    `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal` (the 2-D view path — see
    [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
@@ -218,17 +217,31 @@ but nothing is written into it:
 
 **Refinement — representation vs. value change** (resolves `astype`/`asarray`):
 
-> **Changing how a value is stored is free; changing what a new buffer contains is
-> charged**, even when the new content is a repeated constant.
+> **A representation change that performs no work is free; every cast or copy that
+> actually runs is charged the same as `copy`.**
 
-`astype` and `asarray` conversions bill `0` in both directions: narrowing, widening,
-float→int truncation, and bool coercion all cost nothing — precision is the
-participant's own dial, not a billed event (see [Which dtype prices a
-call](#which-dtype-prices-a-call)). This is the one deliberate exception to "every
-write is metered": the *number* of elements is unchanged, only their stored
-representation is, so there is no new value-per-element decision being priced.
-Contrast this with `ones`/`full`, which also touch every element but write an actual
-value into memory — those are charged (see [Views and metadata](#views-and-metadata-weight-00)
+`astype` and `asarray` bill `numel(input)` at the heavier of the source/destination
+dtype rate — the same formula `copy` bills (see [Which dtype prices a
+call](#which-dtype-prices-a-call)) — for every call that does real work: narrowing,
+widening, float→int truncation, bool coercion, a same-dtype `astype` called with the
+default `copy=True`, and any `asarray(x, dtype=other)` that actually converts the
+buffer. The one free case left is the genuine no-op, where NumPy itself performs zero
+work: `astype(x, dtype, copy=False)` when `dtype` already equals `x`'s dtype returns
+the *identical object*, and `asarray(x)` with no `dtype=` (or a `dtype=` that already
+matches `x`'s dtype) performs no conversion — both bill `0`, same as the views/metadata
+ops above. Any other combination — `copy=False` across an actual dtype change (NumPy
+cannot honor the request and copies anyway), or any other `astype`/`asarray` call —
+performs a real `numel`-element write and is charged.
+
+This closes a loophole where `x.astype(x.dtype)` (default `copy=True`) was a free
+substitute for `x.copy()`, and `x.astype(bool)` / `x.astype(int)` were free substitutes
+for a billed `!= 0` test or a `trunc`-then-cast. It also means choosing a narrower
+working dtype now costs a one-time `copy`-priced toll to get there; the arithmetic
+performed *afterward* on the narrower array is still cheaper per the dtype-rate table
+(see [Which dtype prices a call](#which-dtype-prices-a-call)), so that saving is not
+eliminated — only no longer free to acquire up front. Contrast the charged cases with
+`ones`/`full`, which also touch every element but write an actual value into memory —
+those are charged the same way (see [Views and metadata](#views-and-metadata-weight-00)
 category 2 above and [Copy and gather](#copy-and-gather)).
 
 The method `a.nonzero()` is charged identically to `fnp.nonzero(a)`; `nonzero`,
@@ -420,15 +433,18 @@ Worked consequences:
   promotion. `out=` alone does not narrow the loop: `multiply(f64, f64, out=float32_arr)`
   still runs the float64 loop and only casts the result into `out`, so it stays billed
   at the float64 rate (`2000`).
-- **Changing representation is free.** `astype` and `asarray` conversions bill `0` in
-  both directions — narrowing, widening, or a value-changing cast (to-bool, float→int,
-  complex→real) all cost nothing, because precision is the participant's own dial, not a
-  billed event. The structural formula (`numel` at the heavier of source/destination
-  rate, via `heavier_billing_dtype` — not `result_type`, which would over-promote a
-  cross-kind cast such as `float32 → int32` to float64) is still tracked, so a future
-  re-weighting has a correct number to weight; at the current weight it bills `0`.
-  `copyto`, the in-place write primitive, is priced one unit per element written (per
-  selected element under `where=`), same-dtype or not.
+- **Casting/converting bills like `copy`.** `astype` and `asarray` bill `numel(input)`
+  at the heavier of source/destination rate — via `heavier_billing_dtype`, not
+  `result_type`, which would over-promote a cross-kind cast such as `float32 → int32`
+  to float64 — whenever they perform real work: narrowing, widening, a value-changing
+  cast (to-bool, float→int, complex→real), a same-dtype `astype` with the default
+  `copy=True`, or any `asarray(x, dtype=other)` that actually converts the buffer. The
+  one free case is the genuine no-op: `astype(x, dtype, copy=False)` when `dtype`
+  already matches `x`'s dtype returns the identical object, and a dtype-free or
+  dtype-matching `asarray(x)` performs no conversion — both bill `0` (see
+  [Views and metadata](#views-and-metadata-weight-00) for the full rule). `copyto`, the
+  in-place write primitive, is priced one unit per element written (per selected
+  element under `where=`), same-dtype or not.
 - **`real` / `imag` are free.** Extracting a component of a complex value is a
   view / constant-fill, not arithmetic — `flop_cost = 0`.
 - **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype at
@@ -632,7 +648,7 @@ each backed by a CI-enforced test you can open and read:
 | **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0, 1, or 4; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
-| **Free-tier discipline** | weight 0 is limited to views/metadata and untouched (zero-page or uninitialized) allocation; any op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1, with one deliberate exception: representation changes (`astype`, `asarray`) are free even though they may test or truncate values, because precision is the participant's own dial, not a billed event. Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
+| **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1. Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
 | **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
@@ -1271,8 +1287,9 @@ compute cost. The predicate and the selection are the *same* step here — unlik
 | `take(a, idx)` | charged `4×numel(output)` | index given, but the read pattern is non-sequential — access-tier gather |
 | `hstack([a, b])` | charged `numel(output)` | copies existing values into a new buffer — a real, sequential write |
 | `sort(a)` | charged `4×n·⌈log₂ n⌉` | output order derived by comparing values — access-tier |
-| `a.astype(float64)` | free | representation change only — no value change |
-| `a.astype(bool)` | free | representation change — even though it computes a `!=0` test, precision is the participant's own dial (deliberate exception to the value-test rule) |
+| `a.astype(float64)` | charged `numel(a)` | default `copy=True` performs a real write, billed like `copy`, even for a pure width change |
+| `a.astype(bool)` | charged `numel(a)` | bills like `copy` — no longer a value-test exception, same formula as any other cast |
+| `a.astype(a.dtype, copy=False)` | free | the one true no-op — NumPy returns the identical object, so nothing is written |
 
 **Complex dtypes**: the movement, gather, and scatter ops in this family carry the
 component `complex_factor = 2` (the same floor as everywhere else) and never raise on
@@ -1474,25 +1491,29 @@ Weight 0 now covers two sub-families:
 - **Views / metadata** — no new buffer, or a read-only reinterpretation of an
   existing one: `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
   `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`, `atleast_1d`/`atleast_2d`/
-  `atleast_3d`, `broadcast_to`, `astype` (free in both directions — a representation
-  change, not a value change), `asarray`, `asfortranarray`, `ascontiguousarray`,
+  `atleast_3d`, `broadcast_to`, `asfortranarray`, `ascontiguousarray`,
   `view`, `real`/`imag` (component extraction — a strided view or constant-fill, no
   arithmetic), `split`, `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal`
   (2-D view path only — the 1-D *construct* path writes, see [Copy and
   gather](#copy-and-gather)), `linalg.diagonal`, `linalg.matrix_transpose`,
   `from_dlpack`, `load`, and all other shape/stride/dtype introspection (`ndim`,
   `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`, `ctypes`,
-  `strides`, `T`, `isscalar`, `isfortran`).
+  `strides`, `T`, `isscalar`, `isfortran`). `astype`/`asarray` are **not** in this
+  list any more — they moved to the charged paragraph below; see [Views and
+  metadata](#views-and-metadata-weight-00) for their remaining narrow no-op
+  exception.
 - **Untouched allocation** — a new buffer whose contents are the platform zero-page
   default, so nothing is actually written: `zeros`, `zeros_like`, `empty`,
   `empty_like`.
 
 **Everything else that used to live in this family now writes real memory and is
 charged.** `reshape`/`ravel`/`copy`/`flatten`/`require`, every materializing-copy op
-(`concatenate`/`stack`/`tile`/…), and `fft.fftshift`/`fft.ifftshift` are weight 1.0;
-`take`/`take_along_axis`/`choose` (gather) are weight 4.0; `put`/`putmask`/`place`/
-`compress`/`extract`/`select`/3-arg `where`/`fill_diagonal` (scatter/select) are
-weight 1.0 (`where` gathers, so it is weight 4.0) — see [Copy and
+(`concatenate`/`stack`/`tile`/…), `astype`/`asarray` (any real cast or copy — see
+[Views and metadata](#views-and-metadata-weight-00) for the narrow
+`copy=False`/no-conversion no-op that stays free), and `fft.fftshift`/`fft.ifftshift`
+are weight 1.0; `take`/`take_along_axis`/`choose` (gather) are weight 4.0;
+`put`/`putmask`/`place`/`compress`/`extract`/`select`/3-arg `where`/`fill_diagonal`
+(scatter/select) are weight 1.0 (`where` gathers, so it is weight 4.0) — see [Copy and
 gather](#copy-and-gather) for the full breakdown. `ones`/`full`/`eye`/`identity`/
 `tri`/`meshgrid` moved the same way — see
 [Generator](#generator-linspace-arange-and-kin) for the constant-fill split that

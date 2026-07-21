@@ -297,15 +297,15 @@ def test_array_ops_free_op_bills_zero_regardless_of_dtype():
     assert _cost(lambda: fnp.transpose(zc)) == 0
 
 
-def test_astype_is_free_and_still_resolves_heavier_dtype():
-    # astype is weight 0 (a representation change is free, lossy or not), but
-    # the dtype it RESOLVES for billing purposes -- structural cost tracking,
-    # inert until a weight makes it matter again -- is still the HEAVIER of
-    # the source and destination rate: astype reads the source and writes the
+def test_astype_bills_and_still_resolves_heavier_dtype():
+    # Option B: astype bills numel(input) at the HEAVIER of the source and
+    # destination rate -- astype reads the source and writes the
     # destination, so the pricier side dominates. Neither source-only nor
     # result_type is the right resolution: source-only would under-resolve
     # when dst is pricier (complex64->float64); result_type over-resolves a
-    # cross-kind narrowing (float32+int32 promotes to float64).
+    # cross-kind narrowing (float32+int32 promotes to float64). All calls
+    # below use the default copy=True, so all are real copies and bill
+    # 1000 * rate(resolved) (* complex_factor 2.0 when resolved is complex).
     load_weights()
     a64 = fnp.asarray(np.ones(1000, dtype=np.float64))
     a32 = fnp.asarray(np.ones(1000, dtype=np.float32))
@@ -313,27 +313,28 @@ def test_astype_is_free_and_still_resolves_heavier_dtype():
     c128 = fnp.asarray(np.ones(1000, dtype=np.complex128))
     # source pricier than dest:
     assert _billed_with_production_rates(lambda: fnp.astype(a64, np.int32)) == (
-        0,
+        2000,
         "float64",
     )
     assert _billed_with_production_rates(lambda: fnp.astype(a32, np.int32)) == (
-        0,
+        1000,
         "float32",
     )
     # dest pricier than source: complex64->float64 resolves to the real
     # float64 rate (complex64's own rate is lighter than float64's).
     assert _billed_with_production_rates(lambda: fnp.astype(c64, np.float64)) == (
-        0,
+        2000,
         "float64",
     )
     # complex128->float64 ties on rate (both 2.0); the tie keeps the source
-    # (complex128, listed first), so the resolved dtype stays complex.
+    # (complex128, listed first), so the resolved dtype stays complex --
+    # and the complex_factor (2.0) doubles the plain rate*numel cost.
     assert _billed_with_production_rates(lambda: fnp.astype(c128, np.float64)) == (
-        0,
+        4000,
         "complex128",
     )
     assert _billed_with_production_rates(lambda: fnp.astype(a32, np.int64)) == (
-        0,
+        2000,
         "int64",
     )  # real-only dst pricier
 
@@ -348,12 +349,13 @@ def test_complex_movement_and_creation_do_not_raise():
     # movement-op witness here.
     assert _cost(lambda: fnp.flip(zc)) == 0
     assert _cost(lambda: fnp.broadcast_to(zc, (2, 100))) == 0
-    # astype complex->real is value-changing (structural cost=numel, inert at
-    # astype's weight 0) -- both the function form and the .astype() method
-    # form must not raise, and both bill 0 like every other representation
-    # change.
-    assert _cost(lambda: fnp.astype(zc, np.float64)) == 0
-    assert _cost(lambda: zc.astype(np.float64)) == 0
+    # astype complex->real must not raise despite discarding the imaginary
+    # component -- both the function form and the .astype() method form
+    # bill like copy (numel * rate(float64) * complex_factor(astype)=2.0 --
+    # the RESOLVED dtype stays complex128, so the complex factor still
+    # applies even though the result is real): 100 * 2.0 * 2.0 = 400.
+    assert _cost(lambda: fnp.astype(zc, np.float64)) == 400
+    assert _cost(lambda: zc.astype(np.float64)) == 400
 
 
 # ---------------------------------------------------------------------------
@@ -716,22 +718,22 @@ def test_requested_narrow_dtype_bills_the_loop_numpy_actually_runs():
     assert narrow_requested == 100  # float32 rate 1.0 vs float64 rate 2.0: half
 
 
-def test_astype_to_complex_and_back_is_free():
-    # Widening real->complex astype is a safe (lossless) cast: free, as
-    # always. The reverse, narrowing complex->real, discards the imaginary
-    # lane -- structurally value-changing -- but astype's weight is 0, so it
-    # is free too: every cast bills 0 regardless of direction.
+def test_astype_to_complex_and_back_bills_like_copy():
+    # Option B: both directions bill like copy now, regardless of
+    # safe/unsafe-cast direction. Widening real->complex: heavier_billing_dtype
+    # (float64, complex128) ties at rate 2.0, first (float64, real) wins, so
+    # no complex_factor applies -- 100 * rate(float64)=2.0 = 200.
     load_weights()
     r = fnp.asarray(np.ones(100, dtype=np.float64))
     z = fnp.asarray(np.ones(100, dtype=np.complex128))
-    assert _cost(lambda: r.astype(np.complex128)) == 0  # widening: safe cast
-    # narrowing: value-changing, still free. The dtype RESOLUTION (structural
-    # cost tracking, inert at weight 0) is still the heavier of source/dest
-    # (heavier_billing_dtype(complex128, float64), tied at rate 2.0 -- the tie
-    # keeps the source, complex128) -> resolved dtype stays complex.
+    assert _cost(lambda: r.astype(np.complex128)) == 200
+    # narrowing complex->real: the dtype RESOLUTION is still the heavier of
+    # source/dest (heavier_billing_dtype(complex128, float64), tied at rate
+    # 2.0 -- the tie keeps the source, complex128) -> resolved dtype stays
+    # complex, so the complex_factor (2.0) applies: 100 * 2.0 * 2.0 = 400.
     # Matches the sibling pin in test_complex_movement_and_creation_do_not_raise.
     assert _billed_with_production_rates(lambda: z.astype(np.float64)) == (
-        0,
+        400,
         "complex128",
     )
 
@@ -815,24 +817,29 @@ def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():
     assert REGISTRY["random.Generator.shuffle"]["complex_factor"] == 2.0
 
 
-def test_asarray_value_changing_cast_is_free_like_astype():
-    # asarray(x, dtype=) that changes values does the same structural work as
-    # astype (numel at the heavier rate, tracked internally) but both share
-    # weight 0 -- every asarray call is free, no-op, lossless widen, or lossy
-    # narrowing alike.
+def test_asarray_value_changing_cast_bills_like_astype():
+    # Option B: asarray(x, dtype=) that actually converts the buffer does the
+    # same real work as astype and bills the same way (numel at the heavier
+    # of source/dest rate). The only free cases left are the genuine no-ops:
+    # no dtype= at all, or a dtype= that already matches the input's dtype.
     load_weights()
     a32 = fnp.asarray(np.ones(100, dtype=np.float32))
     a64 = fnp.asarray(np.ones(100, dtype=np.float64))
-    assert _cost(lambda: fnp.asarray(a32)) == 0  # no-op
-    assert _cost(lambda: fnp.asarray(a32, dtype=np.float64)) == 0  # lossless widen
-    # lossy casts stay free too; the resolved dtype (structural cost tracking,
-    # inert at weight 0) still follows the same heavier-of-source/dest rule.
+    assert _cost(lambda: fnp.asarray(a32)) == 0  # no-op: no dtype= at all
+    assert (
+        _cost(lambda: fnp.asarray(a32, dtype=np.float32)) == 0
+    )  # no-op: dtype= matches
+    assert (
+        _cost(lambda: fnp.asarray(a32, dtype=np.float64)) == 200
+    )  # lossless widen: billed
+    # lossy casts bill too; the resolved dtype still follows the same
+    # heavier-of-source/dest rule as astype.
     assert _billed_with_production_rates(lambda: fnp.asarray(a64, dtype=np.int32)) == (
-        0,
+        200,
         "float64",
     )
     assert _billed_with_production_rates(lambda: fnp.asarray(a32, dtype=np.int32)) == (
-        0,
+        100,
         "float32",
     )
 
@@ -1586,26 +1593,32 @@ def test_fft_complex_billing_unchanged_by_the_floor():
     )
 
 
-def test_casts_are_free_in_both_directions():
+def test_casts_bill_like_copy_in_both_directions():
     import flopscope.numpy as fnp
 
     f64 = np.ones(1000, dtype=np.float64)
     c128 = np.ones(1000, dtype=np.complex128)
-    # lossy and lossless casts both bill 0: representation changes are free.
+    # lossy and lossless casts both bill like copy now: representation
+    # changes are only free for the true no-op (see the dedicated no-op
+    # tests). Each `asarray(x)` call here has no dtype= of its own, so it
+    # contributes 0; the chained `.astype(...)` is what bills.
     assert (
         _billed_with_production_rates(lambda: fnp.asarray(f64).astype(np.float32))[0]
-        == 0
+        == 2000
     )
     assert (
-        _billed_with_production_rates(lambda: fnp.asarray(f64).astype(np.int32))[0] == 0
+        _billed_with_production_rates(lambda: fnp.asarray(f64).astype(np.int32))[0]
+        == 2000
     )
     assert (
         _billed_with_production_rates(lambda: fnp.asarray(c128).astype(np.complex64))[0]
-        == 0
+        == 4000
     )
+    # here asarray itself performs the float64->float32 narrowing cast, no
+    # chained astype:
     assert (
         _billed_with_production_rates(lambda: fnp.asarray(f64, dtype=np.float32))[0]
-        == 0
+        == 2000
     )
 
 

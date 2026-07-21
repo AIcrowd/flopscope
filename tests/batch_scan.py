@@ -1102,6 +1102,32 @@ def recipe_full_like(op):
     return [_bp("A:full_like", op, (arr((64,)), 3.0), (arr((K, 64)), 3.0))]
 
 
+def recipe_astype(op):
+    # The generic unary battery calls op(a1) with no dtype arg, which is a
+    # true (permanently free) no-op for astype's array-API form -- it never
+    # reaches the billed cast path. Force a real, value-changing cast
+    # (float64 input -> float32) so the probe exercises the numel(input) *
+    # heavier-rate branch this recipe is meant to scale-test.
+    return [_bp("A:astype", op, (arr((64,)), "float32"), (arr((K, 64)), "float32"))]
+
+
+def recipe_asarray(op):
+    # Same issue as astype: the generic battery's op(a1) has no dtype=, which
+    # is asarray's permanently-free no-conversion path. Pass an explicit
+    # dtype= that actually differs from the (float64) input's dtype so the
+    # probe exercises the billed conversion branch.
+    return [
+        _bp(
+            "A:asarray-cast",
+            op,
+            (arr((64,)),),
+            (arr((K, 64)),),
+            base_kw={"dtype": "float32"},
+            bat_kw={"dtype": "float32"},
+        )
+    ]
+
+
 def recipe_unravel_index(op):
     i1 = fnp.asarray(_rng.integers(0, 64, 64))
     ik = fnp.asarray(_rng.integers(0, 64, (K, 64)))
@@ -1334,6 +1360,8 @@ RECIPES_FUNC = {
     "linalg.matrix_power": recipe_matrix_power,
     "isin": recipe_isin,
     "full_like": recipe_full_like,
+    "astype": recipe_astype,
+    "asarray": recipe_asarray,
     "unravel_index": recipe_unravel_index,
     # stats with shape params
     "stats.lognorm.pdf": recipe_lognorm,

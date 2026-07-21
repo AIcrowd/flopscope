@@ -639,18 +639,18 @@ def test_getitem_advanced_indexing_bills_on_first_touch_data(handler, session):
 
 
 def test_astype_on_first_touch_data_preserves_flopscopearray_typing(handler, session):
-    """``astype`` bills 0 FLOPs by design (registry weight 0 -- a
-    representation change is free, matching ``FlopscopeArray.astype``'s own
-    behavior for both lossless AND lossy casts: ``_cast_changes_values``
-    computes a structural ``numel`` cost, but the op's weight zeroes it out
-    before it reaches the budget). That policy is unchanged by this fix.
+    """``astype`` bills like ``copy`` (Option B billing fix: registry weight
+    1.0 -- a real cast/copy is charged ``numel`` at the heavier of
+    source/destination dtype rate, matching ``FlopscopeArray.astype``'s own
+    formula). Here a 1000-element float64->float32 narrowing cast bills
+    `1000 * rate(float64)=2.0 = 2000` (float64 is the heavier operand).
 
-    What DOES change: before the ``Session.store_array`` fix, calling
-    ``astype`` directly on a ``create_from_data`` handle (a plain
-    ``numpy.ndarray``) resolved to base ``numpy.ndarray.astype`` and stored
-    its plain-ndarray result verbatim -- silently extending the billing
-    bypass to every downstream op on THAT result too, not just the astype
-    call itself. After the fix, the astype result is stored as a
+    What this test actually regresses on: before the ``Session.store_array``
+    fix, calling ``astype`` directly on a ``create_from_data`` handle (a
+    plain ``numpy.ndarray``) resolved to base ``numpy.ndarray.astype`` and
+    stored its plain-ndarray result verbatim -- silently extending the
+    billing bypass to every downstream op on THAT result too, not just the
+    astype call itself. After the fix, the astype result is stored as a
     ``FlopscopeArray`` and a subsequent fancy-index read on it bills
     correctly instead of continuing the bypass chain.
     """
@@ -669,10 +669,10 @@ def test_astype_on_first_touch_data_preserves_flopscopearray_typing(handler, ses
         {"op": "astype", "args": [{"__handle__": src_h}, "float32"], "kwargs": {}}
     )
     assert resp["status"] == "ok"
-    # Representation change: free by design, including this lossy narrowing
-    # (float64 -> float32) -- unchanged, intentional policy (registry weight
-    # 0 for "astype"). This assertion is not the regression under test.
-    assert session.budget_status()["flops_used"] - before == 0
+    # Real cast (default copy=True): billed like copy, at the heavier of
+    # source (float64, rate 2.0) / destination (float32, rate 1.0) --
+    # 1000 * 2.0 = 2000. This assertion is not the regression under test.
+    assert session.budget_status()["flops_used"] - before == 2000
 
     from flopscope._ndarray import FlopscopeArray
 

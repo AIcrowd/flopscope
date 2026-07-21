@@ -759,14 +759,18 @@ class SymmetricTensor(FlopscopeArray):
         subok: bool = False,
         copy: bool = True,
     ):
-        return _asplainflopscope(
-            np.asarray(self).astype(
-                dtype,
-                order=order,  # type: ignore[arg-type]
-                casting=casting,  # type: ignore[arg-type]
-                subok=False,
-                copy=copy,
-            )
+        # Route through the counted ndarray method (FlopscopeArray.astype ->
+        # _astype_counted) so this bills like every other astype call --
+        # unlike copy() above, astype intentionally does NOT reattach
+        # symmetry (a cast is not guaranteed to preserve the symmetric
+        # structure), so no `.view(type(self))` here; the counted backend
+        # already returns a plain (non-Symmetric) FlopscopeArray.
+        return super().astype(
+            dtype,
+            order=order,
+            casting=casting,
+            subok=subok,
+            copy=copy,
         )
 
     def transpose(self, *axes):  # type: ignore[override]

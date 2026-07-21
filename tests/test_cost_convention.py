@@ -752,6 +752,8 @@ DEFERRED: dict[str, str] = {
     "eye": "diagonal length written; structural constructor",
     "identity": "diagonal length written (=n); structural constructor",
     "copy": "numel(input); materializing copy",
+    "astype": "numel(input) at heavier(src,dst) rate; bills like copy for every real cast/copy, free only for the copy=False+unchanged-dtype no-op — see test_dtype_cost.py, test_data_movement_free_tier.py",
+    "asarray": "numel(input) at heavier(src,dst) rate when dtype= actually converts; 0 when no conversion happens — same formula as astype, see test_dtype_cost.py",
     "reshape": "numel(input); billed regardless of view-vs-copy",
     "ravel": "numel(input); billed regardless of view-vs-copy",
     "require": "numel(input); billed regardless of view-vs-copy",

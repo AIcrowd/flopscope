@@ -1547,17 +1547,6 @@ attach_docstring(
 # ---------------------------------------------------------------------------
 
 
-def _cast_changes_values(src_dtype: Any, dst_dtype: Any) -> bool:
-    """True when casting src->dst alters element values (so it is charged).
-
-    A lossless representation/width cast (e.g. float32->float64, int32->int64,
-    bool->int) is ``can_cast(..., "safe")`` and stays free. To-bool (``!=0``),
-    float->int (truncation), float-narrowing (round), and complex->real all
-    fail the safe-cast test and are charged ``numel``.
-    """
-    return not _np.can_cast(_np.dtype(src_dtype), _np.dtype(dst_dtype), casting="safe")
-
-
 @_counted_wrapper
 def astype(
     x: ArrayLike,
@@ -1569,20 +1558,25 @@ def astype(
 ) -> FlopscopeArray:
     """Cast array to *dtype*. Wraps ``np.astype(x, dtype)``.
 
-    Cost: 0 -- a representation change (weight 0); every cast is free,
-    lossy or lossless. The structural cost (``numel`` when the cast changes
-    values: to-bool, float->int, narrowing, complex->real) is still tracked
-    internally and stays available if the weight is ever raised.
+    Cost: ``numel(input)`` at the heavier of the source/destination dtype
+    rate (:func:`_heavier_billing_dtype`) -- the same formula ``copy``
+    bills. Charged for every call that performs real work: any dtype
+    change, or a same-dtype request with the default ``copy=True``. Free
+    only for the genuine no-op -- ``copy=False`` with ``dtype`` already
+    equal to ``x``'s dtype -- where NumPy returns the identical object and
+    performs no work at all.
     """
     budget = require_budget()
     x_arr = _np.asarray(x)
-    cost = x_arr.size if _cast_changes_values(x_arr.dtype, dtype) else 0
+    resolved_dtype = _np.dtype(dtype)
+    is_noop = copy is False and resolved_dtype == x_arr.dtype
+    cost = 0 if is_noop else x_arr.size
     with budget.deduct(
         "astype",
         flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape,),
-        dtypes=(_heavier_billing_dtype(x_arr.dtype, _np.dtype(dtype)),),
+        dtypes=(_heavier_billing_dtype(x_arr.dtype, resolved_dtype),),
     ):
         result = _call_numpy(
             _np.astype, _to_base_ndarray(x), dtype, copy=copy, device=device
@@ -1608,20 +1602,21 @@ def _astype_counted(
     ``np.ndarray.astype`` so unsafe casts raise ``TypeError`` just as they do
     on plain ndarrays.
 
-    Cost: 0 -- a representation change (weight 0); every cast is free, lossy
-    or lossless. The structural cost (``numel`` when the cast changes
-    values) is still tracked internally and stays available if the weight
-    is ever raised.
+    Cost: ``numel(input)`` at the heavier of the source/destination dtype
+    rate -- the same formula and ``copy=False`` no-op carve-out as the
+    array-API ``astype`` above (see its docstring).
     """
     budget = require_budget()
     arr_np = _np.asarray(arr)
-    cost = arr_np.size if _cast_changes_values(arr_np.dtype, dtype) else 0
+    resolved_dtype = _np.dtype(dtype)
+    is_noop = copy is False and resolved_dtype == arr_np.dtype
+    cost = 0 if is_noop else arr_np.size
     with budget.deduct(
         "astype",
         flop_cost=cost,
         subscripts=None,
         shapes=(arr_np.shape,),
-        dtypes=(_heavier_billing_dtype(arr_np.dtype, _np.dtype(dtype)),),
+        dtypes=(_heavier_billing_dtype(arr_np.dtype, resolved_dtype),),
     ):
         result = _call_numpy(
             _np.ndarray.astype,
@@ -1641,14 +1636,20 @@ def asarray(
     dtype: DTypeLike | None = None,
     **kwargs: Any,
 ) -> FlopscopeArray:
-    """Convert to array. Cost: 0 -- representation change (weight 0)."""
+    """Convert to array.
+
+    Cost: ``numel(input)`` at the heavier of source/destination dtype rate
+    when ``dtype=`` actually converts the buffer; ``0`` when no conversion
+    happens (no ``dtype=`` given, or ``dtype`` already matches the input).
+    """
     budget = require_budget()
     _probe = _np.asarray(a)
-    # asarray is a view/no-op unless an explicit dtype= forces a value-changing
-    # cast; then it does the same structural work as astype (numel at the
-    # heavier of source/target rate) tracked internally, but both are weight
-    # 0 -- a value-changing asarray(dtype=) is free, same as astype.
-    if dtype is not None and _cast_changes_values(_probe.dtype, dtype):
+    # asarray is a view/no-op unless an explicit dtype= actually differs from
+    # the input's own dtype; then it performs the same real cast/copy as
+    # astype (numel at the heavier of source/target rate) and bills the same
+    # way. Unlike astype, asarray has no copy= to force a redundant copy of
+    # an unchanged dtype, so "dtype differs" is the only gate it needs.
+    if dtype is not None and _np.dtype(dtype) != _probe.dtype:
         cost = _probe.size
         _asarray_dtypes: tuple = (
             _heavier_billing_dtype(_probe.dtype, _np.dtype(dtype)),
@@ -1670,8 +1671,11 @@ def asarray(
 attach_docstring(
     asarray,
     _np.asarray,
-    "free",
-    "0 FLOPs (representation change; structural cost retained at weight 0)",
+    "counted_custom",
+    "numel(input) FLOPs at the heavier of source/destination dtype rate -- "
+    "same formula as copy -- charged only when dtype= actually converts the "
+    "buffer; 0 when no conversion happens (no dtype=, or dtype already "
+    "matches).",
 )
 
 

@@ -103,9 +103,17 @@
     "class": "NO-BATCH",
     "reason": "symmetric-tensor API; requires SymmetryGroup(axes=...); cost already numel-scaled"
   },
+  "asarray": {
+    "class": "OK-SCALES",
+    "reason": "probe A:asarray-cast scales correctly"
+  },
   "asarray_chkfinite": {
     "class": "OK-SCALES",
     "reason": "probe A:unary-1d scales correctly"
+  },
+  "astype": {
+    "class": "OK-SCALES",
+    "reason": "probe A:astype scales correctly"
   },
   "average": {
     "class": "OK-SCALES",
