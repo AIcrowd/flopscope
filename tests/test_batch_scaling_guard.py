@@ -46,3 +46,22 @@ def test_every_charged_op_is_classified():
         "unclassified charged ops (scale them or add a NO-BATCH reason to "
         f"tests/data/batch_scan_classification.json): {missing}"
     )
+
+
+def test_no_ok_scales_op_silently_loses_scale_coverage():
+    """An op frozen as OK-SCALES must still scale-test as OK-SCALES on every run.
+    Catches a broken/removed recipe that would silently turn the op UNTESTED (or
+    a downgrade to NO-BATCH-NA) -- either of which removes the op's under-bill
+    protection while the other two guard tests stay green."""
+    results = scan_all()
+    frozen_ok = {op for op, e in CLASSIFICATION.items() if e["class"] == "OK-SCALES"}
+    regressed = {
+        op: results.get(op, {}).get("verdict", "MISSING")
+        for op in frozen_ok
+        if results.get(op, {}).get("verdict") != "OK-SCALES"
+    }
+    assert not regressed, (
+        "ops frozen as OK-SCALES no longer scale-test as OK-SCALES (recipe broke "
+        "or op downgraded -- under-bill protection silently lost): "
+        f"{dict(sorted(regressed.items()))}"
+    )

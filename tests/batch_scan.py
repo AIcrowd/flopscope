@@ -21,6 +21,19 @@ cannot build a valid batched call for (two-operand broadcast batch like solve,
 fft N-D, random samplers, cov/corrcoef rowvar, tensorsolve degenerate, permuted
 list-repr, pad stat modes, mvhg count).
 
+Scope -- what this catches, and what it can't
+---------------------------------------------
+This is a dimension-propagation detector: it flags a charged op whose billed
+cost stops scaling with a batch/broadcast axis numpy's real computation loops
+over (the family fixed in Tasks 1-8). It cannot catch a wrong per-item
+coefficient (e.g. billing ``2*q_count`` where honest is ``4*q_count``) --
+any constant factor cancels in a same-dtype ratio by construction. Exact
+coefficients are covered separately by the pins in
+``tests/test_batch_underbill_pins.py`` and per-op cost tests. Ops with a
+scalar/fixed-size output (``allclose``, ``histogram``, 1-D set-membership)
+give the output-numel oracle nothing that grows, so they're classified
+``NO-BATCH`` rather than scanned.
+
 Provenance
 ----------
 Adapted from the throwaway discovery harness ``.superpowers/sdd/
