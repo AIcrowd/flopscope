@@ -59,3 +59,13 @@ def test_tensorsolve_axes_bills_true_solved_dimension():
     assert dt == "float64"
     assert billed == 432  # solve_cost(6, 1)=216 x dtype_rate(float64)=2.0
     assert billed != 26  # the old under-billed (ind-based) production value
+
+
+def test_percentile_family_scales_with_q_count():
+    a = fnp.asarray(np.random.default_rng(2).standard_normal(1000))
+    for op in (fnp.percentile, fnp.quantile, fnp.nanpercentile, fnp.nanquantile):
+        hi = 100.0 if op in (fnp.percentile, fnp.nanpercentile) else 1.0
+        scalar = _bill(lambda op=op, hi=hi: op(a, hi / 2))
+        many = _bill(lambda op=op, hi=hi: op(a, np.linspace(0, hi, 1000)))
+        assert many > scalar, f"{op.__name__} flat-bills q-array"
+        assert many >= scalar + 999  # at least +1 FLOP per extra quantile

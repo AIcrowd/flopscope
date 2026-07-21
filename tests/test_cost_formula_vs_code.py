@@ -345,41 +345,45 @@ def test_nanmean_charges_sum_plus_one_divide(we):
 
 
 def test_percentile_tier2_cost(we):
-    # Task 11: percentile uses Tier-2 model: num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
-    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    # Task 11: percentile uses Tier-2 model: num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (Task 3: per-quantile gather+interpolate term, was flat axis_dim=100.)
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.percentile, a, q=50)
-    assert cost == 100, f"percentile: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"percentile: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["nanpercentile"])
 def test_nanpercentile_numel(name, we):
-    # nanpercentile now uses Tier-2 model (same as percentile): num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar output → 1 orbit.
-    # Cost = 1 * 100 = 100.
+    # nanpercentile now uses Tier-2 model (same as percentile):
+    # num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=50)
-    assert cost == 100, f"{name}: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
 
 
 def test_quantile_tier2_cost(we):
-    # Task 11: quantile uses Tier-2 model: num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
-    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    # Task 11: quantile uses Tier-2 model: num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (Task 3: per-quantile gather+interpolate term, was flat axis_dim=100.)
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.quantile, a, q=0.5)
-    assert cost == 100, f"quantile: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"quantile: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["nanquantile"])
 def test_nanquantile_numel(name, we):
-    # nanquantile now uses Tier-2 model (same as quantile): num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar output → 1 orbit.
-    # Cost = 1 * 100 = 100.
+    # nanquantile now uses Tier-2 model (same as quantile):
+    # num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=0.5)
-    assert cost == 100, f"{name}: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["cumulative_sum", "cumulative_prod"])

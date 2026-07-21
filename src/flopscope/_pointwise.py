@@ -2450,7 +2450,8 @@ def nanpercentile(
 ) -> FlopscopeArray:
     """Counted version of np.nanpercentile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -2467,7 +2468,13 @@ def nanpercentile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2484,7 +2491,6 @@ def nanpercentile(
     # captures that "int/bool -> float64, float preserved" half; q still
     # participates so an explicitly wider q array (e.g. float64 q against a
     # float32 `a`) still raises the bill to match numpy's actual widening.
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
@@ -2521,7 +2527,8 @@ def nanquantile(
 ) -> FlopscopeArray:
     """Counted version of np.nanquantile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -2538,7 +2545,13 @@ def nanquantile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2546,7 +2559,6 @@ def nanquantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
@@ -2586,7 +2598,8 @@ def percentile(
 ) -> FlopscopeArray:
     """Counted version of np.percentile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -2603,7 +2616,13 @@ def percentile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2613,7 +2632,6 @@ def percentile(
     out_stripped = _to_base_ndarray(out) if out is not None else None
     # Same "always divides q by 100 first" rule as nanpercentile: integer/
     # bool `a` always computes in float64, regardless of q's own dtype.
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
@@ -2650,7 +2668,8 @@ def quantile(
 ) -> FlopscopeArray:
     """Counted version of np.quantile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -2667,7 +2686,13 @@ def quantile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2675,7 +2700,6 @@ def quantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)

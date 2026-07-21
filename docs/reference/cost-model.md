@@ -713,7 +713,7 @@ plus the per-output subtract, and `mean`/`average` add the per-output divide.
 | `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
 | `median`, `nanmedian` | axis length per output slice | 1.0 | DECLARED; partition (introselect) per output |
-| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | axis length per output slice | 1.0 | DECLARED; partition (introselect) per output |
+| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | (axis length + 4 × q.size) per output slice | 1.0 | DECLARED; partition (introselect) shared per output, plus a gather-and-interpolate step per requested quantile |
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
 | `nanmean` | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides; billed identically to mean |

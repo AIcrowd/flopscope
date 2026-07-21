@@ -515,9 +515,11 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "nanstd": (lambda: fnp.nanstd(_v100), 4 * 100 + 1),
     "ptp": (lambda: fnp.ptp(_v100), 2 * (100 - 1) + 1),
     "median": (lambda: fnp.median(_v100), 100),
-    "percentile": (lambda: fnp.percentile(_v100, 50), 100),
-    "quantile": (lambda: fnp.quantile(_v100, 0.5), 100),
-    "nanquantile": (lambda: fnp.nanquantile(_v100, 0.5), 100),
+    # percentile/quantile family: axis_dim(100) + 4*q.size(1) = 104 (Task 3:
+    # scalar q still pays the interpolation term, not just the partition pass)
+    "percentile": (lambda: fnp.percentile(_v100, 50), 104),
+    "quantile": (lambda: fnp.quantile(_v100, 0.5), 104),
+    "nanquantile": (lambda: fnp.nanquantile(_v100, 0.5), 104),
     # ---- Diff / gradient --------------------------------------------------
     "diff": (lambda: fnp.diff(_v100), 99),
     "ediff1d": (lambda: fnp.ediff1d(_v100), 99),
