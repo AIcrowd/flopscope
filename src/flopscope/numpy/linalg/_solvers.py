@@ -34,7 +34,7 @@ def _has_zero_dim(shape):
 def solve_cost(n: int, nrhs: int = 1, symmetric: bool = False) -> int:
     r"""FLOP cost of solving Ax = b: LU + two triangular solves (FMA=2).
 
-    2n^3/3 (getrf) + 2n^2*nrhs (getrs). G&VL 4e §3.2. ``symmetric`` is
+    2n^3/3 (getrf) + 2n^2*nrhs (getrs). ``symmetric`` is
     kept for API compatibility and ignored.
 
     Parameters

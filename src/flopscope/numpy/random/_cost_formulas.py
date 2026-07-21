@@ -177,7 +177,7 @@ def _choice_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> 
     # replace=False: pool size n along the sampled axis
     n = _choice_pool_size(args, kwargs)
     if p is None:
-        # Fisher-Yates O(n): legacy RandomState.choice is permutation(pop)[:size];
+        # Partial shuffle O(n): legacy RandomState.choice is permutation(pop)[:size];
         # Generator uses Floyd's/tail-shuffle (<= O(n)); n is a conservative ceiling.
         return n
     # Data-dependent rejection loop with weights: sort_cost(n) conservative floor.
@@ -190,7 +190,7 @@ def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> in
     Base cost is numel(output). ``method="count"`` builds a temporary array
     of integers with length ``sum(colors)`` (numpy's own docstring for the
     method), then for each of the ``num_variates`` output vectors does a
-    partial Fisher-Yates shuffle over the first ``min(nsample, sum(colors) -
+    partial shuffle over the first ``min(nsample, sum(colors) -
     nsample)`` entries of that buffer, followed by a separate pass counting
     the colors of those same shuffled entries -- numpy's C implementation
     (``random_multivariate_hypergeometric_count``) samples whichever of "the
@@ -245,7 +245,7 @@ def multivariate_normal_flops(N: int, d: int) -> int:
     transcendental rate (16/draw). Tier folded into flop_cost; weight 1.0.
 
     Factorization: svd_cost(d, d, with_vectors=True) = 6*d*d^2 + 20*d^3 = 26*d^3
-    (thin SVD of a square d×d matrix; LAPACK dgesdd path, G&VL 4e §8.6).
+    (thin SVD of a square d×d matrix; LAPACK dgesdd path).
     numpy.random.multivariate_normal (Generator default method='svd',
     RandomState always SVD, module-level np.random.multivariate_normal) calls
     np.linalg.svd(cov) on the symmetric d×d covariance matrix.

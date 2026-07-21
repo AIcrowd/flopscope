@@ -40,7 +40,6 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
     Notes
     -----
     Uses dynamic programming for optimal parenthesization.
-    Source: Cormen et al., *Introduction to Algorithms* (CLRS), §15.2.
 
     Each binary matmul step (m x k) @ (k x n) is delegated to
     ``matmul_cost(m, k, n)`` (= 2*m*k*n - m*n), matching ``fnp.matmul`` and

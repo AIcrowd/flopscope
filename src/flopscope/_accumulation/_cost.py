@@ -56,9 +56,9 @@ def compute_step_cost_from_joint_group(
     """Per-step cost via Burnside on the merged-subset's joint group.
 
     Sprint 2 / Cat C: complements the per-input fingerprint cost by handling
-    cross-step identity-swap cases (e.g. §5(a) step 2 = 160 → 55) that
-    per-input cannot see because intermediates lose their "from the same
-    original operand" identity.
+    cross-step identity-swap cases (e.g. the identity-swap case where step 2
+    drops 160 → 55) that per-input cannot see because intermediates lose
+    their "from the same original operand" identity.
 
     Cost formula (Regime 1 / functionalProjection):
         M = |orbits of joint_group on (V ∪ W)-tuples|

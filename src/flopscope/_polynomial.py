@@ -223,8 +223,7 @@ def poly_cost(n: int) -> int:
 def roots_cost(n: int) -> int:
     """Cost for roots: companion-matrix eigenvalues — delegates to
     eigvals_cost(n) (~10n^3; building the companion matrix itself is free).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md."""
+    Includes runtime scaling; see docs/reference/cost-model.md."""
     from flopscope.numpy.linalg import eigvals_cost
 
     return eigvals_cost(n)

@@ -2408,7 +2408,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": 2.0,
-        "notes": "Sampling; cost = numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; n*ceil(log2(n)) conservative floor if replace=False with p.",
+        "notes": "Sampling; cost = numel(output) if replace; n (shuffle draws, matches permutation) if replace=False and p is None; n*ceil(log2(n)) conservative floor if replace=False with p.",
     },
     "random.default_rng": {
         "category": "free",
@@ -2537,7 +2537,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": 2.0,
-        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] for array input or the int argument itself (Fisher-Yates draws, dtype-neutral).",
+        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] for array input or the int argument itself (shuffle draws, dtype-neutral).",
     },
     "random.poisson": {
         "category": "counted_custom",
@@ -2613,7 +2613,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.random",
         "complex_factor": 2.0,
-        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] (in-place Fisher-Yates draws, dtype-neutral).",
+        "notes": "Shuffle; cost = max(n, 1), n = x.shape[0] (in-place shuffle draws, dtype-neutral).",
     },
     "random.standard_cauchy": {
         "category": "counted_custom",
@@ -2724,7 +2724,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
-        "notes": "n = pool length along the sampled axis (`axis`, default 0). numel(output) if replace (+ CDF build 3n + ceil(log2(n)) binary search per draw when p given); n (Fisher-Yates/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
+        "notes": "n = pool length along the sampled axis (`axis`, default 0). numel(output) if replace (+ CDF build 3n + ceil(log2(n)) binary search per draw when p given); n (partial shuffle/Floyd <= O(n)) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
     },
     "random.Generator.dirichlet": {
         "category": "counted_random_method",
@@ -2822,7 +2822,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "mvhg_cost",
-        "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) + 2*num_variates*min(nsample, sum(colors)-nsample) when method='count' (temporary counting buffer plus a per-variate partial Fisher-Yates shuffle pass and a separate counting pass over the same drawn entries; method='marginals', the default, stays at numel(output)).",
+        "notes": "Multivariate hypergeometric; cost = numel(output), plus sum(colors) + 2*num_variates*min(nsample, sum(colors)-nsample) when method='count' (temporary counting buffer plus a per-variate partial shuffle pass and a separate counting pass over the same drawn entries; method='marginals', the default, stays at numel(output)).",
     },
     "random.Generator.multivariate_normal": {
         "category": "counted_random_method",
@@ -2871,7 +2871,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
-        "notes": "Random permutation; cost = shape[axis] (Fisher-Yates draws).",
+        "notes": "Random permutation; cost = shape[axis] (shuffle draws).",
     },
     "random.Generator.permuted": {
         "category": "counted_random_method",
@@ -2913,7 +2913,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
-        "notes": "In-place shuffle; cost = shape[axis] (Fisher-Yates draws).",
+        "notes": "In-place shuffle; cost = shape[axis] (shuffle draws).",
     },
     "random.Generator.standard_cauchy": {
         "category": "counted_random_method",
@@ -3039,7 +3039,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "choice_cost",
-        "notes": "Legacy choice sampler; numel(output) if replace; n (Fisher-Yates, matches permutation) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
+        "notes": "Legacy choice sampler; numel(output) if replace; n (shuffle draws, matches permutation) if replace=False and p is None; sort_cost(n) conservative floor if replace=False with p.",
     },
     "random.RandomState.dirichlet": {
         "category": "counted_random_method",
@@ -3172,7 +3172,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
-        "notes": "Legacy permutation; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
+        "notes": "Legacy permutation; cost = shape[axis] (shuffle draws). RandomState has no axis kwarg; defaults to 0.",
     },
     "random.RandomState.poisson": {
         "category": "counted_random_method",
@@ -3242,7 +3242,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": 2.0,
         "module": "numpy.random",
         "cost_formula": "shape[axis]",
-        "notes": "Legacy in-place shuffle; cost = shape[axis] (Fisher-Yates draws). RandomState has no axis kwarg; defaults to 0.",
+        "notes": "Legacy in-place shuffle; cost = shape[axis] (shuffle draws). RandomState has no axis kwarg; defaults to 0.",
     },
     "random.RandomState.standard_cauchy": {
         "category": "counted_random_method",

@@ -162,7 +162,7 @@ _LARGE_K_THRESHOLD = 8
 def _resolve_optimize_for_k(optimize, k: int):
     """Auto-downgrade 'auto' to 'greedy' for k >= 8 to avoid optimal/B&B
     cold-call latency on large operand counts. Explicit user choices
-    (optimal/branch/dp/etc.) are honored verbatim. See spec §10.
+    (optimal/branch/dp/etc.) are honored verbatim.
     """
     if optimize == "auto" and k >= _LARGE_K_THRESHOLD:
         return "greedy"

@@ -142,7 +142,7 @@ class FlopscopePathInfo:
     def __str__(self) -> str:
         """Render the underlying PathInfo's table.
 
-        Pre-§6.4 we monkey-patched the inner's naive_cost/optimized_cost
+        Earlier we monkey-patched the inner's naive_cost/optimized_cost
         before rendering, because the wrapper's optimized_cost
         (= accumulation.total) differed from inner.optimized_cost (= sum of
         per-step flop_cost). After the reconciliation refactor (commit

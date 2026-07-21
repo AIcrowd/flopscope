@@ -1,8 +1,7 @@
 # src/flopscope/fft/_transforms.py
 """FFT transform wrappers with FLOP counting.
 
-Cost model: 5 * N * log2(N) for complex DFT of length N (Cooley-Tukey radix-2).
-Source: Cooley & Tukey (1965); Van Loan, "Computational Frameworks for the FFT" (1992), §1.4.
+Cost model: 5 * N * log2(N) for complex DFT of length N (radix-2).
 """
 
 from __future__ import annotations
@@ -35,8 +34,7 @@ def fft_cost(n: int) -> int:
 
     Notes
     -----
-    Source: Cooley & Tukey (1965); Van Loan, *Computational Frameworks
-    for the FFT* (1992), §1.4. Assumes radix-2 Cooley-Tukey algorithm.
+    Assumes radix-2 algorithm.
     """
     if n <= 1:
         return 0
@@ -137,7 +135,7 @@ def hfft_cost(n_out: int) -> int:
 
     Notes
     -----
-    hfft(a, n) == irfft(conj(a), n): real-output c2r transform (Van Loan 1992 §1.4).
+    hfft(a, n) == irfft(conj(a), n): real-output c2r transform.
     Exploits conjugate symmetry, roughly halving the work vs a full complex FFT.
     """
     if n_out <= 1:

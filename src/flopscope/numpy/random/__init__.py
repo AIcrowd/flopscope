@@ -528,7 +528,7 @@ def permutation(x):
     cost = _builtins.max(n, 1)
     # permutation relocates caller-supplied values (a movement op,
     # complex_factor 1.0 in the registry). Its shape[0] cost counts the
-    # Fisher-Yates swap / RNG work, which is dtype-independent, so it bills
+    # shuffle swap / RNG work, which is dtype-independent, so it bills
     # dtype-neutral -- a complex/fp64 permutation costs the same as fp32
     # (unlike a genuine sampler, which bills the width of the values it
     # synthesizes).
@@ -556,7 +556,7 @@ def shuffle(x):
         n = len(x)
     cost = _builtins.max(n, 1)
     # shuffle reorders caller-supplied data in place (movement op, registry
-    # factor 1.0). Its shape[0] cost counts the dtype-independent Fisher-Yates
+    # factor 1.0). Its shape[0] cost counts the dtype-independent shuffle
     # swap / RNG work, so it bills dtype-neutral (complex/fp64 shuffles cost
     # the same as fp32).
     # numpy.random.shuffle mutates in place and internally calls empty_like on
@@ -577,7 +577,7 @@ def choice(a, size=None, replace=True, p=None):
     """Counted version of ``numpy.random.choice``.
 
     Cost: numel(output) FLOPs if ``replace=True`` (+ CDF/binary-search term
-    if ``p`` given); ``n`` FLOPs (Fisher-Yates, matches ``random.permutation``)
+    if ``p`` given); ``n`` FLOPs (shuffle draws, matches ``random.permutation``)
     if ``replace=False`` and ``p is None``; ``sort_cost(n)`` conservative floor
     for the data-dependent rejection loop if ``replace=False`` with ``p``.
     """
@@ -609,7 +609,7 @@ def choice(a, size=None, replace=True, p=None):
     else:
         if p is None:
             # Legacy RandomState.choice is permutation(pop_size)[:size] —
-            # Fisher-Yates O(n), bit-exact with random.permutation.
+            # Partial shuffle O(n), bit-exact with random.permutation.
             # Generator.choice uses Floyd's/tail-shuffle (<= O(n)); charging n
             # is a conservative ceiling.
             cost = _builtins.max(n, 1)

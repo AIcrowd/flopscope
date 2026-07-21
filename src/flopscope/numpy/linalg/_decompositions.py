@@ -34,7 +34,7 @@ def cholesky_cost(n: int) -> int:
 
     Notes
     -----
-    n^3/3 FLOPs (G&VL 4e Alg 4.2.1; LAPACK dpotrf).
+    n^3/3 FLOPs (LAPACK dpotrf).
     """
     return max(n**3 // 3, 1)
 
@@ -68,10 +68,10 @@ attach_docstring(cholesky, _np.linalg.cholesky, "linalg", r"$n^3/3$ FLOPs")
 def qr_cost(m: int, n: int, mode: str = "reduced") -> int:
     """FLOP cost of QR decomposition (Householder, FMA=2).
 
-    Factorization (dgeqrf): 2*m*n*k - 2*k^3/3, k = min(m, n)
-    (G&VL 4e §5.2). Modes "reduced"/"complete" additionally form Q
-    explicitly (dorgqr), modeled as the same count again. Modes
-    "r"/"raw" bill the factorization only.
+    Factorization (dgeqrf): 2*m*n*k - 2*k^3/3, k = min(m, n).
+    Modes "reduced"/"complete" additionally form Q explicitly
+    (dorgqr), modeled as the same count again. Modes "r"/"raw"
+    bill the factorization only.
     """
     k = min(m, n)
     factor = 2 * m * n * k - 2 * k**3 // 3
@@ -151,10 +151,9 @@ def eig_cost(n: int) -> int:
 
     Notes
     -----
-    Hessenberg reduction + Francis QR with eigenvector backtransform
-    (LAPACK Users' Guide Table 3.13 DGEEV / G&VL 4e §7.5).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    Hessenberg reduction + QR iteration with eigenvector backtransform
+    (DGEEV).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(25 * n**3, 1)
 
@@ -204,10 +203,8 @@ def eigh_cost(n: int) -> int:
 
     Notes
     -----
-    Tridiagonalization + symmetric QR with vectors
-    (G&VL 4e §8.3; LAPACK dsyevd).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    Tridiagonalization + symmetric QR with vectors (LAPACK dsyevd).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(9 * n**3, 1)
 
@@ -257,13 +254,11 @@ def eigvals_cost(n: int) -> int:
 
     Notes
     -----
-    ~10n^3, values only (LAPACK Users' Guide Table 3.13 DGEEV values-only
-    = 10.00·N^3 exact; G&VL 4e §7.5).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    ~10n^3, values only (DGEEV values-only = 10.00·N^3 exact).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     # Note: costs MORE than eigh_cost (9n^3) — nonsymmetric Hessenberg+QR without vectors
-    # vs symmetric tridiagonalization with vectors (G&VL §7.5 vs §8.3).
+    # vs symmetric tridiagonalization with vectors.
     return max(10 * n**3, 1)
 
 
@@ -313,9 +308,8 @@ def eigvalsh_cost(n: int) -> int:
 
     Notes
     -----
-    4n^3/3: tridiagonalization, values only (G&VL 4e §8.3).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    4n^3/3: tridiagonalization, values only.
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(4 * n**3 // 3, 1)
 

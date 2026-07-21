@@ -327,7 +327,8 @@ def _unique_cost(ar, axis=None):
     With ``axis=None`` (flat): sort_cost(ar.size).
     With ``axis=k``: num_slices * sort_cost(R) where R = shape[axis] (lexicographic
     row sort — each row of width W is compared as a unit, R rows, W words per key).
-    This matches the Sort-and-select family rule declared in cost-model.md §Sort.
+    This matches the Sort-and-select family rule declared in the sort-and-select
+    section of docs/reference/cost-model.md.
     """
     if not isinstance(ar, _np.ndarray):
         ar = _np.asarray(ar)

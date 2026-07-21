@@ -124,7 +124,7 @@ class NormDistribution(ContinuousDistribution):
         -----
         Equivalent to ``scipy.stats.norm.ppf(q, loc, scale)``.
         FLOP cost: ``83 * numel(broadcast(q, loc, scale))`` (composite:
-        Acklam rational ndtri + Newton polish with erf+exp, weight 1.0).
+        rational ndtri approximation + Newton polish with erf+exp, weight 1.0).
 
         Examples
         --------
