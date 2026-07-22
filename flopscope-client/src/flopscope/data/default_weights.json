@@ -346,7 +346,7 @@
     "random.random": 1.0,
     "random.random_sample": 1.0,
     "random.rayleigh": 16.0,
-    "random.sample": 4.0,
+    "random.sample": 1.0,
     "random.seed": 0.0,
     "random.set_state": 0.0,
     "random.shuffle": 4.0,

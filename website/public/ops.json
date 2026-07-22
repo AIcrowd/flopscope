@@ -9007,7 +9007,7 @@
       "slug": "random-sample",
       "status": "supported",
       "summary": "This is an alias of `random_sample`. See `random_sample`  for the complete documentation.",
-      "weight": 4.0
+      "weight": 1.0
     },
     {
       "area": "random",

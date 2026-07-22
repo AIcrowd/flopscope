@@ -132,10 +132,10 @@ def test_random_reorder_bills_4x():
     ) == billed(lambda: g.choice(fnp.asarray(pool), size=100, replace=True))
 
     # random.sample is an alias of random_sample (uniform draws, see
-    # src/flopscope/numpy/random/__init__.py:500) but always bills float64
-    # (no dtype= parameter), so it resolves at rate 2.0 -- expected is
-    # 4(weight) x 2(rate) x N, not just 4x N.
-    assert billed(lambda: fnp.random.sample(N)) == 8 * N
+    # src/flopscope/numpy/random/__init__.py:500) -- a plain draw, not a
+    # selection -- so it bills at the same 1x tier as its twin. It always
+    # bills float64 (no dtype= parameter), so expected is 1(weight) x 2(rate) x N.
+    assert billed(lambda: fnp.random.sample(N)) == 2 * N
 
     rs = fnp.random.RandomState(0)
     assert billed(lambda: rs.choice(N, size=N)) == 4 * N
