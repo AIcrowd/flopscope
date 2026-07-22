@@ -326,3 +326,112 @@ def test_save_insufficient_budget_raises_and_writes_nothing(tmp_path):
         with pytest.raises(we.BudgetExhaustedError):
             we.save(str(target), a)
     assert not target.exists()
+
+
+# ---------------------------------------------------------------------------
+# savez/savez_compressed positional-argument support (bugfix).
+#
+# Before the fix, `savez`/`savez_compressed` were declared `(file, **arrays)`
+# -- no `*args` -- so `we.savez(path, a)` raised TypeError instead of storing
+# `a` under the auto-generated member name `arr_0`, matching `numpy.savez`.
+# `_savez_merge_args` (mirroring the in-process reference's helper of the
+# same name) now builds the merged arr_0/arr_1/... + keyword name->array
+# mapping before `_write_npz` ever runs, so a positional array bills and
+# round-trips exactly like the same array passed under its auto-generated
+# keyword name, and a colliding keyword name raises numpy's own ValueError
+# before any server billing or local write happens.
+# ---------------------------------------------------------------------------
+
+
+def test_savez_positional_args_roundtrip(tmp_path):
+    """we.savez(path, a, b, x=c) stores positional arrays under
+    auto-generated arr_0/arr_1 member names (matching numpy.savez); the
+    keyword array keeps its given name."""
+    import flopscope as we
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        a = we.array([1.0, 2.0])
+        b = we.array([3.0, 4.0, 5.0])
+        c = we.array([6.0])
+        we.savez(str(tmp_path / "pos.npz"), a, b, x=c)
+        out = we.load(str(tmp_path / "pos.npz"))
+        assert sorted(out.keys()) == ["arr_0", "arr_1", "x"]
+        assert out["arr_0"].tolist() == [1.0, 2.0]
+        assert out["arr_1"].tolist() == [3.0, 4.0, 5.0]
+        assert out["x"].tolist() == [6.0]
+
+
+def test_savez_single_positional_bills_and_round_trips_like_named_arr0(tmp_path):
+    """we.savez(path, a) no longer raises TypeError, and behaves exactly like
+    we.savez(path, arr_0=a): same stored member name, same round-tripped
+    value, same billed FLOPs (a positional array bills identically to the
+    same array passed under its auto-generated keyword name)."""
+    import flopscope as we
+
+    vals = [float(i) for i in range(50)]
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array(vals, dtype="float32")
+        we.savez(str(tmp_path / "p.npz"), a)
+    positional_flops = _flops_used(budget)
+
+    with we.BudgetContext(flop_budget=1_000_000) as budget2:
+        b = we.array(vals, dtype="float32")
+        we.savez(str(tmp_path / "kw.npz"), arr_0=b)
+    keyword_flops = _flops_used(budget2)
+
+    assert positional_flops == keyword_flops
+    assert positional_flops > 0
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        out_pos = we.load(str(tmp_path / "p.npz"))
+        out_kw = we.load(str(tmp_path / "kw.npz"))
+        assert list(out_pos.keys()) == ["arr_0"]
+        assert out_pos["arr_0"].tolist() == out_kw["arr_0"].tolist() == vals
+
+
+def test_savez_positional_keyword_collision_raises(tmp_path):
+    """A positional array together with an explicit arr_0= keyword raises the
+    same ValueError numpy raises, checked before any server billing or local
+    file write -- a rejected call spends no budget and leaves no file."""
+    import flopscope as we
+
+    target = tmp_path / "collide.npz"
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array([1.0, 2.0])
+        b = we.array([3.0, 4.0])
+        with pytest.raises(
+            ValueError, match="Cannot use un-named variables and keyword arr_0"
+        ):
+            we.savez(str(target), a, arr_0=b)
+    assert _flops_used(budget) == 0
+    assert not target.exists()
+
+
+def test_savez_compressed_positional_args_roundtrip(tmp_path):
+    """savez_compressed shares savez's exact positional-argument handling."""
+    import flopscope as we
+
+    with we.BudgetContext(flop_budget=1_000_000):
+        a = we.array([1.0, 2.0])
+        b = we.array([3.0])
+        we.savez_compressed(str(tmp_path / "posc.npz"), a, b)
+        out = we.load(str(tmp_path / "posc.npz"))
+        assert sorted(out.keys()) == ["arr_0", "arr_1"]
+        assert out["arr_0"].tolist() == [1.0, 2.0]
+        assert out["arr_1"].tolist() == [3.0]
+
+
+def test_savez_compressed_positional_keyword_collision_raises(tmp_path):
+    """savez_compressed's positional/keyword collision check raises the same
+    ValueError as savez's, before any billing or write."""
+    import flopscope as we
+
+    target = tmp_path / "collidec.npz"
+    with we.BudgetContext(flop_budget=1_000_000) as budget:
+        a = we.array([1.0])
+        with pytest.raises(
+            ValueError, match="Cannot use un-named variables and keyword arr_0"
+        ):
+            we.savez_compressed(str(target), a, arr_0=a)
+    assert _flops_used(budget) == 0
+    assert not target.exists()

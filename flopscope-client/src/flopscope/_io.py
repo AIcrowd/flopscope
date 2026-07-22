@@ -27,7 +27,16 @@ server handle, and includes it in the handles billed via
 `_bill_save_on_server` -- mirroring the root package's `_savez_name_bytes`.
 Skipping this let a participant smuggle data through many tiny arrays given
 huge names instead of through the array values, at a near-zero,
-size-independent cost."""
+size-independent cost.
+
+`savez`/`savez_compressed` accept arrays positionally as well as by keyword,
+matching `numpy.savez`: positional arrays are stored under auto-generated
+member names `arr_0`, `arr_1`, ... in call order (see `_savez_merge_args`),
+keyword arrays keep their given names, and a keyword name that collides with
+a positional array's auto-generated name raises the same `ValueError` numpy
+raises -- checked before any dispatch or billing happens, so a call numpy
+would reject is never billed. A positional array bills identically to the
+same array passed under its auto-generated keyword name."""
 
 from __future__ import annotations
 
@@ -128,6 +137,32 @@ def save(file: str, arr: Any) -> None:
         fh.write(_codec.write_npy(dtype, shape, buf))
 
 
+def _savez_merge_args(args: tuple[Any, ...], arrays: dict[str, Any]) -> dict[str, Any]:
+    """Merge positional and keyword arrays into a single name->value mapping,
+    mirroring ``numpy.savez``'s own naming (``numpy.lib._npyio_impl._savez``):
+    positional arrays are named ``arr_0``, ``arr_1``, ... in call order and
+    appended after the keyword arrays, which keep their given names and
+    order.
+
+    Raises the same ``ValueError`` numpy raises when a keyword name collides
+    with a positional array's auto-generated name -- e.g. a positional array
+    together with ``arr_0=...``. This is checked here, against the ORIGINAL
+    keyword names only, before any dispatch/billing work happens, so a call
+    numpy would reject is never billed (positional auto-names can never
+    collide with each other, only with a pre-existing keyword name, so a
+    single membership check per positional index is equivalent to numpy's
+    incremental insert-and-check loop).
+    """
+    for i in range(len(args)):
+        key = f"arr_{i}"
+        if key in arrays:
+            raise ValueError(f"Cannot use un-named variables and keyword {key}")
+    merged = dict(arrays)
+    for i, val in enumerate(args):
+        merged[f"arr_{i}"] = val
+    return merged
+
+
 def _write_npz(file: str, arrays: dict, compressed: bool, op_name: str) -> None:
     meta = arrays.pop(_META_KEY, None)
     if meta is not None and not isinstance(meta, dict):
@@ -165,10 +200,25 @@ def _write_npz(file: str, arrays: dict, compressed: bool, op_name: str) -> None:
 
 
 @timed_dispatch
-def savez(file: str, **arrays: Any) -> None:
-    _write_npz(file, arrays, compressed=False, op_name="savez")
+def savez(file: str, *args: Any, **arrays: Any) -> None:
+    """Arrays given positionally are stored under auto-generated names
+    ``arr_0``, ``arr_1``, ...; arrays given as keywords keep their given
+    names (matching ``numpy.savez``). A keyword name that collides with a
+    positional array's auto-generated name raises the same ``ValueError``
+    numpy raises -- see ``_savez_merge_args``."""
+    _write_npz(file, _savez_merge_args(args, arrays), compressed=False, op_name="savez")
 
 
 @timed_dispatch
-def savez_compressed(file: str, **arrays: Any) -> None:
-    _write_npz(file, arrays, compressed=True, op_name="savez_compressed")
+def savez_compressed(file: str, *args: Any, **arrays: Any) -> None:
+    """Arrays given positionally are stored under auto-generated names
+    ``arr_0``, ``arr_1``, ...; arrays given as keywords keep their given
+    names (matching ``numpy.savez_compressed``). A keyword name that
+    collides with a positional array's auto-generated name raises the same
+    ``ValueError`` numpy raises -- see ``_savez_merge_args``."""
+    _write_npz(
+        file,
+        _savez_merge_args(args, arrays),
+        compressed=True,
+        op_name="savez_compressed",
+    )
