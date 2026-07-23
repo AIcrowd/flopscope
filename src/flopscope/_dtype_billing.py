@@ -4,6 +4,18 @@ The billed dtype for a call is ``np.result_type`` over the declared operands
 (input dtypes, python scalars for NEP 50 weak promotion, plus any explicit
 ``dtype=``/``out=`` dtype). ``dtypes=()`` declares a dtype-neutral op
 (rate 1.0, factor 1.0).
+
+Folding ``out=`` into that resolution prices the widest participating
+buffer -- ``max(compute width, store width)`` -- not just the compute width.
+A wider ``out=`` forces a real materialization: writing the result into a
+wider buffer is itself chargeable, the same as any other copy into a wider
+dtype. Billing it at the wider rate holds ``out=``-casting at exact
+``astype`` parity in both directions -- a wider ``out=`` costs what the
+equivalent ``astype`` costs, and a narrower ``out=`` never discounts the
+loop that actually runs. Reductions separately fold ``out=`` into
+``reduction_billing_dtype`` for a different, genuine reason: there, a wider
+``out=`` changes the accumulator numpy actually runs, not merely the final
+store, so that path is unaffected by this note.
 """
 
 from __future__ import annotations

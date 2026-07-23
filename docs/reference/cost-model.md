@@ -432,7 +432,13 @@ Worked consequences:
   rate it actually computes (`1000` for a 1000-element call), not the float64 operand
   promotion. `out=` alone does not narrow the loop: `multiply(f64, f64, out=float32_arr)`
   still runs the float64 loop and only casts the result into `out`, so it stays billed
-  at the float64 rate (`2000`).
+  at the float64 rate (`2000`). The reverse direction is priced the same way: a
+  **wider** `out=` bills the wider rate too — `multiply(f32, f32, out=float64_arr)`
+  writes a genuine float64 buffer, so it bills `2000`, identical to
+  `astype(f32_array, float64)`. Storing into a wider buffer is real materialization
+  work, and pricing it at that wider rate holds `out=`-casting at exact `astype`
+  parity in both directions: a wider `out=` costs what the equivalent `astype` costs,
+  so `out=` can never be used to buy a cheaper wide copy than `astype` would.
 - **Casting/converting bills like `copy`.** `astype` and `asarray` bill `numel(input)`
   at the heavier of source/destination rate — via `heavier_billing_dtype`, not
   `result_type`, which would over-promote a cross-kind cast such as `float32 → int32`
