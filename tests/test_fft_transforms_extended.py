@@ -157,12 +157,16 @@ class TestFft2Extended:
         assert budget.op_log[-1].op_name == "fft.fft2"
 
     def test_with_s_param(self):
+        # Padding both axes of a (4, 6) input up to s=(8, 8) is priced from
+        # numpy's actual staged cascade (batch taken from the shape at each
+        # stage), not the flat final-shape fftn_cost(s)=1920: axis 1 pads
+        # first at batch=4 (4*fft_cost(8)=4*120=480), then axis 0 pads at
+        # the now-8-wide batch (8*fft_cost(8)=8*120=960) -> 480+960=1440.
         x = numpy.random.randn(4, 6)
         s = (8, 8)
-        N = 64
         with BudgetContext(flop_budget=10**6) as budget:
             fft2(x, s=s)
-        assert budget.flops_used == fftn_cost(s)
+        assert budget.flops_used == 1440
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +195,15 @@ class TestIfft2:
         assert budget.op_log[-1].op_name == "fft.ifft2"
 
     def test_with_s_param(self):
+        # Staged cost, not the flat final-shape fftn_cost(s)=1920 -- see
+        # TestFft2Extended.test_with_s_param for the per-stage derivation
+        # (same 1440 total: axis 1 pads at batch=4, then axis 0 pads at the
+        # now-8-wide batch=8).
         x = numpy.random.randn(4, 4)
         s = (8, 8)
         with BudgetContext(flop_budget=10**6) as budget:
             ifft2(x, s=s)
-        assert budget.flops_used == fftn_cost(s)
+        assert budget.flops_used == 1440
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +219,16 @@ class TestRfft2:
         assert numpy.allclose(result, numpy.fft.rfft2(x))
 
     def test_cost(self):
+        # rfft2 stages a real FFT on the last axis (batch=8, rfft_cost(8)=60
+        # -> 480) then a complex FFT on axis 0 over the now Hermitian-reduced
+        # last axis (batch=5, fft_cost(8)=120 -> 600); 480+600=1080. The flat
+        # rfftn_cost((8,8))=960 assumes a uniform half-cost across both axes,
+        # which is not what the cascade actually does once the last axis has
+        # already been reduced to n//2+1=5.
         x = numpy.random.randn(8, 8)
         with BudgetContext(flop_budget=10**6) as budget:
             rfft2(x)
-        assert budget.flops_used == rfftn_cost((8, 8))
+        assert budget.flops_used == 1080
 
     def test_op_log_name(self):
         x = numpy.random.randn(4, 4)
@@ -223,11 +237,14 @@ class TestRfft2:
         assert budget.op_log[-1].op_name == "fft.rfft2"
 
     def test_with_s_param(self):
+        # Staged: real FFT on axis 1 first (batch=4, rfft_cost(8)=60 -> 240),
+        # then complex FFT on axis 0 over the Hermitian-reduced axis 1
+        # (batch=5, fft_cost(8)=120 -> 600); 240+600=840.
         x = numpy.random.randn(4, 6)
         s = (8, 8)
         with BudgetContext(flop_budget=10**6) as budget:
             rfft2(x, s=s)
-        assert budget.flops_used == rfftn_cost(s)
+        assert budget.flops_used == 840
 
 
 # ---------------------------------------------------------------------------
@@ -279,10 +296,16 @@ class TestFftnExtended:
         assert budget.op_log[-1].op_name == "fft.fftn"
 
     def test_with_s_and_axes(self):
+        # Truncating both axes of an (8, 8) input down to s=(4, 4) is priced
+        # from the staged cascade: axis 1 truncates first at the original
+        # batch=8 (8*fft_cost(4)=8*40=320), then axis 0 truncates at the
+        # now-4-wide batch (4*fft_cost(4)=160); 320+160=480. The flat
+        # fftn_cost((4,4))=320 assumes both axes always saw the same,
+        # already-truncated batch.
         x = numpy.random.randn(8, 8)
         with BudgetContext(flop_budget=10**6) as budget:
             fftn(x, s=(4, 4), axes=(0, 1))
-        assert budget.flops_used == fftn_cost((4, 4))
+        assert budget.flops_used == 480
 
 
 # ---------------------------------------------------------------------------
@@ -331,10 +354,14 @@ class TestRfftn:
         assert numpy.allclose(result, numpy.fft.rfftn(x))
 
     def test_cost(self):
+        # rfftn stages a real FFT on the last axis (batch=4, rfft_cost(4)=20
+        # -> 80) then a complex FFT on axis 0 over the now Hermitian-reduced
+        # last axis (batch=3, fft_cost(4)=40 -> 120); 80+120=200. The flat
+        # rfftn_cost((4,4))=160 assumes a uniform half-cost across both axes.
         x = numpy.random.randn(4, 4)
         with BudgetContext(flop_budget=10**6) as budget:
             rfftn(x)
-        assert budget.flops_used == rfftn_cost((4, 4))
+        assert budget.flops_used == 200
 
     def test_op_log_name(self):
         x = numpy.random.randn(4, 4)

@@ -21,6 +21,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from flopscope import _symmetry_transport as _st
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import billing_operand
 from flopscope._dtype_billing import heavier_billing_dtype as _heavier_billing_dtype
 from flopscope._ndarray import (
     FlopscopeArray,
@@ -1638,33 +1639,29 @@ def asarray(
 ) -> FlopscopeArray:
     """Convert to array.
 
-    Cost: ``numel(input)`` at the heavier of source/destination dtype rate
-    when ``dtype=`` actually converts the buffer; ``0`` when no conversion
-    happens (no ``dtype=`` given, or ``dtype`` already matches the input).
+    Cost: ``numel(output)`` at the heavier of source/destination dtype rate
+    when the call materializes a fresh buffer; ``0`` when NumPy returns a
+    view of the existing one.
     """
     budget = require_budget()
     _probe = _np.asarray(a)
-    # asarray is a view/no-op unless an explicit dtype= actually differs from
-    # the input's own dtype; then it performs the same real cast/copy as
-    # astype (numel at the heavier of source/target rate) and bills the same
-    # way. Unlike astype, asarray has no copy= to force a redundant copy of
-    # an unchanged dtype, so "dtype differs" is the only gate it needs.
-    if dtype is not None and _np.dtype(dtype) != _probe.dtype:
-        cost = _probe.size
-        _asarray_dtypes: tuple = (
-            _heavier_billing_dtype(_probe.dtype, _np.dtype(dtype)),
-        )
-    else:
-        cost = 0
-        _asarray_dtypes = (_probe.dtype,)
-    with budget.deduct(
-        "asarray",
-        flop_cost=cost,
-        subscripts=None,
-        shapes=(_probe.shape,),
-        dtypes=_asarray_dtypes,
-    ):
+    # Whether asarray copies depends on more than dtype=: copy=True forces
+    # one regardless of dtype, and order="C"/"F" forces one when the input
+    # doesn't already conform to that layout. Ground truth is only knowable
+    # after the call, so bill from what NumPy actually produced (does the
+    # result share memory with the input?) rather than gating on dtype=
+    # alone, which misses those copy=/order= materializations.
+    with budget.deduct_after(
+        "asarray", subscripts=None, shapes=(_probe.shape,), dtypes=(_probe.dtype,)
+    ) as _op:
         result = _call_numpy(_np.asarray, a, dtype=dtype, **kwargs)
+        base = result  # np.asarray always returns a base ndarray, never a subclass
+        materialized = not _np.may_share_memory(base, _probe)
+        if materialized:
+            _op.set_cost(base.size)
+            _op.set_dtypes((_heavier_billing_dtype(_probe.dtype, base.dtype),))
+        else:
+            _op.set_cost(0)
     return result  # type: ignore[return-value]
 
 
@@ -1672,10 +1669,10 @@ attach_docstring(
     asarray,
     _np.asarray,
     "counted_custom",
-    "numel(input) FLOPs at the heavier of source/destination dtype rate -- "
-    "same formula as copy -- charged only when dtype= actually converts the "
-    "buffer; 0 when no conversion happens (no dtype=, or dtype already "
-    "matches).",
+    "numel(output) FLOPs at the heavier of source/destination dtype rate -- "
+    "same formula as copy -- charged whenever the call materializes a fresh "
+    "buffer (dtype conversion, copy=True, or an order= that forces a copy); "
+    "0 when NumPy returns a view of the existing buffer.",
 )
 
 
@@ -3330,10 +3327,16 @@ def select(
     """Return array drawn from elements depending on conditions.
 
     Cost: ``numel(output) * len(condlist)`` — each condition is its own scan
-    over the output, at weight 1.0.
+    over the output, at weight 1.0. Billing dtype resolves over the
+    choicelist AND default -- default is part of the output wherever every
+    condition is False, so it must participate in dtype resolution the same
+    as a choice (a plain Python scalar default still promotes weakly, per
+    NEP 50).
     """
     budget = require_budget()
-    _select_dtypes = tuple(_np.asarray(c).dtype for c in choicelist)
+    _select_dtypes = tuple(_np.asarray(c).dtype for c in choicelist) + (
+        billing_operand(default, _np.asarray(default)),
+    )
     with budget.deduct_after(
         "select", subscripts=None, shapes=(), dtypes=_select_dtypes
     ) as _op:

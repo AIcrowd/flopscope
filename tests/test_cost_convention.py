@@ -224,8 +224,14 @@ _REDUCTION_FAMILY = frozenset(
 OP_EXPECTATIONS: dict[str, tuple] = {
     # ---- FFT family --------------------------------------------------------
     # Formula: 5 * N * ceil(log2(N)) for complex transforms
-    # rfft / rfftn / rfft2: use N//2 (real half-spectrum)
-    # irfft2 / irfftn: use n_out//2 * sum_axis(ceil(log2(si)))
+    # rfft / irfft (1-D only): use N//2 (real half-spectrum)
+    # rfftn / rfft2 / irfftn / irfft2 (N-D, 2+ axes): staged -- numpy runs
+    # these as a cascade of 1-D FFTs, one per axis, over evolving
+    # intermediate shapes (real/Hermitian axis first for r2c, last for c2r;
+    # the remaining axes as plain complex FFTs). Each stage's batch is the
+    # shape at that point in the cascade, not the final shape, so once the
+    # Hermitian axis has been reduced the later complex-FFT stages see a
+    # smaller batch than a flat "N//2 across every axis" formula assumes.
     # ihfft: uses rfft_cost(n) = 5*(n//2)*ceil(log2(n)) — numpy ihfft = conj(rfft(a,n))
     "fft.fft": (
         lambda: fnp.fft.fft(_x64c),
@@ -263,28 +269,42 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         lambda: fnp.fft.ifftn(_x444),
         5 * 64 * 6,  # 1920
     ),
+    # rfft2: (8,8) real, no resize. Staged: real FFT on axis 1 first
+    # (batch=8, rfft_cost(8)=5*4*3=60 -> 480), then complex FFT on axis 0
+    # over the Hermitian-reduced axis 1 (batch=8//2+1=5, fft_cost(8)=120
+    # -> 600); 480+600=1080.
     "fft.rfft2": (
         lambda: fnp.fft.rfft2(_x88),
-        5 * (64 // 2) * (3 + 3),  # 960
+        8 * (5 * 4 * 3) + 5 * (5 * 8 * 3),  # 1080
     ),
+    # rfftn: (4,4,4) real, no resize. Staged: real FFT on axis 2 first
+    # (batch=4*4=16, rfft_cost(4)=5*2*2=20 -> 320), then complex FFTs on
+    # axes 0 and 1, each over the Hermitian-reduced axis 2 (batch=4*3=12,
+    # fft_cost(4)=40 -> 480 apiece); 320+480+480=1280.
     "fft.rfftn": (
         lambda: fnp.fft.rfftn(_x444),
-        5 * (64 // 2) * 6,  # 960
+        16 * (5 * 2 * 2) + 2 * 12 * (5 * 4 * 2),  # 1280
     ),
     # irfft: complex input len 64 → output len 126; 5*(126//2)*ceil(log2(126))
     "fft.irfft": (
         lambda: fnp.fft.irfft(_x64c),
         5 * (126 // 2) * int(math.ceil(math.log2(126))),  # 2205
     ),
-    # irfft2: (8,8) complex → output (8,14); n_out//2 = 56; log2 sums = 3+4=7
+    # irfft2: (8,8) complex, no s -> Hermitian doubling gives s_for_cost=
+    # (8,14). Staged: complex FFT on axis 0 first (batch=8, fft_cost(8)=120
+    # -> 960), then the real (Hermitian-reconstructing) inverse on axis 1
+    # (batch=8, rfft_cost(14)=5*7*4=140 -> 1120); 960+1120=2080.
     "fft.irfft2": (
         lambda: fnp.fft.irfft2(_x88c),
-        5 * (8 * 14 // 2) * (3 + 4),  # 1960
+        8 * (5 * 8 * 3) + 8 * (5 * 7 * 4),  # 2080
     ),
-    # irfftn: (4,4,4) complex → output (4,4,6); n_out//2=48; log2 sums=2+2+3=7
+    # irfftn: (4,4,4) complex, no s -> Hermitian doubling gives s_for_cost=
+    # (4,4,6). Staged: complex FFTs on axes 0 and 1 first (batch=4*4=16,
+    # fft_cost(4)=40 -> 640 apiece), then the real inverse on axis 2
+    # (batch=4*4=16, rfft_cost(6)=5*3*3=45 -> 720); 640+640+720=2000.
     "fft.irfftn": (
         lambda: fnp.fft.irfftn(_x444c),
-        5 * (4 * 4 * 6 // 2) * (2 + 2 + int(math.ceil(math.log2(6)))),  # 1680
+        2 * 16 * (5 * 4 * 2) + 16 * (5 * 3 * 3),  # 2000
     ),
     # hfft: numpy hfft(a,n) = irfft(conj(a),n); n_out=126 for input len 64; rfft_cost=5*(n//2)*ceil(log2(n))
     "fft.hfft": (

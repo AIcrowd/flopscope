@@ -2302,6 +2302,37 @@ def _tier2_reduction_cost(a, axis, dense_per_output_cost: int) -> int:
     )
 
 
+def _quantile_dense_cost(axis_dim: int, q_count: int, *, weighted: bool) -> int:
+    """Per-output cost for one quantile/percentile reduction along an axis.
+
+    ``n = axis_dim``, ``k = q_count``, ``L = ceil(log2(n))`` (0 for ``n<=1``).
+
+    Weighted (``weights=`` given): the interpolated-quantile method sorts (or
+    argsorts) the ``n`` values, builds a cumulative-weight array, then does a
+    per-``q`` cumulative-weight lookup and interpolation: ``4*n*L`` (argsort
+    at sort's own op-weight) + ``3*n`` (gather values/weights and cumulative
+    sum) + ``k*(L + 4)`` (a lookup plus a fixed interpolation cost per
+    quantile).
+
+    Unweighted: the cheaper of ``k`` independent partition passes
+    (``n`` each) versus one shared sort-parity pass amortized across all
+    ``k`` outputs, plus a fixed per-quantile gather-and-interpolate term:
+    ``n * min(k, 1 + 4*L') + 4*k``, where ``L' = ceil(log2(min(k, n)))``
+    (0 for ``min(k, n)<=1``).
+    """
+    import math as _math
+
+    n = _builtins.max(int(axis_dim), 0)
+    k = _builtins.max(int(q_count), 1)
+    log_n = _math.ceil(_math.log2(n)) if n > 1 else 0
+    if weighted:
+        return 4 * n * log_n + 3 * n + k * (log_n + 4)
+    log_min = (
+        _math.ceil(_math.log2(_builtins.min(k, n))) if _builtins.min(k, n) > 1 else 0
+    )
+    return n * _builtins.min(k, 1 + 4 * log_min) + 4 * k
+
+
 @_counted_wrapper
 def median(
     a: ArrayLike,
@@ -2450,8 +2481,9 @@ def nanpercentile(
 ) -> FlopscopeArray:
     """Counted version of np.nanpercentile.
 
-    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
-    model; the +4×q.size term is the per-quantile gather+interpolation cost).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
+    depends on whether weights= is given -- see _quantile_dense_cost.
     """
     import math as _math
 
@@ -2460,7 +2492,7 @@ def nanpercentile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
-    # Dense per-output cost for partition-based nanpercentile: axis_dim (one pass).
+    # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
     elif isinstance(axis, int):
@@ -2470,11 +2502,19 @@ def nanpercentile(
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
-    # quantile independently (a gather of the two bracketing order statistics
-    # plus a linear interpolation per q), so the per-output cost scales with
-    # the number of quantiles requested, not just the reduced axis length.
+    # quantile independently, so the per-output cost scales with the number
+    # of quantiles requested, not just the reduced axis length; a weights=
+    # array additionally routes through the sort-parity weighted formula
+    # instead of the cheaper partition-based one.
     q_count = _builtins.max(int(q_arr.size), 1)
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
+    weighted = kwargs.get("weights") is not None
+    cost = _tier2_reduction_cost(
+        a,
+        axis,
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
+    )
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2527,8 +2567,9 @@ def nanquantile(
 ) -> FlopscopeArray:
     """Counted version of np.nanquantile.
 
-    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
-    model; the +4×q.size term is the per-quantile gather+interpolation cost).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
+    depends on whether weights= is given -- see _quantile_dense_cost.
     """
     import math as _math
 
@@ -2537,7 +2578,7 @@ def nanquantile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
-    # Dense per-output cost for partition-based nanquantile: axis_dim (one pass).
+    # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
     elif isinstance(axis, int):
@@ -2547,11 +2588,19 @@ def nanquantile(
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
-    # quantile independently (a gather of the two bracketing order statistics
-    # plus a linear interpolation per q), so the per-output cost scales with
-    # the number of quantiles requested, not just the reduced axis length.
+    # quantile independently, so the per-output cost scales with the number
+    # of quantiles requested, not just the reduced axis length; a weights=
+    # array additionally routes through the sort-parity weighted formula
+    # instead of the cheaper partition-based one.
     q_count = _builtins.max(int(q_arr.size), 1)
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
+    weighted = kwargs.get("weights") is not None
+    cost = _tier2_reduction_cost(
+        a,
+        axis,
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
+    )
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2598,8 +2647,9 @@ def percentile(
 ) -> FlopscopeArray:
     """Counted version of np.percentile.
 
-    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
-    model; the +4×q.size term is the per-quantile gather+interpolation cost).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
+    depends on whether weights= is given -- see _quantile_dense_cost.
     """
     import math as _math
 
@@ -2608,7 +2658,7 @@ def percentile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
-    # Dense per-output cost for partition-based percentile: axis_dim (one pass).
+    # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
     elif isinstance(axis, int):
@@ -2618,11 +2668,19 @@ def percentile(
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
-    # quantile independently (a gather of the two bracketing order statistics
-    # plus a linear interpolation per q), so the per-output cost scales with
-    # the number of quantiles requested, not just the reduced axis length.
+    # quantile independently, so the per-output cost scales with the number
+    # of quantiles requested, not just the reduced axis length; a weights=
+    # array additionally routes through the sort-parity weighted formula
+    # instead of the cheaper partition-based one.
     q_count = _builtins.max(int(q_arr.size), 1)
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
+    weighted = kwargs.get("weights") is not None
+    cost = _tier2_reduction_cost(
+        a,
+        axis,
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
+    )
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2668,8 +2726,9 @@ def quantile(
 ) -> FlopscopeArray:
     """Counted version of np.quantile.
 
-    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
-    model; the +4×q.size term is the per-quantile gather+interpolation cost).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
+    depends on whether weights= is given -- see _quantile_dense_cost.
     """
     import math as _math
 
@@ -2678,7 +2737,7 @@ def quantile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
-    # Dense per-output cost for partition-based quantile: axis_dim (one pass).
+    # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
     elif isinstance(axis, int):
@@ -2688,11 +2747,19 @@ def quantile(
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
-    # quantile independently (a gather of the two bracketing order statistics
-    # plus a linear interpolation per q), so the per-output cost scales with
-    # the number of quantiles requested, not just the reduced axis length.
+    # quantile independently, so the per-output cost scales with the number
+    # of quantiles requested, not just the reduced axis length; a weights=
+    # array additionally routes through the sort-parity weighted formula
+    # instead of the cheaper partition-based one.
     q_count = _builtins.max(int(q_arr.size), 1)
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
+    weighted = kwargs.get("weights") is not None
+    cost = _tier2_reduction_cost(
+        a,
+        axis,
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
+    )
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)

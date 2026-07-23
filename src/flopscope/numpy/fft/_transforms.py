@@ -18,6 +18,12 @@ from flopscope._dtype_billing import fft_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
+# numpy 2.1 reversed the remaining-axis execution order that rfftn/rfft2 use
+# after the real FFT on the last axis (forward on 2.0.x, reversed from 2.1
+# onward); staged_fftn_cost's r2c branch replays that order exactly, so it
+# must branch on the installed numpy version to stay correct across 2.0-2.4.
+_NUMPY_GE_2_1 = tuple(int(x) for x in _np.__version__.split(".")[:2]) >= (2, 1)
+
 
 def fft_cost(n: int) -> int:
     """FLOP cost of a 1-D complex FFT.
@@ -120,6 +126,90 @@ def rfftn_cost(shape: tuple[int, ...]) -> int:
     return 5 * (N // 2) * log_sum
 
 
+def staged_fftn_cost(
+    input_shape: tuple[int, ...],
+    s_resolved: tuple[int, ...],
+    axes: tuple[int, ...],
+    *,
+    kind: str,
+) -> int:
+    """FLOP cost of an N-D FFT, replaying numpy's exact 1-D execution cascade.
+
+    Parameters
+    ----------
+    input_shape : tuple of int
+        Shape of the input array.
+    s_resolved : tuple of int
+        Resolved transform length for each entry in *axes* (same order,
+        same length; sentinel values such as `None`/`-1` already resolved
+        by the caller).
+    axes : tuple of int
+        Transform axes, normalized to non-negative positions, same order
+        and length as *s_resolved*.
+    kind : str
+        One of ``"c2c"`` (complex-to-complex: fftn/ifftn/fft2/ifft2),
+        ``"r2c"`` (real-to-complex: rfftn/rfft2), or ``"c2r"``
+        (complex-to-real: irfftn/irfft2).
+
+    Returns
+    -------
+    int
+        Sum of the per-stage 1-D FLOP costs, computed over the same
+        sequence of intermediate array shapes numpy's pocketfft backend
+        actually produces: one 1-D transform per axis, applied in numpy's
+        real execution order (reversed for c2c; real axis first for r2c;
+        real axis last for c2r), with the batch size at each stage taken
+        from the *current* (not final) shape.
+
+    Notes
+    -----
+    numpy computes an N-D FFT as a cascade of 1-D FFTs over evolving
+    intermediate shapes rather than a single N-D butterfly. Pricing from
+    only the final transform shape misprices any case where an axis is
+    resized (via `s`), because the batch count at each stage depends on
+    the shape *at that point in the cascade*, not the final shape. This
+    helper replays the cascade with the same `fft_cost`/`rfft_cost`
+    primitives the 1-D wrappers use, so the fused N-D bill equals the sum
+    of the equivalent explicit 1-D calls by construction.
+    """
+    current = [int(d) for d in input_shape]
+
+    def stage(axis: int, n: int, real: bool) -> int:
+        batch = 1
+        for i, d in enumerate(current):
+            if i != axis:
+                batch *= d
+        return batch * (rfft_cost(n) if real else fft_cost(n))
+
+    total = 0
+    if kind == "c2c":  # numpy _raw_fftnd: reverse axis order
+        for pos in reversed(range(len(axes))):
+            ax, n = axes[pos], s_resolved[pos]
+            total += stage(ax, n, False)
+            current[ax] = n
+    elif kind == "r2c":  # rfft last axis first, then remaining c2c axes
+        # (reversed from numpy 2.1 onward; forward on 2.0.x -- see
+        # _NUMPY_GE_2_1)
+        ax, n = axes[-1], s_resolved[-1]
+        total += stage(ax, n, True)
+        current[ax] = n // 2 + 1
+        remaining = range(len(axes) - 1)
+        remaining = reversed(remaining) if _NUMPY_GE_2_1 else remaining
+        for pos in remaining:
+            ax, n = axes[pos], s_resolved[pos]
+            total += stage(ax, n, False)
+            current[ax] = n
+    else:  # c2r: c2c forward, irfft last axis last
+        for pos in range(len(axes) - 1):
+            ax, n = axes[pos], s_resolved[pos]
+            total += stage(ax, n, False)
+            current[ax] = n
+        ax, n = axes[-1], s_resolved[-1]
+        total += stage(ax, n, True)
+        current[ax] = n
+    return total
+
+
 def hfft_cost(n_out: int) -> int:
     """FLOP cost of a Hermitian FFT.
 
@@ -153,16 +243,6 @@ def _batch_count_1d(a: _np.ndarray, axis: int) -> int:
     if a.ndim == 0 or a.shape[axis] == 0:
         return 1
     return a.size // a.shape[axis]
-
-
-def _batch_count_nd(a: _np.ndarray, axes: tuple[int, ...] | None) -> int:
-    """Number of independent N-D transforms over *axes*."""
-    if axes is None:
-        return 1  # all axes are transform axes
-    batch = a.size
-    for ax in axes:
-        batch //= a.shape[ax]
-    return max(batch, 1)
 
 
 # 1-D transforms
@@ -343,7 +423,8 @@ def fft2(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fft2",
         flop_cost=cost,
@@ -398,7 +479,8 @@ def ifft2(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifft2",
         flop_cost=cost,
@@ -453,7 +535,8 @@ def rfft2(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="r2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfft2",
         flop_cost=cost,
@@ -525,7 +608,8 @@ def irfft2(
             )
             for i, (sv, ax) in enumerate(zip(s, eff, strict=True))
         )
-    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2r")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfft2",
         flop_cost=cost,
@@ -581,7 +665,8 @@ def fftn(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.fftn",
         flop_cost=cost,
@@ -636,7 +721,8 @@ def ifftn(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * fftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.ifftn",
         flop_cost=cost,
@@ -691,7 +777,8 @@ def rfftn(
             int(a.shape[ax]) if (sv is None or sv < 0) else int(sv)
             for sv, ax in zip(s, eff, strict=True)
         )
-    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="r2c")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.rfftn",
         flop_cost=cost,
@@ -763,7 +850,8 @@ def irfftn(
             )
             for i, (sv, ax) in enumerate(zip(s, eff, strict=True))
         )
-    cost = _batch_count_nd(a, eff) * rfftn_cost(s_for_cost)  # type: ignore[reportArgumentType]
+    axes_nn = tuple(ax % a.ndim for ax in eff)
+    cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2r")  # type: ignore[reportArgumentType]
     with budget.deduct(
         "fft.irfftn",
         flop_cost=cost,

@@ -36,16 +36,13 @@ depth, width = 5, 256
 
 # Weight init
 scale = np.sqrt(2 / width)
-weights = [
-    np.random.randn(width, width) * scale
-    for _ in range(depth)
-]
+weights = [np.random.randn(width, width) * scale for _ in range(depth)]
 
 # Forward pass
 x = np.random.randn(width)
 h = x
 for i, W in enumerate(weights):
-    h = np.einsum('ij,j->i', W, h)
+    h = np.einsum("ij,j->i", W, h)
     if i < depth - 1:
         h = np.maximum(h, 0)
 # Total FLOPs? No idea.
@@ -62,16 +59,13 @@ depth, width = 5, 256
 
 # Weight init
 scale = fnp.sqrt(2 / width)
-weights = [
-    fnp.random.randn(width, width) * scale
-    for _ in range(depth)
-]
+weights = [fnp.random.randn(width, width) * scale for _ in range(depth)]
 
 # Forward pass
 x = fnp.random.randn(width)
 h = x
 for i, W in enumerate(weights):
-    h = fnp.einsum('ij,j->i', W, h)
+    h = fnp.einsum("ij,j->i", W, h)
     if i < depth - 1:
         h = fnp.maximum(h, 0)
 flops.budget_summary()  # 6,231,041 FLOPs
@@ -160,20 +154,19 @@ depth, width = 5, 256
 with flops.BudgetContext(flop_budget=10**8, wall_time_limit_s=5.0) as budget:
     # Weight init
     scale = fnp.sqrt(2 / width)
-    weights = [fnp.random.randn(width, width) * scale
-               for _ in range(depth)]
+    weights = [fnp.random.randn(width, width) * scale for _ in range(depth)]
 
     # Forward pass
     x = fnp.random.randn(width)
     h = x
     for i, W in enumerate(weights):
-        h = fnp.einsum('ij,j->i', W, h)
+        h = fnp.einsum("ij,j->i", W, h)
         if i < depth - 1:
             h = fnp.maximum(h, 0)
 
-    print(budget.summary())   # current context summary
+    print(budget.summary())  # current context summary
 
-flops.budget_summary()           # accumulated session/global summary
+flops.budget_summary()  # accumulated session/global summary
 ```
 
 ```
@@ -200,11 +193,11 @@ flopscope FLOP Budget Summary
 
 ```python
 # Query FLOP costs without running anything (no BudgetContext needed)
-cost = flops.accounting.einsum_cost('ij,jk->ik', shapes=[(256, 256), (256, 256)])
+cost = flops.accounting.einsum_cost("ij,jk->ik", shapes=[(256, 256), (256, 256)])
 print(f"Matmul cost: {cost:,}")  # 33,554,432
 
 cost = flops.accounting.svd_cost(m=256, n=256, k=10)
-print(f"SVD cost: {cost:,}")     # 2,621,440
+print(f"SVD cost: {cost:,}")  # 2,621,440
 ```
 
 For symmetry-aware inspection that takes actual array inputs (and reflects
@@ -212,14 +205,15 @@ declared symmetry), use the accumulation cost APIs:
 
 ```python
 import numpy as np
+
 A = np.zeros((256, 256))
 B = np.zeros((256, 256))
 # Returns an AccumulationCost decomposition without running the op
-cost = flops.einsum_accumulation_cost('ij,jk->ik', A, B)
-print(cost.total)                # 33,554,432
+cost = flops.einsum_accumulation_cost("ij,jk->ik", A, B)
+print(cost.total)  # 33,554,432
 
 cost = flops.reduction_accumulation_cost(A, op_factor=1)
-print(cost.total)                # 65,535
+print(cost.total)  # 65,535
 ```
 
 ### Symmetry Savings

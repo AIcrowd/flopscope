@@ -32,14 +32,16 @@ import flopscope as fps
 import numpy as np
 
 A = fps.as_symmetric(np.zeros((4, 4, 4)), symmetry=(0, 1, 2))  # S_3
-cost = fps.einsum_accumulation_cost('ijk,abc->ic', A, A)
+cost = fps.einsum_accumulation_cost("ijk,abc->ic", A, A)
 
-print(f'total = {cost.total}')
-print(f'mu = (k-1) * prod(M) = {cost.mu}')
-print(f'alpha = prod(alpha_a) = {cost.alpha}')
+print(f"total = {cost.total}")
+print(f"mu = (k-1) * prod(M) = {cost.mu}")
+print(f"alpha = prod(alpha_a) = {cost.alpha}")
 for component in cost.per_component:
-    print(f'  {component.labels}: M={component.m}, '
-          f'alpha={component.alpha}, regime={component.regime_id}')
+    print(
+        f"  {component.labels}: M={component.m}, "
+        f"alpha={component.alpha}, regime={component.regime_id}"
+    )
 ```
 
 ## What didn't change

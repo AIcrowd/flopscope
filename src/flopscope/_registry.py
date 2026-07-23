@@ -969,25 +969,25 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "q-th percentile of array elements. Per-output cost is axis_dim + 4*q.size: one partition pass shared across all requested quantiles, plus a gather-and-interpolate step per quantile -- so a wide `q` array bills more than a scalar `q`, not a flat per-output cost. Complex-illegal: numpy explicitly rejects complex input ('a must be an array of real numbers') since interpolation between values requires a total order that complex numbers lack, unlike median's pure selection.",
+        "notes": "q-th percentile of array elements. Per-output cost is piecewise in n = axis_dim and k = q.size (see _quantile_dense_cost): unweighted, n*min(k, 1 + 4*L') + 4*k, the cheaper of k independent partition passes versus one shared sort-parity pass, plus a fixed gather-and-interpolate term per quantile, where L' = ceil(log2(min(k, n))) (0 when min(k, n) <= 1); weighted (weights= given), 4*n*L + 3*n + k*(L + 4), an argsort at sort's own op-weight plus a cumulative-weight build, then a per-quantile lookup-and-interpolate term, where L = ceil(log2(n)) (0 when n <= 1). Complex-illegal: numpy explicitly rejects complex input ('a must be an array of real numbers') since interpolation between values requires a total order that complex numbers lack, unlike median's pure selection.",
     },
     "nanpercentile": {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "q-th percentile ignoring NaNs. Per-output cost is axis_dim + 4*q.size, same per-quantile scaling as percentile. Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
+        "notes": "q-th percentile ignoring NaNs. Same piecewise unweighted/weighted per-output cost as percentile (n = axis_dim, k = q.size; see _quantile_dense_cost). Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
     },
     "quantile": {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "q-th quantile of array elements. Per-output cost is axis_dim + 4*q.size, same per-quantile scaling as percentile. Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
+        "notes": "q-th quantile of array elements. Same piecewise unweighted/weighted per-output cost as percentile (n = axis_dim, k = q.size; see _quantile_dense_cost). Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
     },
     "nanquantile": {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "q-th quantile ignoring NaNs. Per-output cost is axis_dim + 4*q.size, same per-quantile scaling as percentile. Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
+        "notes": "q-th quantile ignoring NaNs. Same piecewise unweighted/weighted per-output cost as percentile (n = axis_dim, k = q.size; see _quantile_dense_cost). Complex-illegal: numpy explicitly rejects complex input, same as percentile.",
     },
     "ptp": {
         "category": "counted_reduction",
@@ -1345,13 +1345,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftfreq": {
         "category": "counted_custom",
@@ -1381,13 +1381,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftshift": {
         "category": "counted_custom",
@@ -1411,13 +1411,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D real FFT. Cost: staged -- replays numpy's cascade as complex FFTs over the leading axes (forward order) followed by the real (Hermitian-reconstructing) inverse on the last axis, with batch at each stage taken from the shape at that point in the cascade (not the final transform shape). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.irfftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D real FFT. Cost: staged -- replays numpy's cascade as complex FFTs over the leading axes (forward order) followed by the real (Hermitian-reconstructing) inverse on the last axis, with batch at each stage taken from the shape at that point in the cascade (not the final transform shape). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfft": {
         "category": "counted_custom",
@@ -1429,7 +1429,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D real FFT. Cost: staged -- replays numpy's cascade as a real FFT on the last axis followed by complex FFTs over the remaining axes (forward order), with batch at each stage taken from the shape at that point in the cascade (not the final transform shape); the Hermitian reduction after the first stage changes the batch seen by later stages, so this no longer reduces to a uniform 5*(N//2)*sum(ceil(log2(s_i))) even without resizing. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfftfreq": {
         "category": "counted_custom",
@@ -1441,7 +1441,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D real FFT. Cost: staged -- replays numpy's cascade as a real FFT on the last axis followed by complex FFTs over the remaining axes (forward order), with batch at each stage taken from the shape at that point in the cascade (not the final transform shape); the Hermitian reduction after the first stage changes the batch seen by later stages, so this no longer reduces to a uniform 5*(N//2)*sum(ceil(log2(s_i))) even without resizing. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     # ------------------------------------------------------------------
     # free — implemented in _array_ops.py
@@ -1712,7 +1712,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Convert input to array. Cost: numel(input) at the heavier of source/destination dtype rate when dtype= actually converts the buffer; 0 when no conversion happens (no dtype=, or dtype already matches).",
+        "notes": "Convert input to array. Cost: numel(output) at the heavier of source/destination dtype rate whenever the call materializes a fresh buffer (dtype conversion, copy=True, or an order= that forces a copy); 0 when NumPy returns a view of the existing buffer.",
     },
     "isnan": {
         "category": "counted_custom",
