@@ -240,7 +240,7 @@ with flops.BudgetContext(flop_budget=10**8) as budget:
 
 This works for any einsum where the same Python object appears at multiple
 operand positions. See the
-[exploit-symmetry guide](website/content/docs/guides/symmetry.mdx) for more examples
+[exploit-symmetry guide](https://aicrowd.github.io/flopscope/docs/guides/symmetry/) for more examples
 including triple products and block symmetries.
 
 ## How It Works
@@ -254,7 +254,7 @@ including triple products and block symmetries.
 
 **Budget is always active.** A global default budget (1e15 FLOPs, configurable via `FLOPSCOPE_DEFAULT_BUDGET` env var) activates automatically. Use an explicit `BudgetContext` to set a custom limit.
 
-**31 operations are blocked.** Config and system-level functions (`set_printoptions`, `geterr`, and text/legacy I/O like `savetxt`/`loadtxt`) raise `AttributeError` by design. **Weight I/O is supported:** use `fnp.savez`/`fnp.load` (and the `flops.Module` base class) to persist numeric state safely — see the [Saving & Loading guide](website/content/docs/guides/save-load.mdx). Loading data is free (0 FLOPs) and never unpickles.
+**31 operations are blocked.** Config and system-level functions (`set_printoptions`, `geterr`, and text/legacy I/O like `savetxt`/`loadtxt`) raise `AttributeError` by design. **Weight I/O is supported:** use `fnp.savez`/`fnp.load` (and the `flops.Module` base class) to persist numeric state safely — see the [Saving & Loading guide](https://aicrowd.github.io/flopscope/docs/guides/save-load/). Loading data is free (0 FLOPs) and never unpickles.
 
 **sort, argsort, trace, and random sampling all have analytical FLOP costs** based on their algorithmic complexity.
 
@@ -268,34 +268,34 @@ including triple products and block symmetries.
 
 **Getting Started**
 
-- [Installation & Setup](website/content/docs/getting-started/installation.mdx)
-- [Your First Budget](website/content/docs/getting-started/quickstart.mdx)
+- [Installation & Setup](https://aicrowd.github.io/flopscope/docs/getting-started/installation/)
+- [Your First Budget](https://aicrowd.github.io/flopscope/docs/getting-started/quickstart/)
 
 **How-To Guides**
 
-- [Use Einsum](website/content/docs/guides/einsum.mdx)
-- [Exploit Symmetry](website/content/docs/guides/symmetry.mdx)
-- [Use Linear Algebra](website/content/docs/guides/linalg.mdx)
-- [Plan Your Budget](website/content/docs/guides/budget-planning.mdx)
-- [Debug Budget Overruns](website/content/docs/guides/budget-planning.mdx)
-- [Migrate from NumPy](website/content/docs/guides/migrate-from-numpy.mdx)
+- [Use Einsum](https://aicrowd.github.io/flopscope/docs/guides/einsum/)
+- [Exploit Symmetry](https://aicrowd.github.io/flopscope/docs/guides/symmetry/)
+- [Use Linear Algebra](https://aicrowd.github.io/flopscope/docs/guides/linalg/)
+- [Plan Your Budget](https://aicrowd.github.io/flopscope/docs/guides/budget-planning/)
+- [Debug Budget Overruns](https://aicrowd.github.io/flopscope/docs/guides/budget-planning/)
+- [Migrate from NumPy](https://aicrowd.github.io/flopscope/docs/guides/migrate-from-numpy/)
 
 **Concepts**
 
-- [FLOP Counting Model](docs/reference/cost-model.md)
-- [Operation Categories](website/content/docs/understanding/operation-categories.mdx)
+- [FLOP Counting Model](https://aicrowd.github.io/flopscope/docs/understanding/flop-counting-model/)
+- [Operation Categories](https://aicrowd.github.io/flopscope/docs/understanding/operation-categories/)
 
 **Development**
 
-- [Contributor Guide](website/content/docs/development/contributing.mdx)
+- [Contributor Guide](https://aicrowd.github.io/flopscope/docs/development/contributing/)
 
 **API Reference**
 
-- [Full API Reference](website/content/docs/api/index.mdx)
+- [Full API Reference](https://aicrowd.github.io/flopscope/docs/api/)
 
 **For AI Agents:**
 
-- [Cheat Sheet](website/content/docs/api/for-agents.mdx) -- compact reference for fast lookup
+- [Cheat Sheet](https://aicrowd.github.io/flopscope/docs/api/for-agents/) -- compact reference for fast lookup
 
 ## Development
 
@@ -308,7 +308,7 @@ make docs-serve                # local docs at http://127.0.0.1:8000
 ```
 
 For the monorepo layout, client/server workflows, and generated-doc rules, see
-[Contributor Guide](website/content/docs/development/contributing.mdx).
+[Contributor Guide](https://aicrowd.github.io/flopscope/docs/development/contributing/).
 
 ## Citation
 
