@@ -42,7 +42,7 @@ import flopscope.numpy as fnp
 with flops.BudgetContext(flop_budget=1_000_000):
     a = fnp.array([1.0, 2.0, 3.0])
     b = fnp.array([4.0, 5.0, 6.0])
-    result = fnp.add(a, b)   # round-trips to the server, runs there
+    result = fnp.add(a, b)  # round-trips to the server, runs there
     flops.budget_summary()
 ```
 
@@ -53,8 +53,8 @@ On the first request, the client performs a version handshake with the server. A
 The API mirrors NumPy, with one semantic difference worth knowing up front: **flopscope arrays are immutable** (like [JAX](https://docs.jax.dev/en/latest/notebooks/Common_Gotchas_in_JAX.html#in-place-updates)). Item assignment and indexed in-place updates raise `TypeError`:
 
 ```python
-arr[i] = value      # TypeError: flopscope arrays are immutable
-arr[i] += value     # same error — desugars to arr[i] = arr[i] + value
+arr[i] = value  # TypeError: flopscope arrays are immutable
+arr[i] += value  # same error — desugars to arr[i] = arr[i] + value
 ```
 
 Build results functionally instead — collect the pieces in a list and `fnp.stack(...)` them, or use a whole-array update (`arr = arr + x`, which rebinds rather than mutates). See the [Immutable arrays](https://aicrowd.github.io/flopscope/docs/getting-started/competition/#immutable-arrays) guide for the accumulation recipe.
