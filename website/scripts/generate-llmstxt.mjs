@@ -57,9 +57,6 @@ const SECTIONS = {
   'Development': {
     'development/contributing': 'Repository layout, local workflows, and test suite',
   },
-  'Changelog': {
-    'changelog': 'Release history and breaking changes',
-  },
 };
 
 /**
