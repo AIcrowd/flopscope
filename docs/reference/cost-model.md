@@ -735,7 +735,7 @@ plus the per-output subtract, and `mean`/`average` add the per-output divide.
 | `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
 | `median`, `nanmedian` | axis length per output slice | 1.0 | DECLARED; partition (introselect) per output |
-| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | (axis length + 4 × q.size) per output slice | 1.0 | DECLARED; partition (introselect) shared per output, plus a gather-and-interpolate step per requested quantile |
+| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
 | `nanmean` | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides; billed identically to mean |
@@ -967,9 +967,9 @@ constant is the standard textbook estimate.
 | Op | flop_cost | basis |
 |---|---|---|
 | `fft.fft`, `fft.ifft` | `5 × N × ⌈log₂ N⌉`, `N` = transform length | DERIVED: 5 real ops per butterfly |
-| `fft.fft2`, `fft.ifft2`, `fft.fftn`, `fft.ifftn` | `5 × N × Σᵢ⌈log₂ dᵢ⌉`, `N = prod(transform dims)`, `dᵢ` = individual axis lengths | DERIVED: sum of per-axis log₂ terms (coincides with `5N⌈log₂N⌉` only when all axes are the same power of 2) |
+| `fft.fft2`, `fft.ifft2`, `fft.fftn`, `fft.ifftn` | staged: `Σ` of the per-axis 1-D `fft` costs over numpy's execution cascade (reverse axis order), each `5 × batchᵢ × dᵢ × ⌈log₂ dᵢ⌉` at that axis's *current* intermediate shape; reduces to `5 × N × Σᵢ⌈log₂ dᵢ⌉`, `N = prod(transform dims)`, when `s` resizes no axis | DERIVED: sum of the 1-D cascade; the final-shape product holds only when no axis is resized by `s` |
 | `fft.rfft`, `fft.irfft` | `5 × (N/2) × ⌈log₂ N⌉` | DERIVED: real-input / real-output half-spectrum |
-| `fft.rfft2`, `fft.irfft2`, `fft.rfftn`, `fft.irfftn` | `5 × (N/2) × Σᵢ⌈log₂ dᵢ⌉` (real half-spectrum) | DERIVED: half-spectrum with per-axis log₂ sum |
+| `fft.rfft2`, `fft.irfft2`, `fft.rfftn`, `fft.irfftn` | staged: a real 1-D FFT on the last axis (`5 × (d_last/2) × ⌈log₂ d_last⌉`) plus complex 1-D FFTs on the remaining axes over the half-spectrum intermediate, summed in numpy's order (r2c: real axis first; c2r: real axis last) | DERIVED: per-stage cascade; the half-spectrum shrinks the downstream batch, so it differs from `5 × (N/2) × Σᵢ⌈log₂ dᵢ⌉` except in the no-resize two-axis case |
 | `fft.hfft` | `5 × (n_out/2) × ⌈log₂ n_out⌉` | DERIVED: hfft = irfft(conj(a)) — conjugate-symmetry halves the work |
 | `fft.ihfft` | `5 × (n/2) × ⌈log₂ n⌉` | DERIVED: same `hfft_cost(n)` formula |
 | `fft.fftfreq` | `n` (index grid scaled by `1/(n*d)` — one divide per output element) | DECLARED: `n` divides |
