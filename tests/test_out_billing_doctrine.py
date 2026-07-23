@@ -27,7 +27,9 @@ def _billed(fn):
 def test_out_cast_equals_astype_parity():
     load_weights()
     a32 = np.ones(1000, dtype=np.float32)
-    via_out = _billed(lambda: fnp.add(a32, 0.0, out=np.empty(1000, np.float64)))
+    via_out = _billed(
+        lambda: fnp.add(a32, 0.0, out=np.empty(1000, np.float64))  # pyright: ignore[reportArgumentType]
+    )
     via_astype = _billed(lambda: fnp.astype(a32, np.float64))
     assert via_out == via_astype == 2000  # no cast arbitrage either direction
 
@@ -36,7 +38,7 @@ def test_narrowing_out_never_discounts():
     load_weights()
     a64 = np.ones(1000, dtype=np.float64)
     via_narrowing_out = _billed(
-        lambda: fnp.add(a64, a64, out=np.empty(1000, np.float32))
+        lambda: fnp.add(a64, a64, out=np.empty(1000, np.float32))  # pyright: ignore[reportArgumentType]
     )
     via_no_out = _billed(lambda: fnp.add(a64, a64))
     assert via_narrowing_out == via_no_out == 2000
