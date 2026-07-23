@@ -42,26 +42,26 @@ def test_budget_context_namespace_defaults_none():
 
 def test_deduct_records_namespace():
     with BudgetContext(flop_budget=1000, namespace="inference") as ctx:
-        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=((5,),))
+        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=((5,),), dtypes=())
         assert ctx.op_log[0].namespace == "inference"
 
 
 def test_deduct_records_none_namespace():
     with BudgetContext(flop_budget=1000) as ctx:
-        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=((5,),))
+        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=((5,),), dtypes=())
         assert ctx.op_log[0].namespace is None
 
 
 def test_summary_includes_namespace_label():
     with BudgetContext(flop_budget=1000, namespace="training", quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
         s = ctx.summary()
         assert "[training]" in s
 
 
 def test_summary_without_namespace():
     with BudgetContext(flop_budget=1000, quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
         s = ctx.summary()
         assert "100" in s.replace(",", "")
         assert "[" not in s.split("\n")[0]  # no bracket in header
@@ -70,10 +70,10 @@ def test_summary_without_namespace():
 def test_namespace_scope_builds_dotted_paths():
     with flops.BudgetContext(flop_budget=1000, namespace="predict", quiet=True) as ctx:
         with flops.namespace("precompute"):
-            ctx.deduct("add", flop_cost=10, subscripts=None, shapes=())
+            ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
         with flops.namespace("fallback"):
             with flops.namespace("sampling"):
-                ctx.deduct("mul", flop_cost=20, subscripts=None, shapes=())
+                ctx.deduct("mul", flop_cost=20, subscripts=None, shapes=(), dtypes=())
 
     assert [rec.namespace for rec in ctx.op_log] == [
         "predict.precompute",
@@ -87,7 +87,7 @@ def test_budget_context_preserves_literal_root_namespace():
     ) as ctx:
         with flops.namespace("precompute"):
             assert ctx.namespace == "predict..raw.precompute"
-            ctx.deduct("add", flop_cost=10, subscripts=None, shapes=())
+            ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
 
     assert ctx.namespace == "predict..raw"
     assert ctx.op_log[0].namespace == "predict..raw.precompute"
@@ -101,7 +101,7 @@ def test_namespace_scope_restores_previous_namespace_after_exception():
                 raise RuntimeError("boom")
 
         assert ctx.namespace == "predict"
-        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
 
     assert ctx.op_log[0].namespace == "predict"
 

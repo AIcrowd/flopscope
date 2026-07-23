@@ -146,3 +146,45 @@ def test_renderer_shows_pre_reduction_subrows():
     assert "pre-reduce" in rendered, (
         f"rendered table missing 'pre-reduce' sub-row:\n{rendered}"
     )
+
+
+def test_reordered_single_step_render_labels_correct_operand():
+    """Single-step 2-op path whose upstream einsum_str reorders the operands.
+
+    For ``ijk,kl->il`` the upstream step subscript is reordered (to
+    ``kl,ijk->il``), but the pre-reduction of the isolated ``j`` acts on the
+    ORIGINAL operand ``ijk`` (``operand_index=0`` in the accumulation's operand
+    order).  The renderer must show that operand's own subscript (``ijk → ik``)
+    and a residual that keeps ``kl`` intact and replaces ``ijk`` with its reduced
+    ``ik`` — not index the reordered step subscript by the accumulation operand
+    index (the former bug rendered ``kl → ik`` with residual ``ik,ijk->il``).
+    Costs are unaffected; only the rendered subscripts changed.
+    """
+    a = np.ones((4, 3, 5))  # ijk
+    c = np.ones((5, 6))  # kl
+    info = _einsum_path_info("ijk,kl->il", a, c)
+
+    step = info.steps[0]
+    assert len(step.pre_reductions) == 1
+    pre = step.pre_reductions[0]
+    assert pre.operand_index == 0
+    assert pre.removed_labels == ("j",)
+    assert pre.original_subscript == "ijk"
+    assert pre.surviving_subscript == "ik"
+
+    rendered = info.format_table()
+    collapsed = rendered.replace(" ", "")
+    # The pre-reduce sub-row shows the reduced operand's own subscript...
+    assert "(subscript:ijk→ik)" in collapsed
+    # ...not the wrong operand pulled from the reordered step subscript.
+    assert "(subscript:kl→ik)" not in collapsed
+
+    # The residual sub-row: ijk was pre-reduced to ik, kl stays intact. Assert
+    # order-independently (upstream may or may not reorder in a given version).
+    residual_line = next(
+        line for line in rendered.splitlines() if "residual contraction:" in line
+    )
+    assert "ik" in residual_line
+    assert "kl" in residual_line
+    assert "->il" in residual_line
+    assert "ijk" not in residual_line  # the reduced operand is no longer ijk

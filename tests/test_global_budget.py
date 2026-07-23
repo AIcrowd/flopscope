@@ -52,7 +52,7 @@ def test_global_default_env_var():
 
 def test_global_default_tracks_flops():
     budget = require_budget()
-    budget.deduct("add", flop_cost=100, subscripts=None, shapes=())
+    budget.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
     assert budget.flops_used == 100
     same = require_budget()
     assert same.flops_used == 100

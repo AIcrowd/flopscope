@@ -11,16 +11,16 @@ WINDOW_OPS: list[str] = ["bartlett", "blackman", "hamming", "hanning", "kaiser"]
 _ANALYTICAL_COST: dict[str, int] = {
     "bartlett": 4,  # multiplied by n; compare+div+add+select per sample (FMA=2)
     "blackman": 40,  # multiplied by n; 2 cos evals @16 + 8 arith per sample
-    "hamming": 1,  # multiplied by n
-    "hanning": 1,  # multiplied by n
+    "hamming": 18,  # multiplied by n; cos@16 + mul + sub per sample
+    "hanning": 18,  # multiplied by n; cos@16 + mul + sub per sample
     "kaiser": 23,  # multiplied by n; Bessel I0 @16 + 7 arith per sample (FMA=2)
 }
 
 _FORMULA_STRINGS: dict[str, str] = {
     "bartlett": "4*n",
     "blackman": "40*n",
-    "hamming": "n",
-    "hanning": "n",
+    "hamming": "18*n",
+    "hanning": "18*n",
     "kaiser": "23*n",
 }
 

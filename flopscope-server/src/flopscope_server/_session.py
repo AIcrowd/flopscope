@@ -83,7 +83,28 @@ class Session:
     # ------------------------------------------------------------------
 
     def store_array(self, arr: Any) -> str:
-        """Store *arr* and return its handle ID. Delegates to the connection store."""
+        """Store *arr* and return its handle ID. Delegates to the connection store.
+
+        Every stored plain ``numpy.ndarray`` is view-cast to a
+        ``FlopscopeArray`` first. This is the single choke point all storage
+        paths funnel through (``create_from_data`` and ``_pack_result``'s
+        op-result storage), so it is also the single place to close a
+        budget-bypass: first-touch data (fresh off the wire from
+        ``create_from_data``) used to be stored as a bare ``ndarray``, and a
+        bare Python dunder/method call on it (``arr[key]``, ``arr.astype``)
+        resolves to numpy's own unbilled implementation instead of
+        ``FlopscopeArray``'s billing override -- silently letting advanced
+        (fancy/boolean) indexing and similar ops bill 0 FLOPs when performed
+        as the first operation on client-ingested data. View-casting here
+        guarantees every handle -- first-touch or op-result -- routes through
+        the billing overrides. Op results are already ``FlopscopeArray``
+        (or a subclass, e.g. ``SymmetricTensor``), so the isinstance guard
+        makes this a no-op for them.
+        """
+        from flopscope._ndarray import FlopscopeArray
+
+        if isinstance(arr, np.ndarray) and not isinstance(arr, FlopscopeArray):
+            arr = arr.view(FlopscopeArray)
         return self._conn.arrays.put(arr)
 
     def get_array(self, handle: str) -> Any:

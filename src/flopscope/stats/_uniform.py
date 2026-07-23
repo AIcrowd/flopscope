@@ -24,9 +24,9 @@ class UniformDistribution(ContinuousDistribution):
     Notes
     -----
     ``loc`` is the lower bound and ``scale`` is the interval width. pdf and
-    ppf deduct ``1 * numel(input)`` FLOPs. cdf deducts ``4 * numel(input)``
-    FLOPs (composite: sub + div + 2 clip compare/selects, weight 1.0;
-    calibrated alpha 4.0).
+    ppf deduct ``1 * numel(broadcast(input, loc, scale))`` FLOPs. cdf deducts
+    ``4 * numel(broadcast(input, loc, scale))`` FLOPs (composite: sub + div +
+    2 clip compare/selects, weight 1.0; calibrated alpha 4.0).
     """
 
     def __init__(self):
@@ -52,7 +52,7 @@ class UniformDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.uniform.pdf(x, loc, scale)``.
-        FLOP cost: ``1 * numel(x)``.
+        FLOP cost: ``1 * numel(broadcast(x, loc, scale))``.
 
         Examples
         --------
@@ -84,7 +84,7 @@ class UniformDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.uniform.cdf(x, loc, scale)``.
-        FLOP cost: ``4 * numel(x)`` (composite: sub + div + 2 clip
+        FLOP cost: ``4 * numel(broadcast(x, loc, scale))`` (composite: sub + div + 2 clip
         compare/selects, weight 1.0).
 
         Examples
@@ -117,7 +117,7 @@ class UniformDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.uniform.ppf(q, loc, scale)``.
-        FLOP cost: ``1 * numel(q)``.
+        FLOP cost: ``1 * numel(broadcast(q, loc, scale))``.
 
         Examples
         --------

@@ -18,8 +18,8 @@ class TestUnwrap:
 
             unwrap(x)
             assert (
-                budget.flops_used == 220
-            )  # 11 * numel (Task 4: two passes are now free 3-arg where; was 13*numel)
+                budget.flops_used == 260
+            )  # 13 * numel (3-arg where is charged again; see _unwrap.py:unwrap_cost)
 
     def test_outside_context_uses_global_default(self):
         from flopscope.numpy import unwrap

@@ -5,6 +5,7 @@ from __future__ import annotations
 import statistics
 
 from benchmarks._perf import measure_flops
+from flopscope._polynomial import polyfit_cost
 
 POLYNOMIAL_OPS: list[str] = [
     "polyval",
@@ -21,7 +22,7 @@ POLYNOMIAL_OPS: list[str] = [
 
 _FORMULA_STRINGS: dict[str, str] = {
     "polyval": "2 * n * degree (FMA=2)",
-    "polyfit": "2 * n * (degree+1)^2",
+    "polyfit": "n * degree (Vandermonde build) + lstsq_cost(n, degree+1, ncols=1)",
     "roots": "10*degree^3 (provisional, eigvals_cost)",
     "polymul": "2*(degree+1)^2 - 2*(degree+1) (FMA=2)",
     "polydiv": "1 + Q*(2*n2+1), Q=max(n1-n2+1,0) (quotient length)",
@@ -44,7 +45,12 @@ def _analytical_cost(op: str, n: int, degree: int) -> int:
             2 * n * degree
         )  # Updated for FMA=2 unification (spec 2026-05-20): polyval formula doubled m*deg → 2*m*deg.
     elif op == "polyfit":
-        return 2 * n * (degree + 1) ** 2
+        # y is a 1-D array of length n in this benchmark (see benchmark_polynomial
+        # below) -> ncols=1. Delegates to the real billing formula (polyfit_cost
+        # now prices the Vandermonde build + lstsq solve, matching linalg.lstsq's
+        # own cost for the identical shape) so this benchmark's denominator can
+        # never drift from what flopscope actually charges.
+        return polyfit_cost(n, degree, ncols=1)
     elif op == "roots":
         return 10 * degree**3
     elif op == "polymul":

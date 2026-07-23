@@ -7,6 +7,7 @@ from numpy.linalg._linalg import SVDResult
 from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._flops import svd_cost
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import maybe_check_nan_inf, require_budget
@@ -14,12 +15,9 @@ from flopscope._validation import maybe_check_nan_inf, require_budget
 
 def _batch_size(shape):
     """Number of matrices in a batched array."""
-    if len(shape) <= 2:
-        return 1
-    result = 1
-    for d in shape[:-2]:
-        result *= d
-    return result
+    from flopscope._batch import _broadcast_batch
+
+    return _broadcast_batch(tuple(shape), core_ranks=(2,))
 
 
 def _has_zero_dim(shape):
@@ -93,7 +91,11 @@ def svd(
         else 0
     )
     with budget.deduct(
-        "linalg.svd", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.svd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         if compute_uv:
             # When k is specified, always use economy decomposition then slice.

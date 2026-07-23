@@ -1,9 +1,11 @@
-"""Cost-model tests for boundary/padding ops under the data-movement free-tier.
+"""Cost-model tests for boundary/padding ops under the writes-consistent model.
 
-``pad`` is free for pure data-movement modes (constant/edge/empty/wrap and
-reflect/symmetric with reflect_type='even') but must bill a real analytic cost
-for value-computing modes (maximum/minimum/mean/median/linear_ramp and
-reflect/symmetric with reflect_type='odd'), and reject ``mode=<callable>``.
+``pad`` allocates a fresh output and writes every cell (interior copy +
+border fill), so every mode bills a numel(output) base: movement modes
+(constant/edge/empty/wrap and reflect/symmetric with reflect_type='even') add
+nothing on top; value-computing modes (maximum/minimum/mean/median,
+linear_ramp, and reflect/symmetric with reflect_type='odd') add their own
+extra on top of that base; ``mode=<callable>`` is rejected outright.
 """
 
 import numpy as np
@@ -22,41 +24,51 @@ def billed(fn):
 
 def test_pad_constant_free():
     a = fnp.asarray(np.zeros(100))
-    assert billed(lambda: fnp.pad(a, (1, 1), mode="constant")) == 0
+    # writes-consistent base: numel(out) = 100 + 1 + 1 = 102, no mode extra
+    assert billed(lambda: fnp.pad(a, (1, 1), mode="constant")) == 102
 
 
 def test_pad_even_reflect_free():
     a = fnp.asarray(np.arange(10.0))
-    assert billed(lambda: fnp.pad(a, (1, 1), mode="reflect")) == 0
+    # writes-consistent base: numel(out) = 10 + 1 + 1 = 12, no mode extra
+    assert billed(lambda: fnp.pad(a, (1, 1), mode="reflect")) == 12
 
 
 def test_pad_mean_1d_charged():
     a = fnp.asarray(np.arange(10.0))
-    # full-axis stat, both sides padded -> dedup: 10 reduce + 1 divide = 11
-    assert billed(lambda: fnp.pad(a, (2, 3), mode="mean")) == 11
+    # numel(out) = 15; full-axis stat, both sides padded -> dedup: 10 reduce
+    # + 1 divide = 11 stat extra; total 15 + 11 = 26
+    assert billed(lambda: fnp.pad(a, (2, 3), mode="mean")) == 26
 
 
 def test_pad_maximum_2d_charged():
     a = fnp.asarray(np.arange(20.0).reshape(4, 5))
-    # axis0 (1,1): cross=5, sl=4 -> 20 ; axis1 (0,2): cross=4, sl=5 -> 20 ; total 40
-    assert billed(lambda: fnp.pad(a, ((1, 1), (0, 2)), mode="maximum")) == 40
+    # numel(out) = 6*7 = 42; stat extra: axis0 is processed first, so its
+    # cross-section still uses axis1's ORIGINAL size: cross=5,sl=4 -> 20;
+    # axis1 is processed second, so its cross-section uses axis0's ALREADY
+    # GROWN size (4+1+1=6), not axis0's original size 4: cross=6,sl=5 -> 30;
+    # stat extra 50; total 42 + 50 = 92
+    assert billed(lambda: fnp.pad(a, ((1, 1), (0, 2)), mode="maximum")) == 92
 
 
 def test_pad_median_charged():
     a = fnp.asarray(np.arange(1000.0))
-    assert billed(lambda: fnp.pad(a, (1, 1), mode="median")) == 1000
+    # numel(out) = 1002; stat extra 1000 (full-axis dedup); total 2002
+    assert billed(lambda: fnp.pad(a, (1, 1), mode="median")) == 2002
 
 
 def test_pad_linear_ramp_charged():
     a = fnp.asarray(np.zeros(100))
+    # numel(out) = 150; extra = out - in = 50; total 150 + 50 = 200
     assert (
-        billed(lambda: fnp.pad(a, (0, 50), mode="linear_ramp", end_values=5.0)) == 100
+        billed(lambda: fnp.pad(a, (0, 50), mode="linear_ramp", end_values=5.0)) == 200
     )
 
 
 def test_pad_odd_reflect_charged():
     a = fnp.asarray(np.arange(10.0))
-    assert billed(lambda: fnp.pad(a, (1, 1), mode="reflect", reflect_type="odd")) == 4
+    # numel(out) = 12; extra = out - in = 2; total 12 + 2 = 14
+    assert billed(lambda: fnp.pad(a, (1, 1), mode="reflect", reflect_type="odd")) == 14
 
 
 def test_pad_callable_rejected():
@@ -67,28 +79,47 @@ def test_pad_callable_rejected():
 
 def test_pad_mean_asymmetric_stat_length():
     a = fnp.asarray(np.arange(10.0))
-    # both sides padded, stat_length (3,4) not full-axis -> no dedup:
-    # reduce 3+4=7, +2 divides = 9
-    assert billed(lambda: fnp.pad(a, (1, 1), mode="mean", stat_length=(3, 4))) == 9
+    # numel(out) = 12; both sides padded, stat_length (3,4) not full-axis ->
+    # no dedup: reduce 3+4=7, +2 divides = 9 stat extra; total 12 + 9 = 21
+    assert billed(lambda: fnp.pad(a, (1, 1), mode="mean", stat_length=(3, 4))) == 21
 
 
-def test_pad_one_sided_only_charges_padded_side():
+def test_pad_one_sided_bills_the_discarded_side_too():
     a = fnp.asarray(np.arange(10.0))
-    # pad after only, stat_length=2 -> charge only the after side: cross(1)*2 = 2
-    # (numpy also computes a discarded before-stat; we intentionally do not bill it)
-    assert billed(lambda: fnp.pad(a, (0, 3), mode="maximum", stat_length=2)) == 2
+    # numel(out) = 13; pad after only (before=0), stat_length=2 -> numpy's
+    # _get_stats ALWAYS computes a left-side reduction (even though before=0
+    # means its result is discarded into a width-0 output region), plus the
+    # right-side reduction the output actually uses: cross(1)*2 [left] +
+    # cross(1)*2 [right] = 4 stat extra; total 13 + 4 = 17. (Previously this
+    # test asserted the discarded left-side reduction was NOT billed -- that
+    # was an under-bill: numpy really performs that reduction.)
+    assert billed(lambda: fnp.pad(a, (0, 3), mode="maximum", stat_length=2)) == 17
 
 
 def test_pad_2d_mean_charged():
     a = fnp.asarray(np.arange(20.0).reshape(4, 5))
-    # axis0 (1,1) full-axis dedup: 5*4 reduce + 5 divides = 25
-    # axis1 (1,1) full-axis dedup: 4*5 reduce + 4 divides = 24 ; total 49
-    assert billed(lambda: fnp.pad(a, ((1, 1), (1, 1)), mode="mean")) == 49
+    # numel(out) = 6*7 = 42; stat extra: axis0 (1,1) full-axis dedup, cross=5
+    # (axis1's ORIGINAL size -- axis0 is processed first): 5*4 reduce + 5
+    # divides = 25; axis1 (1,1) full-axis dedup, cross=6 (axis0's ALREADY
+    # GROWN size 4+1+1=6, not its original 4 -- axis0 was padded first):
+    # 6*5 reduce + 6 divides = 36; stat extra 61; total 42 + 61 = 103
+    assert billed(lambda: fnp.pad(a, ((1, 1), (1, 1)), mode="mean")) == 103
 
 
-def test_pad_zero_width_free():
+def test_pad_zero_width_still_reduces_the_full_axis():
     a = fnp.asarray(np.arange(10.0))
-    assert billed(lambda: fnp.pad(a, (0, 0), mode="maximum")) == 0
+    # pad_width=(0,0) -> numel(out) == numel(in) == 10, nothing is actually
+    # placed in the output from this axis's stat -- but numpy's per-axis
+    # stat loop runs unconditionally on pad width (it iterates every axis
+    # and always computes at least the left-side reduction), so it still
+    # performs a full-axis maximum reduction here; the result is simply
+    # discarded into a width-0 output region. stat extra = cross(1)*10 = 10;
+    # total 10 + 10 = 20. (Previously this test asserted a (0, 0) axis was
+    # "free" -- that was an under-bill: numpy really performs the reduction.
+    # A wholly EMPTY input -- some axis length 0 -- is the one case that
+    # truly skips the reduction loop; see test_pad_empty_input_floors_at_one
+    # in test_triage_price_pins.py, which uses mode='constant'.)
+    assert billed(lambda: fnp.pad(a, (0, 0), mode="maximum")) == 20
 
 
 def test_pad_constant_malformed_pad_width_raises_numpy_error():
@@ -101,17 +132,18 @@ def test_pad_constant_malformed_pad_width_raises_numpy_error():
 def test_ravel_multi_index_charged():
     rows = fnp.asarray(np.arange(100) % 10)
     cols = fnp.asarray(np.arange(100) % 10)
-    # ndim=2, N=100 -> 2*(2-1)*100 = 200
-    assert billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10))) == 200
+    # numel(output) = N = 100 (Task 8: replaces the old 2*(ndim-1)*N formula)
+    assert billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10))) == 100
 
 
-def test_ravel_multi_index_clip_adds_n():
+def test_ravel_multi_index_mode_does_not_change_cost():
+    """Task 8: cost is numel(output) regardless of mode -- clip/wrap no
+    longer add +N (the old 2*(ndim-1)*N(+N for clip/wrap) formula did)."""
     rows = fnp.asarray(np.arange(100) % 10)
     cols = fnp.asarray(np.arange(100) % 10)
-    # 200 + N(=100) for clip = 300
     assert (
         billed(lambda: fnp.ravel_multi_index((rows, cols), (10, 10), mode="clip"))
-        == 300
+        == 100
     )
 
 
@@ -124,7 +156,8 @@ def test_trim_zeros_charged():
 def test_copyto_same_dtype_free():
     dst = fnp.zeros(100, dtype=np.float64)
     src = fnp.asarray(np.ones(100, dtype=np.float64))
-    assert billed(lambda: fnp.copyto(dst, src)) == 0
+    # Even same-dtype copy bills per element written: 100 elements at unit rate 1.0
+    assert billed(lambda: fnp.copyto(dst, src)) == 100
 
 
 def test_copyto_value_changing_cast_charged():
@@ -135,11 +168,10 @@ def test_copyto_value_changing_cast_charged():
 
 
 def test_copyto_lossless_widening_free():
-    # lossless widening (float32 -> float64) changes dtype but not values -> free,
-    # mirroring astype
+    # copyto bills per element written: 100 elements at unit rate 1.0
     dst = fnp.zeros(100, dtype=np.float64)
     src = fnp.asarray(np.ones(100, dtype=np.float32))
-    assert billed(lambda: fnp.copyto(dst, src)) == 0
+    assert billed(lambda: fnp.copyto(dst, src)) == 100
 
 
 def test_charged_modes_billed_under_production_weights():

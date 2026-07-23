@@ -131,6 +131,16 @@ class UnsupportedFunctionError(FlopscopeError):
         super().__init__(msg)
 
 
+class UnsupportedDtypeError(TypeError):
+    """An operation resolved to a dtype with no billing rate.
+
+    Raised when production dtype rates are active and the resolved
+    calculation dtype is a numeric type absent from the supported table
+    (a future dtype numpy or an extension package might introduce), or
+    when a complex-dtype call reaches an op marked complex-illegal.
+    """
+
+
 class UnsupportedReturnType(FlopscopeError):
     """Raised when an op's result cannot be serialized across the client/server boundary.
 

@@ -298,8 +298,11 @@ class TestFullLike:
 
 class TestIntegration:
     def test_eye_through_unary_pointwise(self):
+        # eye5 built outside the budget: eye is now billed (diagonal length,
+        # Task 4) too, so isolating it here keeps this assertion about exp's
+        # own symmetric-orbit cost only.
+        eye5 = fnp.eye(5)
         with flops.BudgetContext(flop_budget=10**6) as budget:
-            eye5 = fnp.eye(5)
             result = fnp.exp(eye5)
             assert isinstance(result, SymmetricTensor)
             assert result.symmetry == _s2()
@@ -360,14 +363,16 @@ class TestIntegration:
 
     def test_creation_ops_cost(self):
         with flops.BudgetContext(flop_budget=10**6) as budget:
-            fnp.eye(10)  # free
-            fnp.identity(10)  # free
+            fnp.eye(10)  # diagonal length = 10 (Task 4)
+            fnp.identity(10)  # diagonal length = 10 (Task 4)
             fnp.zeros((10, 10))  # free
-            fnp.ones((10, 10))  # free
+            fnp.ones((10, 10))  # numel(output)=100 (Task 4)
             fnp.full((10, 10), 3.14)  # numel(output)=100
-            fnp.diag(np.arange(10, dtype=float))  # numel(output)=100
-            fnp.diagflat(np.arange(5, dtype=float))  # numel(output)=25
-            assert budget.flops_used == 100 + 100 + 25
+            fnp.diag(
+                np.arange(10, dtype=float)
+            )  # 1-D construct: v.shape[0]=10 (Task 7)
+            fnp.diagflat(np.arange(5, dtype=float))  # numel(v)=5 (Task 7)
+            assert budget.flops_used == 10 + 10 + 100 + 100 + 10 + 5
 
 
 class TestSymmetryInferredSlot:
@@ -567,3 +572,42 @@ class TestMarkerNotPropagated:
         src = fnp.zeros((3, 3))
         plain = np.asarray(src)
         assert getattr(plain, "_symmetry_inferred", False) is False
+
+
+def test_high_rank_symmetric_reduction_falls_back_not_hangs():
+    """fnp.all over a rank-8 symmetric tensor must terminate quickly by falling
+    back to dense cost (with a warning), not hang enumerating S_8. Runs the op
+    in a bounded worker thread so a regression fails LOUDLY instead of being
+    force-exited green by the xdist watchdog."""
+    import threading
+    import warnings
+
+    import flopscope.numpy as fnp
+    from flopscope.errors import CostFallbackWarning
+
+    box: dict = {}
+
+    def op():
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                value = bool(fnp.all(fnp.full((2,) * 8, 1.0) == 1.0))
+            box["value"] = value
+            box["fallbacks"] = [
+                w for w in caught if issubclass(w.category, CostFallbackWarning)
+            ]
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = exc
+
+    t = threading.Thread(target=op, daemon=True)
+    t.start()
+    t.join(30.0)
+    assert not t.is_alive(), (
+        "rank-8 symmetric reduction did not finish in 30s — cost-model hang regression"
+    )
+    if "error" in box:
+        raise box["error"]
+    assert box["value"] is True
+    assert box["fallbacks"], (
+        "expected a CostFallbackWarning when the symmetry group is too large to enumerate"
+    )

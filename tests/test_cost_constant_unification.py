@@ -78,7 +78,9 @@ def test_pinv_lstsq_self_correct_no_double_count():
 def test_svd_family_packaged_weights_are_unity():
     load_weights()  # packaged table; linalg weights must now be 1.0
     A = fnp.asarray(np.random.rand(200, 20))
-    assert cost(lambda: fnp.linalg.svdvals(A)) == 176_000
+    # np.random.rand is float64 (dtype_rate 2.0); weight stays 1.0:
+    # 176_000 * 2.0 * 1.0 = 352_000
+    assert cost(lambda: fnp.linalg.svdvals(A)) == 352_000
 
 
 # ---------------- Task 2: direct solvers ----------------
@@ -138,7 +140,8 @@ def test_direct_family_packaged_weights_are_unity():
     load_weights()
     A = fnp.asarray(np.random.rand(100, 100))
     SPD = fnp.asarray(np.asarray(A) @ np.asarray(A).T + 100 * np.eye(100))
-    assert cost(lambda: fnp.linalg.cholesky(SPD)) == 100**3 // 3
+    # float64 (dtype_rate 2.0) * weight 1.0
+    assert cost(lambda: fnp.linalg.cholesky(SPD)) == 2 * (100**3 // 3)
 
 
 # ---------------- Task 4: eigen family (PROVISIONAL constants) ----------------
@@ -192,8 +195,10 @@ def test_multivariate_normal_default_size_is_one_sample():
 def test_multivariate_normal_packaged_weight_is_unity():
     load_weights()
     d = 30
-    # Weight for this composite op must stay 1.0 so charged == flop_cost
-    expected = svd_cost(d, d, with_vectors=True) + 2 * d * d + 16 * d
+    # Weight for this composite op must stay 1.0 so charged == flop_cost * dtype_rate.
+    # multivariate_normal always draws float64 output (no dtype= parameter),
+    # so dtype_rate is fixed at 2.0 regardless of the mean/cov input dtype.
+    expected = 2 * (svd_cost(d, d, with_vectors=True) + 2 * d * d + 16 * d)
     assert (
         cost(lambda: fnp.random.multivariate_normal(np.zeros(d), np.eye(d))) == expected
     )
@@ -371,17 +376,20 @@ def test_lexsort_bills_all_slices():
 def test_sort_complex_per_slice():
     from flopscope._flops import sort_cost
 
+    # unit dtype rates (no load_weights()); sort_complex's registry
+    # complex_factor is 2.0 (lexicographic compare touches both components),
+    # and that factor is math, not policy -- always active.
     a = fnp.asarray(np.random.rand(100, 70) + 1j * np.random.rand(100, 70))
-    assert cost(lambda: fnp.sort_complex(a)) == 100 * sort_cost(70)
+    assert cost(lambda: fnp.sort_complex(a)) == 2 * 100 * sort_cost(70)
     v = fnp.asarray(np.random.rand(1000) + 1j)
-    assert cost(lambda: fnp.sort_complex(v)) == sort_cost(1000)
+    assert cost(lambda: fnp.sort_complex(v)) == 2 * sort_cost(1000)
 
 
 def test_select_bills_broadcast_output():
     x = fnp.asarray(np.random.rand(1000))
     conds = [np.asarray(x) < 0.3, np.asarray(x) > 0.7]
-    # scalar choices used to collapse the charge; output is 1000 elements
-    assert cost(lambda: fnp.select(conds, [0.0, 1.0], default=0.5)) == 1000
+    # output is 1000 elements, scanned once per condition -> 1000 * len(conds)
+    assert cost(lambda: fnp.select(conds, [0.0, 1.0], default=0.5)) == 2000
 
 
 # ---------------- choice(p=) + diff prepend/append (audit-2 verified) ----------------
@@ -429,9 +437,11 @@ def test_stats_ppf_composites_packaged_weight_unity():
     x = fnp.asarray(np.random.rand(100) * 0.8 + 0.1)
     import flopscope.stats as fstats
 
-    assert cost(lambda: fstats.norm.ppf(x)) == 83 * 100
-    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 81 * 100
-    assert cost(lambda: fstats.lognorm.ppf(x, 0.5)) == 106 * 100
+    # stats._base coerces inputs to float64 (dtype_rate 2.0) before billing;
+    # weight stays 1.0, so charged = 2 * (per_elem * n).
+    assert cost(lambda: fstats.norm.ppf(x)) == 2 * 83 * 100
+    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 2 * 81 * 100
+    assert cost(lambda: fstats.lognorm.ppf(x, 0.5)) == 2 * 106 * 100
 
 
 # ---- stats gap fixes (audit-2 verified, PR fix/cost-model-gaps) ----
@@ -511,12 +521,12 @@ def test_delete_bills_numel_output():
 
 
 def test_copyto_cost_is_dtype_gated():
-    # same-dtype copy is pure data movement -> free
+    # copyto bills per element written, regardless of dtype conversion
     dst = np.zeros(10000)
-    assert cost(lambda: fnp.copyto(dst, 3.14)) == 0
+    assert cost(lambda: fnp.copyto(dst, 3.14)) == 10000
     dst2d = np.zeros((100, 100))
-    assert cost(lambda: fnp.copyto(dst2d, np.arange(100.0))) == 0
-    assert cost(lambda: fnp.copyto(dst, np.ones(10000))) == 0
+    assert cost(lambda: fnp.copyto(dst2d, np.arange(100.0))) == 10000
+    assert cost(lambda: fnp.copyto(dst, np.ones(10000))) == 10000
     # value-changing cast (float -> int) computes per element -> numel(dst)
     dsti = np.zeros(10000, dtype=np.int64)
     assert cost(lambda: fnp.copyto(dsti, np.ones(10000), casting="unsafe")) == 10000
@@ -565,21 +575,24 @@ def test_row_stack_bills_numel_output():
     assert cost(lambda: fnp.row_stack([v, w])) == cost(lambda: fnp.vstack([v, w]))
 
 
-def test_tril_bills_numel_output():
+def test_tril_bills_kept_triangle():
     m = np.ones((100, 100))
-    # weight from spec: 1.0 (materializing-copy tier per triu spec)
-    assert cost(lambda: fnp.tril(m)) == 10_000
-    # batch dims billed
+    # Task 7: kept-triangle count via _triangle_kept, not numel(output);
+    # k=0 on a square 100x100 keeps the lower triangle incl. diagonal =
+    # 100*101/2 = 5050. weight 1.0 (materializing-copy tier per triu spec).
+    assert cost(lambda: fnp.tril(m)) == 5050
+    # batch dims multiply the per-matrix count in
     ms = np.ones((50, 100, 100))
-    assert cost(lambda: fnp.tril(ms)) == 500_000
+    assert cost(lambda: fnp.tril(ms)) == 50 * 5050
 
 
-def test_triu_bills_numel_output():
+def test_triu_bills_kept_triangle():
     m = np.ones((100, 100))
-    assert cost(lambda: fnp.triu(m)) == 10_000
-    # batch dims billed
+    # k=0 on a square 100x100 keeps the upper triangle incl. diagonal = 5050.
+    assert cost(lambda: fnp.triu(m)) == 5050
+    # batch dims multiply the per-matrix count in
     ms = np.ones((50, 100, 100))
-    assert cost(lambda: fnp.triu(ms)) == 500_000
+    assert cost(lambda: fnp.triu(ms)) == 50 * 5050
 
 
 def test_put_bills_numel_indices():
@@ -590,12 +603,14 @@ def test_put_bills_numel_indices():
     assert cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap")) == 1000
     # must NOT scale with destination size (was: a.size; now: ind.size)
     assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 7
-    # Data-movement free tier: with packaged weights loaded, put bills 0
+    # Scatter tier (weight 1.0): with packaged weights loaded, put bills
+    # numel(indices) * dtype_rate(a's own dtype, float64 here -> 2.0) * 1.0.
     try:
         load_weights()
-        assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 0
+        assert cost(lambda: fnp.put(np.zeros(10000), np.arange(7), np.ones(7))) == 14
         assert (
-            cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap")) == 0
+            cost(lambda: fnp.put(np.zeros(4), np.arange(1000), 1.0, mode="wrap"))
+            == 2000
         )
     finally:
         reset_weights()
@@ -623,17 +638,18 @@ def test_put_along_axis_bills_scattered_elements():
         )
         == 1_000_000
     )
-    # Data-movement free tier: with packaged weights loaded, put_along_axis bills 0
+    # Scatter tier (weight 1.0): with packaged weights loaded, put_along_axis
+    # bills elements-scattered * dtype_rate(arr's own dtype, float64 -> 2.0) * 1.0.
     try:
         load_weights()
-        assert cost(lambda: fnp.put_along_axis(dest, np.arange(5), np.ones(5), 0)) == 0
+        assert cost(lambda: fnp.put_along_axis(dest, np.arange(5), np.ones(5), 0)) == 10
         assert (
             cost(
                 lambda: fnp.put_along_axis(
                     dest2d, np.zeros((1, 5), dtype=int), 1.0, axis=1
                 )
             )
-            == 0
+            == 1000
         )
         assert (
             cost(
@@ -641,7 +657,7 @@ def test_put_along_axis_bills_scattered_elements():
                     dest_small, np.zeros(1_000_000, dtype=np.int64), 1.0, 0
                 )
             )
-            == 0
+            == 2_000_000
         )
     finally:
         reset_weights()
@@ -853,12 +869,14 @@ def test_stats_gap_fixes_packaged_weight_unity():
     xpos100 = fnp.asarray(np.abs(np.random.rand(100)) + 0.1)
     u100 = fnp.asarray(np.random.rand(100))
 
-    assert cost(lambda: fstats.laplace.cdf(x100)) == 40 * 100
-    assert cost(lambda: fstats.laplace.ppf(q100)) == 51 * 100
-    assert cost(lambda: fstats.lognorm.pdf(xpos100, 0.5)) == 62 * 100
-    assert cost(lambda: fstats.lognorm.cdf(xpos100, 0.5)) == 70 * 100
-    assert cost(lambda: fstats.uniform.cdf(u100)) == 4 * 100
-    assert cost(lambda: fstats.cauchy.pdf(x100)) == 6 * 100
+    # stats._base coerces inputs to float64 (dtype_rate 2.0) before billing;
+    # weight stays 1.0, so charged = 2 * (per_elem * n).
+    assert cost(lambda: fstats.laplace.cdf(x100)) == 2 * 40 * 100
+    assert cost(lambda: fstats.laplace.ppf(q100)) == 2 * 51 * 100
+    assert cost(lambda: fstats.lognorm.pdf(xpos100, 0.5)) == 2 * 62 * 100
+    assert cost(lambda: fstats.lognorm.cdf(xpos100, 0.5)) == 2 * 70 * 100
+    assert cost(lambda: fstats.uniform.cdf(u100)) == 2 * 4 * 100
+    assert cost(lambda: fstats.cauchy.pdf(x100)) == 2 * 6 * 100
 
 
 # ---------------- reductions & predicates (audit-2 verified) ----------------
@@ -1218,6 +1236,9 @@ def test_choice_replace_false_with_p_uses_sort_cost():
 # Task 1: stats composite family (13 ops) — PR fix/cost-model-gaps
 # Each op: cost_per_elem moved from 1 to K; weight 16.0 → 1.0.
 # K derived from structural FMA=2 count (transcendental = 16 FLOPs).
+# stats._base coerces every input to float64 before billing, so with
+# load_weights() active (dtype_rate 2.0) charged = 2 * per_elem * n; weight
+# itself stays 1.0.
 # ---------------------------------------------------------------------------
 
 
@@ -1228,7 +1249,7 @@ def test_stats_expon_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 3.0)
-        assert cost(lambda: fstats.expon.pdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.expon.pdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1240,7 +1261,7 @@ def test_stats_expon_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 3.0)
-        assert cost(lambda: fstats.expon.cdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.expon.cdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1252,7 +1273,7 @@ def test_stats_expon_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.expon.ppf(q)) == 27 * 1000
+        assert cost(lambda: fstats.expon.ppf(q)) == 2 * 27 * 1000
     finally:
         reset_weights()
 
@@ -1264,7 +1285,7 @@ def test_stats_cauchy_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.cauchy.cdf(x)) == 20 * 1000
+        assert cost(lambda: fstats.cauchy.cdf(x)) == 2 * 20 * 1000
     finally:
         reset_weights()
 
@@ -1276,7 +1297,7 @@ def test_stats_cauchy_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.cauchy.ppf(q)) == 28 * 1000
+        assert cost(lambda: fstats.cauchy.ppf(q)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1288,7 +1309,7 @@ def test_stats_logistic_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.logistic.pdf(x)) == 23 * 1000
+        assert cost(lambda: fstats.logistic.pdf(x)) == 2 * 23 * 1000
     finally:
         reset_weights()
 
@@ -1300,7 +1321,7 @@ def test_stats_logistic_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.logistic.cdf(x)) == 21 * 1000
+        assert cost(lambda: fstats.logistic.cdf(x)) == 2 * 21 * 1000
     finally:
         reset_weights()
 
@@ -1312,7 +1333,7 @@ def test_stats_logistic_ppf_composite():
         import flopscope.stats as fstats
 
         q = fnp.asarray(np.random.rand(1000) * 0.98 + 0.01)
-        assert cost(lambda: fstats.logistic.ppf(q)) == 28 * 1000
+        assert cost(lambda: fstats.logistic.ppf(q)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1324,7 +1345,7 @@ def test_stats_laplace_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.linspace(-3.0, 3.0, 1000))
-        assert cost(lambda: fstats.laplace.pdf(x)) == 22 * 1000
+        assert cost(lambda: fstats.laplace.pdf(x)) == 2 * 22 * 1000
     finally:
         reset_weights()
 
@@ -1336,7 +1357,7 @@ def test_stats_truncnorm_pdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 28 * 1000
+        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 2 * 28 * 1000
     finally:
         reset_weights()
 
@@ -1348,7 +1369,7 @@ def test_stats_truncnorm_cdf_composite():
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 51 * 1000
+        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 2 * 51 * 1000
     finally:
         reset_weights()
 
@@ -1363,17 +1384,18 @@ def test_stats_composite_family_packaged_weight_unity():
     xl = fnp.asarray(np.linspace(-3.0, 3.0, 100))
     xt = fnp.asarray(np.random.rand(100) * 0.6 + 0.2)
 
-    assert cost(lambda: fstats.expon.pdf(x)) == 22 * 100
-    assert cost(lambda: fstats.expon.cdf(x)) == 22 * 100
-    assert cost(lambda: fstats.expon.ppf(q)) == 27 * 100
-    assert cost(lambda: fstats.cauchy.cdf(xl)) == 20 * 100
-    assert cost(lambda: fstats.cauchy.ppf(q)) == 28 * 100
-    assert cost(lambda: fstats.logistic.pdf(xl)) == 23 * 100
-    assert cost(lambda: fstats.logistic.cdf(xl)) == 21 * 100
-    assert cost(lambda: fstats.logistic.ppf(q)) == 28 * 100
-    assert cost(lambda: fstats.laplace.pdf(xl)) == 22 * 100
-    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 28 * 100
-    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 51 * 100
+    # every input is float64 (dtype_rate 2.0); weight stays 1.0.
+    assert cost(lambda: fstats.expon.pdf(x)) == 2 * 22 * 100
+    assert cost(lambda: fstats.expon.cdf(x)) == 2 * 22 * 100
+    assert cost(lambda: fstats.expon.ppf(q)) == 2 * 27 * 100
+    assert cost(lambda: fstats.cauchy.cdf(xl)) == 2 * 20 * 100
+    assert cost(lambda: fstats.cauchy.ppf(q)) == 2 * 28 * 100
+    assert cost(lambda: fstats.logistic.pdf(xl)) == 2 * 23 * 100
+    assert cost(lambda: fstats.logistic.cdf(xl)) == 2 * 21 * 100
+    assert cost(lambda: fstats.logistic.ppf(q)) == 2 * 28 * 100
+    assert cost(lambda: fstats.laplace.pdf(xl)) == 2 * 22 * 100
+    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 2 * 28 * 100
+    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 2 * 51 * 100
 
 
 # ---------------- Task 2: fft freq grids + random samplers ----------------
@@ -1403,27 +1425,33 @@ _bits800 = fnp.asarray(np.ones(800, dtype=np.uint8))
 
 
 def test_diag_diagonal_view_vs_copy():
-    """diagonal is a numpy view → 0 FLOPs; diag is a copy → min(m,n) or n^2."""
+    """diagonal is always a numpy view → 0 FLOPs; diag's 2-D extract is ALSO
+    a view (Task 7) → 0 FLOPs; diag's 1-D construct writes v.shape[0] values."""
     # numpy.diagonal returns a read-only VIEW → 0 FLOPs
     assert cost(lambda: fnp.diagonal(_A100)) == 0
     assert cost(lambda: fnp.linalg.diagonal(_A100)) == 0
-    # diag extract (2-D input): copies min(m,n) elements → min(100,100)=100 at w=1.0
-    assert cost(lambda: fnp.diag(_A100)) == 100
-    # diag construct (1-D input): materialises n^2 output → 50^2=2500 at w=1.0
-    assert cost(lambda: fnp.diag(_v50)) == 2500
+    # diag extract (2-D input): numpy.diag returns a VIEW → 0 FLOPs
+    assert cost(lambda: fnp.diag(_A100)) == 0
+    # diag construct (1-D input): one write per input value → 50 at w=1.0
+    assert cost(lambda: fnp.diag(_v50)) == 50
 
 
 def test_gather_tier_consistency():
-    """Data-movement free tier: take_along_axis/put/put_along_axis/bmat/fromiter bill 0.
-    argwhere remains at weight 1.0 (search op, not pure data-movement)."""
+    """take_along_axis is back in the gather tier (weight 4.0); bmat/fromiter
+    are in the array-assembly/replication tier (weight 1.0). argwhere remains
+    at weight 1.0 (search op, not pure data-movement)."""
     load_weights()
     try:
-        # take_along_axis: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.take_along_axis(_A100, _idx100, axis=1)) == 0
-        # bmat: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.bmat([[_A_bmat, _A_bmat], [_A_bmat, _A_bmat]])) == 0
-        # fromiter: data-movement free tier → weight=0.0 → 0
-        assert cost(lambda: fnp.fromiter(range(100), dtype=float)) == 0
+        # take_along_axis: gather tier → weight=4.0 → numel(output)=100 (result
+        # shape (100,1)) * dtype_rate(_A100 is float64 -> 2.0) * 4.0 = 800
+        assert cost(lambda: fnp.take_along_axis(_A100, _idx100, axis=1)) == 800
+        # bmat: weight=1.0, dtype-aware since the final-review fix (reads the
+        # promoted output dtype via set_dtypes() instead of declaring
+        # dtypes=()). Nested 2x2 blocks of a (2,2) float64 matrix -> output
+        # (4,4)=16 * dtype_rate(float64 -> 2.0) * 1.0 = 32.
+        assert cost(lambda: fnp.bmat([[_A_bmat, _A_bmat], [_A_bmat, _A_bmat]])) == 32
+        # fromiter: weight=1.0 -> numel(output)=100 * dtype_rate(float64 -> 2.0) = 200
+        assert cost(lambda: fnp.fromiter(range(100), dtype=float)) == 200
         # argwhere: search op, weight 1.0 → numel(input)=100 → 100
         assert cost(lambda: fnp.argwhere(_z100)) == 100
     finally:
@@ -1447,12 +1475,12 @@ def test_packbits_formula():
 
 
 def test_mask_indices_formula():
-    """mask_indices: 2*n^2 + 8*k; n=50, triu → k=1275 pairs."""
+    """mask_indices: numel of returned index arrays (= 2*k); n=50, triu -> k=1275 pairs."""
     # np.triu of 50x50: upper triangle = 50*51//2 = 1275 index pairs
-    # formula: 2*50^2 + 8*1275 = 5000 + 10200 = 15200; weight=1.0 after fix
+    # formula (Task 8): 2*k = 2550; weight=1.0, dtype-neutral
     n = 50
     k = n * (n + 1) // 2  # 1275
-    expected = 2 * n * n + 8 * k  # 15200
+    expected = 2 * k  # 2550
     assert cost(lambda: fnp.mask_indices(n, np.triu)) == expected
 
 
@@ -1493,12 +1521,13 @@ def test_cov_corrcoef_centering():
 
 
 def test_unwrap_passes():
-    """unwrap: 11 one-FLOP ufunc passes per element
-    (diff, +period/2, mod, -period/2, ==low, >0, &, sub, abs, <discont, cumsum)
-    Two 3-arg where (select) passes are now free (weight=1.0→free), charged as 11*N.
+    """unwrap: 13 one-FLOP ufunc passes per element
+    (diff, +period/2, mod, -period/2, ==low, >0, &, 2x where-select, sub, abs,
+    <discont, cumsum). The two 3-arg where (select) passes are charged like
+    every other pass (see _unwrap.py:unwrap_cost), so the total is 13*N.
     """
     v = fnp.asarray(np.random.rand(1000))
-    assert cost(lambda: fnp.unwrap(v)) == 11 * 1000
+    assert cost(lambda: fnp.unwrap(v)) == 13 * 1000
 
 
 def test_poly_1d_exact_convolution():

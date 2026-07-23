@@ -2,6 +2,7 @@
 
 import functools
 import heapq
+import importlib
 import math
 import time
 from collections import deque
@@ -11,10 +12,18 @@ from random import choices as random_choices
 from random import seed as random_seed
 from typing import Any
 
-from . import _paths as paths
 from ._helpers import compute_size_by_dict
 from ._subgraph_symmetry import SubgraphSymmetryOracle
 from ._typing import ArrayIndexType, ArrayType, PathType
+
+# Bind the on-disk sibling ``_paths`` explicitly.  A ``from . import _paths``
+# would be intercepted by the package's PEP 562 ``__getattr__`` (which maps the
+# ``_paths`` attribute to *upstream* opt_einsum for the vendored test suite),
+# silently binding upstream ``paths`` — whose search functions reject this
+# fork's ``symmetry_oracle``/``ssa_to_subset`` kwargs.  ``import_module``
+# resolves through ``sys.modules`` / the import machinery and does not consult
+# the parent package's ``__getattr__``, so it always yields the real sibling.
+paths = importlib.import_module("flopscope._opt_einsum._paths")
 
 __all__ = ["RandomGreedy", "random_greedy", "random_greedy_128"]
 

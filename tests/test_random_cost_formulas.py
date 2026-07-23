@@ -121,6 +121,54 @@ class TestChoiceCost:
         cost = formula((16, 5, False), {}, result)
         assert cost == 16
 
+    def test_2d_pool_axis_kwarg_replace_true_with_p(self):
+        from flopscope.numpy.random._cost_formulas import COST_FORMULAS
+
+        formula = COST_FORMULAS["choice_cost"]
+        pool = np.arange(16).reshape(2, 8)
+        p = np.ones(8) / 8
+        result = np.zeros(3)
+        # Generator.choice samples along `axis`: n = shape[1] = 8, NOT shape[0].
+        # base 3 + CDF build 3*8 + 3 draws * ceil(log2(8)) = 3 + 24 + 9 = 36.
+        cost = formula((pool,), {"size": 3, "replace": True, "p": p, "axis": 1}, result)
+        assert cost == 3 + 3 * 8 + 3 * _ceil_log2(8)
+        assert cost == 36
+
+    def test_2d_pool_axis_positional_replace_true_with_p(self):
+        from flopscope.numpy.random._cost_formulas import COST_FORMULAS
+
+        formula = COST_FORMULAS["choice_cost"]
+        pool = np.arange(16).reshape(2, 8)
+        p = np.ones(8) / 8
+        result = np.zeros(3)
+        # axis as the 5th positional per Generator.choice's signature:
+        # choice(a, size, replace, p, axis, shuffle).
+        cost = formula((pool, 3, True, p, 1), {}, result)
+        assert cost == 3 + 3 * 8 + 3 * _ceil_log2(8)
+
+    def test_2d_pool_axis_kwarg_replace_false(self):
+        from flopscope.numpy.random._cost_formulas import COST_FORMULAS
+
+        formula = COST_FORMULAS["choice_cost"]
+        pool = np.arange(16).reshape(2, 8)
+        result = np.zeros(3)
+        # replace=False, p=None: Fisher-Yates/Floyd over the sampled axis
+        # charges n = shape[1] = 8, not shape[0] = 2.
+        cost = formula((pool,), {"size": 3, "replace": False, "axis": 1}, result)
+        assert cost == 8
+
+    def test_2d_pool_default_axis_charges_first_dim(self):
+        from flopscope.numpy.random._cost_formulas import COST_FORMULAS
+
+        formula = COST_FORMULAS["choice_cost"]
+        pool = np.arange(16).reshape(2, 8)
+        result = np.zeros(3)
+        # No axis argument -> axis=0 default. Pins the legacy signatures
+        # (RandomState.choice / module-level random.choice have no axis and
+        # require 1-D pools): n = shape[0] exactly as before.
+        cost = formula((pool,), {"size": 3, "replace": False}, result)
+        assert cost == 2
+
 
 class TestRegistry:
     def test_all_named_formulas_present(self):

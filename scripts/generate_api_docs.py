@@ -46,7 +46,6 @@ DOCS = ROOT / "docs"
 API_DIR = DOCS / "api"
 REF_DIR = DOCS / "reference"
 WEIGHTS_CSV_PATH = ROOT / "src" / "flopscope" / "data" / "weights.csv"
-DEFAULT_WEIGHTS_PATH = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
 # Published FLOP-counting-model page, generated from docs/reference/cost-model.md.
 COST_MODEL_PAGE = (
     WEBSITE / "content" / "docs" / "understanding" / "flop-counting-model.mdx"
@@ -272,9 +271,9 @@ GENERATED_PAGES: dict[str, dict] = {
             | Operation | Cost Formula |
             |-----------|-------------|
             | `polyval` | $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2) |
-            | `polyadd`, `polysub` | $\\max(n_1, n_2)$ |
+            | `polyadd`, `polysub` | $\\text{numel}(\\text{polyadd}(a_1, a_2))$ (broadcast-aligned; $\\max(n_1, n_2)$ for 1-D) |
             | `polymul`, `polydiv` | $n_1 \\cdot n_2$ |
-            | `polyfit` | $2m \\cdot (\\text{deg}+1)^2$ |
+            | `polyfit` | $2m \\cdot (\\text{deg}+1)^2 \\cdot \\text{ncols}$ |
             | `poly` | $n^2$ |
             | `roots` | $10n^3$ (companion matrix eigendecomposition) |
             | `polyder`, `polyint` | $n$ |
@@ -480,7 +479,7 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         "op_factor * product of all index dims",
         r"$\text{op\_factor} \cdot \prod_i d_i$",
     ),
-    "einsum_path": ("0 (planning only)", "$0$"),
+    "einsum_path": ("1 (planning only - path search, no numeric output)", "$1$"),
     "dot": (
         "2 * m * k * n - m * n (FMA=2)",
         r"$2 \cdot m \cdot k \cdot n - m \cdot n$",
@@ -489,24 +488,45 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         "2 * m * k * n - m * n (FMA=2)",
         r"$2 \cdot m \cdot k \cdot n - m \cdot n$",
     ),
-    "inner": ("n", "$n$"),
+    "inner": ("(2*K - 1) * M", r"$(2K - 1) \cdot M$"),
     "outer": ("m * n", r"$m \cdot n$"),
-    "tensordot": ("product of contracted dims * output size", r"$\prod_i d_i$"),
-    "vdot": ("n", "$n$"),
+    "tensordot": (
+        "2*K*out - out (FMA=2)",
+        r"$2 \cdot K \cdot \text{out} - \text{out}$",
+    ),
+    "vdot": ("2*n - 1", r"$2n - 1$"),
     "vecdot": ("n", "$n$"),
     "kron": ("m1*m2 * n1*n2", r"$m_1 m_2 \cdot n_1 n_2$"),
-    "clip": ("numel(input)", r"$\text{numel}(\text{input})$"),
+    "clip": (
+        "max(n_bounds, 1) * numel(output)",
+        r"$\max(n_{\text{bounds}}, 1) \cdot \text{numel}(\text{output})$",
+    ),
     "cross": ("numel(output)", r"$\text{numel}(\text{output})$"),
-    "diff": ("numel(input)", r"$\text{numel}(\text{input})$"),
-    "ediff1d": ("numel(input)", r"$\text{numel}(\text{input})$"),
-    "gradient": ("numel(input)", r"$\text{numel}(\text{input})$"),
-    "convolve": ("n * m", r"$n \cdot m$"),
-    "correlate": ("n * m", r"$n \cdot m$"),
-    "corrcoef": ("n^2 * m", r"$n^2 \cdot m$"),
-    "cov": ("n^2 * m", r"$n^2 \cdot m$"),
-    "interp": ("n * log(m)", r"$n \cdot \log m$"),
-    "trapezoid": ("numel(input)", r"$\text{numel}(\text{input})$"),
-    "trapz": ("numel(input)", r"$\text{numel}(\text{input})$"),
+    "diff": (
+        "prod(other axes) * (n*L - n*(n+1)//2) along the diff axis (n = order)",
+        r"$\prod_{\text{other}} (nL - n(n+1)/2)$",
+    ),
+    "ediff1d": (
+        "numel(input) - 1 (+ to_begin/to_end extras)",
+        r"$\text{numel}(\text{input}) - 1$",
+    ),
+    "gradient": (
+        "sum over axes of 2*S*(L-2)//L (uniform); + surcharge for coordinate-array spacing",
+        r"$\sum_{\text{ax}} 2S(L-2)/L$",
+    ),
+    "convolve": (
+        "full: 2*n*m - n - m; valid: (2*min - 1)*(max - min + 1); same: variable-length dot sum",
+        r"varies (per mode)",
+    ),
+    "correlate": (
+        "full: 2*n*m - n - m + 1; valid: (2*min - 1)*(max - min + 1); same: variable-length dot sum",
+        r"varies (per mode)",
+    ),
+    "corrcoef": ("(2*f^2*s + 2*f*s) + 2*f^2 + f", r"$2f^2 s + 2fs + 2f^2 + f$"),
+    "cov": ("2*f^2*s + 2*f*s", r"$2f^2 s + 2fs$"),
+    "interp": ("3*n + n*ceil(log2(len(xp)))", r"$3n + n \lceil\log_2 |xp|\rceil$"),
+    "trapezoid": ("4*numel", r"$4 \cdot \text{numel}$"),
+    "trapz": ("4*numel", r"$4 \cdot \text{numel}$"),
     "linalg.svd": ("m * n * k", r"$m \cdot n \cdot k$"),
     "linalg.svdvals": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
     "linalg.cholesky": ("n^3", r"$n^3$"),
@@ -551,20 +571,29 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "fft.hfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
     "fft.ihfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
     "polyval": ("2 * m * deg (FMA=2)", r"$2 \cdot m \cdot \text{deg}$"),
-    "polyadd": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
-    "polysub": ("max(n1, n2)", r"$\max(n_1, n_2)$"),
+    "polyadd": (
+        "size of broadcast-aligned result (numpy.polyadd(a1, a2).size; = max(n1, n2) for 1-D)",
+        r"$\text{numel}(\text{polyadd}(a_1, a_2))$",
+    ),
+    "polysub": (
+        "size of broadcast-aligned result (numpy.polysub(a1, a2).size; = max(n1, n2) for 1-D)",
+        r"$\text{numel}(\text{polysub}(a_1, a_2))$",
+    ),
     "polyder": ("n", "$n$"),
     "polyint": ("n", "$n$"),
     "polymul": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polydiv": ("n1 * n2", r"$n_1 \cdot n_2$"),
-    "polyfit": ("2m * (deg+1)^2", r"$2m \cdot (\text{deg}+1)^2$"),
+    "polyfit": (
+        "m*deg + lstsq_cost(m, deg+1, ncols)",
+        r"$m \cdot \text{deg} + \text{lstsq\_cost}(m, \text{deg}+1, \text{ncols})$",
+    ),
     "poly": ("n^2", r"$n^2$"),
     "roots": ("10n^3", r"$10n^3$"),
-    "bartlett": ("n", "$n$"),
-    "blackman": ("3n", "$3n$"),
-    "hamming": ("n", "$n$"),
-    "hanning": ("n", "$n$"),
-    "kaiser": ("3n", "$3n$"),
+    "bartlett": ("4n", "$4n$"),
+    "blackman": ("40n", "$40n$"),
+    "hamming": ("18n", "$18n$"),
+    "hanning": ("18n", "$18n$"),
+    "kaiser": ("23n", "$23n$"),
     "unwrap": ("numel(input)", r"$\text{numel}(\text{input})$"),
     # stats distributions (not in numpy registry — these are scipy-compatible)
     "stats.norm.pdf": ("10n", r"$10n$"),
@@ -630,6 +659,13 @@ class OperationDocRecord:
     notes: str
     aliases: list[str]
     signature: str
+    # Overrides the detail-page title when the op has no `fnp.<name>` call form
+    # (e.g. method-surface ops like `getitem`, whose only invocation is
+    # `arr[key]` syntax). Left None for ordinary ops so the website's
+    # `display_name ?? import_path ?? flopscope_ref` fallback resolves to
+    # `flopscope_ref` as before; a method-surface op sets it so the title does
+    # not read as the non-existent `fnp.getitem`.
+    display_name: str | None = None
     summary: str = ""
     provenance_label: str = ""
     provenance_url: str = ""
@@ -2648,6 +2684,7 @@ def _build_operation_record(
         notes=notes,
         aliases=aliases,
         signature=signature,
+        display_name=METHOD_SURFACE_SIGNATURES.get(name),
         summary=parsed_doc.summary,
         provenance_label=provenance_label_for_operation(module),
         provenance_url=docs_url_for_operation(name, module),
@@ -2668,6 +2705,25 @@ def _build_operation_record(
     )
 
 
+# Registry ops whose live implementation is a dunder method on FlopscopeArray
+# (e.g. "getitem" bills ``arr[key]`` -> ``FlopscopeArray.__getitem__``), not a
+# module-level ``fnp.<name>`` callable. ``getattr(fnp, name)`` on one of these
+# hits flopscope.numpy's registry-aware ``__getattr__`` (the op IS registered,
+# just not as a module attribute) and raises -- so resolve_live_objects maps
+# them explicitly instead of falling through to the generic branch.
+METHOD_SURFACE_OPS: dict[str, str] = {
+    "getitem": "__getitem__",
+}
+
+# Hand-written call signatures for METHOD_SURFACE_OPS: ``inspect.signature``
+# on the raw dunder would render the ``self`` parameter (``(self, key)``)
+# under the misleading ``fnp.<name>(...)`` call form nothing actually uses --
+# participants spell this ``arr[key]``, never ``fnp.getitem(arr, key)``.
+METHOD_SURFACE_SIGNATURES: dict[str, str] = {
+    "getitem": "arr[key]",
+}
+
+
 def resolve_live_objects(name: str, module: str) -> tuple[object, object | None]:
     """Resolve the live flopscope object and its upstream NumPy/SciPy counterpart."""
     import numpy as np
@@ -2675,6 +2731,16 @@ def resolve_live_objects(name: str, module: str) -> tuple[object, object | None]
     flops = _import_local_flopscope_module("flopscope")
     fnp = _import_local_flopscope_module("flopscope.numpy")
 
+    if name in METHOD_SURFACE_OPS:
+        dunder = METHOD_SURFACE_OPS[name]
+        ndarray_module = _import_local_flopscope_module("flopscope._ndarray")
+        flopscope_method = getattr(ndarray_module.FlopscopeArray, dunder)
+        # Upstream's slot-wrapper docstring is a content-free stub ("Return
+        # self[key]."), so it is deliberately left unresolved (None) rather
+        # than returned here: build_structured_doc's docstring fallback
+        # (upstream-first, "or" flopscope) would otherwise let that stub
+        # shadow the real, billing-relevant flopscope docstring.
+        return flopscope_method, None
     if module == "numpy.linalg":
         short_name = name.removeprefix("linalg.")
         return getattr(fnp.linalg, short_name), getattr(np.linalg, short_name, None)
@@ -2883,12 +2949,15 @@ def build_structured_doc(
     if parsed.examples:
         example = derive_example_from_upstream(parsed.examples[0].code)
 
-    try:
-        signature = _sanitize_signature(
-            f"{flopscope_ref(name, module)}{inspect.signature(flopscope_obj)}"
-        )
-    except (TypeError, ValueError):
-        signature = f"{flopscope_ref(name, module)}(...)"
+    if name in METHOD_SURFACE_SIGNATURES:
+        signature = METHOD_SURFACE_SIGNATURES[name]
+    else:
+        try:
+            signature = _sanitize_signature(
+                f"{flopscope_ref(name, module)}{inspect.signature(flopscope_obj)}"
+            )
+        except (TypeError, ValueError):
+            signature = f"{flopscope_ref(name, module)}(...)"
 
     flopscope_source_url = _repo_source_url(
         flopscope_obj,
@@ -3313,18 +3382,6 @@ def resolve_canonical_name(name: str, alias_map: dict[str, str]) -> str:
     return current
 
 
-def load_operation_weights() -> dict[str, float]:
-    """Load per-operation BILLED weights for docs manifests.
-
-    Source of truth is default_weights.json (what _weights.py bills), not the
-    frozen empirical weights.json — so ops.json can never disagree with billing.
-    """
-    if not DEFAULT_WEIGHTS_PATH.exists():
-        return {}
-    raw = json.loads(DEFAULT_WEIGHTS_PATH.read_text())
-    return raw.get("weights", {})
-
-
 def example_file_for(name: str, example_root: Path) -> Path:
     """Return the owned-example path for a canonical operation name."""
     return example_root / f"{name}.mdx"
@@ -3452,28 +3509,25 @@ def build_alias_groups(
 def resolve_operation_weight(
     name: str,
     registry: dict[str, dict],
-    weights: dict[str, float],
     alias_map: dict[str, str],
-    alias_groups: dict[str, list[str]] | None = None,
 ) -> float:
-    """Resolve a stable weight for canonical and alias rows."""
+    """Resolve the displayed weight to exactly what billing applies.
+
+    Delegates to ``flopscope._weights.get_weight`` -- the same multiplier
+    ``BudgetContext.deduct`` uses, including its fallback chain
+    (``random.Generator.*``/``RandomState.*`` -> legacy module weight; numpy
+    ufunc aliases -> canonical) -- so ops.json's ``weight`` column can never
+    disagree with billing. A raw ``default_weights.json`` lookup missed that
+    chain and showed 1.0 for e.g. ``random.Generator.normal`` (billed 16.0).
+    Free ops bill nothing regardless of nominal weight, so they display 0.0.
+    """
+    from flopscope._weights import get_weight
+
     canonical = resolve_canonical_name(name, alias_map)
-    if canonical in weights:
-        return weights[canonical]
-
-    aliases = alias_groups.get(canonical, []) if alias_groups is not None else []
-    for alias in aliases:
-        if alias in weights:
-            return weights[alias]
-
-    if canonical not in registry and name in weights:
-        return weights[name]
-
     info = registry.get(canonical) or registry.get(name)
     if info is not None and info.get("category") == "free":
         return 0.0
-
-    return 1.0
+    return get_weight(canonical)
 
 
 def build_operation_doc_records(
@@ -3482,7 +3536,6 @@ def build_operation_doc_records(
     """Build canonical operation doc records for supported operations."""
     alias_map = load_alias_map(registry)
     alias_groups = build_alias_groups(registry, alias_map)
-    weights = load_operation_weights()
     supported_ops = {
         name
         for name, info in registry.items()
@@ -3501,9 +3554,7 @@ def build_operation_doc_records(
         weight = resolve_operation_weight(
             name=name,
             registry=registry,
-            weights=weights,
             alias_map=alias_map,
-            alias_groups=alias_groups,
         )
 
         module = info["module"]
@@ -4082,7 +4133,12 @@ def _public_api_payload_from_operation(record: OperationDocRecord) -> dict[str, 
     payload["canonical_path"] = payload["href"]
     payload["legacy_href"] = detail_href_for_slug(record.slug)
     payload["import_path"] = import_path
-    payload["display_name"] = import_path
+    # A method-surface op (e.g. getitem) has no `flopscope.numpy.<name>(...)`
+    # call form, so its detail-page title uses the record's own display_name
+    # (e.g. `arr[key]`) instead of the dotted import path — which would read as
+    # a non-existent callable. Ordinary ops leave display_name None and keep the
+    # import-path title.
+    payload["display_name"] = record.display_name or import_path
     payload["kind"] = "function"
     payload["operation"] = {
         "name": record.name,
@@ -4399,9 +4455,7 @@ def generate_audit_page(registry: dict[str, dict]) -> None:
 
 def generate_ops_json(registry: dict[str, dict]) -> None:
     """Generate website/public/ops.json — machine-readable operation manifest."""
-    weights = load_operation_weights()
     alias_map = load_alias_map(registry)
-    alias_groups = build_alias_groups(registry, alias_map)
 
     ops = []
     for name, info in sorted(registry.items()):
@@ -4424,9 +4478,7 @@ def generate_ops_json(registry: dict[str, dict]) -> None:
                 "weight": resolve_operation_weight(
                     name=name,
                     registry=registry,
-                    weights=weights,
                     alias_map=alias_map,
-                    alias_groups=alias_groups,
                 ),
             }
         )

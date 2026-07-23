@@ -49,6 +49,10 @@ def test_ufunc_aliases_resolve_to_canonical_weight():
 def test_ufunc_aliases_bill_identically_to_canonical():
     load_weights()
     v = fnp.asarray(np.random.rand(100))  # cost is shape-based; values irrelevant
+    # v is float64 (numpy's default), so dtype_rate 2.0 applies on top of the
+    # 16.0 transcendental weight: 100 * 2.0 * 16.0 = 3200. The parity
+    # invariant (ca == cc) is what matters -- the absolute just tracks the
+    # dtype-aware billing migration.
     with np.errstate(all="ignore"):  # arccosh(<1) etc. NaN harmlessly
         for alias, canon in ALIAS_CANONICAL:
             fa, fc = getattr(fnp, alias), getattr(fnp, canon)
@@ -56,4 +60,4 @@ def test_ufunc_aliases_bill_identically_to_canonical():
                 ca, cc = _cost(fa, v, v), _cost(fc, v, v)
             else:
                 ca, cc = _cost(fa, v), _cost(fc, v)
-            assert ca == cc == 1600, f"{alias}={ca} vs {canon}={cc} (want 1600)"
+            assert ca == cc == 3200, f"{alias}={ca} vs {canon}={cc} (want 3200)"

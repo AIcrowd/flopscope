@@ -189,13 +189,12 @@ def svd_cost(
         values only (with_vectors=False):        2*a*b^2 + 2*b^3
         thin U, V (full_matrices=False):         6*a*b^2 + 20*b^3
         full U (full_matrices=True and m != n):  4*a^2*b + 22*b^3
-    Constants from the 2026-06 evidence audit (LAPACK dgesdd + G&VL 4e §8.6);
-    see docs/reference/cost-model.md.
+    Constants follow the LAPACK dgesdd path; see docs/reference/cost-model.md.
 
     Top-k truncated SVD (``1 <= k < min(m, n)``):
         min(4*m*n*k, economy)
-    ``4*m*n*k`` is the verified leading-order cost of a rank-k randomized SVD
-    (Halko-Martinsson-Tropp; two passes over A, Theta(m*n*k)). flopscope bills
+    ``4*m*n*k`` is the leading-order cost of a rank-k randomized SVD (two
+    passes over A, Theta(m*n*k)). flopscope bills
     this standard truncated-algorithm cost even though the reference
     implementation computes the full economy SVD and slices — it bills the
     textbook cost of the operation (like matmul), not literal BLAS work.

@@ -11,7 +11,7 @@ def test_budget_context_as_decorator():
         budget_ctx = get_active_budget()
         assert budget_ctx is not None
         assert budget_ctx.namespace == "train"
-        budget_ctx.deduct("add", flop_cost=10, subscripts=None, shapes=())
+        budget_ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
         return 42
 
     result = my_func()

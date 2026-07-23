@@ -149,6 +149,8 @@ class RequestHandler:
                 return self._handle_create_from_data(request)
             if op == "__getitem__":
                 return self._handle_getitem(request)
+            if op in ("save", "savez", "savez_compressed"):
+                return self._handle_save(op, request)
 
             # Any other op — flopscope function call
             return self._handle_flopscope_op(request)
@@ -289,6 +291,30 @@ class RequestHandler:
         key = self._decode_index_key(args[1])
         result = self._run_kernel(lambda: arr[key])
         return self._pack_result(result)
+
+    # ------------------------------------------------------------------
+    # save / savez / savez_compressed — bill-only, no data transfer
+    # ------------------------------------------------------------------
+
+    def _handle_save(self, op: str, request: dict) -> dict:
+        """Bill the data-egress cost of a client-side save; no array data
+        crosses the wire and nothing is written on the server.
+
+        The flopscope-client already writes the file to the participant's
+        local disk; this round-trip exists only so the SERVER -- the sole
+        owner of the FLOP budget -- can charge the same 4*sum(numel) egress
+        cost the in-process wrappers charge. ``request["args"]`` carries only
+        handle refs (``{"__handle__": id}``), resolved here exactly like
+        ``__getitem__`` above; the deduction runs inside this session's
+        already-active BudgetContext (``Session.__init__`` entered it), so
+        ``_bill_save_egress``'s own ``require_budget()`` resolves it.
+        """
+        from flopscope._io import _bill_save_egress
+
+        raw_args = request.get("args") or []
+        arrays = [np.asarray(self._resolve_arg(a)) for a in raw_args]
+        _bill_save_egress(op, arrays)
+        return {"status": "ok", "result": None, "budget": self._session.budget_status()}
 
     # ------------------------------------------------------------------
     # Analytical cost estimators (flopscope.accounting)
@@ -481,21 +507,17 @@ class RequestHandler:
                 return slice(*[None if p is None else int(p) for p in parts])
             # Tagged list: a genuine Python list key (fancy indexing, e.g.
             # x[[0, 1]]) -- decode to a list, never a tuple.
-            if "__list__" in raw_key:
-                return [self._decode_index_key(item) for item in raw_key["__list__"]]
-            if b"__list__" in raw_key:
-                return [self._decode_index_key(item) for item in raw_key[b"__list__"]]
+            if "__list__" in raw_key or b"__list__" in raw_key:
+                items = (
+                    raw_key["__list__"]
+                    if "__list__" in raw_key
+                    else raw_key[b"__list__"]
+                )
+                return [self._decode_index_key(item) for item in items]
         if isinstance(raw_key, list):
-            decoded = [self._decode_index_key(item) for item in raw_key]
-            # A one-element key like ``arr[..., ]`` arrives as ``(Ellipsis,)`` ->
-            # ``[Ellipsis]``; numpy needs the tuple form, so treat Ellipsis (like
-            # a slice) as a marker that this list is a multi-axis index tuple.
-            if (
-                any(isinstance(d, slice) or d is Ellipsis for d in decoded)
-                or len(decoded) > 1
-            ):
-                return tuple(decoded)
-            return decoded
+            # A bare wire-list is always an encoded tuple (multi-axis index);
+            # fancy-index lists arrive marked as {"__list__": [...]} above.
+            return tuple(self._decode_index_key(item) for item in raw_key)
         # bool before int: bool subclasses int, and coercing a boolean-mask
         # element True -> 1 would turn mask indexing into integer indexing.
         if isinstance(raw_key, bool):
@@ -657,22 +679,16 @@ def _decode_index_key(raw_key):
         if b"__slice__" in raw_key:
             parts = raw_key[b"__slice__"]
             return slice(*[None if p is None else int(p) for p in parts])
-        if "__list__" in raw_key:
-            return [_decode_index_key(item) for item in raw_key["__list__"]]
-        if b"__list__" in raw_key:
-            return [_decode_index_key(item) for item in raw_key[b"__list__"]]
+        if "__list__" in raw_key or b"__list__" in raw_key:
+            items = (
+                raw_key["__list__"] if "__list__" in raw_key else raw_key[b"__list__"]
+            )
+            # A Python list key = advanced (fancy) indexing along axis 0.
+            return [_decode_index_key(item) for item in items]
     if isinstance(raw_key, list):
-        decoded = [_decode_index_key(item) for item in raw_key]
-        # A list of slices/ints (or a one-element Ellipsis like ``arr[..., ]``)
-        # -> tuple for multi-dim indexing; numpy needs the tuple form.
-        if (
-            any(isinstance(d, slice) or d is Ellipsis for d in decoded)
-            or len(decoded) > 1
-        ):
-            return tuple(decoded)
-        # Single-element list: could be the key itself being a list
-        # (e.g., fancy indexing) -- keep as list
-        return decoded
+        # A bare wire-list is always an encoded tuple (multi-axis index);
+        # fancy-index lists arrive marked as {"__list__": [...]} above.
+        return tuple(_decode_index_key(item) for item in raw_key)
     # bool before int: bool subclasses int, and coercing a boolean-mask
     # element True -> 1 would turn mask indexing into integer indexing.
     if isinstance(raw_key, bool):

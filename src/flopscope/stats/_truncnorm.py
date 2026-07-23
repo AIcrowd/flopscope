@@ -41,12 +41,13 @@ class TruncnormDistribution(ContinuousDistribution):
     ``a`` and ``b`` are standardized lower and upper bounds. The truncated
     support is ``[a * scale + loc, b * scale + loc]``, and both bounds appear
     before ``loc`` and ``scale`` to match SciPy's signature. pdf deducts
-    ``28 * numel(input)`` FLOPs (composite: z(2)+std_norm_pdf(20)+div(1)+
-    bounds(5), FMA=2, weight 1.0; calibrated alpha 28.0). cdf deducts
-    ``51 * numel(input)`` FLOPs (composite: z(2)+std_norm_cdf(46)+result(3)+
-    2 where(4), FMA=2, weight 1.0; calibrated alpha 50.6). ppf deducts
-    ``81 * numel(input)`` FLOPs (composite: erf + ndtri rational approx +
-    arithmetic, weight 1.0; audit-2 verified).
+    ``28 * numel(broadcast(input, a, b, loc, scale))`` FLOPs (composite:
+    z(2)+std_norm_pdf(20)+div(1)+bounds(5), FMA=2, weight 1.0; calibrated
+    alpha 28.0). cdf deducts ``51 * numel(broadcast(input, a, b, loc, scale))``
+    FLOPs (composite: z(2)+std_norm_cdf(46)+result(3)+2 where(4), FMA=2,
+    weight 1.0; calibrated alpha 50.6). ppf deducts
+    ``81 * numel(broadcast(input, a, b, loc, scale))`` FLOPs (composite:
+    erf + ndtri rational approx + arithmetic, weight 1.0; audit-2 verified).
     """
 
     def __init__(self):
@@ -77,8 +78,9 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.pdf(x, a, b, loc, scale)``.
-        FLOP cost: ``28 * numel(x)`` (composite: z(2)+std_norm_pdf(20)+
-        div(1)+bounds(5), FMA=2, weight 1.0; calibrated alpha 28.0).
+        FLOP cost: ``28 * numel(broadcast(x, a, b, loc, scale))`` (composite:
+        z(2)+std_norm_pdf(20)+div(1)+bounds(5), FMA=2, weight 1.0; calibrated
+        alpha 28.0).
 
         Examples
         --------
@@ -115,8 +117,9 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.cdf(x, a, b, loc, scale)``.
-        FLOP cost: ``51 * numel(x)`` (composite: z(2)+std_norm_cdf(46)+
-        result(3)+2 where(4), FMA=2, weight 1.0; calibrated alpha 50.6).
+        FLOP cost: ``51 * numel(broadcast(x, a, b, loc, scale))`` (composite:
+        z(2)+std_norm_cdf(46)+result(3)+2 where(4), FMA=2, weight 1.0;
+        calibrated alpha 50.6).
 
         Examples
         --------
@@ -153,7 +156,8 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.ppf(q, a, b, loc, scale)``.
-        FLOP cost: ``81 * numel(q)`` (composite: erf + ndtri rational approx + arithmetic, weight 1.0).
+        FLOP cost: ``81 * numel(broadcast(q, a, b, loc, scale))`` (composite:
+        erf + ndtri rational approx + arithmetic, weight 1.0).
 
         Examples
         --------

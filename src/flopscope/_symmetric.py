@@ -160,8 +160,18 @@ def symmetrize(
     n = array.size
     cost = max((group.order() + 1) * n, 1)
     budget = require_budget()
+    # _project_core always accumulates in np.result_type(array, float64) --
+    # the "/ group.order()" scaling pass needs float precision even from
+    # float32 input (verified: symmetrize(float32).dtype == float64,
+    # symmetrize(complex64).dtype == complex128) -- so the float64 sentinel
+    # must join the resolve rather than replace it (result_type preserves
+    # kind: result_type(complex64, float64) == complex128).
     with budget.deduct(
-        "symmetrize", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "symmetrize",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype, np.dtype(np.float64)),
     ):
         projected = _project_core(array, group)
         # D1: internal validation runs but is NOT billed — build the tensor
@@ -267,7 +277,11 @@ def is_symmetric(
     cost = max(k * (7 * n - 1), 1)
     budget = require_budget()
     with budget.deduct(
-        "is_symmetric", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "is_symmetric",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
     ):
         return _check_generators(array, group, atol=atol, rtol=rtol)
 
@@ -745,14 +759,18 @@ class SymmetricTensor(FlopscopeArray):
         subok: bool = False,
         copy: bool = True,
     ):
-        return _asplainflopscope(
-            np.asarray(self).astype(
-                dtype,
-                order=order,  # type: ignore[arg-type]
-                casting=casting,  # type: ignore[arg-type]
-                subok=False,
-                copy=copy,
-            )
+        # Route through the counted ndarray method (FlopscopeArray.astype ->
+        # _astype_counted) so this bills like every other astype call --
+        # unlike copy() above, astype intentionally does NOT reattach
+        # symmetry (a cast is not guaranteed to preserve the symmetric
+        # structure), so no `.view(type(self))` here; the counted backend
+        # already returns a plain (non-Symmetric) FlopscopeArray.
+        return super().astype(
+            dtype,
+            order=order,
+            casting=casting,
+            subok=subok,
+            copy=copy,
         )
 
     def transpose(self, *axes):  # type: ignore[override]
@@ -845,7 +863,11 @@ def as_symmetric(
     cost = max(k * (7 * n - 1), 1)
     budget = require_budget()
     with budget.deduct(
-        "as_symmetric", flop_cost=cost, subscripts=None, shapes=(array.shape,)
+        "as_symmetric",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
     ):
         validate_symmetry_groups(array, [group])
         return SymmetricTensor(array, symmetry=group)

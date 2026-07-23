@@ -36,7 +36,14 @@ def bartlett_cost(n: int) -> int:
 def bartlett(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = bartlett_cost(M)
-    with budget.deduct("bartlett", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "bartlett",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
+    ):
         result = _call_numpy(_np.bartlett, M)
     return result  # type: ignore[return-value]
 
@@ -70,7 +77,14 @@ def blackman_cost(n: int) -> int:
 def blackman(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = blackman_cost(M)
-    with budget.deduct("blackman", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "blackman",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
+    ):
         result = _call_numpy(_np.blackman, M)
     return result  # type: ignore[return-value]
 
@@ -91,25 +105,34 @@ def hamming_cost(n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: 2n (FMA=2 textbook: 1 multiply + 1 add per sample).
+        Estimated FLOP count: 18n (cosine at the transcendental tier + multiply
+        + subtract per sample).
 
     Notes
     -----
-    Two ops per sample under FMA=2 convention (1 multiply + 1 add).
+    Per sample: 1 cosine at the transcendental tier (16) + 1 multiply + 1
+    subtract = 18. Weight 1.0 (constant in flop_cost).
     """
-    return max(2 * n, 1)
+    return max(18 * n, 1)
 
 
 @_counted_wrapper
 def hamming(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hamming_cost(M)
-    with budget.deduct("hamming", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "hamming",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
+    ):
         result = _call_numpy(_np.hamming, M)
     return result  # type: ignore[return-value]
 
 
-attach_docstring(hamming, _np.hamming, "counted_custom", "2n FLOPs (FMA=2)")
+attach_docstring(hamming, _np.hamming, "counted_custom", "18n FLOPs")
 
 
 def hanning_cost(n: int) -> int:
@@ -123,25 +146,34 @@ def hanning_cost(n: int) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: 2n (FMA=2 textbook: 1 multiply + 1 add per sample).
+        Estimated FLOP count: 18n (cosine at the transcendental tier + multiply
+        + subtract per sample).
 
     Notes
     -----
-    Two ops per sample under FMA=2 convention (1 multiply + 1 add).
+    Per sample: 1 cosine at the transcendental tier (16) + 1 multiply + 1
+    subtract = 18. Weight 1.0 (constant in flop_cost).
     """
-    return max(2 * n, 1)
+    return max(18 * n, 1)
 
 
 @_counted_wrapper
 def hanning(M: int) -> FlopscopeArray:
     budget = require_budget()
     cost = hanning_cost(M)
-    with budget.deduct("hanning", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "hanning",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
+    ):
         result = _call_numpy(_np.hanning, M)
     return result  # type: ignore[return-value]
 
 
-attach_docstring(hanning, _np.hanning, "counted_custom", "2n FLOPs (FMA=2)")
+attach_docstring(hanning, _np.hanning, "counted_custom", "18n FLOPs")
 
 
 def kaiser_cost(n: int) -> int:
@@ -171,7 +203,14 @@ def kaiser_cost(n: int) -> int:
 def kaiser(M: int, beta: float) -> FlopscopeArray:
     budget = require_budget()
     cost = kaiser_cost(M)
-    with budget.deduct("kaiser", flop_cost=cost, subscripts=None, shapes=((M,),)):
+    with budget.deduct(
+        "kaiser",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=((M,),),
+        # numpy window functions always return float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
+    ):
         result = _call_numpy(_np.kaiser, M, beta)
     return result  # type: ignore[return-value]
 

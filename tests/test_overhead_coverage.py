@@ -70,6 +70,12 @@ def test_every_wrapper_with_budget_deduct_is_decorated():
                 # function carries @_counted_wrapper; _one is a closure that
                 # issues one deduct per variadic argument.
                 "_one",
+                # Shared save/savez/savez_compressed egress-billing formula
+                # (src/flopscope/_io.py), called by those already-decorated
+                # wrappers AND by flopscope-server's request handler (a plain
+                # function call outside any wrapper) -- must not be wrapped
+                # a second time, same shape as _einsum_routed_binary above.
+                "_bill_save_egress",
             ):
                 continue
             if not _has_counted_wrapper_decorator(fn):

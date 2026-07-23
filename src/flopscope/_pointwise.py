@@ -12,9 +12,20 @@ from typing import Any
 import numpy as _np
 from numpy.typing import ArrayLike
 
+from flopscope._accumulation._cost import contraction_complex_override
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import (
+    billing_operand,
+    binary_float_loop_dtype,
+    heavier_billing_dtype,
+    mean_compute_dtype,
+    reduction_billing_dtype,
+    resolve_billing_dtype,
+    sum_accumulator_dtype,
+    unary_float_loop_dtype,
+)
 from flopscope._flops import _ceil_log2
 from flopscope._flops import (
     analytical_pointwise_cost as pointwise_cost,
@@ -46,6 +57,126 @@ from flopscope.errors import (
     UnsupportedFunctionError,
     _warn_symmetry_loss,
 )
+
+# Reductions that accumulate values (add/multiply family) and so inherit
+# numpy's integer-widening accumulator dtype when called with dtype=None.
+# Extremum (max/min), index (argmax/argmin) and boolean (all/any) reductions
+# are excluded: they do not widen, and an index output is int64 regardless of
+# the arithmetic precision.
+_INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
+    {
+        "sum",
+        "prod",
+        "cumsum",
+        "cumprod",
+        "cumulative_sum",
+        "cumulative_prod",
+        "nansum",
+        "nanprod",
+        "nancumsum",
+        "nancumprod",
+    }
+)
+
+# Float-only ufuncs: numpy has no integer loops for these, so integer/bool
+# inputs promote to a float compute dtype (same-size float for unary ops,
+# float64 for binary ops). Billing the raw input dtype would undercharge the
+# actual arithmetic width. Membership is derived from numpy loop resolution
+# (an op belongs iff an int32 input yields a float result); the compute-dtype
+# conformance sweep enforces it stays complete.
+#
+# Includes NumPy 2.x array-API spelling aliases (acos/acosh/asin/asinh/
+# atan/atanh/atan2 -- literally the same ufunc object as arccos/arccosh/
+# arcsin/arcsinh/arctan/arctanh/arctan2, `np.acos is np.arccos` etc.) since
+# flopscope wraps each spelling under its own op_name; omitting the alias
+# would leave it undercharged while its canonical twin was fixed. Also
+# includes ``rint`` (no integer loop at all, same size-mapped promotion as
+# the rest of the family) and ``ldexp`` (no all-integer loop; an int32/int32
+# call promotes its first operand the same size-mapped way -- a mixed
+# float32/int-exponent call is a separate, pre-existing, out-of-scope
+# overcount unrelated to this undercount fix; see task-6-report.md).
+#
+# Also includes ``angle`` (arctan2(0, x) internally -- same size-mapped
+# promotion for every integer/unsigned width; a python-int-vs-bool-array NEP
+# 50 quirk means angle(bool_) actually computes float64 rather than the
+# float16 this mapping would predict, a narrow pre-existing gap this fix does
+# not chase) and the ``_counted_unary_multi`` pair ``modf``/``frexp`` (real
+# multi-output ufuncs with the identical same-size float loop for their
+# primary output; ``frexp``'s exponent output is handled separately, see
+# ``_counted_unary_multi``).
+_UNARY_FLOAT_LOOP_OPS = frozenset(
+    {
+        "acos",
+        "acosh",
+        "angle",
+        "arccos",
+        "arccosh",
+        "arcsin",
+        "arcsinh",
+        "arctan",
+        "arctanh",
+        "asin",
+        "asinh",
+        "atan",
+        "atanh",
+        "cbrt",
+        "cos",
+        "cosh",
+        "deg2rad",
+        "degrees",
+        "exp",
+        "exp2",
+        "expm1",
+        "fabs",
+        "frexp",
+        "log",
+        "log1p",
+        "log2",
+        "log10",
+        "modf",
+        "rad2deg",
+        "radians",
+        "rint",
+        "sin",
+        "sinh",
+        "spacing",
+        "sqrt",
+        "tan",
+        "tanh",
+    }
+)
+# Unary ops with NO size-mapped integer loop: numpy always computes them in
+# (at least) float64 for integer/bool input regardless of the input's own
+# width -- unlike the size-mapped _UNARY_FLOAT_LOOP_OPS family (i0(int8) ->
+# float64, not float16, matching numpy's Chebyshev-polynomial/sin-ratio
+# implementations that don't have narrower loops). Float/complex inputs keep
+# their own width. binary_float_loop_dtype's "any int kind -> float64,
+# float/complex unchanged" mapping already expresses exactly this rule (it
+# doesn't care about arity), so it is reused here instead of a new helper.
+_UNARY_FLOAT64_MIN_OPS = frozenset({"i0", "sinc"})
+_BINARY_FLOAT_LOOP_OPS = frozenset(
+    {
+        "arctan2",
+        "atan2",
+        "copysign",
+        "divide",
+        "heaviside",
+        "hypot",
+        "ldexp",
+        "logaddexp",
+        "logaddexp2",
+        "nextafter",
+        "true_divide",
+    }
+)
+# float_power computes at DOUBLE PRECISION minimum: it has no
+# single-precision loops at all (dd->d / DD->D are its narrowest), so
+# float32 inputs compute float64 and complex64 inputs compute complex128.
+# It is deliberately NOT a member of _BINARY_FLOAT_LOOP_OPS: that set's
+# resolver (binary_float_loop_dtype) leaves float/complex inputs unchanged,
+# which would bill float_power(f32, f32) at float32 and
+# float_power(c64, c64) at complex64 -- both below its true compute width.
+_BINARY_FLOAT64_MIN_OPS = frozenset({"float_power"})
 
 # ---------------------------------------------------------------------------
 # Signature helpers
@@ -370,7 +501,33 @@ def _counted_unary(np_func, op_name: str):
         symmetry = _symmetry_of(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+        else:
+            billing_dtypes = (x.dtype,)
+            if isinstance(out, _np.ndarray):
+                billing_dtypes += (out.dtype,)
+        if op_name in _UNARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (unary_float_loop_dtype(resolved),)
+        elif op_name in _UNARY_FLOAT64_MIN_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (binary_float_loop_dtype(resolved),)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 x,
@@ -389,6 +546,56 @@ def _counted_unary(np_func, op_name: str):
 
 
 @_counted_wrapper
+def _free_unary(np_func, op_name: str):
+    """Factory for unary ops that are pure component/data extraction.
+
+    Structurally identical to :func:`_counted_unary` (same symmetry / ``out=``
+    / NaN-Inf handling) but always bills ``flop_cost=0``: the op returns a
+    view or a constant-filled array and performs no floating-point
+    arithmetic, so charging ``numel`` would overcount. Still routes through
+    ``budget.deduct`` so wall time is accounted.
+    """
+    supports_out = _supports_out_argument(np_func)
+
+    @_counted_wrapper
+    def wrapper(
+        x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
+    ) -> FlopscopeArray:
+        budget = require_budget()
+        if not isinstance(x, _np.ndarray):
+            x = _np.asarray(x)
+        symmetry = _symmetry_of(x)
+        symmetry = _prepare_symmetric_out(out, symmetry)
+        billing_dtypes: tuple = (x.dtype,)
+        if kwargs.get("dtype") is not None:
+            billing_dtypes += (_np.dtype(kwargs["dtype"]),)
+        if isinstance(out, _np.ndarray):
+            billing_dtypes += (out.dtype,)
+        with budget.deduct(
+            op_name,
+            flop_cost=0,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
+            result = _call_with_optional_out(
+                np_func,
+                x,
+                out=None if isinstance(out, SymmetricTensor) else out,
+                supports_out=supports_out,
+                **kwargs,
+            )
+        maybe_check_nan_inf(result, op_name)
+        return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
+
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
+    attach_docstring(wrapper, np_func, "free", "0 FLOPs")
+    _apply_numpy_signature(wrapper, np_func)
+    return wrapper
+
+
+@_counted_wrapper
 def _counted_unary_multi(np_func, op_name: str):
     """Factory for unary functions that return multiple arrays (modf, frexp).
 
@@ -396,6 +603,14 @@ def _counted_unary_multi(np_func, op_name: str):
     allocation) — per-slot stripping and identity preservation are routed
     through :func:`_call_with_optional_multi_out`. Symmetry of the input
     is inherited by every output (elementwise ufuncs).
+
+    Both ``modf`` and ``frexp`` are true ufuncs with the same same-size float
+    loop as the ``_UNARY_FLOAT_LOOP_OPS`` family (``modf``/``frexp`` on int8
+    input compute float16, same as ``sin``), so they share that membership
+    set and resolver. ``frexp``'s second output (the exponent) is always
+    int32 regardless of the mantissa's size-mapped precision -- a narrow
+    mantissa (float16, from an int8 input) would otherwise undercount the
+    fixed-width exponent, so its billed dtype is floored at int32's rate too.
     """
     nout = getattr(np_func, "nout", 2)
 
@@ -410,7 +625,34 @@ def _counted_unary_multi(np_func, op_name: str):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+        else:
+            billing_dtypes = (x.dtype,)
+            if out is not None:
+                for o in out:
+                    if isinstance(o, _np.ndarray):
+                        billing_dtypes += (o.dtype,)
+        if op_name in _UNARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                mapped = unary_float_loop_dtype(resolved)
+                if op_name == "frexp":
+                    mapped = heavier_billing_dtype(mapped, _np.dtype(_np.int32))
+                billing_dtypes = (mapped,)
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_multi_out(
                 np_func,
                 x,
@@ -460,8 +702,44 @@ def _counted_binary(np_func, op_name: str):
         out_symmetry = _prepare_symmetric_out(out, out_symmetry)
 
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes = (_np.dtype(explicit_dtype),)
+        else:
+            billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+            if isinstance(out, _np.ndarray):
+                billing_dtypes += (out.dtype,)
+        if op_name in _BINARY_FLOAT_LOOP_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                billing_dtypes = (binary_float_loop_dtype(resolved),)
+        elif op_name in _BINARY_FLOAT64_MIN_OPS:
+            resolved = resolve_billing_dtype(billing_dtypes)
+            if resolved is not None:
+                # Double-precision minimum in BOTH kinds: float_power has no
+                # single-precision loops at all (dd->d / DD->D are its
+                # narrowest), so real inputs floor at float64 and complex
+                # inputs floor at complex128. The complex minimum stays
+                # complex-KIND so the registry complex_factor still applies
+                # -- folding complex into a bare real float64 would silently
+                # discard the complex structure premium.
+                minimum = (
+                    _np.dtype(_np.complex128)
+                    if resolved.kind == "c"
+                    else _np.dtype(_np.float64)
+                )
+                billing_dtypes = (heavier_billing_dtype(resolved, minimum),)
         with budget.deduct(
-            op_name, flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape, y.shape),
+            dtypes=billing_dtypes,
         ):
             # Call the underlying ufunc with the ORIGINAL inputs so that
             # Python-scalar dtype promotion (NEP 50) and FloatingPointError
@@ -543,8 +821,26 @@ def _counted_binary_multi(np_func, op_name: str):
                 output_shape,
             )
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        # An explicit dtype= forces the ufunc loop: numpy casts operands on
+        # read and computes at that width, so it replaces the operand
+        # promotion for billing. out= alone does not narrow the loop. A bool
+        # dtype= is excluded: it names the output of a value-testing loop,
+        # which still reads full-width operands -- bill the operands.
+        explicit_dtype = kwargs.get("dtype")
+        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+            billing_dtypes = (_np.dtype(explicit_dtype),)
+        else:
+            billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+            if out is not None:
+                for o in out:
+                    if isinstance(o, _np.ndarray):
+                        billing_dtypes += (o.dtype,)
         with budget.deduct(
-            op_name, flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(x.shape, y.shape),
+            dtypes=billing_dtypes,
         ):
             # Pass the ORIGINAL inputs so NEP 50 dtype-promotion rules
             # apply at the NumPy boundary. Stripping happens inside the
@@ -587,6 +883,42 @@ def _counted_binary_multi(np_func, op_name: str):
 # ---------------------------------------------------------------------------
 # Generic ufunc-method helpers (outer, reduceat, at, generic reduce/accumulate)
 # ---------------------------------------------------------------------------
+
+
+def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
+    """The physical loop/output dtype numpy resolves for ``ufunc`` on ``operand_dtypes``.
+
+    Shared by the five generic ufunc-method paths below (``outer`` /
+    ``reduce`` / ``accumulate`` / ``reduceat`` / ``at``) to bill a float-only
+    ufunc's actual compute dtype instead of its integer input dtype --
+    ``true_divide(int32, int32)`` runs entirely in float64; billing the raw
+    int32 label undercharges it 2x under production rates.
+
+    ``ufunc.resolve_dtypes`` asks numpy directly which loop it will select.
+    Its input tuple is sized from ``ufunc.nin``: a missing second operand of
+    a binary ufunc repeats the first (matching how reduce / accumulate /
+    reduceat feed a single array through a binary loop), and an unspecified
+    (``None``) output slot is appended. An operand may also be a bare
+    Python type (``int`` / ``float`` / ``complex``), which
+    ``resolve_dtypes`` treats as a NEP 50 weak scalar -- ``ufunc.at`` uses
+    this for Python-scalar ``vals``. On failure (``TypeError`` /
+    ``ValueError`` -- the operand combination has no valid loop for this
+    ufunc, or a multi-output ufunc needs a wider tuple) falls back to
+    ``np.result_type(*operand_dtypes)``, which recovers each call site's
+    pre-existing behavior exactly: a dtype with itself resolves to itself,
+    and two distinct operand dtypes resolve to their common promoted dtype
+    (the same resolution ``resolve_billing_dtype`` would have performed on
+    the undifferentiated tuple).
+    """
+    first, *rest = operand_dtypes
+    if ufunc.nin == 1:
+        inputs: tuple = (first,)
+    else:
+        inputs = (first, rest[0] if rest else first)
+    try:
+        return ufunc.resolve_dtypes((*inputs, None))[len(inputs)]
+    except (TypeError, ValueError):
+        return _np.result_type(*operand_dtypes)
 
 
 @_counted_wrapper
@@ -636,11 +968,36 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # An explicit dtype= forces the loop numpy actually runs (both
+    # directions), the same as the plain pointwise factories -- it replaces
+    # the operand-promoted default rather than discounting it. A bool
+    # dtype= is excluded: it names the output of a value-testing loop
+    # (comparison/logical), which still reads full-width operands, so it
+    # falls through to the default path below instead of billing the
+    # (lighter) bool rate.
+    explicit_dtype = kwargs.get("dtype")
+    if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+        billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+    else:
+        # This default path shares the operand-width behavior of the
+        # reduce/accumulate/reduceat/at siblings: a comparison/logical
+        # ufunc's loop OUTPUT is bool, which for wide-int inputs would bill
+        # NARROWER than the input -- never charge below it.
+        # heavier_billing_dtype keeps the loop dtype on a rate tie, so float
+        # widening (float64 >= int rate) is unaffected.
+        billing_dtypes = (
+            heavier_billing_dtype(
+                _ufunc_loop_dtype(ufunc, a.dtype, b.dtype), a.dtype, b.dtype
+            ),
+        )
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.outer",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.outer(
             _to_base_ndarray(a),
@@ -674,11 +1031,25 @@ def _counted_ufunc_reduce_generic(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # The reduce/accumulate loop runs at the ufunc's own resolved loop dtype
+    # (true_divide(int32) -> float64, subtract(int32) -> int32, logical_* ->
+    # bool). add/multiply's extra integer widening never matters here: they
+    # are routed to sum/prod, not this generic path.
+    default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            default_dtype=default_dtype,
+        ),
+    )
     with budget.deduct(
         f"{ufunc.__name__}.reduce",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.reduce(
             _to_base_ndarray(a),
@@ -712,11 +1083,24 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # Same loop resolution as the generic reduce path above: the accumulate
+    # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
+    # -> float64, subtract(int32) -> int32).
+    default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            default_dtype=default_dtype,
+        ),
+    )
     with budget.deduct(
         f"{ufunc.__name__}.accumulate",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.accumulate(
             _to_base_ndarray(a),
@@ -747,11 +1131,36 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     indices_stripped = (
         _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
     )
+    # This default path (no explicit dtype=) shares the operand-width
+    # behavior of the generic reduce/accumulate paths: reduceat runs the
+    # ufunc's own resolved loop dtype by default (true_divide(int32) ->
+    # float64, subtract(int32) -> int32) -- except add/multiply, which numpy
+    # runs through the same integer-widening sum/prod accumulator, regardless
+    # of the segment indices. reduction_billing_dtype supplies the
+    # input-rate floor -- a comparison/logical ufunc's bool loop OUTPUT must
+    # never bill narrower than a wide-int input. An explicit dtype= now
+    # resolves per numpy's accumulator semantics instead (billed exactly as
+    # requested, wider or narrower).
+    default_dtype = (
+        sum_accumulator_dtype(a.dtype)
+        if ufunc.__name__ in ("add", "multiply")
+        else _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    )
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=kwargs.get("dtype"),
+            default_dtype=default_dtype,
+        ),
+    )
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         f"{ufunc.__name__}.reduceat",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = ufunc.reduceat(
             _to_base_ndarray(a),
@@ -808,11 +1217,43 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     stripped_args = tuple(
         _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
     )
+    # Same loop resolution as the other generic ufunc-method paths:
+    # ``ufunc.at`` applies the ufunc's own resolved loop and casts the
+    # result back in place with unsafe casting, so a float-only loop runs
+    # on integer arrays WITHOUT raising (exp.at(int32) computes float64).
+    # Bill that loop, floored at the array's own rate (the established
+    # reduction_billing_dtype semantics -- logical_and.at(f64) keeps the
+    # f64 rate). Binary ufuncs contribute their ``vals`` operand: NEP 50
+    # weak Python scalars pass as their bare type (bool never widens a
+    # loop, so it just repeats the array dtype via the nin-padding);
+    # everything else contributes its (coerced) array dtype.
+    if hasattr(a, "dtype"):
+        operands: list = [a.dtype]
+        if args:
+            vals = args[0]
+            if isinstance(vals, (bool, int, float, complex)) and not isinstance(
+                vals, _np.generic
+            ):
+                if not isinstance(vals, bool):
+                    operands.append(type(vals))
+            elif isinstance(vals, _np.ndarray):
+                operands.append(vals.dtype)
+            else:
+                operands.append(_np.asarray(vals).dtype)
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                default_dtype=_ufunc_loop_dtype(ufunc, *operands),
+            ),
+        )
+    else:
+        billing_dtypes = ()
     with budget.deduct(
         f"{ufunc.__name__}.at",
         flop_cost=n_ops,
         subscripts=None,
         shapes=(a.shape,) if hasattr(a, "shape") else (),
+        dtypes=billing_dtypes,
     ):
         ufunc.at(
             _to_base_ndarray(a),
@@ -855,6 +1296,11 @@ def _counted_reduction(
     _out_args_idx = (
         _params.index("out") - _args_offset
         if "out" in _params and _params.index("out") >= _args_offset
+        else None
+    )
+    _dtype_args_idx = (
+        _params.index("dtype") - _args_offset
+        if "dtype" in _params and _params.index("dtype") >= _args_offset
         else None
     )
 
@@ -912,7 +1358,39 @@ def _counted_reduction(
             np_out_kwarg = out_for_np
             np_supports_out_for_call = supports_out
 
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        # numpy computes the reduction in the explicit dtype= (positional or
+        # keyword) if given, else in out's dtype, else in the family default
+        # (integer-widening for the accumulating reductions). An explicit
+        # dtype= bills as the accumulator numpy runs, in both directions;
+        # out= widens the accumulator, and a narrower out only casts the
+        # final store; the default never bills below the operand width.
+        explicit_dtype = kwargs.get("dtype")
+        if (
+            explicit_dtype is None
+            and _dtype_args_idx is not None
+            and 0 <= _dtype_args_idx < len(args_list)
+        ):
+            explicit_dtype = args_list[_dtype_args_idx]
+        default_dtype = (
+            sum_accumulator_dtype(a.dtype)
+            if op_name in _INTEGER_ACCUMULATING_REDUCTIONS
+            else a.dtype
+        )
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=explicit_dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=default_dtype,
+            ),
+        )
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             if _axis_is_second_positional:
                 result = _call_with_optional_out(
                     np_func,
@@ -1028,7 +1506,16 @@ def around(
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
-    with budget.deduct("around", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "around",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_with_optional_out(
             _np.around,
             a,
@@ -1074,7 +1561,7 @@ fabs = _counted_unary(_np.fabs, "fabs")
 fix = _counted_unary(_np.fix, "fix")
 fix.__signature__ = _inspect.signature(_np.fix)  # pyright: ignore[reportFunctionMemberAccess]
 i0 = _counted_unary(_np.i0, "i0")
-imag = _counted_unary(_np.imag, "imag")
+imag = _free_unary(_np.imag, "imag")
 imag.__signature__ = _inspect.signature(_np.imag)  # pyright: ignore[reportFunctionMemberAccess]
 invert = _counted_unary(_np.invert, "invert")
 iscomplex = _counted_unary(_np.iscomplex, "iscomplex")
@@ -1109,7 +1596,7 @@ nan_to_num.__signature__ = _inspect.signature(_np.nan_to_num)  # pyright: ignore
 positive = _counted_unary(_np.positive, "positive")
 rad2deg = _counted_unary(_np.rad2deg, "rad2deg")
 radians = _counted_unary(_np.radians, "radians")
-real = _counted_unary(_np.real, "real")
+real = _free_unary(_np.real, "real")
 real.__signature__ = _inspect.signature(_np.real)  # pyright: ignore[reportFunctionMemberAccess]
 real_if_close = _counted_unary(_np.real_if_close, "real_if_close")
 real_if_close.__signature__ = _inspect.signature(_np.real_if_close)  # pyright: ignore[reportFunctionMemberAccess]
@@ -1129,7 +1616,16 @@ def round(
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
-    with budget.deduct("round", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "round",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_with_optional_out(
             _np.round,
             a,
@@ -1154,6 +1650,30 @@ sinc = _counted_unary(_np.sinc, "sinc")
 sinh = _counted_unary(_np.sinh, "sinh")
 
 
+def _sort_complex_billing_dtype(dtype: _np.dtype) -> _np.dtype:
+    """np.sort_complex's exact output dtype -- a hardcoded 3-way table in
+    numpy's own source, not a `result_type`-style promotion:
+
+        if b.dtype.char in 'bhBH': return b.astype('F')   # int8/16, uint8/16 -> complex64
+        elif b.dtype.char == 'g':  return b.astype('G')   # longdouble -> clongdouble
+        else:                      return b.astype('D')   # everything else -> complex128
+
+    So bool/int32/int64/uint32/uint64/float16/float32/float64 all compute in
+    complex128 (verified: sort_complex(float32) -> complex128, NOT
+    complex64), only the narrow bhBH integer kinds get the complex64 loop.
+    Already-complex input is returned unchanged.
+    """
+    if dtype.kind == "c":
+        return dtype
+    if dtype.char in "bhBH":
+        return _np.dtype(_np.complex64)
+    if dtype.char == "g":
+        if hasattr(_np, "complex256"):
+            return _np.dtype(_np.complex256)
+        return _np.dtype(_np.complex128)
+    return _np.dtype(_np.complex128)
+
+
 @_counted_wrapper
 def sort_complex(a: ArrayLike) -> FlopscopeArray:
     """Counted version of np.sort_complex.
@@ -1170,7 +1690,11 @@ def sort_complex(a: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     cost = 1 if a.ndim == 0 else _sort_cost_nd(a, a.ndim - 1)
     with budget.deduct(
-        "sort_complex", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "sort_complex",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(_sort_complex_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(_np.sort_complex, _to_base_ndarray(a))
     return result  # type: ignore[return-value]  # wrapped at fnp.sort_complex import time
@@ -1204,8 +1728,13 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
     )
     # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
     cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
+    billing_dtypes = (billing_operand(a, a_arr), billing_operand(b, b_arr))
     with budget.deduct(
-        "isclose", flop_cost=cost, subscripts=None, shapes=(a_arr.shape, b_arr.shape)
+        "isclose",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a_arr.shape, b_arr.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.isclose, _to_base_ndarray(a), _to_base_ndarray(b), **kwargs
@@ -1352,26 +1881,38 @@ def clip(
     Output shape is the broadcast of a with all bound arrays.
     """
     budget = require_budget()
+    a_orig = a
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     operand_arrays = [(a, _symmetry_of(a))]
+    billing_dtypes: tuple = (billing_operand(a_orig, a),)
     for value in args:
         if value is None:
             continue
         arr = value if isinstance(value, _np.ndarray) else _np.asarray(value)
         operand_arrays.append((arr, _symmetry_of(arr)))
+        billing_dtypes += (billing_operand(value, arr),)
     for key in ("a_min", "a_max", "min", "max"):
         value = kwargs.get(key)
         if value is None:
             continue
         arr = value if isinstance(value, _np.ndarray) else _np.asarray(value)
         operand_arrays.append((arr, _symmetry_of(arr)))
+        billing_dtypes += (billing_operand(value, arr),)
     n_bounds = len(operand_arrays) - 1
     output_shape = _np.broadcast_shapes(*(arr.shape for arr, _ in operand_arrays))
     symmetry, _ = _pointwise_symmetry(operand_arrays, output_shape)
     _prepare_symmetric_out(out, symmetry)
     cost = _builtins.max(n_bounds, 1) * pointwise_cost(output_shape, symmetry=symmetry)
-    with budget.deduct("clip", flop_cost=cost, subscripts=None, shapes=(output_shape,)):
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    with budget.deduct(
+        "clip",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(output_shape,),
+        dtypes=billing_dtypes,
+    ):
         # Delegate all argument handling (validation, min/max/a_min/a_max) to numpy
         result = _call_with_optional_out(
             _np.clip,
@@ -1454,7 +1995,26 @@ def _counted_mean(np_func, op_name: str):
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
 
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        # numpy computes an integer mean in float64 unless an explicit dtype
+        # or out= overrides the accumulator. An explicit dtype= bills as the
+        # accumulator numpy runs, in both directions; out= widens it, and a
+        # narrower out only casts the final store; the family default never
+        # bills below the operand width.
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=mean_compute_dtype(a.dtype),
+            ),
+        )
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 a,
@@ -1523,7 +2083,26 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         )
         _prepare_symmetric_out(out, new_symmetry)
         out_for_np = None if isinstance(out, SymmetricTensor) else out
-        with budget.deduct(op_name, flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+        # numpy computes an integer var/std in float64 unless an explicit
+        # dtype or out= overrides the accumulator. An explicit dtype= bills
+        # as the accumulator numpy runs, in both directions; out= widens it,
+        # and a narrower out only casts the final store; the family default
+        # never bills below the operand width.
+        billing_dtypes: tuple = (
+            reduction_billing_dtype(
+                a.dtype,
+                explicit_dtype=dtype,
+                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                default_dtype=mean_compute_dtype(a.dtype),
+            ),
+        )
+        with budget.deduct(
+            op_name,
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=billing_dtypes,
+        ):
             result = _call_with_optional_out(
                 np_func,
                 a,
@@ -1603,7 +2182,23 @@ def average(
     weights_raw = (
         _to_base_ndarray(weights) if isinstance(weights, _np.ndarray) else weights
     )
-    with budget.deduct("average", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    # np.average is mean-shaped: integer/bool `a` always computes in float64
+    # (average(int32) -> float64), float `a` keeps its own precision unless
+    # explicit weights widen it (average(f32, weights=f64) -> float64) --
+    # the same rule as mean/median/percentile's compute dtype.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
+    if weights is not None:
+        weights_arr = (
+            weights if isinstance(weights, _np.ndarray) else _np.asarray(weights)
+        )
+        billing_dtypes += (billing_operand(weights, weights_arr),)
+    with budget.deduct(
+        "average",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.average,
             a_raw,
@@ -1652,7 +2247,11 @@ def count_nonzero(
         else None
     )
     with budget.deduct(
-        "count_nonzero", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "count_nonzero",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(a.dtype,),
     ):
         result = _call_numpy(
             _np.count_nonzero, _to_base_ndarray(a), axis=axis, keepdims=keepdims
@@ -1738,11 +2337,19 @@ def median(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # numpy's median always computes in float64 for integer/bool input (the
+    # partition-based selection still runs the interpolating mean-of-two for
+    # even-length axes) and preserves the input's own float precision
+    # otherwise -- the same rule as mean/var/std's compute dtype.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "median",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.median,
@@ -1804,11 +2411,17 @@ def nanmedian(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # Same compute-dtype rule as median: float64 for integer/bool input,
+    # the input's own float precision otherwise.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanmedian",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanmedian,
@@ -1837,7 +2450,8 @@ def nanpercentile(
 ) -> FlopscopeArray:
     """Counted version of np.nanpercentile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -1854,7 +2468,13 @@ def nanpercentile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -1862,11 +2482,24 @@ def nanpercentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # numpy's percentile family always divides q by 100 first (an implicit
+    # true_divide, "q = np.true_divide(q, a.dtype.type(100) if a.dtype.kind
+    # == 'f' else 100)" in numpy's own source), so an integer/bool `a` always
+    # computes in float64 -- even an exact-integer q like 50 -- unlike
+    # quantile, whose q is used directly with no such division and so can
+    # stay at `a`'s own dtype for an exact q of 0 or 1. mean_compute_dtype
+    # captures that "int/bool -> float64, float preserved" half; q still
+    # participates so an explicitly wider q array (e.g. float64 q against a
+    # float32 `a`) still raises the bill to match numpy's actual widening.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanpercentile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanpercentile,
@@ -1894,7 +2527,8 @@ def nanquantile(
 ) -> FlopscopeArray:
     """Counted version of np.nanquantile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -1911,7 +2545,13 @@ def nanquantile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -1919,11 +2559,15 @@ def nanquantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "nanquantile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.nanquantile,
@@ -1954,7 +2598,8 @@ def percentile(
 ) -> FlopscopeArray:
     """Counted version of np.percentile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -1971,7 +2616,13 @@ def percentile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -1979,11 +2630,17 @@ def percentile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    # Same "always divides q by 100 first" rule as nanpercentile: integer/
+    # bool `a` always computes in float64, regardless of q's own dtype.
+    billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "percentile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.percentile,
@@ -2011,7 +2668,8 @@ def quantile(
 ) -> FlopscopeArray:
     """Counted version of np.quantile.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
+    Cost = num_output_orbits × (axis_dim + 4 × q.size) (Tier-2 partition-based
+    model; the +4×q.size term is the per-quantile gather+interpolation cost).
     """
     import math as _math
 
@@ -2028,7 +2686,13 @@ def quantile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # numpy prepends q.shape to the output and computes each requested
+    # quantile independently (a gather of the two bracketing order statistics
+    # plus a linear interpolation per q), so the per-output cost scales with
+    # the number of quantiles requested, not just the reduced axis length.
+    q_count = _builtins.max(int(q_arr.size), 1)
+    cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim + 4 * q_count)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -2036,11 +2700,15 @@ def quantile(
         else None
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
         "quantile",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.quantile,
@@ -2080,7 +2748,9 @@ def ptp(
     symmetry = a.symmetry if isinstance(a, SymmetricTensor) else None
     m = _num_output_orbits(tuple(a.shape), axes_summed, symmetry)
     cost = 2 * reduction_cost(a.shape, axis, symmetry=symmetry) + m
-    with budget.deduct("ptp", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "ptp", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+    ):
         stripped = _to_base_ndarray(a)
         if hasattr(_np, "ptp"):
             result = _call_numpy(_np.ptp, stripped, axis=axis, **kwargs)
@@ -2139,6 +2809,11 @@ def _einsum_routed_binary(
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
+    billing_dtypes = (a.dtype, b.dtype)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
+    resolved = _np.result_type(*billing_dtypes)
+    complex_override = contraction_complex_override(info.accumulation, resolved)
     if out is not None:
         call_kwargs = {**call_kwargs, "out": _to_base_ndarray(out)}
     with budget.deduct(
@@ -2146,6 +2821,8 @@ def _einsum_routed_binary(
         flop_cost=info.accumulation.total,
         subscripts=info.canonical_subscripts,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         if errstate:
             with _np.errstate(divide="ignore", over="ignore", invalid="ignore"):
@@ -2279,8 +2956,15 @@ def outer(
     # einsum subscripts regardless of original ndim.
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
-    a_flat = a.ravel() if a.ndim != 1 else a
-    b_flat = b.ravel() if b.ndim != 1 else b
+    # Strip the FlopscopeArray subclass BEFORE the internal ravel: this flatten
+    # is a private cost-model helper (its result only feeds the einsum cost
+    # resolver, never the user), so it must stay numpy's free C view. Since
+    # FlopscopeArray.ravel() now bills numel@w1, a bare a.ravel() here would
+    # over-bill the operand's size on top of the real outer cost (and on a
+    # SymmetricTensor would also emit a spurious symmetry-loss warning). The
+    # ndim==1 branch never ravels, so it keeps the operand as-is.
+    a_flat = _to_base_ndarray(a).ravel() if a.ndim != 1 else a
+    b_flat = _to_base_ndarray(b).ravel() if b.ndim != 1 else b
     # Preserve operand-aliasing through the asarray boundary: if the user
     # passed the same Python object for both operands, treat them as one
     # array for the helper's identity-pattern detection.
@@ -2292,8 +2976,15 @@ def outer(
     canonical_subs = info.canonical_subscripts
     if output_sym is not None:
         output_sym = _prepare_symmetric_out(out, output_sym)
+    billing_dtypes: tuple = (a.dtype, b.dtype)
+    if isinstance(out, _np.ndarray):
+        billing_dtypes += (out.dtype,)
     with budget.deduct(
-        "outer", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
+        "outer",
+        flop_cost=cost,
+        subscripts=canonical_subs,
+        shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.outer,
@@ -2405,11 +3096,16 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         cost = info.accumulation.total
         canonical_subs = info.canonical_subscripts
         out_sym = info.output_symmetry  # scalar output — always None
+        billing_dtypes = (a.dtype, b.dtype)
+        resolved = _np.result_type(*billing_dtypes)
+        complex_override = contraction_complex_override(info.accumulation, resolved)
         with budget.deduct(
             "tensordot",
             flop_cost=cost,
             subscripts=canonical_subs,
             shapes=(a.shape, b.shape),
+            dtypes=billing_dtypes,
+            complex_factor_override=complex_override,
         ):
             result = _call_numpy(
                 _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
@@ -2441,6 +3137,14 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     # ``_is_oversized_for_cost_model``).
     a_sym = _symmetry_of(a)
     b_sym = _symmetry_of(b)
+    # Only the branches below that reach `_resolve_cost_and_output_symmetry`
+    # (i.e. keep an AccumulationCost around, not just its .total) can supply
+    # an exact complex_factor_override; the einsum_cost/_symmetry_adjusted_cost
+    # branches (oversized symmetry, or rank>52 with no subscripts) compute a
+    # plain int with no mu/adds decomposition, so they stay None and rely on
+    # complex_factor_for's fail-closed raise if a complex dtype ever reaches
+    # them (registry classification "exact").
+    accumulation_for_billing = None
     if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
         try:
             oversized_order = (
@@ -2494,17 +3198,32 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             _info = _resolve_cost_and_output_symmetry(_subs, a, b)
             cost = _info.accumulation.total
             canonical_subs = _subs
+            accumulation_for_billing = _info.accumulation
         else:
             dense = (
                 _builtins.max(a.size * b.size // contracted, 1) if contracted > 0 else 1
             )
             cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
             canonical_subs = None
+    billing_dtypes = (a.dtype, b.dtype)
+    resolved = _np.result_type(*billing_dtypes)
+    # accumulation_for_billing is None for the oversized-symmetry / rank>52
+    # branches above, which never reach _resolve_cost_and_output_symmetry and
+    # so have no AccumulationCost to draw an exact override from; leave
+    # complex_override None there so complex_factor_for's fail-closed "exact"
+    # raise still fires if a complex dtype reaches those branches.
+    complex_override = (
+        contraction_complex_override(accumulation_for_billing, resolved)
+        if accumulation_for_billing is not None
+        else None
+    )
     with budget.deduct(
         "tensordot",
         flop_cost=cost,
         subscripts=canonical_subs,
         shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         result = _call_numpy(
             _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
@@ -2527,13 +3246,26 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
-    a_flat = a.ravel() if a.ndim != 1 else a
-    b_flat = b.ravel() if b.ndim != 1 else b
+    # Strip the subclass before this internal ravel so it stays a free numpy
+    # view: its result only feeds the einsum cost resolver below, and a bare
+    # a.ravel() would now bill numel@w1 (FlopscopeArray.ravel is counted),
+    # over-charging vdot-of-matrices (Frobenius inner product) by both
+    # operands' sizes. ndim==1 never ravels, so it is left untouched.
+    a_flat = _to_base_ndarray(a).ravel() if a.ndim != 1 else a
+    b_flat = _to_base_ndarray(b).ravel() if b.ndim != 1 else b
     info = _resolve_cost_and_output_symmetry("i,i->", a_flat, b_flat)
     cost = info.accumulation.total
     canonical_subs = info.canonical_subscripts
+    billing_dtypes = (a.dtype, b.dtype)
+    resolved = _np.result_type(*billing_dtypes)
+    complex_override = contraction_complex_override(info.accumulation, resolved)
     with budget.deduct(
-        "vdot", flop_cost=cost, subscripts=canonical_subs, shapes=(a.shape, b.shape)
+        "vdot",
+        flop_cost=cost,
+        subscripts=canonical_subs,
+        shapes=(a.shape, b.shape),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         result = _call_numpy(_np.vdot, _to_base_ndarray(a), _to_base_ndarray(b))
     # vdot returns a scalar, never a SymmetricTensor.
@@ -2554,7 +3286,11 @@ def kron(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     # kron output size = a.size * b.size
     cost = _builtins.max(a.size * b.size, 1)
     with budget.deduct(
-        "kron", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "kron",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.kron, _to_base_ndarray(a), _to_base_ndarray(b))
     return result  # type: ignore[return-value]  # wrapped at fnp.kron import time
@@ -2584,7 +3320,7 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     stripped_a = _to_base_ndarray(a)
     stripped_b = _to_base_ndarray(b)
     with budget.deduct_after(
-        "cross", subscripts=None, shapes=(a.shape, b.shape)
+        "cross", subscripts=None, shapes=(a.shape, b.shape), dtypes=(a.dtype, b.dtype)
     ) as _op:
         result = _call_numpy(_np.cross, stripped_a, stripped_b, **kwargs)
         _op.set_cost(
@@ -2632,12 +3368,18 @@ def diff(
     L = a.shape[ax]
     # numpy concatenates prepend/append along the diff axis before differencing,
     # so the effective axis length L grows by their contribution.
+    billing_dtypes: tuple = (a.dtype,)
     if prepend is not _np._NoValue:  # type: ignore[attr-defined]
         p = _np.asanyarray(_to_base_ndarray(prepend))
         L += 1 if p.ndim == 0 else p.shape[ax] if p.ndim > ax else 1
+        # np.diff concatenates prepend/append via np.concatenate, which does
+        # NOT follow NEP 50 weak-scalar promotion (unlike ufunc arithmetic);
+        # bill the coerced array's dtype directly rather than billing_operand.
+        billing_dtypes += (p.dtype,)
     if append is not _np._NoValue:  # type: ignore[attr-defined]
         p = _np.asanyarray(_to_base_ndarray(append))
         L += 1 if p.ndim == 0 else p.shape[ax] if p.ndim > ax else 1
+        billing_dtypes += (p.dtype,)
     prod_outside = int(_np.prod(a.shape[:ax]))
     prod_inside = int(_np.prod(a.shape[ax + 1 :]))
     per_iter_sum = n * L - n * (n + 1) // 2
@@ -2654,6 +3396,7 @@ def diff(
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.diff, _to_base_ndarray(a), n=n, axis=axis, **np_kwargs)
     return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
@@ -2757,7 +3500,19 @@ def gradient(
 
         cost = base + surcharge
 
-    with budget.deduct("gradient", flop_cost=cost, subscripts=None, shapes=(f.shape,)):
+    # varargs (spacing/coordinate arrays) never change np.gradient's output
+    # dtype (verified: gradient(f32, spacing=np.float64(...)) stays float32),
+    # so only f's dtype prices the call. np.gradient is mean-shaped on that
+    # dtype: integer/bool input always computes in float64 (the central-
+    # difference division needs float precision), float input keeps its own
+    # width (gradient(float32) -> float32).
+    with budget.deduct(
+        "gradient",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(f.shape,),
+        dtypes=(mean_compute_dtype(f.dtype),),
+    ):
         result = _call_numpy(
             _np.gradient,
             _to_base_ndarray(f),
@@ -2791,11 +3546,15 @@ def ediff1d(ary: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     if to_end is not None:
         extra += _np.asarray(to_end).size
     cost = _builtins.max(ary.size - 1 + extra, 1)
+    # to_begin/to_end must be same_kind-compatible with ary's dtype (numpy
+    # raises TypeError otherwise) and never change the output dtype, so only
+    # ary's dtype prices the call.
     with budget.deduct(
         "ediff1d",
         flop_cost=cost,
         subscripts=None,
         shapes=(ary.shape,),
+        dtypes=(ary.dtype,),
     ):
         # ``to_begin`` / ``to_end`` kwargs may be FlopscopeArrays — strip via tree.
         stripped_kwargs = {
@@ -2845,6 +3604,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
         flop_cost=flop_cost,
         subscripts=None,
         shapes=(a.shape, v.shape),
+        dtypes=(a.dtype, v.dtype),
     ):
         result = _call_numpy(
             _np.convolve, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
@@ -2932,6 +3692,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, v.shape),
+        dtypes=(a.dtype, v.dtype),
     ):
         result = _call_numpy(
             _np.correlate, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
@@ -2947,32 +3708,52 @@ attach_docstring(
 )
 
 
-def _cov_cost(x, y=None):
+def _cov_cost(x, y=None, rowvar=True):
     """Cost for cov: 2 * f^2 * s + 2 * f * s FLOPs.
 
-    For a (f, s) input: f features, s samples.
+    For a (f, s) input: f features, s samples. ``rowvar=True`` (numpy's
+    default) reads x as (features, samples) -- f=shape[0], s=shape[1].
+    ``rowvar=False`` transposes that reading: each COLUMN is a variable and
+    each ROW an observation -- f=shape[1], s=shape[0]. Same for ``y``: numpy
+    transposes it under ``rowvar=False`` before stacking, so its variable
+    count is read off ``shape[1]`` there too.
 
     - Gram term:      f^2 dot products of length s → ``2 * f^2 * s`` FLOPs (FMA=2)
     - Centering pass: subtract per-feature mean from each sample → ``2 * f * s``
       FLOPs (1 mean divide + 1 subtract per element, 2 * f * s total).
 
     Previously only the Gram term was counted, under-counting by ``2 * f * s``.
+    Previously ``rowvar`` was also ignored entirely, pinning every call to the
+    ``rowvar=True`` binding regardless of what was passed -- an unbounded
+    under-bill under ``rowvar=False`` whenever the sample axis is larger than
+    the feature axis (the common observations-as-rows layout).
     """
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     if x.ndim == 1:
         f, s = 1, x.shape[0]
-    else:
+    elif rowvar:
         f, s = x.shape[0], x.shape[1]
+    else:
+        f, s = x.shape[1], x.shape[0]
     if y is not None:
         y_arr = _np.asarray(y)
-        f2 = 1 if y_arr.ndim == 1 else y_arr.shape[0]
+        if y_arr.ndim == 1:
+            f2 = 1
+        elif rowvar:
+            f2 = y_arr.shape[0]
+        else:
+            f2 = y_arr.shape[1]  # numpy transposes y under rowvar=False
         f += f2
     return _builtins.max(2 * f * f * s + 2 * f * s, 1)
 
 
-def _corrcoef_cost(x, y=None):
+def _corrcoef_cost(x, y=None, rowvar=True):
     """Cost for corrcoef: cov_cost(x, y) + 2 * f^2 + f FLOPs.
+
+    ``f`` here is the same rowvar-dependent feature count as ``_cov_cost``
+    (the output correlation matrix is f x f, so the normalization term must
+    track the same orientation as the Gram/centering term it wraps).
 
     Normalization step: f^2 divides (divide cov[i,j] by std_i * std_j) plus
     f sqrt calls (one per feature) → ``2 * f^2 + f`` additional FLOPs.
@@ -2984,13 +3765,20 @@ def _corrcoef_cost(x, y=None):
         x = _np.asarray(x)
     if x.ndim == 1:
         f = 1
-    else:
+    elif rowvar:
         f = x.shape[0]
+    else:
+        f = x.shape[1]
     if y is not None:
         y_arr = _np.asarray(y)
-        f2 = 1 if y_arr.ndim == 1 else y_arr.shape[0]
+        if y_arr.ndim == 1:
+            f2 = 1
+        elif rowvar:
+            f2 = y_arr.shape[0]
+        else:
+            f2 = y_arr.shape[1]
         f += f2
-    return _builtins.max(_cov_cost(x, y) + 2 * f * f + f, 1)
+    return _builtins.max(_cov_cost(x, y, rowvar) + 2 * f * f + f, 1)
 
 
 @_counted_wrapper
@@ -2999,8 +3787,20 @@ def corrcoef(x: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> Flopsco
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
-    cost = _corrcoef_cost(x, y)
-    with budget.deduct("corrcoef", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    cost = _corrcoef_cost(x, y, rowvar=kwargs.get("rowvar", True))
+    # np.corrcoef always computes at least in float64 (numpy internally uses
+    # np.result_type(x, y, np.float64)), regardless of the input dtype.
+    billing_dtypes: tuple = (x.dtype, _np.dtype("float64"))
+    if y is not None:
+        y_arr = y if isinstance(y, _np.ndarray) else _np.asarray(y)
+        billing_dtypes += (y_arr.dtype,)
+    with budget.deduct(
+        "corrcoef",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.corrcoef,
             _to_base_ndarray(x),
@@ -3025,8 +3825,20 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
     budget = require_budget()
     if not isinstance(m, _np.ndarray):
         m = _np.asarray(m)
-    cost = _cov_cost(m, y)
-    with budget.deduct("cov", flop_cost=cost, subscripts=None, shapes=(m.shape,)):
+    cost = _cov_cost(m, y, rowvar=kwargs.get("rowvar", True))
+    # np.cov always computes at least in float64 (numpy internally uses
+    # np.result_type(m, y, np.float64)), regardless of the input dtype.
+    billing_dtypes: tuple = (m.dtype, _np.dtype("float64"))
+    if y is not None:
+        y_arr = y if isinstance(y, _np.ndarray) else _np.asarray(y)
+        billing_dtypes += (y_arr.dtype,)
+    with budget.deduct(
+        "cov",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(m.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.cov,
             _to_base_ndarray(m),
@@ -3050,8 +3862,16 @@ def trapezoid(
     budget = require_budget()
     if not isinstance(y, _np.ndarray):
         y = _np.asarray(y)
+    billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+    if x is not None:
+        x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
+        billing_dtypes += (billing_operand(x, x_arr),)
     with budget.deduct(
-        "trapezoid", flop_cost=4 * y.size, subscripts=None, shapes=(y.shape,)
+        "trapezoid",
+        flop_cost=4 * y.size,
+        subscripts=None,
+        shapes=(y.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.trapezoid,
@@ -3078,8 +3898,16 @@ if hasattr(_np, "trapz"):
         budget = require_budget()
         if not isinstance(y, _np.ndarray):
             y = _np.asarray(y)
+        billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+        if x is not None:
+            x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
+            billing_dtypes += (billing_operand(x, x_arr),)
         with budget.deduct(
-            "trapz", flop_cost=4 * y.size, subscripts=None, shapes=(y.shape,)
+            "trapz",
+            flop_cost=4 * y.size,
+            subscripts=None,
+            shapes=(y.shape,),
+            dtypes=billing_dtypes,
         ):
             result = _call_numpy(
                 _np.trapz,
@@ -3109,11 +3937,20 @@ def interp(x: ArrayLike, xp: ArrayLike, fp: ArrayLike, **kwargs: Any) -> Flopsco
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     xp_arr = _np.asarray(xp)
+    fp_arr = _np.asarray(fp)
     n = _builtins.max(x.size, 1)
     xp_len = _builtins.max(xp_arr.size, 1)
     cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1)
+    # np.interp always computes the x/xp search+blend in float64 regardless
+    # of x/xp's own precision, but the interpolated VALUE keeps fp's dtype
+    # (e.g. complex fp -> complex128 output); bill both contributions.
+    billing_dtypes = (_np.dtype("float64"), fp_arr.dtype)
     with budget.deduct(
-        "interp", flop_cost=cost, subscripts=None, shapes=(x.shape, xp_arr.shape)
+        "interp",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape, xp_arr.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.interp,

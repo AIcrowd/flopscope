@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as _np
 from numpy.typing import ArrayLike
 
+from flopscope._batch import _broadcast_batch
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._symmetric import SymmetricTensor, validate_symmetry_groups
 from flopscope._validation import require_budget
@@ -18,12 +21,9 @@ from flopscope.errors import SymmetryError
 
 def _batch_size(shape):
     """Number of matrices in a batched array."""
-    if len(shape) <= 2:
-        return 1
-    result = 1
-    for d in shape[:-2]:
-        result *= d
-    return result
+    from flopscope._batch import _broadcast_batch
+
+    return _broadcast_batch(tuple(shape), core_ranks=(2,))
 
 
 def _has_zero_dim(shape):
@@ -34,7 +34,7 @@ def _has_zero_dim(shape):
 def solve_cost(n: int, nrhs: int = 1, symmetric: bool = False) -> int:
     r"""FLOP cost of solving Ax = b: LU + two triangular solves (FMA=2).
 
-    2n^3/3 (getrf) + 2n^2*nrhs (getrs). G&VL 4e §3.2. ``symmetric`` is
+    2n^3/3 (getrf) + 2n^2*nrhs (getrs). ``symmetric`` is
     kept for API compatibility and ignored.
 
     Parameters
@@ -73,11 +73,16 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     n = a.shape[-1]
-    batch = _batch_size(a.shape)
     nrhs = b.shape[-1] if b.ndim >= 2 else 1
+    b_core = 2 if b.ndim >= 2 else 1
+    batch = _broadcast_batch(a.shape, b.shape, core_ranks=(2, b_core))
     cost = solve_cost(n, nrhs=nrhs) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.solve", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.solve",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.linalg.solve, _to_base_ndarray(a), _to_base_ndarray(b))
     if b_was_whest:
@@ -89,7 +94,8 @@ attach_docstring(
     solve,
     _np.linalg.solve,
     "linalg",
-    r"$\frac{2}{3}n^3 + 2n^2 \cdot nrhs$ FLOPs (LU + triangular solves)",
+    r"($\frac{2}{3}n^3 + 2n^2 \cdot nrhs$) $\times$ batch FLOPs (LU + triangular solves); "
+    r"batch broadcasts a's and b's leading dims, not just a's",
 )
 
 
@@ -134,7 +140,11 @@ def inv(a: ArrayLike) -> FlopscopeArray:
         inv_cost(n, symmetric=is_symmetric) * batch if not _has_zero_dim(a.shape) else 0
     )
     with budget.deduct(
-        "linalg.inv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.inv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.inv, _to_base_ndarray(a))
     if is_symmetric:
@@ -243,7 +253,11 @@ def lstsq(
         else 0
     )
     with budget.deduct(
-        "linalg.lstsq", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.lstsq",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.lstsq, _to_base_ndarray(a), _to_base_ndarray(b), rcond=rcond
@@ -325,7 +339,11 @@ def pinv(
     if rtol is not None:
         kwargs["rtol"] = rtol  # type: ignore[reportAssignmentType]
     with budget.deduct(
-        "linalg.pinv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.pinv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.pinv, _to_base_ndarray(a), **kwargs)
     if inputs_were_whest:
@@ -341,31 +359,35 @@ attach_docstring(
 )
 
 
-def tensorsolve_cost(a_shape: tuple, ind: int | None = None) -> int:
-    """FLOP cost of tensor solve.
+def tensorsolve_cost(a_shape: tuple) -> int:
+    r"""FLOP cost of tensor solve.
 
     Parameters
     ----------
     a_shape : tuple of int
-        Shape of the coefficient tensor.
-    ind : int or None, optional
-        Number of leading indices for the solution. Default is 2.
+        Shape of the coefficient tensor, as passed to ``tensorsolve`` (i.e.
+        before any ``axes`` reordering numpy performs internally).
 
     Returns
     -------
     int
-        Estimated FLOP count: $\frac{2}{3}n^3 + 2n^2$ where $n$ = product of
-        trailing dims. Reduces to ``solve_cost(n, 1)``.
+        Estimated FLOP count: $\frac{2}{3}n^3 + 2n^2$ where $n$ is the
+        dimension of the linear system numpy actually solves. Reduces to
+        ``solve_cost(n, 1)``.
 
     Notes
     -----
-    Reduces to a standard linear solve after reshaping.
+    ``numpy.linalg.tensorsolve(a, b, axes=...)`` optionally transposes ``a``
+    to move ``axes`` to the trailing positions, then reshapes the result to
+    a square ``(n, n)`` system before delegating to ``solve``. A transpose
+    only reorders axes, so it never changes ``a``'s total element count, and
+    numpy requires ``a.size == n**2`` for any valid call (it raises
+    otherwise) -- both regardless of ``axes`` and of ``b``'s rank. So
+    ``n = isqrt(prod(a_shape))`` recovers the true solved dimension directly
+    from ``a``'s original (untransposed) shape, without needing to locate
+    the reshape split point.
     """
-    if ind is None:
-        ind = 2
-    n = 1
-    for d in a_shape[ind:]:
-        n *= d
+    n = math.isqrt(math.prod(a_shape))
     return solve_cost(n, nrhs=1)
 
 
@@ -376,9 +398,18 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
     inputs_were_whest = isinstance(a, FlopscopeArray) or isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+    b_arr = _np.asarray(b)
     cost = tensorsolve_cost(a.shape)
     with budget.deduct(
-        "linalg.tensorsolve", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.tensorsolve",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        # tensorsolve delegates to solve: a real `a` with a complex `b` yields a
+        # complex result, so both operands must join the billing dtype tuple or
+        # the 4x complex factor is bypassed (mirrors solve/lstsq above). It is
+        # also LAPACK-backed, so integer operands force the float64 driver.
+        dtypes=linalg_billing_dtypes(a.dtype, b_arr.dtype),
     ):
         result = _call_numpy(
             _np.linalg.tensorsolve,
@@ -395,7 +426,8 @@ attach_docstring(
     tensorsolve,
     _np.linalg.tensorsolve,
     "linalg",
-    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = product of trailing dims (reduces to solve)",
+    r"$\frac{2}{3}n^3 + 2n^2$ FLOPs where n = isqrt(prod(a.shape)) (reduces to solve); "
+    r"n is the solved system's true dimension regardless of axes reordering",
 )
 
 
@@ -434,7 +466,11 @@ def tensorinv(a: ArrayLike, ind: int = 2) -> FlopscopeArray:
         a = _np.asarray(a)
     cost = tensorinv_cost(a.shape, ind=ind)
     with budget.deduct(
-        "linalg.tensorinv", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.tensorinv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.tensorinv, _to_base_ndarray(a), ind=ind)
     if inputs_were_whest:

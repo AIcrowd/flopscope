@@ -11,6 +11,9 @@ Core algorithms:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import functools
 import math
 import weakref
 from functools import reduce
@@ -572,6 +575,24 @@ class SymmetryGroup:
 
     @classmethod
     def direct_product(cls, *groups: SymmetryGroup) -> SymmetryGroup:
+        """Combine groups with disjoint axis supports into their direct product.
+
+        This is a factory **classmethod**, like :meth:`symmetric`,
+        :meth:`cyclic`, :meth:`dihedral`, and :meth:`young`. Call it on the
+        class with every factor passed explicitly::
+
+            SymmetryGroup.direct_product(g1, g2, ...)
+
+        Do NOT call it as an instance method (``g1.direct_product(g2)``):
+        because it is a classmethod, the receiver ``g1`` is bound to ``cls``
+        and dropped from ``groups``, so the call silently returns just ``g2``
+        (order and axes of ``g2`` alone) instead of the product ``g1 × g2``.
+        For the common case of several symmetric blocks, prefer
+        :meth:`young`, which routes through this method correctly.
+
+        Every factor must carry ``axes`` and the supports must be pairwise
+        disjoint; otherwise ``ValueError`` is raised.
+        """
         if not groups:
             raise ValueError("direct_product() requires at least one group")
         supports = []
@@ -672,6 +693,62 @@ class _DiminoBudgetExceeded(Exception):
         self.budget = budget
 
 
+_dimino_cumulative: contextvars.ContextVar = contextvars.ContextVar(
+    "_dimino_cumulative", default=None
+)
+
+
+class _CumulativeDiminoCounter:
+    """Shared element budget across every _dimino call while pricing one op."""
+
+    __slots__ = ("seen", "budget")
+
+    def __init__(self, budget: int) -> None:
+        self.seen = 0
+        self.budget = budget
+
+    def charge(self, n: int) -> None:
+        self.seen += n
+        if self.seen > self.budget:
+            raise _DiminoBudgetExceeded(self.seen, self.budget)
+
+
+@contextlib.contextmanager
+def cumulative_dimino_budget():
+    """Bound TOTAL dimino enumeration while pricing a single op.
+
+    _minimal_generators re-runs _dimino once per candidate generator; a group
+    whose order sits just under the per-call dimino_budget would otherwise be
+    enumerated many times over (a practical hang for high-rank symmetric
+    tensors). Sharing one cumulative element budget across every _dimino call in
+    scope caps total enumeration at dimino_budget regardless of candidate count.
+    Reentrant: a nested scope reuses the outer counter.
+    """
+    existing = _dimino_cumulative.get()
+    if existing is not None:
+        yield existing
+        return
+    from flopscope._config import get_setting
+
+    counter = _CumulativeDiminoCounter(int(get_setting("dimino_budget")))  # type: ignore[arg-type]
+    token = _dimino_cumulative.set(counter)
+    try:
+        yield counter
+    finally:
+        _dimino_cumulative.reset(token)
+
+
+def with_cumulative_dimino_budget(fn):
+    """Decorator: run *fn* under a (reentrant) cumulative dimino budget."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with cumulative_dimino_budget():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
     """Enumerate all group elements via Dimino's algorithm.
 
@@ -714,4 +791,7 @@ def _dimino(generators: tuple[_Permutation, ...]) -> list[_Permutation]:
             coset.extend(next_new)
         elements.extend(coset)
 
+    cumulative = _dimino_cumulative.get()
+    if cumulative is not None:
+        cumulative.charge(len(seen))
     return elements

@@ -173,7 +173,7 @@ class TestApplyOverAxes:
 
 
 class TestPiecewise:
-    """Cover lines 313-319: piecewise cost = x.size."""
+    """Cover lines 313-319: piecewise cost = x.size * len(condlist)."""
 
     def test_basic(self):
         x = numpy.linspace(-2, 2, 10)
@@ -183,7 +183,7 @@ class TestPiecewise:
             from flopscope._counting_ops import piecewise
 
             result = piecewise(x, condlist, funclist)
-        assert budget.flops_used == 10
+        assert budget.flops_used == 20  # 10 elements * 2 conditions
         numpy.testing.assert_array_equal(result, numpy.abs(x))
 
     def test_with_list_input(self):
@@ -195,7 +195,7 @@ class TestPiecewise:
             from flopscope._counting_ops import piecewise
 
             piecewise(x, condlist, funclist)
-        assert budget.flops_used == 3
+        assert budget.flops_used == 6  # 3 elements * 2 conditions
 
 
 # ============================================================================

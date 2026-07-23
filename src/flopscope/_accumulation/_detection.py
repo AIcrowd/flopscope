@@ -166,7 +166,7 @@ def run_sigma_loop(
 
 import math
 
-from flopscope._perm_group import _dimino
+from flopscope._perm_group import _dimino, with_cumulative_dimino_budget
 
 
 @dataclass(frozen=True)
@@ -268,6 +268,7 @@ def _action_summary(
     return "trivial"
 
 
+@with_cumulative_dimino_budget
 def build_full_group(
     sigma_results: Sequence[SigmaResult],
     *,

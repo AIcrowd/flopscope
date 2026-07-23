@@ -47,6 +47,12 @@ _sq10 = fnp.asarray(_rng.standard_normal((10, 10)))
 _sq10_psd = fnp.asarray(_sq10.T @ _sq10 + np.eye(10))
 _a3 = fnp.asarray(np.array([1.0, 2.0, 3.0]))
 _b3 = fnp.asarray(np.array([4.0, 5.0, 6.0]))
+# Non-1-D outer/vdot operands: outer/vdot flatten these internally, and that
+# private flatten must stay a free numpy view (not the now-billed
+# FlopscopeArray.ravel) -- see test_outer_vdot_nd_operands_no_ravel_surcharge.
+_m2x3 = fnp.asarray(_rng.standard_normal((2, 3)))  # ndim=2 -> internal ravel
+_v4 = fnp.asarray(_rng.standard_normal(4))
+_v6 = fnp.asarray(_rng.standard_normal(6))  # 1-D twin of _m2x3 (same 6 elems)
 
 # FFT inputs
 _x64c = fnp.asarray(_rng.standard_normal(64).astype(complex))
@@ -88,10 +94,8 @@ _u100 = fnp.asarray(_rng.uniform(0.01, 0.99, 100))
 _v100_pos = fnp.asarray(np.asarray(_v100) > 0)  # bool mask, built outside BudgetContext
 
 # Copy / gather / view ops
-_sq10_2d = fnp.asarray(
-    _rng.standard_normal((10, 10))
-)  # 2-D: diag extract → min(10,10)=10
-_v5_1d = fnp.asarray(_rng.standard_normal(5))  # 1-D: diag construct → (5+0)^2=25 output
+_sq10_2d = fnp.asarray(_rng.standard_normal((10, 10)))  # 2-D: diag extract → view → 0
+_v5_1d = fnp.asarray(_rng.standard_normal(5))  # 1-D: diag construct → v.shape[0]=5
 _sq3a = fnp.asarray(_rng.standard_normal((3, 3)))
 _sq3b = fnp.asarray(_rng.standard_normal((3, 3)))
 _idx10x3 = fnp.asarray(np.random.default_rng(7).integers(0, 10, (10, 3)))
@@ -180,7 +184,16 @@ _SYMMETRIC = {
     "random.symmetric",
 }
 
-COVERED_ELSEWHERE: set[str] = _CCU | _FMA | _UFUNC | _SYMMETRIC
+# test_triage_price_pins.py — file I/O needs a tmp_path fixture, which this
+# module's module-level-only array convention doesn't support; exact probes
+# (4*size) live there instead (cost-model triage Task 10).
+_TRIAGE_IO = {
+    "save",
+    "savez",
+    "savez_compressed",
+}
+
+COVERED_ELSEWHERE: set[str] = _CCU | _FMA | _UFUNC | _SYMMETRIC | _TRIAGE_IO
 
 # ---------------------------------------------------------------------------
 # Registry categories where ALL members follow a simple family rule.
@@ -304,6 +317,13 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         lambda: fnp.vdot(_v100, _v100),
         2 * 100 - 1,  # 199
     ),
+    # vdot on 2-D operands (Frobenius inner product) flattens both internally;
+    # that private ravel must NOT bill, so a 10x10 (=100 elems) vdot costs the
+    # SAME 199 as the 1-D 100-vector vdot above -- no numel(input) surcharge.
+    "vdot (2-D operands, no ravel surcharge)": (
+        lambda: fnp.vdot(_sq10, _sq10),
+        2 * 100 - 1,  # 199 (NOT 199 + 100 + 100)
+    ),
     "kron": (
         lambda: fnp.kron(_v10, _v10),
         10 * 10,  # 100
@@ -312,6 +332,17 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "outer": (
         lambda: fnp.outer(_v10, _v10b),
         10 * 10,  # 100
+    ),
+    # outer on a 2-D operand flattens it internally; that private ravel must NOT
+    # bill, so outer(2x3, 4) costs the SAME 24 as the 1-D outer(6, 4) below --
+    # the bill must depend only on the 6x4 output, never on the operand's shape.
+    "outer (2-D operand, no ravel surcharge)": (
+        lambda: fnp.outer(_m2x3, _v4),
+        6 * 4,  # 24 (NOT 24 + 6)
+    ),
+    "outer (1-D twin, shape-parity baseline)": (
+        lambda: fnp.outer(_v6, _v4),
+        6 * 4,  # 24
     ),
     "linalg.outer": (
         lambda: fnp.linalg.outer(_v10, _v10b),
@@ -352,7 +383,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     ),
     "sort_complex": (
         lambda: fnp.sort_complex(_complex50),
-        50 * int(math.ceil(math.log2(50))),  # 300
+        # complex_factor 2.0 (lexicographic compare touches both components);
+        # unit dtype rates, so only the complex factor applies: 300 * 2 = 600.
+        2 * 50 * int(math.ceil(math.log2(50))),  # 600
     ),
     "partition": (
         lambda: fnp.partition(_v100, 10),
@@ -439,8 +472,12 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     ),
     "polyfit": (
         # plain numpy arrays required (FlopscopeArray causes internal tripwire)
+        # polyfit_cost now delegates to lstsq_cost (Vandermonde build + SVD
+        # least-squares solve), replacing the old normal-equations-shaped
+        # 2*m*(deg+1)^2 estimate (7200 here) that billed 3-13x cheaper than
+        # the identical solve billed through linalg.lstsq.
         lambda: fnp.polyfit(_v100_np, _v100_np, 5),
-        2 * 100 * (5 + 1) ** 2,  # 7200
+        100 * 5 + 27186,  # m*deg + lstsq_cost(100, 6, ncols=1) == 27686
     ),
     "roots": (
         # 10-coeff poly → 9×9 companion matrix; eigvals cost = 10*9^3
@@ -456,8 +493,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         lambda: fnp.blackman(50),
         40 * 50,
     ),  # 2 cosine evals @16 + 8 arith per sample
-    "hamming": (lambda: fnp.hamming(50), 2 * 50),  # 1 mul + 1 cos
-    "hanning": (lambda: fnp.hanning(50), 2 * 50),
+    # cos@16 + mul + sub per sample (kaiser-family derived-constant convention)
+    "hamming": (lambda: fnp.hamming(50), 18 * 50),
+    "hanning": (lambda: fnp.hanning(50), 18 * 50),
     "kaiser": (lambda: fnp.kaiser(50, 14), 23 * 50),  # Bessel I0 @16 + 7 arith (FMA=2)
     # ---- Stats (fixed per-elem constants at weight=1.0) -------------------
     "stats.norm.pdf": (lambda: fst.norm.pdf(_v100), 27 * 100),
@@ -481,9 +519,11 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "nanstd": (lambda: fnp.nanstd(_v100), 4 * 100 + 1),
     "ptp": (lambda: fnp.ptp(_v100), 2 * (100 - 1) + 1),
     "median": (lambda: fnp.median(_v100), 100),
-    "percentile": (lambda: fnp.percentile(_v100, 50), 100),
-    "quantile": (lambda: fnp.quantile(_v100, 0.5), 100),
-    "nanquantile": (lambda: fnp.nanquantile(_v100, 0.5), 100),
+    # percentile/quantile family: axis_dim(100) + 4*q.size(1) = 104 (Task 3:
+    # scalar q still pays the interpolation term, not just the partition pass)
+    "percentile": (lambda: fnp.percentile(_v100, 50), 104),
+    "quantile": (lambda: fnp.quantile(_v100, 0.5), 104),
+    "nanquantile": (lambda: fnp.nanquantile(_v100, 0.5), 104),
     # ---- Diff / gradient --------------------------------------------------
     "diff": (lambda: fnp.diff(_v100), 99),
     "ediff1d": (lambda: fnp.ediff1d(_v100), 99),
@@ -491,8 +531,11 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     # ---- Miscellaneous counted_custom -------------------------------------
     # clip: 2 bounds → 2 compare-selects/elem → 2*numel(output); old pin was 1*numel
     "clip": (lambda: fnp.clip(_v100, -1.0, 1.0), 200),
-    # where (1-arg): cond.size = 100; equivalent to nonzero -> charged numel at weight 1.0
-    # 3-arg where (select) is FREE (0 FLOPs); only the 1-arg form (derives indices) is charged.
+    # where (1-arg): cond.size = 100; equivalent to nonzero -> deducted under
+    # "nonzero" (alias parity), charged numel at weight 1.0. This pin exercises
+    # that path -- unit-weight flops_used is unaffected by the op_name it logs
+    # under. 3-arg where (select) is now charged too: 4*numel(broadcast output)
+    # at weight 4.0 (unit weight here -> 1*numel), see test_triage_price_pins.py.
     "where": (lambda: fnp.where(_v100_pos), 100),
     "tile": (lambda: fnp.tile(_v100, 3), 300),
     "repeat": (lambda: fnp.repeat(_v100, 3), 300),
@@ -505,8 +548,8 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "trace": (lambda: fnp.trace(_sq10), 10),
     "linalg.cross": (lambda: fnp.linalg.cross(_a3, _b3), 3 * 3),
     # ---- Copy / gather / view ops (audit-completion pins) ------------------
-    # diag extract: 2-D (10,10) → min(10,10)=10
-    "diag": (lambda: fnp.diag(_sq10_2d), 10),
+    # diag extract: 2-D (10,10) → view → 0 (Task 7)
+    "diag": (lambda: fnp.diag(_sq10_2d), 0),
     # diagonal: returns a view → 0 FLOPs
     "diagonal": (lambda: fnp.diagonal(_sq10_2d), 0),
     # take_along_axis: gather tier weight 4.0; conftest resets weights → flop_cost = numel(output) = 30
@@ -522,8 +565,9 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "compress": (lambda: fnp.compress(_cond5, _v5_float), 17),
     # packbits: numel(input)=8
     "packbits": (lambda: fnp.packbits(_v8_bits), 8),
-    # unwrap: 11 * numel(input) = 11 * 100 (steps 8/12 are 3-arg where = free selects)
-    "unwrap": (lambda: fnp.unwrap(_v100), 11 * 100),
+    # unwrap: 13 * numel(input) = 13 * 100 (steps 8/12, 3-arg where selects,
+    # are charged like every other pass now that 3-arg where itself bills)
+    "unwrap": (lambda: fnp.unwrap(_v100), 13 * 100),
 }
 
 # ---------------------------------------------------------------------------
@@ -702,7 +746,20 @@ DEFERRED: dict[str, str] = {
     "array": "numel(input); plain copy",
     "full": "numel; scalar broadcast",
     "full_like": "numel; trivial",
-    "diag": "pinned in OP_EXPECTATIONS (extract path; construct path = numel(output))",
+    # Task 4: value-writing creation & layout copies (formerly free tier)
+    "ones": "numel(output); constant fill",
+    "ones_like": "numel(output); constant fill",
+    "eye": "diagonal length written; structural constructor",
+    "identity": "diagonal length written (=n); structural constructor",
+    "copy": "numel(input); materializing copy",
+    "astype": "numel(input) at heavier(src,dst) rate; bills like copy for every real cast/copy, free only for the copy=False+unchanged-dtype no-op — see test_dtype_cost.py, test_data_movement_free_tier.py",
+    "asarray": "numel(input) at heavier(src,dst) rate when dtype= actually converts; 0 when no conversion happens — same formula as astype, see test_dtype_cost.py",
+    "reshape": "numel(input); billed regardless of view-vs-copy",
+    "ravel": "numel(input); billed regardless of view-vs-copy",
+    "require": "numel(input); billed regardless of view-vs-copy",
+    "fft.fftshift": "numel(output); roll-based reindex, no arithmetic",
+    "fft.ifftshift": "numel(output); roll-based reindex, no arithmetic",
+    "diag": "pinned in OP_EXPECTATIONS (2-D extract: 0, view; 1-D construct: v.shape[0])",
     "concatenate": "numel(output); trivial copy",
     "concat": "numel(output); numpy 2.x alias for concatenate",
     "stack": "numel(output); trivial copy",
@@ -714,11 +771,11 @@ DEFERRED: dict[str, str] = {
     "hstack": "numel(output); materializing copy",
     "column_stack": "numel(output); materializing copy (1-D to 2-D columns)",
     "row_stack": "numel(output); alias for vstack",
-    "tril": "numel(output); masked-select copy; weight 1.0",
-    "triu": "numel(output); masked-select copy; weight 1.0",
+    "tril": "elements at/below kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
+    "triu": "elements at/above kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
     "einsum_path": "path planning only; returns list+string, no numeric FLOPs",
     "histogram_bin_edges": "numel(a); bin-edge computation",
-    "pad": "numel(output); pad fill",
+    "pad": "numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises",
     "resize": "numel(output)",
     "meshgrid": "numel(output) per array; sparse=True bills sum(input lengths); copy=False bills 1",
     "indices": "numel(dense output)",
@@ -732,8 +789,8 @@ DEFERRED: dict[str, str] = {
     "nonzero": "numel(input)",
     "flatnonzero": "numel(input)",
     "argwhere": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
-    "select": "numel(output) gather tier",
-    "piecewise": "numel(input); local_callback",
+    "select": "numel(output) * len(condlist)",
+    "piecewise": "numel(input) * len(condlist); local_callback",
     "apply_along_axis": "numel(output); local_callback",
     "apply_over_axes": "numel(output); local_callback",
     "fromfunction": "numel(output); local_callback",
@@ -744,25 +801,46 @@ DEFERRED: dict[str, str] = {
     "take_along_axis": "pinned in OP_EXPECTATIONS (numel(output) weight 4.0 gather tier)",
     "choose": "numel(output) gather tier",
     "compress": "pinned in OP_EXPECTATIONS (len(cond)+4*numel(out) weight 1.0)",
+    # Task 11: __getitem__ (new billed surface) -- basic indexing (int/slice/
+    # newaxis/Ellipsis, tuples thereof) is free (view); advanced (fancy/bool)
+    # indexing bills 4*numel(out) + numel(mask) per bool-mask part, weight
+    # 1.0. Pinned in
+    # tests/test_triage_price_pins.py::test_getitem_slices_free_fancy_4x_mask_scan_plus_4x.
+    "getitem": "4*numel(output) gather + numel(mask) per boolean-mask part; basic indexing free",
     "extract": "numel(input) gather",
     "place": "numel(input) scatter",
     "put": "numel(indices) scatter at gather tier",
-    "put_along_axis": "elements scattered; gather tier weight 4.0",
+    "put_along_axis": "elements scattered; scatter tier weight 1.0",
     "putmask": "numel(input) scatter",
     "delete": "numel(output); surviving elements copied",
     "insert": "numel(output); materializing copy",
     "append": "numel(output) = arr.size + values.size; concatenate family",
-    "copyto": "0 for a lossless copy (same dtype or safe widening); numel(dst) (or popcount where) for a value-changing (lossy) cast",
+    "copyto": "numel(dst) per element written (or popcount of where= when masked)",
     "trim_zeros": "numel(input); value scan, like nonzero",
-    "ravel_multi_index": "2*(ndim-1)*N (+N for clip/wrap); one stride is unity",
+    # Task 8: index generators -- numel of the returned index arrays, weight
+    # 1.0, dtype-neutral (dtypes=()); pinned in
+    # tests/test_triage_price_pins.py::test_index_generators_bill_their_outputs
+    # and siblings.
+    "ravel_multi_index": "numel(output) = N; dtype-neutral",
+    "mask_indices": "numel(output) = 2*k; dtype-neutral (mask scan itself is unbilled; an fnp mask_func bills its own cost on top -- see test_mask_indices_fnp_mask_func_bills_on_top)",
+    "tri": "numel(output); NOT dtype-neutral, bills the actual (possibly requested) output dtype -- mirrors full/ones/eye/identity",
+    "tril_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "tril_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "triu_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "triu_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "diag_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "diag_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
+    "unravel_index": "numel(output) = numel of the returned index arrays; dtype-neutral",
+    "broadcast_shapes": "sum of len(shape) across input shape tuples (floor 1); dtype-neutral, no array operands",
     "ix_": "numel(output)",
-    "mask_indices": "2*n^2 + 8*k; weight 1.0 (mask scan + gather index pairs)",
-    "diagflat": "len(v)",
+    "diagflat": "numel(v)",
     "fill_diagonal": "min(m,n)",
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",
     "unpackbits": "8*n",
-    "unwrap": "pinned in OP_EXPECTATIONS (11*numel(input) weight 1.0; steps 8/12 are free 3-arg where)",
-    "unstack": "numel(output); NumPy 2.1+",
+    "unwrap": "pinned in OP_EXPECTATIONS (13*numel(input) weight 1.0; steps 8/12 are 3-arg where selects, charged like the rest since Task 6's select-class rework)",
+    # unstack left this dict in Task 5 -- it now bills 0 FLOPs (free-tier
+    # view, NumPy 2.1+); see tests/test_triage_price_pins.py::test_unstack_stays_free
+    # and tests/test_view_semantics_lock.py.
     "unique_all": "n*ceil(log2(n)); unique family",
     "unique_counts": "n*ceil(log2(n)); unique family",
     "unique_inverse": "n*ceil(log2(n)); unique family",
@@ -804,6 +882,29 @@ def test_conformance():
         pytest.fail("Cost convention violations:\n" + "\n".join(failures))
 
 
+def test_outer_vdot_nd_operands_no_ravel_surcharge():
+    """outer/vdot flatten multi-D operands internally; that private ravel must
+    stay a free numpy view, not the now-billed FlopscopeArray.ravel.
+
+    Regression guard for the F1a follow-up: adding FlopscopeArray.ravel made a
+    bare ``a.ravel()`` inside outer/vdot bill numel@w1, so a multi-D operand
+    was over-charged by its own size on top of the real contraction cost. The
+    bill must depend only on the contraction (output for outer, flattened
+    length for vdot), never on the operand's original ndim/shape.
+    """
+    # vdot: a 10x10 (=100 elems) Frobenius inner product must equal a 1-D
+    # 100-vector vdot -- no +100+100 ravel surcharge.
+    assert _cost(lambda: fnp.vdot(_sq10, _sq10)) == _cost(
+        lambda: fnp.vdot(_v100, _v100)
+    )
+    assert _cost(lambda: fnp.vdot(_sq10, _sq10)) == 2 * 100 - 1  # core only
+
+    # outer: a 2x3 operand flattens to a 6-vector; outer(2x3, 4) must bill the
+    # SAME as outer(6, 4) -- identical 6x4 output, so identical cost.
+    assert _cost(lambda: fnp.outer(_m2x3, _v4)) == _cost(lambda: fnp.outer(_v6, _v4))
+    assert _cost(lambda: fnp.outer(_m2x3, _v4)) == 6 * 4  # output-only, no +6 surcharge
+
+
 def test_family_defaults_elementwise():
     """Elementwise unary and binary: flop_cost = numel(output)."""
     v = fnp.asarray(_rng.standard_normal(50))
@@ -842,18 +943,18 @@ def test_family_defaults_reduction():
 
 
 def test_family_defaults_free():
-    """Free / view ops: cost = 0."""
+    """Free / view ops: cost = 0.
+
+    reshape/ones/ones_like/fft.fftshift/fft.ifftshift moved out of this test
+    in Task 4 -- they now bill numel(input)/numel(output) (weight 1.0); see
+    OP_EXPECTATIONS / DEFERRED below and tests/test_triage_price_pins.py.
+    """
     v = fnp.asarray(_rng.standard_normal(100))
     sq = fnp.asarray(_rng.standard_normal((4, 4)))
-    assert _cost(lambda: fnp.reshape(v, (10, 10))) == 0
     assert _cost(lambda: fnp.transpose(sq)) == 0
     assert _cost(lambda: fnp.zeros(100)) == 0
-    assert _cost(lambda: fnp.ones(100)) == 0
     assert _cost(lambda: fnp.empty(100)) == 0
     assert _cost(lambda: fnp.zeros_like(v)) == 0
-    assert _cost(lambda: fnp.ones_like(v)) == 0
-    assert _cost(lambda: fnp.fft.fftshift(v)) == 0
-    assert _cost(lambda: fnp.fft.ifftshift(v)) == 0
     assert _cost(lambda: fnp.linalg.matrix_transpose(sq)) == 0
 
 

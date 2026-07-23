@@ -29,7 +29,7 @@ class TestFftshift:
             from flopscope.numpy.fft import fftshift
 
             assert numpy.allclose(fftshift(x), numpy.fft.fftshift(x))
-            assert budget.flops_used == 0
+            assert budget.flops_used == 8  # numel(output); Task 4
 
 
 class TestIfftshift:
@@ -39,4 +39,4 @@ class TestIfftshift:
             from flopscope.numpy.fft import ifftshift
 
             assert numpy.allclose(ifftshift(x), numpy.fft.ifftshift(x))
-            assert budget.flops_used == 0
+            assert budget.flops_used == 8  # numel(output); Task 4

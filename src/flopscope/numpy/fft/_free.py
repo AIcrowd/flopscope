@@ -27,7 +27,12 @@ def fftfreq(n: int, d: float = 1.0, device: Any = None) -> FlopscopeArray:
     if device is not None:
         kwargs["device"] = device
     with budget.deduct(
-        "fft.fftfreq", flop_cost=max(int(n), 1), subscripts=None, shapes=((n,),)
+        "fft.fftfreq",
+        flop_cost=max(int(n), 1),
+        subscripts=None,
+        shapes=((n,),),
+        # fftfreq grids are always float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.fft.fftfreq, n, d=d, **kwargs)
     return result  # type: ignore[reportReturnType]
@@ -51,7 +56,12 @@ def rfftfreq(n: int, d: float = 1.0, device: Any = None) -> FlopscopeArray:
         kwargs["device"] = device
     grid = int(n) // 2 + 1
     with budget.deduct(
-        "fft.rfftfreq", flop_cost=max(grid, 1), subscripts=None, shapes=((grid,),)
+        "fft.rfftfreq",
+        flop_cost=max(grid, 1),
+        subscripts=None,
+        shapes=((grid,),),
+        # fftfreq grids are always float64; bill that width.
+        dtypes=(_np.dtype(_np.float64),),
     ):
         result = _call_numpy(_np.fft.rfftfreq, n, d=d, **kwargs)
     return result  # type: ignore[reportReturnType]
@@ -67,29 +77,44 @@ attach_docstring(
 
 @_counted_wrapper
 def fftshift(x: ArrayLike, axes: int | Sequence[int] | None = None) -> FlopscopeArray:
-    """Shift zero-frequency component to center. Cost: 0 FLOPs."""
+    """Shift zero-frequency component to center. Cost: numel(output)."""
     budget = require_budget()
     x_arr = _np.asarray(x)
+    # numpy.fft.fftshift is a roll (shape- and dtype-preserving reindex, no
+    # arithmetic), so numel(output) == x_arr.size and result.dtype == x_arr.dtype
+    # unconditionally -- billing from the pre-call array keeps the numpy call
+    # inside the timed deduct() block.
+    cost = max(x_arr.size, 1)
     with budget.deduct(
-        "fft.fftshift", flop_cost=0, subscripts=None, shapes=(x_arr.shape,)
+        "fft.fftshift",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.fft.fftshift, _to_base_ndarray(x), axes=axes)
     return result  # type: ignore[reportReturnType]
 
 
-attach_docstring(fftshift, _np.fft.fftshift, "free", "0 FLOPs")
+attach_docstring(fftshift, _np.fft.fftshift, "counted_custom", "numel(output) FLOPs")
 
 
 @_counted_wrapper
 def ifftshift(x: ArrayLike, axes: int | Sequence[int] | None = None) -> FlopscopeArray:
-    """Inverse of fftshift. Cost: 0 FLOPs."""
+    """Inverse of fftshift. Cost: numel(output)."""
     budget = require_budget()
     x_arr = _np.asarray(x)
+    # Same roll-based reindex as fftshift -- see the comment there.
+    cost = max(x_arr.size, 1)
     with budget.deduct(
-        "fft.ifftshift", flop_cost=0, subscripts=None, shapes=(x_arr.shape,)
+        "fft.ifftshift",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=(x_arr.dtype,),
     ):
         result = _call_numpy(_np.fft.ifftshift, _to_base_ndarray(x), axes=axes)
     return result  # type: ignore[reportReturnType]
 
 
-attach_docstring(ifftshift, _np.fft.ifftshift, "free", "0 FLOPs")
+attach_docstring(ifftshift, _np.fft.ifftshift, "counted_custom", "numel(output) FLOPs")

@@ -23,6 +23,7 @@ _HEADER = """\
 _CLIENT_SRC = (
     Path(__file__).resolve().parent.parent / "flopscope-client" / "src" / "flopscope"
 )
+_ROOT_DATA = Path(__file__).resolve().parent.parent / "src" / "flopscope" / "data"
 
 
 def _generate_registry_data() -> str:
@@ -73,6 +74,26 @@ def _write_or_check(path: Path, content: str, check: bool, diffs: list[str]) -> 
         print(f"  wrote {path}")
 
 
+def _sync_json_verbatim(src: Path, dest: Path, check: bool, diffs: list[str]) -> None:
+    """Mirror a JSON data file verbatim (no ruff — JSON is not Python).
+
+    Used for ``default_weights.json``: the client's public cost-estimation
+    helpers (``flops.pointwise_cost`` / ``reduction_cost`` / ...) resolve
+    ``get_weight`` against the packaged copy, so it must stay byte-identical to
+    the core source of truth. ``_extract_weights`` reads only the ``weights``
+    section, so the mirrored ``dtype_rates`` section is carried but inert.
+    """
+    content = src.read_text()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if check:
+        existing = dest.read_text() if dest.exists() else ""
+        if existing != content:
+            diffs.append(f"--- {dest} is out of sync with {src} ---\n")
+    else:
+        dest.write_text(content)
+        print(f"  wrote {dest}")
+
+
 def _remove_or_check_absent(path: Path, check: bool, diffs: list[str]) -> None:
     """Delete a stale generated file, or report it during --check."""
     if check:
@@ -95,6 +116,7 @@ def _generate_errors() -> str:
         "SymmetryError",
         "TimeExhaustedError",
         "UnauthorizedControlError",
+        "UnsupportedDtypeError",
         "UnsupportedFunctionError",
         "UnsupportedReturnType",
     }
@@ -134,6 +156,18 @@ def _generate_errors() -> str:
             "UnsupportedFunctionError",
             "FlopscopeError",
             "Raised when calling a function not available in the installed NumPy.",
+        ),
+        (
+            "UnsupportedDtypeError",
+            "TypeError",
+            (
+                "An operation resolved to a dtype with no billing rate. Raised "
+                "when production dtype rates are active and the resolved "
+                "calculation dtype is a numeric type absent from the supported "
+                "table (a future dtype numpy or an extension package might "
+                "introduce), or when a complex-dtype call reaches an op marked "
+                "complex-illegal."
+            ),
         ),
         (
             "UnsupportedReturnType",
@@ -513,6 +547,14 @@ def main():
     _write_or_check(
         _CLIENT_SRC / "linalg" / "__init__.py",
         _generate_linalg_init(),
+        args.check,
+        diffs,
+    )
+
+    print("Mirroring default weights...")
+    _sync_json_verbatim(
+        _ROOT_DATA / "default_weights.json",
+        _CLIENT_SRC / "data" / "default_weights.json",
         args.check,
         diffs,
     )

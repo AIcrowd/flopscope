@@ -16,7 +16,9 @@ def test_budget_context_basic():
 
 def test_budget_context_deduct():
     with BudgetContext(flop_budget=1000) as budget:
-        budget.deduct("test_op", flop_cost=300, subscripts=None, shapes=((10, 10),))
+        budget.deduct(
+            "test_op", flop_cost=300, subscripts=None, shapes=((10, 10),), dtypes=()
+        )
         assert budget.flops_used == 300
         assert budget.flops_remaining == 700
         assert len(budget.op_log) == 1
@@ -29,14 +31,16 @@ def test_budget_context_deduct():
 def test_budget_exhausted():
     with pytest.raises(BudgetExhaustedError) as exc_info:
         with BudgetContext(flop_budget=100) as budget:
-            budget.deduct("einsum", flop_cost=200, subscripts="ij,jk->ik", shapes=())
+            budget.deduct(
+                "einsum", flop_cost=200, subscripts="ij,jk->ik", shapes=(), dtypes=()
+            )
     assert exc_info.value.op_name == "einsum"
     assert exc_info.value.flop_cost == 200
 
 
 def test_budget_exact_boundary():
     with BudgetContext(flop_budget=100) as budget:
-        budget.deduct("op", flop_cost=100, subscripts=None, shapes=())
+        budget.deduct("op", flop_cost=100, subscripts=None, shapes=(), dtypes=())
         assert budget.flops_remaining == 0
 
 
@@ -93,9 +97,9 @@ def test_op_record_fields():
 
 def test_summary():
     with BudgetContext(flop_budget=1000) as budget:
-        budget.deduct("einsum", flop_cost=500, subscripts="ij->i", shapes=())
-        budget.deduct("exp", flop_cost=100, subscripts=None, shapes=())
-        budget.deduct("einsum", flop_cost=200, subscripts="ij->j", shapes=())
+        budget.deduct("einsum", flop_cost=500, subscripts="ij->i", shapes=(), dtypes=())
+        budget.deduct("exp", flop_cost=100, subscripts=None, shapes=(), dtypes=())
+        budget.deduct("einsum", flop_cost=200, subscripts="ij->j", shapes=(), dtypes=())
         s = budget.summary()
         assert "1,000" in s
         assert "800" in s
@@ -338,7 +342,7 @@ def test_deduct_without_with_leaves_backend_duration_none():
     ctx = BudgetContext(flop_budget=int(1e9), quiet=True)
     ctx.__enter__()
     # Call deduct without using 'with' — discard the returned _OpTimer
-    ctx.deduct("test_op", flop_cost=10, subscripts=None, shapes=((10,),))
+    ctx.deduct("test_op", flop_cost=10, subscripts=None, shapes=((10,),), dtypes=())
     ctx.__exit__(None, None, None)
     assert len(ctx.op_log) == 1
     assert ctx.op_log[0].flopscope_backend_duration_s is None
@@ -476,7 +480,9 @@ def test_post_op_deadline_check():
             flop_budget=int(1e15), wall_time_limit_s=0.05
         ) as b:
             a = flopscope.numpy.ones((10,))
-            timer = b.deduct("test_op", flop_cost=1, subscripts=None, shapes=((10,),))
+            timer = b.deduct(
+                "test_op", flop_cost=1, subscripts=None, shapes=((10,),), dtypes=()
+            )
             with timer:
                 time.sleep(0.1)  # Exceeds 0.05s limit
     assert exc_info.value.elapsed_s >= 0.05
@@ -514,7 +520,7 @@ def test_budget_context_summary_dict_live_and_closed():
 
     budget = BudgetContext(flop_budget=100, quiet=True)
     with budget:
-        with budget.deduct("add", flop_cost=10, subscripts=None, shapes=()):
+        with budget.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=()):
             _call_numpy(time.sleep, 0.01)  # backend time via _call_numpy
         live = budget.summary_dict()
         assert live["flop_budget"] == 100
@@ -554,7 +560,7 @@ def test_budget_summary_dict_shows_live_timing_for_active_context():
     import flopscope
 
     with flopscope.BudgetContext(flop_budget=100, quiet=True) as budget:
-        with budget.deduct("add", flop_cost=10, subscripts=None, shapes=()):
+        with budget.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=()):
             pass
         time.sleep(0.01)
 
@@ -573,11 +579,14 @@ def test_budget_summary_dict_shows_live_timing_for_active_context():
 def test_budget_summary_dict_includes_global_default_while_explicit_context_is_open():
     import flopscope
 
-    a = flopscope.numpy.ones((10,))
+    # zeros, not ones: ones is billed as of Task 4 (numel(output)=10), which
+    # would double-count on the global-default accumulator this test measures
+    # (it only wants add's own 10).
+    a = flopscope.numpy.zeros((10,))
     _ = flopscope.numpy.add(a, a)
 
     with flopscope.BudgetContext(flop_budget=100, quiet=True) as budget:
-        with budget.deduct("mul", flop_cost=7, subscripts=None, shapes=()):
+        with budget.deduct("mul", flop_cost=7, subscripts=None, shapes=(), dtypes=()):
             pass
 
         live = flopscope.budget_summary_dict()
@@ -592,10 +601,12 @@ def test_budget_context_summary_dict_by_namespace_uses_exact_op_namespace():
     with flopscope.BudgetContext(
         flop_budget=1000, namespace="predict..raw", quiet=True
     ) as budget:
-        with budget.deduct("mul", flop_cost=5, subscripts=None, shapes=()):
+        with budget.deduct("mul", flop_cost=5, subscripts=None, shapes=(), dtypes=()):
             pass
         with flopscope.namespace("precompute"):
-            with budget.deduct("add", flop_cost=25, subscripts=None, shapes=()):
+            with budget.deduct(
+                "add", flop_cost=25, subscripts=None, shapes=(), dtypes=()
+            ):
                 pass
 
     data = budget.summary_dict(by_namespace=True)
@@ -749,7 +760,7 @@ def test_optimer_splits_block_into_backend_and_overhead():
     from flopscope._budget import _call_numpy
 
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
-        with b.deduct("x", flop_cost=1, subscripts=None, shapes=()):
+        with b.deduct("x", flop_cost=1, subscripts=None, shapes=(), dtypes=()):
             _time.sleep(0.005)  # in-block overhead (no _call_numpy)
             _call_numpy(_time.sleep, 0.01)  # backend
             _time.sleep(0.005)  # more in-block overhead
@@ -770,7 +781,7 @@ def test_deduct_self_charges_body_to_overhead_and_oprecord():
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
         baseline = b.flopscope_overhead_time_s
         # Call deduct directly without entering the timer
-        timer = b.deduct("x", flop_cost=1, subscripts=None, shapes=())
+        timer = b.deduct("x", flop_cost=1, subscripts=None, shapes=(), dtypes=())
         # The deduct body itself should have charged some overhead
         assert b.flopscope_overhead_time_s > baseline
         # And the OpRecord should reflect it
@@ -793,10 +804,10 @@ def test_per_namespace_summary_includes_flopscope_overhead():
     import flopscope
 
     with flopscope.BudgetContext(flop_budget=int(1e9), quiet=True) as b:
-        with b.deduct("x", flop_cost=1, subscripts=None, shapes=()):
+        with b.deduct("x", flop_cost=1, subscripts=None, shapes=(), dtypes=()):
             pass
         with flopscope.namespace("ns"):
-            with b.deduct("y", flop_cost=1, subscripts=None, shapes=()):
+            with b.deduct("y", flop_cost=1, subscripts=None, shapes=(), dtypes=()):
                 pass
     d = b.summary_dict(by_namespace=True)
     assert "flopscope_overhead_time_s" in d["by_namespace"][None]

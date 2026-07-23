@@ -61,7 +61,9 @@ def test_load_weights_use_packaged_default_explicitly():
 def test_packaged_array_ops_have_zero_weight():
     load_weights(use_packaged_default=True)
     assert get_weight("empty") == 0.0
-    assert get_weight("reshape") == 0.0
+    # reshape is weight 1.0 as of Task 4 (billed numel(input)); transpose is
+    # the still-free view-op witness now.
+    assert get_weight("transpose") == 0.0
 
 
 def test_load_weights_missing_file_warns_and_falls_back_to_packaged_default_when_enabled():

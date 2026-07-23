@@ -13,6 +13,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import require_budget
 from flopscope.numpy.linalg._solvers import _batch_size, _has_zero_dim
@@ -33,7 +34,7 @@ def cholesky_cost(n: int) -> int:
 
     Notes
     -----
-    n^3/3 FLOPs (G&VL 4e Alg 4.2.1; LAPACK dpotrf).
+    n^3/3 FLOPs (LAPACK dpotrf).
     """
     return max(n**3 // 3, 1)
 
@@ -49,7 +50,11 @@ def cholesky(a: ArrayLike, /, *, upper: bool = False) -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = cholesky_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.cholesky", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.cholesky",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.cholesky, _to_base_ndarray(a), upper=upper)
     if isinstance(result, _np.ndarray) and inputs_were_whest:
@@ -63,10 +68,10 @@ attach_docstring(cholesky, _np.linalg.cholesky, "linalg", r"$n^3/3$ FLOPs")
 def qr_cost(m: int, n: int, mode: str = "reduced") -> int:
     """FLOP cost of QR decomposition (Householder, FMA=2).
 
-    Factorization (dgeqrf): 2*m*n*k - 2*k^3/3, k = min(m, n)
-    (G&VL 4e §5.2). Modes "reduced"/"complete" additionally form Q
-    explicitly (dorgqr), modeled as the same count again. Modes
-    "r"/"raw" bill the factorization only.
+    Factorization (dgeqrf): 2*m*n*k - 2*k^3/3, k = min(m, n).
+    Modes "reduced"/"complete" additionally form Q explicitly
+    (dorgqr), modeled as the same count again. Modes "r"/"raw"
+    bill the factorization only.
     """
     k = min(m, n)
     factor = 2 * m * n * k - 2 * k**3 // 3
@@ -97,7 +102,13 @@ def qr(
     m, n = a.shape[-2], a.shape[-1]
     batch = _batch_size(a.shape)
     cost = qr_cost(m, n, mode=mode) * batch if not _has_zero_dim(a.shape) else 0
-    with budget.deduct("linalg.qr", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    with budget.deduct(
+        "linalg.qr",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
+    ):
         result = _call_numpy(_np.linalg.qr, _to_base_ndarray(a), mode=mode)  # type: ignore[reportCallIssue]
     if mode in ("reduced", "complete"):
         q, r = result  # type: ignore[reportGeneralTypeIssues]
@@ -140,10 +151,9 @@ def eig_cost(n: int) -> int:
 
     Notes
     -----
-    Hessenberg reduction + Francis QR with eigenvector backtransform
-    (LAPACK Users' Guide Table 3.13 DGEEV / G&VL 4e §7.5).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    Hessenberg reduction + QR iteration with eigenvector backtransform
+    (DGEEV).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(25 * n**3, 1)
 
@@ -159,7 +169,11 @@ def eig(a: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]:
     batch = _batch_size(a.shape)
     cost = eig_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eig", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eig",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eig, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -189,10 +203,8 @@ def eigh_cost(n: int) -> int:
 
     Notes
     -----
-    Tridiagonalization + symmetric QR with vectors
-    (G&VL 4e §8.3; LAPACK dsyevd).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    Tridiagonalization + symmetric QR with vectors (LAPACK dsyevd).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(9 * n**3, 1)
 
@@ -208,7 +220,11 @@ def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[FlopscopeArray, FlopscopeArray]
     batch = _batch_size(a.shape)
     cost = eigh_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigh", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigh",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -238,13 +254,11 @@ def eigvals_cost(n: int) -> int:
 
     Notes
     -----
-    ~10n^3, values only (LAPACK Users' Guide Table 3.13 DGEEV values-only
-    = 10.00·N^3 exact; G&VL 4e §7.5).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    ~10n^3, values only (DGEEV values-only = 10.00·N^3 exact).
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     # Note: costs MORE than eigh_cost (9n^3) — nonsymmetric Hessenberg+QR without vectors
-    # vs symmetric tridiagonalization with vectors (G&VL §7.5 vs §8.3).
+    # vs symmetric tridiagonalization with vectors.
     return max(10 * n**3, 1)
 
 
@@ -259,7 +273,11 @@ def eigvals(a: ArrayLike) -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = eigvals_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigvals", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigvals",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvals, _to_base_ndarray(a))
     if inputs_were_whest:
@@ -290,9 +308,8 @@ def eigvalsh_cost(n: int) -> int:
 
     Notes
     -----
-    4n^3/3: tridiagonalization, values only (G&VL 4e §8.3).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md.
+    4n^3/3: tridiagonalization, values only.
+    Includes runtime scaling; see docs/reference/cost-model.md.
     """
     return max(4 * n**3 // 3, 1)
 
@@ -308,7 +325,11 @@ def eigvalsh(a: ArrayLike, UPLO: str = "L") -> FlopscopeArray:
     batch = _batch_size(a.shape)
     cost = eigvalsh_cost(n) * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
-        "linalg.eigvalsh", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.eigvalsh",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvalsh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
     if inputs_were_whest:
@@ -351,7 +372,11 @@ def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
         raise ValueError(f"k must satisfy 1 <= k <= min(m, n) = {min(m, n)}, got k={k}")
     cost = svdvals_cost(m, n, k) * batch if not _has_zero_dim(x.shape) else 0
     with budget.deduct(
-        "linalg.svdvals", flop_cost=cost, subscripts=None, shapes=(x.shape,)
+        "linalg.svdvals",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=linalg_billing_dtypes(x.dtype),
     ):
         result = _call_numpy(_np.linalg.svdvals, _to_base_ndarray(x))
     if k < min(m, n):

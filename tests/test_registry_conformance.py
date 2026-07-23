@@ -296,6 +296,12 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "fromfunction",
         "fromiter",
         "full_like",
+        # getitem (Task 11): the wire protocol dispatches array indexing under
+        # the literal op name "__getitem__" (see _request_handler.handle),
+        # not the registry key "getitem" this generic harness would send —
+        # so it cannot be exercised as a normal EXAMPLE_OVERRIDES call without
+        # harness support for that special-cased op name.
+        "getitem",
         "gradient",
         "hamming",
         "hanning",
@@ -304,6 +310,7 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "histogram_bin_edges",
         "histogramdd",
         "hsplit",
+        "imag",  # component extraction — free (view), like iscomplexobj/isrealobj
         "in1d",
         "indices",
         "insert",
@@ -414,6 +421,7 @@ PENDING_EXAMPLES: frozenset[str] = frozenset(
         "random.weibull",
         "random.zipf",
         "ravel_multi_index",
+        "real",  # component extraction — free (view), like iscomplexobj/isrealobj
         "repeat",
         "require",
         "resize",

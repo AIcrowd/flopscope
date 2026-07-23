@@ -60,23 +60,28 @@ def test_flop_query_matches_execution():
 
 
 def test_mixed_free_and_counted():
+    # reshape/ones are billed as of Task 4 (numel(input)/numel(output)); the
+    # "free" half of this demo now uses zeros/transpose/moveaxis instead, all
+    # still weight 0.0.
     with flops.BudgetContext(flop_budget=1000) as budget:
         x = fnp.zeros((10, 10))
-        x = fnp.reshape(x, (100,))
-        x = fnp.ones((5, 5))
         x = fnp.transpose(x)
+        x = fnp.zeros((5, 5))
+        x = fnp.moveaxis(x, 0, 1)
         assert budget.flops_used == 0
-        fnp.exp(fnp.ones((10,)))
+        fnp.exp(fnp.zeros((10,)))
         assert budget.flops_used == 10
 
 
 def test_budget_exhaustion_mid_computation():
+    # ones is billed as of Task 4 (numel(output)=100), so each line below now
+    # spends 200 (100 for ones() + 100 for exp()), not 100 -- exhaustion still
+    # lands exactly on the third line (ones' 100 exactly fills the last 100
+    # remaining after two full lines; exp's own 100 then exceeds), so
+    # flops_remaining == 0 at the raise is unchanged.
     with pytest.raises(flops.BudgetExhaustedError) as exc_info:
         with flops.BudgetContext(flop_budget=500) as budget:
-            fnp.exp(fnp.ones((100,)))  # 100
             fnp.exp(fnp.ones((100,)))  # 200
-            fnp.exp(fnp.ones((100,)))  # 300
             fnp.exp(fnp.ones((100,)))  # 400
-            fnp.exp(fnp.ones((100,)))  # 500
-            fnp.exp(fnp.ones((100,)))  # would be 600 — exceeds!
+            fnp.exp(fnp.ones((100,)))  # ones fills to 500 (remaining=0); exp raises
     assert exc_info.value.flops_remaining == 0

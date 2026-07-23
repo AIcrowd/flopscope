@@ -4,6 +4,8 @@ ROW-LEVEL: every billed registry op is reachable in ops.json (the generated
 exhaustive reference), resolving ufunc/function aliases to their canonical op.
 CLASS-LEVEL: every ops.json `area` is documented by a family section in
 cost-model.md, so no whole op-class is silently undocumented.
+DTYPE: the 'Dtype and precision' section exists, states the four-factor billing
+formula verbatim, and its rate table covers every supported dtype.
 """
 
 import importlib.util
@@ -16,6 +18,7 @@ from flopscope._registry import REGISTRY
 ROOT = Path(__file__).resolve().parents[1]
 OPS_JSON = ROOT / "website" / "public" / "ops.json"
 COST_MODEL_MD = ROOT / "docs" / "reference" / "cost-model.md"
+DEFAULT_WEIGHTS = ROOT / "src" / "flopscope" / "data" / "default_weights.json"
 
 
 def _load_alias_map() -> dict[str, str]:
@@ -83,4 +86,41 @@ def test_every_ops_json_area_has_a_doc_family():
     missing = [a for a in areas if area_markers.get(a, a) not in doc]
     assert not missing, (
         f"ops.json areas with no cost-model.md family section: {missing}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# DTYPE-LEVEL: the 'Dtype and precision' section documents the width/complex
+# pricing that the four-factor billing formula rests on.
+# ---------------------------------------------------------------------------
+
+FOUR_FACTOR_FORMULA = "charged = int(flop_cost × dtype_rate × complex_factor × weight)"
+
+
+def test_cost_model_has_dtype_and_precision_section():
+    doc = COST_MODEL_MD.read_text()
+    assert "## Dtype and precision" in doc, (
+        "cost-model.md is missing the '## Dtype and precision' section heading"
+    )
+
+
+def test_cost_model_states_the_four_factor_formula():
+    doc = COST_MODEL_MD.read_text()
+    assert FOUR_FACTOR_FORMULA in doc, (
+        "cost-model.md must state the four-factor billing formula verbatim: "
+        f"{FOUR_FACTOR_FORMULA!r}"
+    )
+
+
+def test_cost_model_dtype_table_covers_every_supported_dtype():
+    # Source the dtype names from the same policy file billing reads, so a new
+    # supported dtype must be added to the doc's rate table too.
+    doc = COST_MODEL_MD.read_text()
+    rates = json.loads(DEFAULT_WEIGHTS.read_text())["dtype_rates"]
+    assert len(rates) == 18, (
+        f"expected 18 supported dtypes in default_weights.json, got {len(rates)}"
+    )
+    missing = [name for name in rates if f"`{name}`" not in doc]
+    assert not missing, (
+        f"cost-model.md dtype rate table is missing a row for: {sorted(missing)}"
     )

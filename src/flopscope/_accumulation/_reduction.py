@@ -12,6 +12,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+from flopscope._perm_group import with_cumulative_dimino_budget
+
 if TYPE_CHECKING:
     from flopscope._perm_group import SymmetryGroup
 
@@ -112,6 +114,7 @@ def output_discounted_reduction_cost(
     return num_orbits * dense_per_output_cost
 
 
+@with_cumulative_dimino_budget
 def compute_reduction_accumulation_cost(
     input_shape: tuple[int, ...],
     axes_summed: tuple[int, ...],

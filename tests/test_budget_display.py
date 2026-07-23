@@ -11,10 +11,12 @@ from flopscope._display import _plain_text_summary, budget_live, render_budget_s
 
 def test_plain_text_summary_default_omits_namespace_section():
     with BudgetContext(flop_budget=1000, namespace="train", quiet=True) as ctx:
-        with ctx.deduct("add", flop_cost=100, subscripts=None, shapes=()):
+        with ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=()):
             pass
         with flops.namespace("precompute"):
-            with ctx.deduct("mul", flop_cost=200, subscripts=None, shapes=()):
+            with ctx.deduct(
+                "mul", flop_cost=200, subscripts=None, shapes=(), dtypes=()
+            ):
                 pass
 
     text = _plain_text_summary()
@@ -26,14 +28,16 @@ def test_plain_text_summary_default_omits_namespace_section():
 
 def test_plain_text_summary_by_namespace_shows_dotted_rows():
     with BudgetContext(flop_budget=1000, namespace="predict", quiet=True) as ctx:
-        with ctx.deduct("mul", flop_cost=50, subscripts=None, shapes=()):
+        with ctx.deduct("mul", flop_cost=50, subscripts=None, shapes=(), dtypes=()):
             pass
         with flops.namespace("precompute"):
-            with ctx.deduct("add", flop_cost=100, subscripts=None, shapes=()):
+            with ctx.deduct(
+                "add", flop_cost=100, subscripts=None, shapes=(), dtypes=()
+            ):
                 pass
 
     with BudgetContext(flop_budget=500, quiet=True) as ctx:
-        with ctx.deduct("sum", flop_cost=25, subscripts=None, shapes=()):
+        with ctx.deduct("sum", flop_cost=25, subscripts=None, shapes=(), dtypes=()):
             pass
 
     text = _plain_text_summary(by_namespace=True)
@@ -52,7 +56,9 @@ def test_render_budget_summary_falls_back_to_text():
     """When Rich is not available, render_budget_summary returns plain text."""
     with BudgetContext(flop_budget=1000, namespace="test", quiet=True) as ctx:
         with flops.namespace("nested"):
-            with ctx.deduct("add", flop_cost=100, subscripts=None, shapes=()):
+            with ctx.deduct(
+                "add", flop_cost=100, subscripts=None, shapes=(), dtypes=()
+            ):
                 pass
 
     with patch.dict(
@@ -69,7 +75,7 @@ def test_render_budget_summary_with_rich():
     pytest.importorskip("rich")
 
     with BudgetContext(flop_budget=1000, namespace="test", quiet=True) as ctx:
-        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("add", flop_cost=100, subscripts=None, shapes=(), dtypes=())
 
     result = render_budget_summary()
     from rich.panel import Panel

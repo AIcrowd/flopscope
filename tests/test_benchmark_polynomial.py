@@ -11,6 +11,7 @@ from benchmarks._polynomial import (
     _analytical_cost,
     benchmark_polynomial,
 )
+from flopscope._polynomial import polyfit_cost
 
 
 class TestOpsLists:
@@ -28,7 +29,12 @@ class TestAnalyticalCost:
         assert _analytical_cost("polyval", 1000, 5) == 2 * 1000 * 5
 
     def test_polyfit(self):
-        assert _analytical_cost("polyfit", 1000, 5) == 2 * 1000 * 6**2
+        # The benchmark's y is 1-D (ncols=1, see benchmark_polynomial), so the
+        # benchmark denominator must agree exactly with the real billing
+        # formula: m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols=1)
+        # == 1000*5 + lstsq_cost(1000, 6, 1) == 237386.
+        assert _analytical_cost("polyfit", 1000, 5) == polyfit_cost(1000, 5, ncols=1)
+        assert _analytical_cost("polyfit", 1000, 5) == 237386
 
     def test_roots(self):
         # roots delegates to eigvals_cost(degree) = 10*degree^3 (PROVISIONAL)

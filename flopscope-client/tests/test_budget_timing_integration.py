@@ -229,7 +229,7 @@ def test_every_op_family_increments_dispatch():
             npy_path = os.path.join(_tmpdir, "state.npy")
             _grew(
                 lambda: fl.save(npy_path, a)
-            )  # save: _fetch_data egress + local write
+            )  # save: server billing round-trip (4*numel egress) + _fetch_data + local write
             _grew(
                 lambda: fl.load(npy_path)
             )  # load: local parse + create_from_data ingress

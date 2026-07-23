@@ -56,9 +56,9 @@ def compute_step_cost_from_joint_group(
     """Per-step cost via Burnside on the merged-subset's joint group.
 
     Sprint 2 / Cat C: complements the per-input fingerprint cost by handling
-    cross-step identity-swap cases (e.g. §5(a) step 2 = 160 → 55) that
-    per-input cannot see because intermediates lose their "from the same
-    original operand" identity.
+    cross-step identity-swap cases (e.g. the identity-swap case where step 2
+    drops 160 → 55) that per-input cannot see because intermediates lose
+    their "from the same original operand" identity.
 
     Cost formula (Regime 1 / functionalProjection):
         M = |orbits of joint_group on (V ∪ W)-tuples|
@@ -207,7 +207,14 @@ def run_ladder_per_component(
         # that reduction_accumulation_cost already applies.
         v_sizes = tuple(c.sizes[p] for p in c.visible_positions)
         if not v_sizes:
-            num_output_orbits = 1
+            # A full reduction to a scalar has exactly one output cell --
+            # UNLESS the component's own index space is empty (some summed
+            # dimension has size 0, so dense_count == alpha == 0). A fully
+            # empty contraction has no first element to call a free copy;
+            # crediting one here is what drove aggregate_einsum's
+            # ``alpha_product - output_orbit_product`` negative (0 - 1) for
+            # e.g. an empty-vector dot product.
+            num_output_orbits = 1 if dense_count > 0 else 0
         elif c.elements and len(c.elements) > 0:
             h_elements = restrict_stabilizer_to_positions(
                 c.elements, c.visible_positions
@@ -377,6 +384,43 @@ def aggregate_einsum(
         unavailable_components=tuple(failing),
         unavailable_reason=reason,
     )
+
+
+def complex_real_total(acc: AccumulationCost) -> int:
+    """Real-FLOP total when this contraction runs in complex arithmetic.
+
+    Decomposition of the aggregate total: ``mu`` is the multiplication-chain
+    count (set to ``(num_terms - 1) * m_total`` for a single contraction, and
+    to the sum of per-step ``mu`` for a multi-step path — the aggregate
+    ``m_total`` is repurposed to the full-expression output-orbit product and is
+    NOT the multiply basis, so ``mu`` is the authoritative source). adds =
+    total - mu (accumulation). Complex costs 6 real FLOPs per multiply and 2 per
+    add. Fallback totals (``fallback_used`` or ``mu is None``) carry no
+    decomposition; bill every unit as a multiply (conservative).
+    """
+    if acc.fallback_used or acc.mu is None:
+        return 6 * acc.total
+    mults = acc.mu
+    adds = acc.total - mults
+    if adds < 0:  # degenerate corner (heavy symmetry savings): stay conservative
+        return 6 * acc.total
+    return 6 * mults + 2 * adds
+
+
+def contraction_complex_override(accumulation, resolved) -> float | None:
+    """Exact complex-factor override for a contraction deduct site.
+
+    ``None`` for real (or undeclared) dtypes — the registry factor path
+    applies. For a complex resolved dtype, the exact real-FLOP ratio when the
+    contraction does work, and 1.0 when it does none (a transpose/diagonal/
+    empty contraction has no complex arithmetic; the charge is 0 either way,
+    but the "exact" guard in complex_factor_for must not fire).
+    """
+    if resolved is None or resolved.kind != "c":
+        return None
+    if accumulation.total > 0:
+        return complex_real_total(accumulation) / accumulation.total
+    return 1.0
 
 
 # ── End-to-end orchestrator ──────────────────────────────────────────
@@ -720,6 +764,7 @@ def _walk_path_and_aggregate(
                     operand_index=0,
                     removed_labels=tuple(sorted(left_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=step_input_parts[0],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -760,6 +805,7 @@ def _walk_path_and_aggregate(
                     operand_index=1,
                     removed_labels=tuple(sorted(right_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=step_input_parts[1],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -1089,7 +1135,7 @@ def compute_accumulation_cost(
       partition_budget: per-component partition cap; defaults to global setting.
 
     Dimino-budget fallback: any internal call to ``_dimino`` that exceeds the
-    configured ``dimino_budget`` (default 500_000) raises
+    configured ``dimino_budget`` (default 50_000) raises
     :class:`_DiminoBudgetExceeded`. This function catches the exception,
     emits a :class:`CostFallbackWarning`, and returns an
     :class:`AccumulationCost` with ``fallback_used=True`` and
@@ -1260,6 +1306,7 @@ def compute_accumulation_cost(
                     operand_index=0,
                     removed_labels=tuple(sorted(left_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=input_parts_list[0],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)
@@ -1299,6 +1346,7 @@ def compute_accumulation_cost(
                     operand_index=1,
                     removed_labels=tuple(sorted(right_only_summed)),
                     cost=reduce_cost,
+                    original_subscript=input_parts_list[1],
                     surviving_subscript=surviving_subscript,
                     reduced_symmetry_fingerprint=(
                         _per_op_sym_fingerprint(surviving_sym)

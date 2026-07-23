@@ -1,0 +1,1986 @@
+{
+  "absolute": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "add": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "all": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "allclose": {
+    "class": "NO-BATCH",
+    "reason": "output did not propagate (prop=1, k=8)"
+  },
+  "angle": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "any": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "append": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "apply_along_axis": {
+    "class": "NO-BATCH",
+    "reason": "requires a Python callable; cost is caller-code-defined"
+  },
+  "apply_over_axes": {
+    "class": "NO-BATCH",
+    "reason": "requires a Python callable; cost is caller-code-defined"
+  },
+  "arange": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar start/stop/step (no array operand)"
+  },
+  "arccos": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "arccosh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "arcsin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "arcsinh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "arctan": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "arctan2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "arctanh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "argmax": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "argmin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "argpartition": {
+    "class": "OK-SCALES",
+    "reason": "probe A:partition scales correctly"
+  },
+  "argsort": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "argwhere": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "array": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "array_equal": {
+    "class": "NO-BATCH",
+    "reason": "output did not propagate (prop=1, k=8)"
+  },
+  "array_equiv": {
+    "class": "NO-BATCH",
+    "reason": "output did not propagate (prop=1, k=8)"
+  },
+  "as_symmetric": {
+    "class": "NO-BATCH",
+    "reason": "symmetric-tensor API; requires SymmetryGroup(axes=...); cost already numel-scaled"
+  },
+  "asarray": {
+    "class": "OK-SCALES",
+    "reason": "probe A:asarray-cast scales correctly"
+  },
+  "asarray_chkfinite": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "astype": {
+    "class": "OK-SCALES",
+    "reason": "probe A:astype scales correctly"
+  },
+  "average": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "bartlett": {
+    "class": "OK-SCALES",
+    "reason": "scale window length M"
+  },
+  "bincount": {
+    "class": "NO-BATCH",
+    "reason": "1-D count; output size = max+1, no batch dimension"
+  },
+  "bitwise_and": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "bitwise_count": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d-int scales correctly"
+  },
+  "bitwise_left_shift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "bitwise_not": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d-int scales correctly"
+  },
+  "bitwise_or": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "bitwise_right_shift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "bitwise_xor": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "blackman": {
+    "class": "OK-SCALES",
+    "reason": "scale window length M"
+  },
+  "block": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "bmat": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "broadcast_shapes": {
+    "class": "NO-BATCH",
+    "reason": "operates on shape tuples, not arrays"
+  },
+  "cbrt": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "ceil": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "choose": {
+    "class": "OK-SCALES",
+    "reason": "probe A:choose scales correctly"
+  },
+  "clip": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "column_stack": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "compress": {
+    "class": "OK-SCALES",
+    "reason": "probe A:compress scales correctly"
+  },
+  "concatenate": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "conj": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "conjugate": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "convolve": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: object too deep for desired array"
+  },
+  "copy": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "copysign": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "copyto": {
+    "class": "NO-BATCH",
+    "reason": "in-place copy (movement); returns None"
+  },
+  "corrcoef": {
+    "class": "OK-SCALES",
+    "reason": "rowvar=False swaps variable axis; billed blind to rowvar"
+  },
+  "correlate": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: object too deep for desired array"
+  },
+  "cos": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "cosh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "count_nonzero": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "cov": {
+    "class": "OK-SCALES",
+    "reason": "rowvar=False swaps variable axis; billed blind to rowvar"
+  },
+  "cross": {
+    "class": "OK-SCALES",
+    "reason": "probe A:cross scales correctly"
+  },
+  "cumprod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "cumsum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "cumulative_prod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "cumulative_sum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "degrees": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "delete": {
+    "class": "OK-SCALES",
+    "reason": "probe A:delete-axis scales correctly"
+  },
+  "diag": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: Input must be 1- or 2-d."
+  },
+  "diag_indices": {
+    "class": "NO-BATCH",
+    "reason": "index-grid factory from scalar n (no array operand)"
+  },
+  "diag_indices_from": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: All dimensions of input must be of equal length"
+  },
+  "diagflat": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "diagonal": {
+    "class": "NO-BATCH",
+    "reason": "base bills 0 (free view / data-movement); no compute to scale"
+  },
+  "diff": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "digitize": {
+    "class": "OK-SCALES",
+    "reason": "probe A:digitize scales correctly"
+  },
+  "divide": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "dot": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-2d scales correctly"
+  },
+  "dstack": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "ediff1d": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "einsum": {
+    "class": "OK-SCALES",
+    "reason": "explicit batch subscript b prepended"
+  },
+  "einsum_path": {
+    "class": "NO-BATCH",
+    "reason": "returns a contraction path (planning), not array data"
+  },
+  "equal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "exp": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "exp2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "expm1": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "extract": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "eye": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar shape (no array operand)"
+  },
+  "fabs": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.fft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.fft2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "fft.fftfreq": {
+    "class": "NO-BATCH",
+    "reason": "frequency-grid factory from scalar n (no array operand)"
+  },
+  "fft.fftn": {
+    "class": "OK-SCALES",
+    "reason": "s given + axes omitted: leading axes are a dropped batch"
+  },
+  "fft.fftshift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.hfft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.ifft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.ifft2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "fft.ifftn": {
+    "class": "OK-SCALES",
+    "reason": "s given + axes omitted: leading axes are a dropped batch"
+  },
+  "fft.ifftshift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.ihfft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.irfft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.irfft2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "fft.irfftn": {
+    "class": "OK-SCALES",
+    "reason": "s given + axes omitted: leading axes are a dropped batch"
+  },
+  "fft.rfft": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fft.rfft2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "fft.rfftfreq": {
+    "class": "NO-BATCH",
+    "reason": "frequency-grid factory from scalar n (no array operand)"
+  },
+  "fft.rfftn": {
+    "class": "OK-SCALES",
+    "reason": "s given + axes omitted: leading axes are a dropped batch"
+  },
+  "fill_diagonal": {
+    "class": "NO-BATCH",
+    "reason": "in-place diagonal write (movement); returns None"
+  },
+  "flatnonzero": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "float_power": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "floor": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "floor_divide": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "fmax": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "fmin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "fmod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "frexp": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "fromfunction": {
+    "class": "NO-BATCH",
+    "reason": "constructs from a Python callable; no array operand"
+  },
+  "fromiter": {
+    "class": "NO-BATCH",
+    "reason": "constructs from a Python iterable; no array operand"
+  },
+  "full": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar shape + fill (no array operand)"
+  },
+  "full_like": {
+    "class": "OK-SCALES",
+    "reason": "probe A:full_like scales correctly"
+  },
+  "gcd": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "geomspace": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "getitem": {
+    "class": "NO-BATCH",
+    "reason": "resolves to __getitem__; plain indexing, no batch cost model"
+  },
+  "gradient": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "greater": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "greater_equal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "hamming": {
+    "class": "OK-SCALES",
+    "reason": "scale window length M"
+  },
+  "hanning": {
+    "class": "OK-SCALES",
+    "reason": "scale window length M"
+  },
+  "heaviside": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "histogram": {
+    "class": "NO-BATCH",
+    "reason": "output did not propagate (prop=1, k=16)"
+  },
+  "histogram2d": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: too many values to unpack (expected 2, got 3)"
+  },
+  "histogram_bin_edges": {
+    "class": "NO-BATCH",
+    "reason": "output did not propagate (prop=1, k=16)"
+  },
+  "histogramdd": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: too many values to unpack (expected 2, got 3)"
+  },
+  "hstack": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "hypot": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "i0": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "identity": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar n (no array operand)"
+  },
+  "in1d": {
+    "class": "NO-BATCH",
+    "reason": "set membership flattens inputs to 1-D (no batch axis)"
+  },
+  "indices": {
+    "class": "NO-BATCH",
+    "reason": "grid factory from a shape tuple (no array operand)"
+  },
+  "inner": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "insert": {
+    "class": "OK-SCALES",
+    "reason": "probe A:insert-axis scales correctly"
+  },
+  "interp": {
+    "class": "OK-SCALES",
+    "reason": "fixed xp/fp, batched sample points x"
+  },
+  "intersect1d": {
+    "class": "NO-BATCH",
+    "reason": "set op flattens inputs to 1-D (no batch axis)"
+  },
+  "invert": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d-int scales correctly"
+  },
+  "is_symmetric": {
+    "class": "NO-BATCH",
+    "reason": "symmetric-tensor API; requires SymmetryGroup(axes=...); cost already numel-scaled"
+  },
+  "isclose": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "iscomplex": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isfinite": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:isin scales correctly"
+  },
+  "isinf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isnan": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isneginf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isposinf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "isreal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "ix_": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: Cross index must be 1 dimensional"
+  },
+  "kaiser": {
+    "class": "OK-SCALES",
+    "reason": "scale window length M (beta fixed)"
+  },
+  "kron": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "lcm": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "ldexp": {
+    "class": "OK-SCALES",
+    "reason": "float mantissa, int exponent"
+  },
+  "left_shift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "less": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "less_equal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "lexsort": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "linalg.cholesky": {
+    "class": "OK-SCALES",
+    "reason": "probe A:matrix scales correctly"
+  },
+  "linalg.cond": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.cross": {
+    "class": "OK-SCALES",
+    "reason": "probe A:cross scales correctly"
+  },
+  "linalg.det": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.eig": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.eigh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.eigvals": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.eigvalsh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.inv": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.lstsq": {
+    "class": "NO-BATCH",
+    "reason": "LinAlgError: Incompatible dimensions"
+  },
+  "linalg.matmul": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-2d scales correctly"
+  },
+  "linalg.matrix_norm": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.matrix_power": {
+    "class": "OK-SCALES",
+    "reason": "probe A:matrix_power scales correctly"
+  },
+  "linalg.matrix_rank": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.multi_dot": {
+    "class": "NO-BATCH",
+    "reason": "2-D matrix chain; no batch/broadcast dimension"
+  },
+  "linalg.norm": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "linalg.outer": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "linalg.pinv": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.qr": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.slogdet": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.solve": {
+    "class": "OK-SCALES",
+    "reason": "one-sided batch: a fixed, b gains leading axis"
+  },
+  "linalg.svd": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.svdvals": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "linalg.tensordot": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: shape-mismatch for sum"
+  },
+  "linalg.tensorinv": {
+    "class": "NO-BATCH",
+    "reason": "single tensor inverse; folds all leading axes"
+  },
+  "linalg.tensorsolve": {
+    "class": "OK-SCALES",
+    "reason": "degenerate 2-D a / 1-D b: bill flat, honest ~N^3"
+  },
+  "linalg.trace": {
+    "class": "OK-SCALES",
+    "reason": "per-item trace over the last two axes (numpy 2.x API)"
+  },
+  "linalg.vecdot": {
+    "class": "OK-SCALES",
+    "reason": "probe A:vecdot scales correctly"
+  },
+  "linalg.vector_norm": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "linspace": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "log": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "log10": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "log1p": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "log2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "logaddexp": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "logaddexp2": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "logical_and": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "logical_not": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "logical_or": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "logical_xor": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "logspace": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "mask_indices": {
+    "class": "NO-BATCH",
+    "reason": "index-grid factory from scalar n (no array operand)"
+  },
+  "matmul": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-2d scales correctly"
+  },
+  "matvec": {
+    "class": "OK-SCALES",
+    "reason": "probe A:matvec scales correctly"
+  },
+  "max": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "maximum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "mean": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "median": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "meshgrid": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "min": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "minimum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "mod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "modf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "multiply": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "nan_to_num": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "nanargmax": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanargmin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nancumprod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nancumsum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanmax": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanmean": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanmedian": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanmin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanpercentile": {
+    "class": "OK-SCALES",
+    "reason": "q-array prepends output axis; probed at Q0=1000 quantiles (asymptotic regime) so the shared-partition constant can't mask q.size scaling"
+  },
+  "nanprod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanquantile": {
+    "class": "OK-SCALES",
+    "reason": "q-array prepends output axis; probed at Q0=1000 quantiles (asymptotic regime) so the shared-partition constant can't mask q.size scaling"
+  },
+  "nanstd": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nansum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "nanvar": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "negative": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "nextafter": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "nonzero": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "not_equal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "ones": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar shape (no array operand)"
+  },
+  "ones_like": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "outer": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "packbits": {
+    "class": "OK-SCALES",
+    "reason": "probe A:packbits scales correctly"
+  },
+  "pad": {
+    "class": "OK-SCALES",
+    "reason": "unpadded axes still reduced by numpy; billed skips them"
+  },
+  "partition": {
+    "class": "OK-SCALES",
+    "reason": "probe A:partition scales correctly"
+  },
+  "percentile": {
+    "class": "OK-SCALES",
+    "reason": "q-array prepends output axis; probed at Q0=1000 quantiles (asymptotic regime) so the shared-partition constant can't mask q.size scaling"
+  },
+  "piecewise": {
+    "class": "NO-BATCH",
+    "reason": "requires a list of Python callables; caller-code-defined"
+  },
+  "place": {
+    "class": "NO-BATCH",
+    "reason": "in-place scatter (movement); returns None"
+  },
+  "poly": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: input must be 1d or non-empty square 2d array."
+  },
+  "polyadd": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "polyder": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: operands could not be broadcast together with shapes (15,64) (15,) "
+  },
+  "polydiv": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: setting an array element with a sequence."
+  },
+  "polyfit": {
+    "class": "NO-BATCH",
+    "reason": "x is 1-D only (no batch axis); y's RHS columns (ncols) share lstsq_cost's SVD factorization -- the same shared-factorization axis linalg.lstsq's own b_cols has (also un-probed here) -- not an independent-repeat batch dimension, so cost is legitimately sublinear in ncols, not linear"
+  },
+  "polyint": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: operands could not be broadcast together with shapes (16,64) (16,) "
+  },
+  "polymul": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: Polynomial must be 1d only."
+  },
+  "polysub": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "polyval": {
+    "class": "OK-SCALES",
+    "reason": "fixed poly, batched eval points x"
+  },
+  "positive": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "power": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "prod": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "ptp": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "put": {
+    "class": "NO-BATCH",
+    "reason": "in-place scatter (movement); returns None"
+  },
+  "put_along_axis": {
+    "class": "NO-BATCH",
+    "reason": "in-place scatter (movement); returns None"
+  },
+  "putmask": {
+    "class": "NO-BATCH",
+    "reason": "in-place scatter (movement); returns None"
+  },
+  "quantile": {
+    "class": "OK-SCALES",
+    "reason": "q-array prepends output axis; probed at Q0=1000 quantiles (asymptotic regime) so the shared-partition constant can't mask q.size scaling"
+  },
+  "radians": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "random.Generator.beta": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.bit_generator": {
+    "class": "NO-BATCH",
+    "reason": "attribute/property accessor, not a sampler"
+  },
+  "random.Generator.bytes": {
+    "class": "OK-SCALES",
+    "reason": "scale byte count n; honest = k"
+  },
+  "random.Generator.chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.choice": {
+    "class": "OK-SCALES",
+    "reason": "probe R:choice-list-axis scales correctly (nested Python list bills axis-0 len(a), not shape[axis])"
+  },
+  "random.Generator.dirichlet": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.geometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.gumbel": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.hypergeometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.integers": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.laplace": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.logistic": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.lognormal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.logseries": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.multinomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.multivariate_hypergeometric": {
+    "class": "OK-SCALES",
+    "reason": "method='count' scales with sum(colors); probed at 1000x magnitude so nsample/output terms don't mask it"
+  },
+  "random.Generator.multivariate_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.negative_binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.noncentral_chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.noncentral_f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.pareto": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.permutation": {
+    "class": "OK-SCALES",
+    "reason": "probe C:perm scales correctly"
+  },
+  "random.Generator.permuted": {
+    "class": "OK-SCALES",
+    "reason": "nested Python list bills len(outer), not numel"
+  },
+  "random.Generator.poisson": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.power": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.random": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.rayleigh": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.shuffle": {
+    "class": "NO-BATCH",
+    "reason": "row-permutation: bills shape[0] draws (documented); movement free -> not a compute batch"
+  },
+  "random.Generator.spawn": {
+    "class": "NO-BATCH",
+    "reason": "spawns child generators; no array work"
+  },
+  "random.Generator.standard_cauchy": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.standard_exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.standard_gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.standard_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.standard_t": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.triangular": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.uniform": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.vonmises": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.wald": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.weibull": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.Generator.zipf": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.beta": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.bytes": {
+    "class": "OK-SCALES",
+    "reason": "scale byte count n; honest = k"
+  },
+  "random.RandomState.chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.choice": {
+    "class": "OK-SCALES",
+    "reason": "probe C:choice scales correctly"
+  },
+  "random.RandomState.dirichlet": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.geometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.get_state": {
+    "class": "NO-BATCH",
+    "reason": "RNG state accessor; returns state tuple, no array work"
+  },
+  "random.RandomState.gumbel": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.hypergeometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.laplace": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.logistic": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.lognormal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.logseries": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.multinomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.multivariate_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.negative_binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.noncentral_chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.noncentral_f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.pareto": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.permutation": {
+    "class": "OK-SCALES",
+    "reason": "probe C:perm scales correctly"
+  },
+  "random.RandomState.poisson": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.power": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.rand": {
+    "class": "OK-SCALES",
+    "reason": "probe C:dims scales correctly"
+  },
+  "random.RandomState.randint": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.randn": {
+    "class": "OK-SCALES",
+    "reason": "probe C:dims scales correctly"
+  },
+  "random.RandomState.random": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.random_integers": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.random_sample": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.rayleigh": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.seed": {
+    "class": "NO-BATCH",
+    "reason": "RNG state mutation; no array work"
+  },
+  "random.RandomState.set_state": {
+    "class": "NO-BATCH",
+    "reason": "RNG state mutation; no array work"
+  },
+  "random.RandomState.shuffle": {
+    "class": "NO-BATCH",
+    "reason": "row-permutation: bills shape[0] draws (documented); movement free -> not a compute batch"
+  },
+  "random.RandomState.standard_cauchy": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.standard_exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.standard_gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.standard_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.standard_t": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.tomaxint": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.triangular": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.uniform": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.vonmises": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.wald": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.weibull": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.RandomState.zipf": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.beta": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.bytes": {
+    "class": "OK-SCALES",
+    "reason": "scale byte count n; honest = k"
+  },
+  "random.chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.choice": {
+    "class": "OK-SCALES",
+    "reason": "probe C:choice scales correctly"
+  },
+  "random.dirichlet": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.geometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.gumbel": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.hypergeometric": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.laplace": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.logistic": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.lognormal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.logseries": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.multinomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.multivariate_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.negative_binomial": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.noncentral_chisquare": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.noncentral_f": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.pareto": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.permutation": {
+    "class": "OK-SCALES",
+    "reason": "probe C:perm scales correctly"
+  },
+  "random.poisson": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.power": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.rand": {
+    "class": "OK-SCALES",
+    "reason": "probe C:dims scales correctly"
+  },
+  "random.randint": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.randn": {
+    "class": "OK-SCALES",
+    "reason": "probe C:dims scales correctly"
+  },
+  "random.random": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.random_sample": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.rayleigh": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.sample": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.shuffle": {
+    "class": "NO-BATCH",
+    "reason": "row-permutation: bills shape[0] draws (documented); movement free -> not a compute batch"
+  },
+  "random.standard_cauchy": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.standard_exponential": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.standard_gamma": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.standard_normal": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.standard_t": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.symmetric": {
+    "class": "NO-BATCH",
+    "reason": "not counted via Generator (raises UnsupportedFunctionError); symmetric-tensor sampler"
+  },
+  "random.triangular": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.uniform": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.vonmises": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.wald": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.weibull": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "random.zipf": {
+    "class": "OK-SCALES",
+    "reason": "probe C:sampler scales correctly"
+  },
+  "ravel": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "ravel_multi_index": {
+    "class": "NO-BATCH",
+    "reason": "index arithmetic on a tuple of index arrays; 1-D"
+  },
+  "real_if_close": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "reciprocal": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "remainder": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "repeat": {
+    "class": "OK-SCALES",
+    "reason": "probe A:repeat-axis scales correctly"
+  },
+  "require": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "reshape": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reshape scales correctly"
+  },
+  "resize": {
+    "class": "OK-SCALES",
+    "reason": "probe A:resize scales correctly"
+  },
+  "right_shift": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d-int scales correctly"
+  },
+  "rint": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "roll": {
+    "class": "OK-SCALES",
+    "reason": "probe A:roll scales correctly"
+  },
+  "roots": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: Input must be a rank-1 array."
+  },
+  "save": {
+    "class": "NO-BATCH",
+    "reason": "writes an .npy file to disk (I/O); not run"
+  },
+  "savez": {
+    "class": "NO-BATCH",
+    "reason": "writes an .npz file to disk (I/O); not run"
+  },
+  "savez_compressed": {
+    "class": "NO-BATCH",
+    "reason": "writes a compressed .npz to disk (I/O); not run"
+  },
+  "searchsorted": {
+    "class": "OK-SCALES",
+    "reason": "fixed sorted array, batched query values v"
+  },
+  "select": {
+    "class": "OK-SCALES",
+    "reason": "condlist/choicelist batched together"
+  },
+  "setdiff1d": {
+    "class": "NO-BATCH",
+    "reason": "set op flattens inputs to 1-D (no batch axis)"
+  },
+  "setxor1d": {
+    "class": "NO-BATCH",
+    "reason": "set op flattens inputs to 1-D (no batch axis)"
+  },
+  "sign": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "signbit": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sin": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sinc": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sinh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sort": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sort_complex": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "spacing": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "sqrt": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "square": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stack": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.cauchy.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.cauchy.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.cauchy.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.expon.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.expon.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.expon.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.laplace.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.laplace.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.laplace.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.logistic.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.logistic.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.logistic.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.lognorm.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.lognorm.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.lognorm.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.norm.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.norm.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.norm.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.truncnorm.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.truncnorm.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.truncnorm.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:stats-x scales correctly"
+  },
+  "stats.uniform.cdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.uniform.pdf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "stats.uniform.ppf": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "std": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "subtract": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "sum": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "symmetrize": {
+    "class": "NO-BATCH",
+    "reason": "symmetric-tensor API; requires SymmetryGroup(axes=...); cost already numel-scaled"
+  },
+  "take": {
+    "class": "OK-SCALES",
+    "reason": "take along last axis"
+  },
+  "take_along_axis": {
+    "class": "OK-SCALES",
+    "reason": "probe A:take_along_axis scales correctly"
+  },
+  "tan": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "tanh": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "tensordot": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: shape-mismatch for sum"
+  },
+  "tile": {
+    "class": "OK-SCALES",
+    "reason": "probe A:tile scales correctly"
+  },
+  "trace": {
+    "class": "OK-SCALES",
+    "reason": "per-item trace over the last two axes"
+  },
+  "trapezoid": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "tri": {
+    "class": "NO-BATCH",
+    "reason": "creation from scalar shape (no array operand)"
+  },
+  "tril": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "tril_indices": {
+    "class": "NO-BATCH",
+    "reason": "index-grid factory from scalar n (no array operand)"
+  },
+  "tril_indices_from": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: input array must be 2-d"
+  },
+  "trim_zeros": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "triu": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-2d scales correctly"
+  },
+  "triu_indices": {
+    "class": "NO-BATCH",
+    "reason": "index-grid factory from scalar n (no array operand)"
+  },
+  "triu_indices_from": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: input array must be 2-d"
+  },
+  "true_divide": {
+    "class": "OK-SCALES",
+    "reason": "probe A:binary-1d scales correctly"
+  },
+  "trunc": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "union1d": {
+    "class": "NO-BATCH",
+    "reason": "set op flattens inputs to 1-D (no batch axis)"
+  },
+  "unique": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "unique_all": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "unique_counts": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "unique_inverse": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "unique_values": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "unpackbits": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unpackbits scales correctly"
+  },
+  "unravel_index": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unravel_index scales correctly"
+  },
+  "unwrap": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "vander": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: x must be a one-dimensional array or sequence."
+  },
+  "var": {
+    "class": "OK-SCALES",
+    "reason": "probe A:reduce-1d scales correctly"
+  },
+  "vdot": {
+    "class": "NO-BATCH",
+    "reason": "ValueError: Size of label 'i' for operand 1 (8) does not match previous terms (64)."
+  },
+  "vecdot": {
+    "class": "OK-SCALES",
+    "reason": "probe A:vecdot scales correctly"
+  },
+  "vecmat": {
+    "class": "OK-SCALES",
+    "reason": "probe A:vecmat scales correctly"
+  },
+  "vstack": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  },
+  "where": {
+    "class": "OK-SCALES",
+    "reason": "probe A:unary-1d scales correctly"
+  }
+}

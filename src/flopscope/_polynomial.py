@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect as _inspect
+import math as _math
 from typing import Any
 
 import numpy as _np
@@ -10,6 +11,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_compute_dtype, resolve_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
@@ -28,13 +30,97 @@ def polyval_cost(deg: int, m: int) -> int:
 
 
 def polyadd_cost(n1: int, n2: int) -> int:
-    """Cost for polyadd: max(n1, n2) FLOPs."""
+    """Cost for polyadd: max(n1, n2) FLOPs.
+
+    Legacy length-based formula, kept for the public ``flops.polyadd_cost``
+    analytical-cost API (1-D coefficient arrays, where axis-0 length *is*
+    the element count). The ``polyadd`` wrapper itself bills via
+    ``_polyaddsub_cost``, which also covers higher-rank/broadcasting inputs
+    -- see that function's docstring for why axis-0 length alone is not
+    enough there.
+    """
     return max(n1, n2, 1)
 
 
 def polysub_cost(n1: int, n2: int) -> int:
-    """Cost for polysub: max(n1, n2) FLOPs."""
+    """Cost for polysub: max(n1, n2) FLOPs.
+
+    Legacy length-based formula, kept for the public ``flops.polysub_cost``
+    analytical-cost API (1-D coefficient arrays, where axis-0 length *is*
+    the element count). The ``polysub`` wrapper itself bills via
+    ``_polyaddsub_cost``, which also covers higher-rank/broadcasting inputs
+    -- see that function's docstring for why axis-0 length alone is not
+    enough there.
+    """
     return max(n1, n2, 1)
+
+
+def _polyaddsub_cost(a1: ArrayLike, a2: ArrayLike) -> int:
+    """Exact FLOP cost for polyadd/polysub: the true size of numpy's result.
+
+    ``numpy.polyadd``/``numpy.polysub`` share this recipe (see
+    ``numpy/lib/_polynomial_impl.py``)::
+
+        a1 = atleast_1d(a1); a2 = atleast_1d(a2)
+        diff = len(a2) - len(a1)                      # len() reads axis-0 size
+        if diff == 0:
+            val = a1 + a2                              # plain broadcast, ANY rank
+        elif diff > 0:
+            val = concatenate((zeros(diff), a1)) + a2  # requires a1 to be 1-D
+        else:
+            val = a1 + concatenate((zeros(-diff), a2)) # requires a2 to be 1-D
+
+    A naive "zero-pad axis 0 to max(len), then broadcast the trailing axes"
+    model gets two things wrong here:
+
+    * When axis-0 lengths already match (``diff == 0``), numpy does a
+      *plain* ``a1 + a2`` over the FULL shapes. Broadcasting aligns from the
+      trailing axis, not from axis 0 -- if the two inputs have different
+      rank this is not "axis-0 aligned, trailing broadcast" at all (e.g. a
+      1-D array of the same axis-0 length as a 2-D array's axis 0 does not
+      broadcast against it the way trailing-axis alignment would suggest).
+    * When axis-0 lengths differ, the zero-pad array numpy builds is always
+      1-D, so ``concatenate`` only succeeds if the shorter-by-axis-0 operand
+      is itself exactly 1-D (a 0-d/scalar operand qualifies once promoted by
+      ``atleast_1d``) -- anything higher-rank raises. When it *does*
+      succeed, the padded 1-D array is broadcast (from the trailing axis)
+      against the other operand's full shape, which can blow the result
+      size up far past ``max(len(a1), len(a2))``: e.g.
+      ``polyadd(5.0, ones((1000, 1)))`` pads the scalar to a length-1000
+      vector and broadcasts it against a (1000, 1) array, yielding a
+      (1000, 1000) result (1e6 elements) for a call a naive axis-0-only
+      formula would bill at 1000 -- a 1000x under-bill.
+
+    This mirrors that exact algorithm on shapes alone (no data is
+    allocated), so the billed cost always equals
+    ``numpy.polyadd(a1, a2).size`` for every input numpy accepts, and raises
+    ``ValueError`` in precisely the cases numpy itself rejects (verified by
+    fuzzing both against real numpy; see tests/test_batch_underbill_pins.py).
+    """
+    a1 = _np.asarray(a1)
+    a2 = _np.asarray(a2)
+    s1 = a1.shape if a1.ndim >= 1 else (1,)
+    s2 = a2.shape if a2.ndim >= 1 else (1,)
+    diff = s2[0] - s1[0]
+    if diff == 0:
+        result_shape = _np.broadcast_shapes(s1, s2)
+    elif diff > 0:
+        if len(s1) != 1:
+            raise ValueError(
+                f"polyadd/polysub: a1 with shape {a1.shape} cannot be "
+                "zero-padded against a longer a2 (numpy's concatenate "
+                "requires the shorter-by-axis-0 operand to be 1-D)"
+            )
+        result_shape = _np.broadcast_shapes((s2[0],), s2)
+    else:
+        if len(s2) != 1:
+            raise ValueError(
+                f"polyadd/polysub: a2 with shape {a2.shape} cannot be "
+                "zero-padded against a longer a1 (numpy's concatenate "
+                "requires the shorter-by-axis-0 operand to be 1-D)"
+            )
+        result_shape = _np.broadcast_shapes(s1, (s1[0],))
+    return max(int(_math.prod(result_shape)), 1)
 
 
 def polyder_cost(n: int, m: int = 1) -> int:
@@ -92,9 +178,48 @@ def polydiv_cost(n1: int, n2: int) -> int:
     return max(1 + q * (2 * n2 + 1), 1)
 
 
-def polyfit_cost(m: int, deg: int) -> int:
-    """Cost for polyfit: 2 * m * (deg+1)^2 FLOPs."""
-    return max(2 * m * (deg + 1) ** 2, 1)
+def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
+    """Cost for polyfit: Vandermonde build + lstsq solve.
+
+    ``numpy.polyfit`` builds an ``(m, deg+1)`` Vandermonde matrix from ``x``
+    and solves it against ``y`` with ``numpy.linalg.lstsq`` (an SVD-based
+    least-squares solve). The billed cost is therefore the Vandermonde
+    build plus ``lstsq_cost(m, deg+1, ncols)`` -- the identical solve
+    ``linalg.lstsq`` itself would charge for the same shape -- rather than a
+    standalone normal-equations-shaped estimate. The prior
+    ``2*m*(deg+1)^2*ncols`` formula billed 3-13x cheaper than routing the
+    same solve through ``lstsq`` directly, so a least-squares solve could
+    dodge its true price by going through ``polyfit`` instead.
+
+    The SVD factorization inside ``lstsq_cost`` is shared across every
+    right-hand-side column -- only the final back-substitution scales with
+    ``ncols`` -- so this cost grows *sublinearly* in ``ncols``, unlike the
+    old formula, which scaled every term linearly with ``ncols``.
+
+    Parameters
+    ----------
+    m : int
+        Number of data points (``len(x)``).
+    deg : int
+        Fit degree; the Vandermonde matrix has ``deg + 1`` columns.
+    ncols : int, default 1
+        Number of right-hand-side columns being fit: 1 for a 1-D ``y`` (the
+        usual case), or ``y.shape[1]`` when ``y`` is 2-D (numpy solves one
+        independent least-squares system per column, sharing the same
+        Vandermonde factorization).
+
+    Returns
+    -------
+    int
+        Estimated FLOP count: ``m*deg`` (Vandermonde build) plus
+        ``lstsq_cost(m, deg+1, ncols)`` (SVD least-squares solve).
+    """
+    from flopscope.numpy.linalg import lstsq_cost
+
+    n = deg + 1
+    vandermonde = m * deg  # build the (m, deg+1) Vandermonde: ~m*deg mults
+    solve = lstsq_cost(m, n, b_cols=ncols, b_ndim=1 if ncols == 1 else 2)
+    return max(vandermonde + solve, 1)
 
 
 def poly_cost(n: int) -> int:
@@ -130,8 +255,7 @@ def poly_cost(n: int) -> int:
 def roots_cost(n: int) -> int:
     """Cost for roots: companion-matrix eigenvalues — delegates to
     eigvals_cost(n) (~10n^3; building the companion matrix itself is free).
-    Confirmed by the 2026-06 evidence audit (LAPACK Users' Guide Table 3.13
-    / G&VL 4e §7.5, §8.3 + runtime scaling); see docs/reference/cost-model.md."""
+    Includes runtime scaling; see docs/reference/cost-model.md."""
     from flopscope.numpy.linalg import eigvals_cost
 
     return eigvals_cost(n)
@@ -160,7 +284,11 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
     m = x_arr.size
     cost = polyval_cost(deg, m)
     with budget.deduct(
-        "polyval", flop_cost=cost, subscripts=None, shapes=(p_arr.shape, x_arr.shape)
+        "polyval",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p_arr.shape, x_arr.shape),
+        dtypes=(p_arr.dtype, x_arr.dtype),
     ):
         result = _call_numpy(_np.polyval, p_arr, x_arr)
     return result  # type: ignore[return-value]
@@ -177,17 +305,25 @@ def polyadd(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     budget = require_budget()
     a1 = _np.asarray(a1)
     a2 = _np.asarray(a2)
-    n1 = len(a1)
-    n2 = len(a2)
-    cost = polyadd_cost(n1, n2)
+    cost = _polyaddsub_cost(a1, a2)
     with budget.deduct(
-        "polyadd", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polyadd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polyadd, a1, a2)
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polyadd, _np.polyadd, "counted_custom", "max(n1, n2) FLOPs")
+attach_docstring(
+    polyadd,
+    _np.polyadd,
+    "counted_custom",
+    "size of the axis-0 zero-padded, broadcast-aligned add result "
+    "(== numpy.polyadd(a1, a2).size; reduces to max(n1, n2) for 1-D inputs)",
+)
 
 
 @_counted_wrapper
@@ -196,17 +332,25 @@ def polysub(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     budget = require_budget()
     a1 = _np.asarray(a1)
     a2 = _np.asarray(a2)
-    n1 = len(a1)
-    n2 = len(a2)
-    cost = polysub_cost(n1, n2)
+    cost = _polyaddsub_cost(a1, a2)
     with budget.deduct(
-        "polysub", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polysub",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polysub, a1, a2)
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polysub, _np.polysub, "counted_custom", "max(n1, n2) FLOPs")
+attach_docstring(
+    polysub,
+    _np.polysub,
+    "counted_custom",
+    "size of the axis-0 zero-padded, broadcast-aligned subtract result "
+    "(== numpy.polysub(a1, a2).size; reduces to max(n1, n2) for 1-D inputs)",
+)
 
 
 @_counted_wrapper
@@ -216,7 +360,21 @@ def polyder(p: ArrayLike, m: int = 1) -> FlopscopeArray:
     p = _np.asarray(p)
     n = len(p)
     cost = polyder_cost(n, int(m))
-    with budget.deduct("polyder", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    # np.polyder multiplies each coefficient by an arange-derived exponent
+    # array, whose dtype is the platform default int (int64 on 64-bit
+    # platforms) -- so the billed dtype is p's dtype promoted against that
+    # default int, exactly like numpy's own arithmetic (verified:
+    # polyder(int8/16/32/64) -> int64, polyder(float32) -> float64,
+    # polyder(complex64) -> complex128; result_type(X, platform_int)
+    # reproduces every case).
+    billing_dtypes = (p.dtype, _np.dtype(_np.int_))
+    with budget.deduct(
+        "polyder",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(_np.polyder, p, m=m)
     return result  # type: ignore[return-value]
 
@@ -237,7 +395,22 @@ def polyint(p: ArrayLike, m: int = 1, k: ArrayLike | None = None) -> FlopscopeAr
     n = len(p)
     m_int = int(m)
     cost = polyint_cost(n, m_int)
-    with budget.deduct("polyint", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    # ``k`` (integration constants) is a genuine second operand: complex k
+    # yields a complex result, so its dtype must join the billing tuple or the
+    # complex factor is bypassed. np.polyint's coefficient division also
+    # always runs in (at least) float64 -- even from float32 p (verified:
+    # polyint(float32).dtype == float64) and complex64 -> complex128 -- so a
+    # float64 sentinel joins the resolve too (kind-preserving, see polyfit).
+    billing_dtypes = (p.dtype, _np.dtype(_np.float64))
+    if k is not None:
+        billing_dtypes += (_np.asarray(k).dtype,)
+    with budget.deduct(
+        "polyint",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=billing_dtypes,
+    ):
         if k is None:
             result = _call_numpy(_np.polyint, p, m=m)
         else:
@@ -263,7 +436,11 @@ def polymul(a1: ArrayLike, a2: ArrayLike) -> FlopscopeArray:
     n2 = len(a2)
     cost = polymul_cost(n1, n2)
     with budget.deduct(
-        "polymul", flop_cost=cost, subscripts=None, shapes=(a1.shape, a2.shape)
+        "polymul",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a1.shape, a2.shape),
+        dtypes=(a1.dtype, a2.dtype),
     ):
         result = _call_numpy(_np.polymul, a1, a2)
     return result  # type: ignore[return-value]
@@ -286,8 +463,22 @@ def polydiv(u: ArrayLike, v: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]
     n1 = len(u)
     n2 = len(v)
     cost = polydiv_cost(n1, n2)
+    # np.polydiv's per-step scale-divide always runs in (at least) float64
+    # for integer/bool operands (verified: polydiv(int, int) -> float64) but
+    # preserves float32/complex64 precision otherwise (polydiv(f32, f32) ->
+    # float32, polydiv(c64, c64) -> c64) -- combine u/v's own promotion
+    # first, then apply the same kind-conditional float64 floor as an
+    # eigvals-backed linalg op (int/bool -> float64, float/complex kept).
+    combined = resolve_billing_dtype((u.dtype, v.dtype))
+    billing_dtypes = (
+        linalg_compute_dtype(combined) if combined is not None else u.dtype,
+    )
     with budget.deduct(
-        "polydiv", flop_cost=cost, subscripts=None, shapes=(u.shape, v.shape)
+        "polydiv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(u.shape, v.shape),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.polydiv, u, v)
     return result  # type: ignore[return-value]
@@ -319,15 +510,39 @@ def polyfit(
     if kwargs.get("w") is not None:
         kwargs["w"] = _to_base_ndarray(_np.asarray(kwargs["w"]))
     m = len(x_arr)
-    cost = polyfit_cost(m, deg)
+    # numpy.polyfit accepts only 1-D or 2-D y (anything else is rejected by
+    # numpy itself downstream); a 2-D y fits one independent least-squares
+    # system per column, so the solve cost scales with ncols, not just m.
+    ncols = y_arr.shape[1] if y_arr.ndim == 2 else 1
+    cost = polyfit_cost(m, deg, ncols)
+    # np.polyfit's least-squares solve always runs in (at least) float64 --
+    # even from float32 x/y (verified: polyfit(f32, f32, deg).dtype ==
+    # float64) -- and complex64 y computes complex128, so the float64
+    # sentinel must join the resolve rather than replace it (result_type
+    # preserves the complex/real kind: result_type(complex64, float64) ==
+    # complex128, not float64).
+    billing_dtypes = (x_arr.dtype, y_arr.dtype, _np.dtype(_np.float64))
+    if kwargs.get("w") is not None:
+        billing_dtypes += (kwargs["w"].dtype,)
     with budget.deduct(
-        "polyfit", flop_cost=cost, subscripts=None, shapes=(x_arr.shape,)
+        "polyfit",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x_arr.shape,),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.polyfit, x_arr, y_arr, deg, **kwargs)  # type: ignore[arg-type]
     return result  # type: ignore[return-value]
 
 
-attach_docstring(polyfit, _np.polyfit, "counted_custom", "2 * m * (deg+1)^2 FLOPs")
+attach_docstring(
+    polyfit,
+    _np.polyfit,
+    "counted_custom",
+    "m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) FLOPs "
+    "(ncols = y.shape[1] for 2-D y, else 1; SVD factorization is shared "
+    "across ncols, so cost grows sublinearly in ncols)",
+)
 polyfit.__signature__ = _inspect.signature(_np.polyfit)  # type: ignore[attr-defined]
 
 
@@ -345,7 +560,23 @@ def poly(seq_of_zeros: ArrayLike) -> FlopscopeArray:
     else:
         n = len(seq)
         cost = poly_cost(n)
-    with budget.deduct("poly", flop_cost=cost, subscripts=None, shapes=(seq.shape,)):
+    # The 2-D branch delegates to eigvals (LAPACK _commonType: int/bool ->
+    # float64, float/complex kept), same as roots. The 1-D branch instead
+    # casts through np.mintypecode, whose *default* typeset is only
+    # {float32, float64, complex64, complex128} -- anything else, including
+    # integers AND float16 (verified: poly(float16_roots) -> float64, NOT
+    # float16), falls back to float64. linalg_compute_dtype already covers
+    # every case except float16, which it would otherwise leave unchanged.
+    poly_dtype = linalg_compute_dtype(seq.dtype)
+    if poly_dtype.kind == "f" and poly_dtype.itemsize < 4:
+        poly_dtype = _np.dtype(_np.float64)
+    with budget.deduct(
+        "poly",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(seq.shape,),
+        dtypes=(poly_dtype,),
+    ):
         result = _call_numpy(_np.poly, _to_base_ndarray(seq))
     return result  # type: ignore[return-value]
 
@@ -373,7 +604,18 @@ def roots(p: ArrayLike) -> FlopscopeArray:
     else:
         n = (len(_p_flat) - 1 - _last) - _first  # trimmed companion dimension
     cost = roots_cost(n)
-    with budget.deduct("roots", flop_cost=cost, subscripts=None, shapes=(p.shape,)):
+    # np.roots delegates to np.linalg.eigvals on the companion matrix, so its
+    # compute dtype follows the exact same LAPACK _commonType rule: integer/
+    # bool input always computes in float64, float/complex input keeps its
+    # own precision (verified: roots(int32) -> float64, roots(float32) ->
+    # float32, roots(complex64) -> complex64 -- NOT widened to complex128).
+    with budget.deduct(
+        "roots",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(p.shape,),
+        dtypes=(linalg_compute_dtype(p.dtype),),
+    ):
         result = _call_numpy(_np.roots, p)
     return result  # type: ignore[return-value]
 

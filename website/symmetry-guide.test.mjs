@@ -235,14 +235,17 @@ print(json.dumps({
     broadcast_has_symmetry: true,
     unary_c3_order: 3,
     unary_d4_order: 8,
-    // After the off-by-one fix in einsum_accumulation_cost: the formula
-    // is now `(k-1)·∏M + ∏α − ∏num_output_orbits` (mirrors the same
-    // "first cell of each output orbit is a free copy" correction the
-    // reduction surface already applies). For ki,kj->ij with k=5,i=j=3
-    // and S_2 on the (i,j) output: ∏num_output_orbits = 6 for the
-    // repeated-input case and 9 for the distinct-operand case.
-    repeated_einsum_cost: 54,
-    distinct_einsum_cost: 81,
+    // Base einsum_accumulation_cost from `(k-1)·∏M + ∏α − ∏num_output_orbits`
+    // (the "first cell of each output orbit is a free copy" correction the
+    // reduction surface also applies). For ki,kj->ij with k=5,i=j=3 and S_2 on
+    // the (i,j) output, ∏num_output_orbits = 6 (repeated input) / 9 (distinct
+    // operands), giving base 54 / 81. float64 operands, so dtype-aware billing
+    // (rate 2.0) doubles it: 54→108, 81→162. The `fnp.ones((5, 3))` operand
+    // creations run INSIDE the BudgetContext and creation now bills
+    // numel(output) (15 × rate 2 = 30 per operand): one operand for the
+    // repeated case (108+30=138), two for the distinct case (162+60=222).
+    repeated_einsum_cost: 138,
+    distinct_einsum_cost: 222,
     repeated_einsum_type: 'SymmetricTensor',
     distinct_einsum_type: 'SymmetricTensor',
   });

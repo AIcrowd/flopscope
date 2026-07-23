@@ -436,3 +436,446 @@ def test_decode_index_key_ellipsis(handler):
     """The {"__ellipsis__": True} wire form decodes to Ellipsis (str + bytes keys)."""
     assert handler._decode_index_key({"__ellipsis__": True}) is Ellipsis
     assert handler._decode_index_key({b"__ellipsis__": True}) is Ellipsis
+
+
+def test_decode_index_key_marker_semantics(handler):
+    from flopscope_server._request_handler import _decode_index_key
+
+    # bare wire-list is always a tuple (basic multi-axis index)
+    assert handler._decode_index_key([0, 2]) == (0, 2)
+    assert _decode_index_key([0, 2]) == (0, 2)
+    # marked list is a fancy-index Python list
+    assert handler._decode_index_key({"__list__": [0, 2]}) == [0, 2]
+    assert _decode_index_key({"__list__": [0, 2]}) == [0, 2]
+    # msgpack bytes-key form of the fancy-list marker (wire uses bytes keys)
+    assert handler._decode_index_key({b"__list__": [0, 2]}) == [0, 2]
+    assert _decode_index_key({b"__list__": [0, 2]}) == [0, 2]
+    # nested: tuple(int, fancy-list)
+    assert handler._decode_index_key([1, {"__list__": [0, 2]}]) == (1, [0, 2])
+    # module-level decoder: same nested case too
+    assert _decode_index_key([1, {"__list__": [0, 2]}]) == (1, [0, 2])
+
+
+# ---------------------------------------------------------------------------
+# __getitem__ billing (positive lock)
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_advanced_indexing_bills_on_computed_array(handler, session):
+    """The real ``{"op": "__getitem__"}`` wire path DOES deduct FLOPs for
+    advanced (fancy / boolean) indexing when the indexed handle is backed by a
+    ``FlopscopeArray`` — i.e. the state after any flopscope op has touched the
+    array. ``FlopscopeArray.__getitem__`` runs server-side and bills.
+
+    (See ``test_getitem_advanced_indexing_bills_on_first_touch_data`` below
+    for the ``create_from_data`` first-touch case, where the stored object
+    used to be a plain ``numpy.ndarray`` and the override never fired — this
+    test locks the already-working path so it can't silently regress.)
+    """
+    a = np.arange(1000, dtype=np.float32)
+    src = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )
+    # abs() returns a FlopscopeArray, so the result handle is FlopscopeArray-
+    # backed — exactly the state advanced indexing must bill against.
+    fa_h = handler.handle(
+        {"op": "abs", "args": [{"__handle__": src["result"]["id"]}], "kwargs": {}}
+    )["result"]["id"]
+    from flopscope._ndarray import FlopscopeArray
+
+    assert isinstance(session.get_array(fa_h), FlopscopeArray)
+
+    # Fancy (integer-array) index of 100 elements -> 4 * 100 = 400.
+    idx = np.arange(0, 1000, 10, dtype=np.int64)
+    idx_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": idx.tobytes(),
+            "shape": [100],
+            "dtype": "int64",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": fa_h}, {"__handle__": idx_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 400
+
+    # Boolean mask with 250 True -> 250 gathered + 1000 scanned = 1000 + 4*250.
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = True
+    mask_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": mask.tobytes(),
+            "shape": [1000],
+            "dtype": "bool",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": fa_h}, {"__handle__": mask_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+# ---------------------------------------------------------------------------
+# Python-list index key = fancy indexing (wire marker {"__list__": [...]})
+# ---------------------------------------------------------------------------
+
+
+def test_handle_getitem_python_list_is_fancy_index(handler, session):
+    import numpy as np
+
+    arr = np.arange(12, dtype=np.float64).reshape(3, 4)
+    handle = session.store_array(arr)
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": handle}, {"__list__": [0, 2]}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    out = session.get_array(resp["result"]["id"])
+    np.testing.assert_array_equal(out, arr[[0, 2]])
+
+
+# ---------------------------------------------------------------------------
+# __getitem__ / astype billing on FIRST-TOUCH data (budget-bypass regression)
+#
+# Session.store_array used to store the raw np.frombuffer(...).copy() ndarray
+# from create_from_data verbatim. Any op that runs directly against that
+# handle via a bare Python dunder/method call (__getitem__, astype) -- rather
+# than through a flopscope counted wrapper -- hit numpy's own unbilled
+# ndarray implementation instead of FlopscopeArray's billing override, so
+# advanced indexing performed as the FIRST op on fresh client-ingested data
+# silently billed 0 FLOPs. Session.store_array now view-casts every plain
+# ndarray to FlopscopeArray on the way in, so first-touch data bills exactly
+# like the already-touched case above.
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_advanced_indexing_bills_on_first_touch_data(handler, session):
+    """Fancy/boolean indexing performed DIRECTLY on a handle returned by
+    ``create_from_data`` (no intervening flopscope op) must bill exactly like
+    the already-touched case in
+    ``test_getitem_advanced_indexing_bills_on_computed_array`` above. Before
+    the ``Session.store_array`` fix, both assertions below failed with 0
+    billed FLOPs because the stored object was a plain ``numpy.ndarray`` and
+    ``arr[key]`` resolved to numpy's own unbilled ``__getitem__``.
+    """
+    a = np.arange(1000, dtype=np.float32)
+    src_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    from flopscope._ndarray import FlopscopeArray
+
+    assert isinstance(session.get_array(src_h), FlopscopeArray)
+
+    # Fancy (integer-array) index of 100 elements -> 4 * 100 = 400.
+    idx = np.arange(0, 1000, 10, dtype=np.int64)
+    idx_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": idx.tobytes(),
+            "shape": [100],
+            "dtype": "int64",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": src_h}, {"__handle__": idx_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 400
+
+    # Boolean mask with 250 True -> 250 gathered + 1000 scanned = 1000 + 4*250.
+    mask = np.zeros(1000, dtype=bool)
+    mask[:250] = True
+    mask_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": mask.tobytes(),
+            "shape": [1000],
+            "dtype": "bool",
+        }
+    )["result"]["id"]
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": src_h}, {"__handle__": mask_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 1000 + 4 * 250
+
+
+def test_astype_on_first_touch_data_preserves_flopscopearray_typing(handler, session):
+    """``astype`` bills like ``copy`` (Option B billing fix: registry weight
+    1.0 -- a real cast/copy is charged ``numel`` at the heavier of
+    source/destination dtype rate, matching ``FlopscopeArray.astype``'s own
+    formula). Here a 1000-element float64->float32 narrowing cast bills
+    `1000 * rate(float64)=2.0 = 2000` (float64 is the heavier operand).
+
+    What this test actually regresses on: before the ``Session.store_array``
+    fix, calling ``astype`` directly on a ``create_from_data`` handle (a
+    plain ``numpy.ndarray``) resolved to base ``numpy.ndarray.astype`` and
+    stored its plain-ndarray result verbatim -- silently extending the
+    billing bypass to every downstream op on THAT result too, not just the
+    astype call itself. After the fix, the astype result is stored as a
+    ``FlopscopeArray`` and a subsequent fancy-index read on it bills
+    correctly instead of continuing the bypass chain.
+    """
+    a = np.arange(1000, dtype=np.float64)
+    src_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float64",
+        }
+    )["result"]["id"]
+
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {"op": "astype", "args": [{"__handle__": src_h}, "float32"], "kwargs": {}}
+    )
+    assert resp["status"] == "ok"
+    # Real cast (default copy=True): billed like copy, at the heavier of
+    # source (float64, rate 2.0) / destination (float32, rate 1.0) --
+    # 1000 * 2.0 = 2000. This assertion is not the regression under test.
+    assert session.budget_status()["flops_used"] - before == 2000
+
+    from flopscope._ndarray import FlopscopeArray
+
+    astype_h = resp["result"]["id"]
+    assert isinstance(session.get_array(astype_h), FlopscopeArray)
+
+    # The chain must stay billable: a fancy-index read on the astype OUTPUT
+    # bills like any other FlopscopeArray-backed handle (4 * 100 = 400).
+    idx = np.arange(0, 1000, 10, dtype=np.int64)
+    idx_h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": idx.tobytes(),
+            "shape": [100],
+            "dtype": "int64",
+        }
+    )["result"]["id"]
+    before2 = session.budget_status()["flops_used"]
+    resp2 = handler.handle(
+        {
+            "op": "__getitem__",
+            "args": [{"__handle__": astype_h}, {"__handle__": idx_h}],
+            "kwargs": {},
+        }
+    )
+    assert resp2["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before2 == 400
+
+
+# ---------------------------------------------------------------------------
+# save / savez / savez_compressed billing (bill-only, no data transfer,
+# nothing written server-side) — closes the client's free-save budget bypass:
+# flopscope-client used to write the file entirely locally and never
+# round-trip to the server, so the 4*numel egress cost was never billed.
+# ---------------------------------------------------------------------------
+
+
+def test_handle_save_bills_four_times_numel(handler, session):
+    """A ``save`` request for a single handle deducts 4*(numel + ndim*8),
+    matches the in-process ``flops.save`` formula, writes nothing, and
+    returns no result payload (the client already wrote the file locally).
+
+    The ``+ndim*8`` term is the array's ``.npy`` shape header: a
+    participant-controlled channel (e.g. ``zeros((0, K))`` has 0 elements
+    but an arbitrary ``K``), billed alongside the element data."""
+    a = np.arange(1000, dtype=np.float32)
+    h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle({"op": "save", "args": [{"__handle__": h}], "kwargs": {}})
+
+    assert resp["status"] == "ok"
+    assert resp["result"] is None
+    # numel(1000) + shape-header (ndim=1 -> 1*8 bytes).
+    assert session.budget_status()["flops_used"] - before == 4 * (1000 + 8)
+    # budget info in the response matches a fresh query (server-owned counting).
+    assert resp["budget"] == session.budget_status()
+
+
+def test_handle_savez_bills_sum_of_all_handles(handler, session):
+    """``savez``/``savez_compressed`` deduct 4*(sum of numel across every
+    handle passed + sum of ndim*8 shape-header bytes), matching the
+    in-process ``flops.savez`` formula. No names blob is passed here (this
+    test exercises the handler's raw handle-summation mechanics, not a full
+    client round-trip with member names -- see
+    test_handle_savez_bills_same_as_in_process below for that)."""
+    a = np.arange(250, dtype=np.float32)
+    b = np.arange(150, dtype=np.float32)
+    h1 = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [250],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+    h2 = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": b.tobytes(),
+            "shape": [150],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    # numel(250 + 150) + shape-header (2 handles, each ndim=1 -> 2*8 bytes).
+    before = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "savez",
+            "args": [{"__handle__": h1}, {"__handle__": h2}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before == 4 * (250 + 150 + 2 * 8)
+
+    before2 = session.budget_status()["flops_used"]
+    resp2 = handler.handle(
+        {
+            "op": "savez_compressed",
+            "args": [{"__handle__": h1}, {"__handle__": h2}],
+            "kwargs": {},
+        }
+    )
+    assert resp2["status"] == "ok"
+    assert session.budget_status()["flops_used"] - before2 == 4 * (250 + 150 + 2 * 8)
+
+
+def test_handle_savez_bills_same_as_in_process(handler, session, tmp_path):
+    """The server's savez billing (data handle + a synthetic 1-D uint8 names
+    blob handle -- what a real client round-trip sends, see ``_handle_save``'s
+    docstring) must match what the in-process ``flops.savez`` wrapper bills
+    for the same call, including the shape-header channel on both the data
+    array and the synthetic names blob (Step 3/4 of the shape-header fix).
+
+    Both sides are measured as deltas on the SAME ``session`` fixture's
+    already-active ``BudgetContext`` (``Session.__init__`` enters one for the
+    session's lifetime -- a second top-level ``flops.BudgetContext`` can't be
+    opened here; ``BudgetContext``s don't nest). Calling ``fnp.savez``
+    directly bills into that active context exactly like a participant's own
+    in-process call would during a live session, so this is a faithful
+    apples-to-apples in-process-vs-server comparison, not a workaround."""
+    import numpy as np
+
+    import flopscope.numpy as fnp
+
+    x = np.ones((3, 4), dtype=np.float64)
+
+    # In-process reference billing.
+    before_in_process = session.budget_status()["flops_used"]
+    fnp.savez(str(tmp_path / "in_process.npz"), x=fnp.asarray(x))
+    in_process = session.budget_status()["flops_used"] - before_in_process
+
+    # Server path: data array + concatenated names blob ("x") as a 1-D uint8 array.
+    data = session.store_array(x)
+    names = session.store_array(np.frombuffer(b"x", dtype=np.uint8))
+    before_server = session.budget_status()["flops_used"]
+    resp = handler.handle(
+        {
+            "op": "savez",
+            "args": [{"__handle__": data}, {"__handle__": names}],
+            "kwargs": {},
+        }
+    )
+    assert resp["status"] == "ok"
+    server = session.budget_status()["flops_used"] - before_server
+
+    assert server == in_process
+
+
+def test_handle_save_bills_nothing_stored(handler, session):
+    """save/savez must not allocate a new array handle -- pure bill-only op."""
+    a = np.arange(64, dtype=np.float32)
+    h = handler.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [64],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+    before_count = session._conn.arrays.count
+
+    resp = handler.handle({"op": "save", "args": [{"__handle__": h}], "kwargs": {}})
+
+    assert resp["status"] == "ok"
+    assert session._conn.arrays.count == before_count
+
+
+def test_handle_save_unknown_handle_returns_error(handler):
+    resp = handler.handle(
+        {"op": "save", "args": [{"__handle__": "a999"}], "kwargs": {}}
+    )
+    assert resp["status"] == "error"
+    assert resp["error_type"] == "KeyError"
+
+
+def test_handle_save_insufficient_budget_returns_error():
+    """A save that would overshoot the remaining budget is rejected -- the
+    server, not the client, is the sole authority on whether the egress is
+    affordable."""
+    s = Session(flop_budget=100)
+    h = RequestHandler(s)
+    a = np.arange(1000, dtype=np.float32)  # would cost 4*1000 = 4000 > 100
+    handle = h.handle(
+        {
+            "op": "create_from_data",
+            "data": a.tobytes(),
+            "shape": [1000],
+            "dtype": "float32",
+        }
+    )["result"]["id"]
+
+    resp = h.handle({"op": "save", "args": [{"__handle__": handle}], "kwargs": {}})
+    assert resp["status"] == "error"
+    assert resp["error_type"] == "BudgetExhaustedError"
+
+    s.close()

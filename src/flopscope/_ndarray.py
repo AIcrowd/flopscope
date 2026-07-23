@@ -11,9 +11,10 @@ flopscope's FLOP-counted ``me.*`` functions.
   result would weaken or destroy ``A_sym``'s tagged symmetry. ``A @= B``
   on shape-changing matmul falls back to CPython's documented
   rebind-the-name semantics.
-- **25 ndarray methods** (``sum``, ``mean``, ``dot``, ``argsort``,
-  ``compress``, ``trace``, ``round``, ``clip``, ``ptp``, …) so
-  ``a.sum()`` and ``fnp.sum(a)`` produce the same FLOP count.
+- **33 ndarray methods** (``sum``, ``mean``, ``dot``, ``argsort``,
+  ``compress``, ``trace``, ``round``, ``clip``, ``ptp``, ``copy``,
+  ``ravel``, ``reshape``, ``choose``, ``flatten``, …) so ``a.sum()`` and
+  ``fnp.sum(a)`` produce the same FLOP count.
 - **In-place ``sort`` / ``partition``** which refuse on a
   ``SymmetricTensor`` (the reorder would break symmetry).
 
@@ -46,6 +47,8 @@ from typing import Any
 
 import numpy as _np
 from numpy.typing import DTypeLike
+
+from flopscope._budget import _call_numpy, _counted_wrapper
 
 
 def _me():
@@ -387,6 +390,15 @@ class FlopscopeArray(_np.ndarray):
         ):
             _bind(name, name)
 
+        # ----- Counts / search -----
+        # nonzero: fnp.nonzero exists and is billed, and the ``.nonzero()``
+        # METHOD is already overridden below -- but top-level
+        # ``np.nonzero(FlopscopeArray)`` was unmapped, so it raised TypeError
+        # (NEP-18 "no implementation found") instead of routing like its
+        # set/unique siblings above. Bind it for parity.
+        for name in ("nonzero",):
+            _bind(name, name)
+
         # ----- Free / structural (asarray excluded) -----
         for name in (
             "where",
@@ -667,6 +679,189 @@ class FlopscopeArray(_np.ndarray):
 
     def nonzero(self, *args: Any, **kwargs: Any) -> tuple[FlopscopeArray, ...]:  # type: ignore[override]
         return _me().nonzero(self, *args, **kwargs)
+
+    @_counted_wrapper
+    def copy(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        """Return an owning copy, billed exactly like ``fnp.copy``.
+
+        Delegating to ``fnp.copy`` would hand back a wrapper VIEW of a base
+        buffer (``OWNDATA=False``), and ``np.require(..., ['OWNDATA'])``
+        satisfies the 'O' requirement via ``arr.copy()`` then checks the flag
+        on what it gets back -- so the copy must be allocated natively by
+        ``ndarray.copy``. Bill the identical deduct
+        (:func:`flopscope._array_ops.copy`: numel(input) under ``"copy"``)
+        directly, mirroring :meth:`flatten` below.
+        """
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        cost = max(self.size, 1)
+        with budget.deduct(
+            "copy",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(self.shape,),
+            dtypes=(self.dtype,),
+        ):
+            result = _call_numpy(super().copy, *args, **kwargs)
+        return result
+
+    def ravel(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        return _me().ravel(self, *args, **kwargs)
+
+    def reshape(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        # ndarray.reshape uniquely allows the target shape as either one
+        # tuple/list argument (``x.reshape((2, 3))``) or separate positional
+        # ints (``x.reshape(2, 3)``). The free-function form (np.reshape /
+        # fnp.reshape) only takes a single shape argument -- its 2nd
+        # positional slot is ``order``, not another shape dim -- so multi-int
+        # varargs must be collapsed into one shape tuple before delegating.
+        # A single argument (already a tuple/list, or a lone int/-1) is
+        # forwarded unchanged.
+        if len(args) > 1:
+            args = (args,)
+        return _me().reshape(self, *args, **kwargs)
+
+    def choose(self, choices: Any, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        return _me().choose(self, choices, *args, **kwargs)
+
+    @_counted_wrapper
+    def flatten(self, *args: Any, **kwargs: Any) -> FlopscopeArray:
+        """Return a flattened copy.
+
+        ``ndarray.flatten`` always allocates a new buffer (unlike
+        ``.ravel()``, which may return a view) and there is no dedicated
+        ``fnp.flatten`` free function to delegate to. Bill it directly under
+        the "copy" op name at numel(input) -- mirroring
+        :func:`flopscope._array_ops.copy` exactly -- rather than composing
+        copy-then-reshape, which would charge twice for the same data
+        movement. ``@_counted_wrapper`` (matching every other billing
+        wrapper in this codebase) attributes this method's own bookkeeping
+        time to flopscope_overhead instead of leaking it into residual.
+        """
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        cost = max(self.size, 1)
+        with budget.deduct(
+            "copy",
+            flop_cost=cost,
+            subscripts=None,
+            shapes=(self.shape,),
+            dtypes=(self.dtype,),
+        ):
+            result = _call_numpy(super().flatten, *args, **kwargs)
+        return result
+
+    # ----- Indexing -----
+
+    def __getitem__(self, key: Any):  # type: ignore[override]
+        """Index the array. Basic indexing is free; advanced indexing bills.
+
+        Basic indexing -- every part of ``key`` is an ``int`` (Python or numpy
+        scalar), ``slice``, ``np.newaxis`` (``None``), ``Ellipsis``, or a tuple
+        of those -- returns a view, matching NumPy's zero-copy semantics: 0 FLOPs.
+
+        Advanced indexing materializes a gathered copy and is billed under
+        ``"getitem"``: 4 FLOPs per gathered output element (matching ``take``),
+        plus one scan FLOP per boolean-mask element (matching ``compress``). A
+        part triggers advanced indexing when it is any of:
+
+        * a ``bool`` / ``np.bool_`` **scalar** -- numpy routes a bare boolean
+          scalar through the advanced-index copy path (prepending a length-1 /
+          length-0 axis), a genuine copy though it is not an ``ndarray``;
+        * **any other part that coerces to an integer- or boolean-dtype array**
+          -- an ``ndarray`` (or ``FlopscopeArray``) of any ``ndim`` including
+          0-d, a ``list``, ``tuple``, ``range``, ``array.array``,
+          ``memoryview``, or any future array-like sequence/buffer. This
+          matches numpy's own rule (any array-like integer/bool index gathers a
+          copy) rather than an enumerated type list, so it cannot silently miss
+          a sequence kind: the part is classified by ``np.asarray(part).dtype``,
+          and only its ``dtype``/``size`` are read -- the original ``key`` is
+          what actually indexes, so a single-use generator part is never
+          consumed.
+
+        This is about a *part* -- an already-decomposed element of ``parts`` --
+        not the top-level ``key``: ``m[1:3, ::2]`` has ``key`` as a tuple, but
+        that tuple is the multi-axis split itself (``parts = key``), and its
+        parts are slices, so it stays basic. Likewise ``v[(0, 2, 4)]`` on a 1-D
+        ``v`` has ``key`` as the 3-tuple; splitting it into parts ``0, 2, 4``
+        yields three *int* parts -- basic, and numpy raises its own "too many
+        indices" error since none of them consumes as an array. A tuple only
+        gathers when it survives the top-level split as one part, e.g.
+        ``v[(0, 2, 4),]`` (a 1-tuple *containing* the 3-tuple) or
+        ``m[tuple_a, tuple_b]`` (each axis's index happens to be a tuple).
+
+        A numpy/Python *integer scalar* stays basic (a view) -- only integer
+        *arrays* (or a sequence/buffer coerced to one) gather. A part numpy
+        cannot turn into an integer/bool array -- an object array (kind ``O``,
+        e.g. a generator), a string/bytes field selector (``U``/``S``), a
+        float/complex array, or a ragged sequence ``np.asarray`` rejects --
+        falls through to ``super().__getitem__`` unbilled, so numpy handles or
+        raises on it exactly as usual. ``mask_elems`` counts boolean elements
+        only: a bool scalar contributes 1, a bool array contributes its size;
+        integer operands add nothing beyond the gather.
+        """
+        parts = key if isinstance(key, tuple) else (key,)
+        mask_elems = 0
+        advanced = False
+        for p in parts:
+            # Boolean scalars drive numpy's advanced-index copy path even
+            # though they are not ndarrays. Check bool FIRST: ``isinstance(
+            # True, int)`` is True, but a bare int is a BASIC index (view), so
+            # a plain int must not slip through this branch as "advanced".
+            if isinstance(p, (bool, _np.bool_)):
+                advanced = True
+                mask_elems += 1
+                continue
+            # Fast BASIC path: a scalar integer (Python or numpy), a slice,
+            # ``np.newaxis`` (None), or Ellipsis all index as a view -- 0 FLOPs.
+            # A numpy integer SCALAR (``np.int64(3)``) MUST be caught here: the
+            # coercion below would turn it into a 0-d int array (kind 'i') and
+            # misread it as an advanced gather, but a scalar-int index is basic.
+            # (A 0-d int ARRAY, ``np.array(3)``, is genuinely advanced -- it is
+            # an ndarray, not an ``int``/``np.integer``, so it flows on below.)
+            if p is None or p is Ellipsis or isinstance(p, (int, _np.integer, slice)):
+                continue
+            # Everything else -- list, tuple, range, ``array.array``,
+            # ``memoryview``, an ndarray, or any future array-like sequence /
+            # buffer -- is classified exactly as numpy would: coerce it to an
+            # array and treat it as an advanced (copying) gather iff the result
+            # is an integer/bool index array. Only ``dtype``/``size`` are READ
+            # off the coercion; the ORIGINAL ``key`` is what actually indexes
+            # below, so a single-use generator part is never consumed here
+            # (``np.asarray`` wraps it in a 0-d object array without draining
+            # it, kind 'O', which falls through as basic below).
+            try:
+                arr = p if isinstance(p, _np.ndarray) else _np.asarray(p)
+            except Exception:
+                # numpy can't build an array from this part (ragged /
+                # inhomogeneous / uncoercible) -- leave the ORIGINAL key to
+                # super().__getitem__ to handle or raise on. Never billed.
+                continue
+            # An integer- or boolean-dtype array operand of ANY ndim (including
+            # 0-d) is advanced indexing -- numpy materializes a gathered copy,
+            # never a view. A coercion whose kind is NOT in "biu"
+            # (float/complex index arrays, object arrays from generators,
+            # string/bytes field selectors) is not a valid gather index; fall
+            # through so numpy handles or raises on the original key.
+            if arr.dtype.kind in "biu":
+                advanced = True
+                if arr.dtype.kind == "b":
+                    mask_elems += int(arr.size)
+        if not advanced:
+            return super().__getitem__(key)  # basic indexing: view, free
+
+        from flopscope._validation import require_budget
+
+        budget = require_budget()
+        with budget.deduct_after(
+            "getitem", subscripts=None, shapes=(self.shape,), dtypes=(self.dtype,)
+        ) as _op:
+            result = super().__getitem__(key)
+            out_numel = int(result.size) if hasattr(result, "size") else 1
+            _op.set_cost(mask_elems + 4 * out_numel)
+        return result
 
     # flopscope arrays are immutable: item assignment and in-place mutation
     # are not supported.  Raise descriptive errors that match the client.

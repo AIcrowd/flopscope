@@ -17,6 +17,12 @@ from numpy.typing import ArrayLike, DTypeLike
 
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import (
+    heavier_billing_dtype,
+    mean_compute_dtype,
+    reduction_billing_dtype,
+    sum_accumulator_dtype,
+)
 from flopscope._flops import _ceil_log2
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray, _to_base_ndarray_tree
 from flopscope._validation import require_budget
@@ -63,7 +69,26 @@ def trace(
     else:
         cost = 0
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct("trace", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    # numpy widens the trace accumulator like sum (trace(int32) runs int64).
+    # An explicit dtype= bills as the accumulator numpy runs, in both
+    # directions; out= widens it, and a narrower out only casts the final
+    # store; the default never bills below the input rate. Mirrors the
+    # reduction wrappers exactly.
+    billing_dtypes: tuple = (
+        reduction_billing_dtype(
+            a.dtype,
+            explicit_dtype=dtype,
+            out_dtype=out_stripped.dtype if out_stripped is not None else None,
+            default_dtype=sum_accumulator_dtype(a.dtype),
+        ),
+    )
+    with budget.deduct(
+        "trace",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(
             _np.trace,
             _to_base_ndarray(a),
@@ -96,7 +121,11 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     # 6 FLOPs/elem tolerance core (sub + 2*abs + mul + add + cmp) + (numel-1) all-reduce
     cost = _builtins.max(7 * numel - 1, 1)
     with budget.deduct(
-        "allclose", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "allclose",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.allclose, a, b, **kwargs)
     return result  # type: ignore[return-value]
@@ -119,7 +148,11 @@ def array_equal(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     # array_equal does not broadcast; returns False on shape mismatch
     cost = _builtins.max(a.size, b.size, 1)
     with budget.deduct(
-        "array_equal", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "array_equal",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.array_equal, a, b, **kwargs)
     return result  # type: ignore[return-value]
@@ -144,7 +177,11 @@ def array_equiv(a: ArrayLike, b: ArrayLike) -> bool:
     except ValueError:
         cost = _builtins.max(a.size, b.size, 1)
     with budget.deduct(
-        "array_equiv", flop_cost=cost, subscripts=None, shapes=(a.shape, b.shape)
+        "array_equiv",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape, b.shape),
+        dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.array_equiv, a, b)
     return result  # type: ignore[return-value]
@@ -168,13 +205,24 @@ def histogram(
     budget = require_budget()
     a = _np.asarray(a)
     n = a.size
+    # np.histogram's counts output is always the platform default int
+    # (bincount-style accumulation: int64 on 64-bit platforms) regardless of
+    # a's dtype, while its bin-edges output follows the same mean-shaped
+    # rule as linspace/mean (integer/bool a -> float64, float a preserved).
+    # Both outputs must clear the billed rate, so the int floor joins the
+    # edge-driven dtype(s) in the resolve tuple below (result_type, same
+    # "append a sentinel dtype" pattern as cov/corrcoef/polyfit).
+    _hist_int_floor = _np.dtype(_np.int_)
     if isinstance(bins, _builtins.int):
         cost = _builtins.max(n * _ceil_log2(bins), 1)
     elif isinstance(bins, _builtins.str):
         # Deferred cost: resolve nbins from returned edges, then charge
         # 2n (min/max scan) + estimator_cost*n + n*ceil_log2(nbins_resolved)
         with budget.deduct_after(
-            "histogram", subscripts=None, shapes=(a.shape,)
+            "histogram",
+            subscripts=None,
+            shapes=(a.shape,),
+            dtypes=(mean_compute_dtype(a.dtype), _hist_int_floor),
         ) as _op:
             result = _call_numpy(
                 _np.histogram,
@@ -193,7 +241,22 @@ def histogram(
     else:
         bins_arr = _np.asarray(bins)
         cost = _builtins.max(n * _ceil_log2(_builtins.len(bins_arr)), 1)
-    with budget.deduct("histogram", flop_cost=cost, subscripts=None, shapes=(a.shape,)):
+    # An array ``bins`` (edge values) is a genuine second operand — numpy
+    # promotes across data and edges — so its dtype must join the billing tuple
+    # or a complex/fp64 edge array bypasses the factor. An int ``bins`` is a
+    # count, not data, so its dtype is irrelevant.
+    _hist_dtypes = (
+        (mean_compute_dtype(a.dtype), _hist_int_floor)
+        if _np.isscalar(bins)
+        else (mean_compute_dtype(a.dtype), _np.asarray(bins).dtype, _hist_int_floor)
+    )
+    with budget.deduct(
+        "histogram",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=_hist_dtypes,
+    ):
         result = _call_numpy(
             _np.histogram,
             a,
@@ -247,8 +310,30 @@ def histogram2d(
     else:
         cost = _builtins.max(n, 1)
 
+    # Array-valued bin edges are genuine operands numpy promotes across; fold
+    # their dtype in so complex/fp64 edges don't bypass the factor. Integer
+    # bins are counts, not data -> skipped. histogram2d delegates to
+    # histogramdd's weighted-accumulation counting, whose counts output is
+    # always float64 regardless of x/y's dtype (verified: histogram2d(int32,
+    # int32) counts -> float64, histogram2d(float32, float32) counts ->
+    # float64 too), while the edges follow the mean-shaped rule (integer/
+    # bool -> float64, float preserved) -- so both x and y route through
+    # mean_compute_dtype and a float64 sentinel joins the resolve.
+    _bin_dtypes = tuple(
+        _np.asarray(b).dtype
+        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
+        if not _np.isscalar(b)
+    )
     with budget.deduct(
-        "histogram2d", flop_cost=cost, subscripts=None, shapes=(x.shape, y.shape)
+        "histogram2d",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape, y.shape),
+        dtypes=(
+            (mean_compute_dtype(x.dtype), mean_compute_dtype(y.dtype))
+            + _bin_dtypes
+            + (_np.dtype(_np.float64),)
+        ),
     ):
         result = _call_numpy(
             _np.histogram2d,
@@ -301,8 +386,23 @@ def histogramdd(
     else:
         cost = _builtins.max(n, 1)
 
+    # Array-valued bin edges are genuine operands numpy promotes across; fold
+    # their dtype in so complex/fp64 edges don't bypass the factor. Integer
+    # bins are counts, not data -> skipped. Same histogram2d/mean-shaped
+    # rule: counts always float64, edges follow mean_compute_dtype(sample).
+    _bin_dtypes = tuple(
+        _np.asarray(b).dtype
+        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
+        if not _np.isscalar(b)
+    )
     with budget.deduct(
-        "histogramdd", flop_cost=cost, subscripts=None, shapes=(sample.shape,)
+        "histogramdd",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(sample.shape,),
+        dtypes=(mean_compute_dtype(sample.dtype),)
+        + _bin_dtypes
+        + (_np.dtype(_np.float64),),
     ):
         result = _call_numpy(
             _np.histogramdd,
@@ -340,8 +440,21 @@ def histogram_bin_edges(
         cost = _builtins.max(n * (2 + est), 1)
     else:
         cost = _builtins.max(n, 1)
+    # Edges derived from a's own range follow the mean-shaped rule
+    # (integer/bool a -> float64, float a preserved -- verified:
+    # histogram_bin_edges(int32) -> float64, (float32) -> float32). An
+    # array-valued ``bins`` instead echoes straight back unchanged (numpy
+    # returns the same array), so its own dtype must join the resolve too or
+    # a wider explicit edges array would be undercounted.
+    _hbe_dtypes: tuple = (mean_compute_dtype(a.dtype),)
+    if not _np.isscalar(bins) and not isinstance(bins, _builtins.str):
+        _hbe_dtypes += (_np.asarray(bins).dtype,)
     with budget.deduct(
-        "histogram_bin_edges", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "histogram_bin_edges",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=_hbe_dtypes,
     ):
         result = _call_numpy(
             _np.histogram_bin_edges,
@@ -366,7 +479,19 @@ def bincount(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     budget = require_budget()
     x = _np.asarray(x)
     cost = _builtins.max(x.size, 1)
-    with budget.deduct("bincount", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    # np.bincount's output is always the platform default int (int64 on
+    # 64-bit platforms), regardless of x's own integer width -- verified
+    # across int8..64 AND uint8..64 (even bincount(uint64) -> int64, not
+    # uint64). This is a fixed override, not a promotion (result_type(uint64,
+    # int64) would incorrectly jump to float64), so heavier_billing_dtype
+    # (max-by-rate) is used instead of folding int64 into the resolve tuple.
+    with budget.deduct(
+        "bincount",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=(heavier_billing_dtype(x.dtype, _np.dtype(_np.int_)),),
+    ):
         result = _call_numpy(
             _np.bincount,
             x,
@@ -395,7 +520,7 @@ def logspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    with budget.deduct_after("logspace", subscripts=None, shapes=()) as _op:
+    with budget.deduct_after("logspace", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(
             _np.logspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -403,6 +528,10 @@ def logspace(
             num=num,
             **kwargs,
         )
+        # Bill the dtype numpy actually PRODUCED: with ``dtype`` omitted,
+        # integer endpoints yield float64 samples, so resolving from the
+        # inputs would bill half the float64 rate (same fix as linspace).
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result  # type: ignore[return-value]
 
@@ -419,7 +548,7 @@ def geomspace(
     **kwargs: Any,
 ) -> FlopscopeArray:
     budget = require_budget()
-    with budget.deduct_after("geomspace", subscripts=None, shapes=()) as _op:
+    with budget.deduct_after("geomspace", subscripts=None, shapes=(), dtypes=()) as _op:
         result = _call_numpy(
             _np.geomspace,
             _to_base_ndarray(start) if hasattr(start, "__array__") else start,
@@ -427,6 +556,11 @@ def geomspace(
             num=num,
             **kwargs,
         )
+        # Bill the dtype numpy actually PRODUCED: geomspace promotes to at
+        # least float64 (float32 endpoints included), so input-derived
+        # resolution under-billed every omitted-dtype call (same fix as
+        # linspace/logspace).
+        _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
     return result  # type: ignore[return-value]
 
@@ -447,7 +581,23 @@ def vander(
     if N is None:
         N = n
     cost = _builtins.max(n * (N - 2), 1)
-    with budget.deduct("vander", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    # np.vander allocates its output at ``promote_types(x.dtype, int)`` (its
+    # own source: ``dtype=promote_types(x.dtype, int)``) -- ``int`` there is
+    # numpy's platform default int (int64 on 64-bit platforms), so every
+    # narrower integer/bool/uint promotes to it (verified: vander(int8..32)
+    # AND vander(uint8..32) -> int64, matching promote_types exactly even
+    # though uint's own same-kind default would be uint64), while float32/
+    # complex64 still widen to float64/complex128 (promote_types(f32, i8)
+    # can't stay float32). result_type(x.dtype, platform_int) reproduces
+    # promote_types(x.dtype, int) exactly for every dtype kind.
+    billing_dtypes = (x.dtype, _np.dtype(_np.int_))
+    with budget.deduct(
+        "vander",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=billing_dtypes,
+    ):
         result = _call_numpy(_np.vander, x, N=N, **kwargs)
     return result  # type: ignore[return-value]
 
@@ -483,8 +633,21 @@ def apply_along_axis(
         **kwargs,
     )
     cost = result.size if hasattr(result, "size") else 1
+    # func1d is arbitrary user code (hence the RemoteCallbackWarning above):
+    # numpy has no promotion rule to predict what it returns, so bill
+    # whichever is pricier of the input array's dtype and the callback's
+    # OWN demonstrated result dtype (already computed above) -- the same
+    # "max of operand rates" pattern as astype, not a result_type combine
+    # (there is no real promotion relationship between the two here).
+    billing_dtypes: tuple = (arr.dtype,)
+    if isinstance(result, _np.ndarray):
+        billing_dtypes = (heavier_billing_dtype(arr.dtype, result.dtype),)
     with budget.deduct(
-        "apply_along_axis", flop_cost=cost, subscripts=None, shapes=(arr.shape,)
+        "apply_along_axis",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(arr.shape,),
+        dtypes=billing_dtypes,
     ):
         pass
     return result  # type: ignore[return-value]
@@ -513,8 +676,18 @@ def apply_over_axes(
         budget, _np.apply_over_axes, func, _to_base_ndarray(a), axes
     )
     cost = result.size if hasattr(result, "size") else 1
+    # Same reasoning as apply_along_axis: func is arbitrary user code, so
+    # bill whichever is pricier of the input dtype and the callback's own
+    # demonstrated result dtype.
+    billing_dtypes: tuple = (a.dtype,)
+    if isinstance(result, _np.ndarray):
+        billing_dtypes = (heavier_billing_dtype(a.dtype, result.dtype),)
     with budget.deduct(
-        "apply_over_axes", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "apply_over_axes",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=billing_dtypes,
     ):
         pass
     return result  # type: ignore[return-value]
@@ -536,7 +709,7 @@ def piecewise(
     *args: Any,
     **kw: Any,
 ) -> FlopscopeArray:
-    """Counted version of np.piecewise. Cost: numel(input)."""
+    """Counted version of np.piecewise. Cost: numel(input) * len(condlist)."""
     _warn_remote_callback("piecewise")
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
@@ -550,8 +723,36 @@ def piecewise(
         *args,
         **kw,
     )
-    cost = x.size
-    with budget.deduct("piecewise", flop_cost=cost, subscripts=None, shapes=(x.shape,)):
+    # Count conditions exactly the way numpy's piecewise promotes condlist
+    # (numpy.lib._function_base_impl.piecewise): a scalar condlist, or one
+    # whose first element is neither a list nor an ndarray while x is not
+    # 0-d, is a SINGLE condition (numpy wraps it as [condlist]); everything
+    # else -- a list/tuple of per-piece conditions, or a 2-D+ bool ndarray
+    # whose ROWS are independent conditions -- counts len(condlist). Each
+    # condition is its own scan over x, so the bill scales with that count;
+    # an isinstance(list/tuple) test alone would let a stacked 2-D condlist
+    # bill as one condition. numpy has already accepted condlist above, so
+    # condlist[0] here cannot raise on inputs numpy itself rejects.
+    if _np.isscalar(condlist) or (
+        not isinstance(condlist[0], (list, _np.ndarray)) and x.ndim != 0
+    ):
+        n_conds = 1
+    else:
+        n_conds = len(condlist)
+    cost = x.size * max(n_conds, 1)
+    # Same reasoning as apply_along_axis: funclist entries are arbitrary
+    # user code, so bill whichever is pricier of the input dtype and the
+    # callback's own demonstrated result dtype.
+    billing_dtypes: tuple = (x.dtype,)
+    if isinstance(result, _np.ndarray):
+        billing_dtypes = (heavier_billing_dtype(x.dtype, result.dtype),)
+    with budget.deduct(
+        "piecewise",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(x.shape,),
+        dtypes=billing_dtypes,
+    ):
         pass
     return result  # type: ignore[return-value]
 
@@ -560,7 +761,7 @@ attach_docstring(
     piecewise,
     _np.piecewise,
     "counted_custom",
-    "numel(input) FLOPs",
+    "numel(input) * len(condlist) FLOPs",
 )
 
 

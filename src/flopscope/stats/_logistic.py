@@ -26,10 +26,10 @@ class LogisticDistribution(ContinuousDistribution):
     ``loc`` is the center of the distribution and ``scale`` controls the
     spread. The CDF is the sigmoid function and the PPF is the logit
     function. Per-method FLOP costs (weight 1.0): pdf deducts
-    ``23 * numel(input)`` (composite: z(2)+exp(-z)(17)+(1+ez)(1)+sq(1)+
-    scale*(1)+div(1), FMA=2), cdf deducts ``21 * numel(input)`` (composite:
+    ``23 * numel(broadcast(input, loc, scale))`` (composite: z(2)+exp(-z)(17)+(1+ez)(1)+sq(1)+
+    scale*(1)+div(1), FMA=2), cdf deducts ``21 * numel(broadcast(input, loc, scale))`` (composite:
     z(2)+exp(-z)(17)+1+ez(1)+1/denom(1), FMA=2), ppf deducts
-    ``28 * numel(input)`` (composite: 1-q(1)+q/(1-q)(1)+log(16)+
+    ``28 * numel(broadcast(input, loc, scale))`` (composite: 1-q(1)+q/(1-q)(1)+log(16)+
     loc+scale*(2)+3 where(8), FMA=2).
     """
 
@@ -56,7 +56,7 @@ class LogisticDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.logistic.pdf(x, loc, scale)``.
-        FLOP cost: ``23 * numel(x)`` (composite: z(2)+exp(-z)(17)+
+        FLOP cost: ``23 * numel(broadcast(x, loc, scale))`` (composite: z(2)+exp(-z)(17)+
         (1+ez)(1)+sq(1)+scale*(1)+div(1), FMA=2, weight 1.0).
 
         Examples
@@ -89,7 +89,7 @@ class LogisticDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.logistic.cdf(x, loc, scale)``.
-        FLOP cost: ``21 * numel(x)`` (composite: z(2)+exp(-z)(17)+
+        FLOP cost: ``21 * numel(broadcast(x, loc, scale))`` (composite: z(2)+exp(-z)(17)+
         1+ez(1)+1/denom(1), FMA=2, weight 1.0).
 
         Examples
@@ -122,7 +122,7 @@ class LogisticDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.logistic.ppf(q, loc, scale)``.
-        FLOP cost: ``28 * numel(q)`` (composite: 1-q(1)+q/(1-q)(1)+log(16)+
+        FLOP cost: ``28 * numel(broadcast(q, loc, scale))`` (composite: 1-q(1)+q/(1-q)(1)+log(16)+
         loc+scale*(2)+3 where(8), FMA=2, weight 1.0).
 
         Examples

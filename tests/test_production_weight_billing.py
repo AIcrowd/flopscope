@@ -2,20 +2,32 @@
 
 Most of the cost suite runs under UNIT weights: conftest's autouse
 ``reset_global_budget`` fixture calls ``reset_weights()``, clearing the table so
-every op falls back to weight 1.0 — which pins each op's raw ``flop_cost``.
-Weight TIERS are checked separately by ``test_weight_tier_policy.py`` (only that
-each weight is a legal tier value). Neither pins what production actually
-*bills* — ``flop_cost x weight`` — which is what participants are charged.
+every op falls back to weight 1.0 and dtype_rate 1.0 — which pins each op's raw
+``flop_cost``. Weight TIERS are checked separately by ``test_weight_tier_policy.py``
+(only that each weight is a legal tier value). Neither pins what production
+actually *bills* — ``flop_cost x dtype_rate x complex_factor x weight`` — which is
+what participants are charged.
 
 This module closes that gap: it loads the packaged production weights
 (``data/default_weights.json``) and pins the billed cost for one representative
-op per weight tier {0, 1, 8, 16}. A silent weight regression (e.g. a
+op per weight tier {0, 1, 4, 16}. A silent weight regression (e.g. a
 transcendental sampler dropping from 16x to 1x) or a tier mislabel now fails
 here — not only in the (unenforced) ``docs/reference/cost-model.md`` table.
 
-Note: the former 4.0 "gather" tier (take/put/take_along_axis/put_along_axis etc.)
-was replaced by the data-movement free tier (weight=0.0) in the cost-model
-data-movement-free-tier change.
+Note: the 4.0 "gather" tier (take/take_along_axis/choose) was briefly replaced
+by the data-movement free tier (weight=0.0) in the cost-model
+data-movement-free-tier change, then reinstated by the explicit-indexing-ops
+triage task (put/place/putmask/put_along_axis/fill_diagonal/extract/compress
+landed in the 1.0 scatter tier instead of returning to gather).
+
+Note: the 8.0 "half" tier is now RETIRED. hamming/hanning were its only two
+occupants; the cost-model triage (Task 10) moved both off the flat-weight-tier
+model entirely onto the kaiser-family derived-constant formula (18*n at weight
+1.0, the whole per-sample cost baked directly into flop_cost) -- no op in
+default_weights.json carries weight 8.0 any more. hamming/hanning's own
+production-billed values are locked in
+tests/test_triage_price_pins.py::test_windows_bill_derived_constants instead
+(bespoke-formula ops, like kaiser, are not given a representative row here).
 """
 
 import numpy as np
@@ -40,23 +52,56 @@ def _billed(call):
     return budget.flops_used
 
 
-# label, weight_key, call, expected_billed (= flop_cost x weight), expected_weight.
+# label, weight_key, call, expected_billed (= flop_cost x dtype_rate x weight),
+# expected_weight.
 # One op per tier; expected_billed verified against the live model at 100 elems.
-# Tiers: {0, 1, 8, 16}. The old 4.0 gather tier is gone (data-movement free).
+# Tiers: {0, 1, 4, 16}. The 4.0 gather tier (see module docstring) is
+# represented by take. The former 8.0 "half" tier is retired (see module
+# docstring) and has no representative here.
+#
+# _A/_B are float64 (np.random.default_rng(...).standard_normal's default
+# dtype), so add/exp/take resolve dtype_rate 2.0. random.randn has no dtype=
+# parameter and always draws float64, so it is also dtype_rate 2.0. transpose
+# is weight 0.0 (billed 0 regardless of dtype_rate) -- reshape represented this
+# tier before Task 4, which moved it to the 1.0 tier (numel(input)); transpose
+# is the still-free witness now.
 _TIER_CASES = [
-    ("free: reshape", "reshape", lambda: fnp.reshape(_A, (10, 10)), 0, 0.0),
-    ("free: take (was gather)", "take", lambda: fnp.take(_A, _IDX), 0, 0.0),
-    ("arithmetic: add", "add", lambda: fnp.add(_A, _B), 100, 1.0),
-    ("half: hanning", "hanning", lambda: fnp.hanning(100), 1600, 8.0),
-    ("transcendental: exp", "exp", lambda: fnp.exp(_A), 1600, 16.0),
+    ("free: transpose", "transpose", lambda: fnp.transpose(_A), 0, 0.0),
+    # gather tier: numel(output)=100 (take(_A, _IDX) with axis=None flattens
+    # to _IDX's shape) * dtype_rate 2.0(f64, take's own declared dtype) * 4.0
+    ("gather: take", "take", lambda: fnp.take(_A, _IDX), 800, 4.0),
+    (
+        "arithmetic: add",
+        "add",
+        lambda: fnp.add(_A, _B),
+        200,
+        1.0,
+    ),  # 100 * 2.0(f64) * 1.0
+    (
+        "transcendental: exp",
+        "exp",
+        lambda: fnp.exp(_A),
+        3200,
+        16.0,
+    ),  # 100 * 2.0(f64) * 16.0
     (
         "transcendental: random.randn",
         "random.randn",
         lambda: fnp.random.randn(100),
-        1600,
+        3200,  # 100 * 2.0(f64, no dtype= param) * 16.0
         16.0,
     ),
 ]
+
+# dtype_rate that applies to each case above (keyed by weight_key), used by
+# the invariant test below. See the derivations in the _TIER_CASES comment.
+_DTYPE_RATE_BY_WEIGHT_KEY = {
+    "transpose": 1.0,
+    "take": 2.0,
+    "add": 2.0,
+    "exp": 2.0,
+    "random.randn": 2.0,
+}
 
 
 @pytest.fixture
@@ -83,19 +128,27 @@ def test_production_billed_cost_per_tier(
     assert get_weight(weight_key) == expected_weight, (
         f"{label}: weight is {get_weight(weight_key)}, expected tier {expected_weight}"
     )
-    # ... and production bills flop_cost x weight (what participants are charged).
+    # ... and production bills flop_cost x dtype_rate x weight (what
+    # participants are charged) -- see _TIER_CASES for the per-case
+    # dtype_rate derivation baked into expected_billed.
     assert _billed(call) == expected_billed, label
 
 
 def test_production_billed_equals_unit_flop_cost_times_weight(monkeypatch):
-    """Invariant: production billed cost == raw flop_cost x weight, end to end."""
+    """Invariant: production billed cost == raw flop_cost x dtype_rate x weight,
+    end to end. Under reset_weights() dtype_rate is unit (1.0), so `flop_cost`
+    measured there is the raw, dtype-unadjusted cost; production billing then
+    reapplies both the dtype_rate (_DTYPE_RATE_BY_WEIGHT_KEY) and the weight.
+    """
     monkeypatch.delenv("FLOPSCOPE_WEIGHTS_FILE", raising=False)
     for label, weight_key, call, _, _ in _TIER_CASES:
-        reset_weights()  # unit weights -> raw flop_cost
+        reset_weights()  # unit weights and unit dtype rates -> raw flop_cost
         flop_cost = _billed(call)
         load_weights()  # production weights -> billed
         weight = get_weight(weight_key)
-        assert _billed(call) == flop_cost * weight, (
-            f"{label}: billed != flop_cost {flop_cost} x weight {weight}"
+        dtype_rate = _DTYPE_RATE_BY_WEIGHT_KEY[weight_key]
+        assert _billed(call) == flop_cost * dtype_rate * weight, (
+            f"{label}: billed != flop_cost {flop_cost} x dtype_rate {dtype_rate} "
+            f"x weight {weight}"
         )
     reset_weights()

@@ -87,9 +87,9 @@ def test_plain_text_summary_no_data_message():
 def test_plain_text_summary_has_operations_section():
     """Session total ops section appears when ops are present."""
     with BudgetContext(flop_budget=1000, namespace="disp_test", quiet=True) as ctx:
-        ctx.deduct("foo", flop_cost=100, subscripts=None, shapes=())
-        ctx.deduct("foo", flop_cost=200, subscripts=None, shapes=())
-        ctx.deduct("bar", flop_cost=50, subscripts=None, shapes=())
+        ctx.deduct("foo", flop_cost=100, subscripts=None, shapes=(), dtypes=())
+        ctx.deduct("foo", flop_cost=200, subscripts=None, shapes=(), dtypes=())
+        ctx.deduct("bar", flop_cost=50, subscripts=None, shapes=(), dtypes=())
 
     text = _plain_text_summary()
     assert "foo" in text
@@ -100,7 +100,7 @@ def test_plain_text_summary_has_operations_section():
 def test_plain_text_summary_single_call_word():
     """Singular 'call' vs plural 'calls'."""
     with BudgetContext(flop_budget=1000, namespace="call_test", quiet=True) as ctx:
-        ctx.deduct("single_op", flop_cost=10, subscripts=None, shapes=())
+        ctx.deduct("single_op", flop_cost=10, subscripts=None, shapes=(), dtypes=())
 
     text = _plain_text_summary()
     assert "1 call" in text
@@ -108,7 +108,7 @@ def test_plain_text_summary_single_call_word():
 
 def test_plain_text_summary_percentages():
     with BudgetContext(flop_budget=1000, namespace="pct_test", quiet=True) as ctx:
-        ctx.deduct("op1", flop_cost=500, subscripts=None, shapes=())
+        ctx.deduct("op1", flop_cost=500, subscripts=None, shapes=(), dtypes=())
 
     text = _plain_text_summary()
     assert "%" in text
@@ -130,7 +130,9 @@ def test_plain_text_live_prints_on_exit(capsys):
             with BudgetContext(
                 flop_budget=100, namespace="live_test", quiet=True
             ) as ctx:
-                ctx.deduct("live_op", flop_cost=10, subscripts=None, shapes=())
+                ctx.deduct(
+                    "live_op", flop_cost=10, subscripts=None, shapes=(), dtypes=()
+                )
     # The output should be captured from the plain text fallback
     captured = capsys.readouterr()
     # Either something was printed or the rich live was used — just check no exception
@@ -145,7 +147,7 @@ def test_plain_text_live_prints_on_exit(capsys):
 def test_budget_summary_plain_text_prints(capsys):
     """In a non-IPython context, budget_summary should print plain text."""
     with BudgetContext(flop_budget=1000, namespace="summary_test", quiet=True) as ctx:
-        ctx.deduct("op1", flop_cost=100, subscripts=None, shapes=())
+        ctx.deduct("op1", flop_cost=100, subscripts=None, shapes=(), dtypes=())
 
     # Patch away rich so fnp get the plain text path
     with patch.dict(
@@ -165,7 +167,9 @@ def test_budget_summary_by_namespace_prints_section_only_when_requested(capsys):
 
     with BudgetContext(flop_budget=1000, namespace="predict", quiet=True) as ctx:
         with flops.namespace("precompute"):
-            with ctx.deduct("op1", flop_cost=100, subscripts=None, shapes=()):
+            with ctx.deduct(
+                "op1", flop_cost=100, subscripts=None, shapes=(), dtypes=()
+            ):
                 pass
 
     with patch.dict(
@@ -186,7 +190,7 @@ def test_budget_summary_with_rich_returns_none(capsys):
     with BudgetContext(
         flop_budget=1000, namespace="rich_summary_test", quiet=True
     ) as ctx:
-        ctx.deduct("op1", flop_cost=50, subscripts=None, shapes=())
+        ctx.deduct("op1", flop_cost=50, subscripts=None, shapes=(), dtypes=())
 
     result = budget_summary()
     assert result is None
@@ -203,7 +207,7 @@ def test_render_budget_summary_rich_with_multiple_namespaces():
 
     for ns in ["ns_a", "ns_b", "ns_c", "ns_d"]:
         with BudgetContext(flop_budget=1000, namespace=ns, quiet=True) as ctx:
-            ctx.deduct("op", flop_cost=100, subscripts=None, shapes=())
+            ctx.deduct("op", flop_cost=100, subscripts=None, shapes=(), dtypes=())
 
     result = render_budget_summary(by_namespace=True)
     from rich.panel import Panel

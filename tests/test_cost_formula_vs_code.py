@@ -94,7 +94,6 @@ _UNARY_NUMEL = [
     "positive",
     "rad2deg",
     "radians",
-    "real",
     "reciprocal",
     "rint",
     "sign",
@@ -112,7 +111,6 @@ _UNARY_NUMEL = [
     "frexp",
     "modf",
     "real_if_close",
-    "imag",
     "bitwise_invert",
     "bitwise_not",
     "invert",
@@ -121,7 +119,8 @@ _UNARY_NUMEL = [
     "isreal",
     "isneginf",
     "isposinf",
-    # iscomplexobj and isrealobj are dtype predicates (free, 0 FLOPs) — see test_dtype_predicates_are_free
+    # iscomplexobj/isrealobj (dtype predicates) and real/imag (component
+    # extraction — a view, no arithmetic) are free (0 FLOPs), not counted_unary.
 ]
 
 
@@ -133,7 +132,7 @@ def _unary_input(name):
         return numpy.abs(a) + 1.1
     if name in ("log", "log10", "log1p", "log2", "sqrt", "reciprocal"):
         return numpy.abs(a) + 0.1
-    if name in ("angle", "real_if_close", "imag"):
+    if name in ("angle", "real_if_close"):
         return a.astype(complex)
     if name in ("bitwise_invert", "bitwise_not", "invert", "bitwise_count"):
         return numpy.random.randint(0, 255, (10, 10))
@@ -145,7 +144,16 @@ def test_unary_numel(name, we):
     fn = getattr(we, name)
     inp = _unary_input(name)
     cost = _cost_of(fn, inp)
-    assert cost == 100, f"{name}: expected numel=100, got {cost}"
+    # real_if_close and angle both take complex input (see _unary_input).
+    # real_if_close's registry complex_factor is 2.0 (test-and-patch: checks
+    # the imaginary part against a tolerance and conditionally copies the real
+    # component, structurally matching isnan/isfinite); angle's is likewise
+    # 2.0 (a complex value is two real components, one unit per component) --
+    # unit dtype rates here, so only the complex factor applies: 100 * 2.0 =
+    # 200. Every other op in this list bills numel(input) = 100 unchanged
+    # (real input).
+    expected = 200 if name in ("real_if_close", "angle") else 100
+    assert cost == expected, f"{name}: expected {expected}, got {cost}"
 
 
 def test_isclose_numel(we):
@@ -337,41 +345,45 @@ def test_nanmean_charges_sum_plus_one_divide(we):
 
 
 def test_percentile_tier2_cost(we):
-    # Task 11: percentile uses Tier-2 model: num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
-    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    # Task 11: percentile uses Tier-2 model: num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (Task 3: per-quantile gather+interpolate term, was flat axis_dim=100.)
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.percentile, a, q=50)
-    assert cost == 100, f"percentile: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"percentile: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["nanpercentile"])
 def test_nanpercentile_numel(name, we):
-    # nanpercentile now uses Tier-2 model (same as percentile): num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar output → 1 orbit.
-    # Cost = 1 * 100 = 100.
+    # nanpercentile now uses Tier-2 model (same as percentile):
+    # num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=50)
-    assert cost == 100, f"{name}: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
 
 
 def test_quantile_tier2_cost(we):
-    # Task 11: quantile uses Tier-2 model: num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100,
-    # scalar output → 1 orbit. Cost = 1 * 100 = 100.
+    # Task 11: quantile uses Tier-2 model: num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (Task 3: per-quantile gather+interpolate term, was flat axis_dim=100.)
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.quantile, a, q=0.5)
-    assert cost == 100, f"quantile: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"quantile: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["nanquantile"])
 def test_nanquantile_numel(name, we):
-    # nanquantile now uses Tier-2 model (same as quantile): num_output_orbits × axis_dim.
-    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar output → 1 orbit.
-    # Cost = 1 * 100 = 100.
+    # nanquantile now uses Tier-2 model (same as quantile):
+    # num_output_orbits × (axis_dim + 4*q.size).
+    # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=0.5)
-    assert cost == 100, f"{name}: expected Tier-2 cost=100, got {cost}"
+    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
 
 
 @pytest.mark.parametrize("name", ["cumulative_sum", "cumulative_prod"])
@@ -688,8 +700,13 @@ class TestPolynomial:
         assert _cost_of(we.polydiv, numpy.ones(5), numpy.ones(3)) == 22
 
     def test_polyfit(self, we):
+        # m=20, deg=2 (n=3 Vandermonde columns): m*deg (Vandermonde build)
+        # + lstsq_cost(20, 3, ncols=1) = 40 + 1755 = 1795. polyfit_cost now
+        # delegates to lstsq_cost (SVD least-squares), replacing the old
+        # normal-equations-shaped 2*m*(deg+1)^2 estimate (360 here) that
+        # billed 3-13x cheaper than the identical solve through lstsq.
         x = numpy.random.rand(20)
-        assert _cost_of(we.polyfit, x, numpy.random.rand(20), 2) == 360
+        assert _cost_of(we.polyfit, x, numpy.random.rand(20), 2) == 1795
 
     def test_poly(self, we):
         # n=5: (3*25 + 5) // 2 = 80 // 2 = 40  (was 2*25=50)
@@ -713,7 +730,16 @@ class TestSorting:
         assert _cost_of(we.argsort, numpy.random.rand(100)) == 700
 
     def test_sort_complex_nlogn(self, we):
-        assert _cost_of(we.sort_complex, numpy.random.rand(100)) == 700
+        # np.sort_complex ALWAYS returns a complex array (its own docstring:
+        # "Always returns a sorted complex array") -- it lexicographically
+        # compares real-then-imaginary parts even for a real float64 input,
+        # so the registry's complex_factor=2.0 (ordering compare) applies
+        # unconditionally: base cost 700 (n=100 * ceil(log2 100)=7) * factor
+        # 2.0 = 1400. Compute-dtype conformance sweep (Task 8) fixed
+        # sort_complex to resolve its real numpy output dtype (complex64/128,
+        # never the raw real input dtype), closing the undercount this test
+        # used to pin (base cost alone, at rate/factor 1.0 = 700).
+        assert _cost_of(we.sort_complex, numpy.random.rand(100)) == 1400
 
     def test_partition_n(self, we):
         assert _cost_of(we.partition, numpy.random.rand(100), 50) == 100
@@ -798,13 +824,15 @@ class TestWindows:
         # Updated: compare+div+add+select per sample (FMA=2); 4 ops/point
         assert _cost_of(we.bartlett, 20) == 4 * 20
 
-    def test_hamming_n(self, we):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
-        assert _cost_of(we.hamming, 20) == 40
+    def test_hamming_18n(self, we):
+        # Updated: cos@16 + mul + sub per sample (kaiser-family derived
+        # constant convention); 18 ops/point.
+        assert _cost_of(we.hamming, 20) == 18 * 20
 
-    def test_hanning_n(self, we):
-        # Updated for FMA=2 unification (spec 2026-05-20): formula doubled n → 2*n.
-        assert _cost_of(we.hanning, 20) == 40
+    def test_hanning_18n(self, we):
+        # Updated: cos@16 + mul + sub per sample (kaiser-family derived
+        # constant convention); 18 ops/point.
+        assert _cost_of(we.hanning, 20) == 18 * 20
 
     def test_blackman_40n(self, we):
         # Updated: 2 cos evals @16 + 8 arith per sample; 40 ops/point
@@ -874,22 +902,24 @@ class TestFreeOps:
         assert _cost_of(we.trim_zeros, numpy.array([0, 0, 1, 2, 0, 0])) == 6
 
     def test_diag_1d(self, we):
-        # 1D->2D: cost = numel(output) = 3*3 = 9
-        assert _cost_of(we.diag, numpy.array([1, 2, 3])) == 9
+        # 1-D construct: cost = v.shape[0] = 3 (Task 7)
+        assert _cost_of(we.diag, numpy.array([1, 2, 3])) == 3
 
     def test_diag_2d(self, we):
-        assert _cost_of(we.diag, numpy.random.rand(5, 5)) == 5
+        # 2-D extract: numpy.diag returns a view -> 0 (Task 7)
+        assert _cost_of(we.diag, numpy.random.rand(5, 5)) == 0
 
     def test_fill_diagonal(self, we):
         assert _cost_of(we.fill_diagonal, numpy.zeros((5, 5)), 1.0) == 5
 
     def test_copyto_same_dtype_where_free(self, we):
         mask = numpy.array([True, False] * 5)
-        # same-dtype copy is data movement -> free even with a where mask
-        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10), where=mask) == 0
+        # copyto bills per element selected by where mask -> popcount(mask) = 5
+        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10), where=mask) == 5
 
     def test_copyto_same_dtype_free(self, we):
-        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10)) == 0
+        # copyto bills per element written -> numel(dst) = 10
+        assert _cost_of(we.copyto, numpy.zeros(10), numpy.ones(10)) == 10
 
     def test_copyto_value_changing_cast(self, we):
         # float -> int cast computes per element -> numel(dst)
@@ -1078,7 +1108,7 @@ def test_gradient_cost_pinned(shape, expected, we):
     assert _cost_of(we.gradient, f) == expected
 
 
-@pytest.mark.parametrize("size,expected", [(100, 1100), (1000, 11000)])
+@pytest.mark.parametrize("size,expected", [(100, 1300), (1000, 13000)])
 def test_unwrap_cost_pinned(size, expected, we):
     a = we.asarray(numpy.zeros(size))
     assert _cost_of(we.unwrap, a) == expected

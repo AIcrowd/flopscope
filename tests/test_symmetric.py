@@ -10,6 +10,7 @@ import flopscope.numpy as fnp
 from flopscope._budget import BudgetContext
 from flopscope._ndarray import FlopscopeArray
 from flopscope._symmetric import SymmetricTensor, as_symmetric, is_symmetric, symmetrize
+from flopscope._weights import load_weights, reset_weights
 from flopscope.errors import SymmetryError, SymmetryLossWarning
 
 
@@ -57,6 +58,46 @@ def test_copy_preserves_symmetry_and_shape_methods_now_transport(recwarn):
         w for w in recwarn.list if issubclass(w.category, SymmetryLossWarning)
     ]
     assert len(sym_warnings) == 3  # reshape, ravel, flatten each warn once
+
+
+def test_astype_bills_like_copy_and_stays_free_for_the_true_noop():
+    """SymmetricTensor.astype must route through the counted backend (the
+    astype/asarray Option B billing fix) -- before that fix it bypassed
+    billing entirely via raw numpy (``np.asarray(self).astype(...)``), so it
+    stayed silently free regardless of the shared astype weight.
+    """
+    tensor = as_symmetric(np.eye(20, dtype=np.float64), symmetry=_s2(0, 1))
+    n = np.asarray(tensor).size  # 400
+
+    load_weights()
+    try:
+        # Real cast (default copy=True): heavier(float64, float32) = float64,
+        # rate 2.0 -> n * 2.0. Matches the top-level astype/copy formula
+        # exactly -- confirmed against SymmetricTensor.copy() below.
+        with BudgetContext(flop_budget=10**12, quiet=True) as b:
+            cast = tensor.astype(np.float32)
+        assert not isinstance(cast, SymmetricTensor)
+        assert b.flops_used == n * 2
+
+        # Same-dtype astype with the default copy=True is still a real copy
+        # and must bill exactly what .copy() bills.
+        with BudgetContext(flop_budget=10**12, quiet=True) as b:
+            same_dtype_copy = tensor.astype(tensor.dtype, copy=True)
+        with BudgetContext(flop_budget=10**12, quiet=True) as b2:
+            plain_copy = tensor.copy()
+        assert b.flops_used == b2.flops_used == n * 2
+        assert isinstance(plain_copy, SymmetricTensor)  # copy() preserves symmetry
+        assert not isinstance(same_dtype_copy, SymmetricTensor)  # astype does not
+
+        # The one true no-op -- copy=False with an unchanged dtype -- is the
+        # only case that stays free.
+        with BudgetContext(flop_budget=10**12, quiet=True) as b:
+            noop = tensor.astype(tensor.dtype, copy=False)
+        assert b.flops_used == 0
+        assert not isinstance(noop, SymmetricTensor)
+        assert np.shares_memory(np.asarray(noop), np.asarray(tensor))
+    finally:
+        reset_weights()
 
 
 def test_symmetric_tensor_squeeze_preserves_block(recwarn):

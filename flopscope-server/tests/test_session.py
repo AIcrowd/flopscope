@@ -67,10 +67,20 @@ def test_get_array_returns_original(session):
     np.testing.assert_array_equal(retrieved, arr)
 
 
-def test_get_array_returns_same_object(session):
+def test_get_array_returns_zero_copy_view_of_original(session):
+    """``store_array`` view-casts a plain ``ndarray`` to ``FlopscopeArray`` (so
+    first-touch data routes through the billing overrides -- see its
+    docstring), so the retrieved object is no longer ``is arr``. It must
+    still be a zero-copy VIEW over the same memory, not a copy.
+    """
+    from flopscope._ndarray import FlopscopeArray
+
     arr = np.zeros((3, 4))
     handle = session.store_array(arr)
-    assert session.get_array(handle) is arr
+    retrieved = session.get_array(handle)
+    assert isinstance(retrieved, FlopscopeArray)
+    assert np.shares_memory(retrieved, arr)
+    assert retrieved.base is arr
 
 
 def test_store_multiple_arrays(session):
@@ -186,7 +196,9 @@ def test_close_keeps_flat_summary_for_unlabeled_sessions(session):
 
 def test_close_includes_namespace_breakdown_when_session_is_labeled(session):
     with flops.namespace("phase"):
-        session.budget_context.deduct("add", flop_cost=1, subscripts=None, shapes=())
+        session.budget_context.deduct(
+            "add", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        )
 
     result = session.close()
     assert "By namespace:" in result["budget_summary"]
@@ -196,7 +208,9 @@ def test_close_includes_namespace_breakdown_when_session_is_labeled(session):
 
 
 def test_close_budget_breakdown_keeps_unlabeled_ops_structured(session):
-    session.budget_context.deduct("add", flop_cost=1, subscripts=None, shapes=())
+    session.budget_context.deduct(
+        "add", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+    )
 
     result = session.close()
     assert result["budget_breakdown"]["by_namespace"][None]["flops_used"] == 1

@@ -18,6 +18,18 @@ from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetr
 from flopscope._validation import maybe_check_nan_inf, require_budget
 
 
+def _dtype_of_ndarray_out(out: Any) -> _np.dtype | None:
+    """``out.dtype`` when ``out`` is an ndarray, else ``None``.
+
+    Kept as a helper (rather than an inline ``isinstance(out, _np.ndarray)``
+    check) because ``out`` is typed ``Any`` at its call sites; an inline
+    ``isinstance`` there leaks a narrowed-``out`` union into pyright's
+    control-flow analysis of the rest of the function, tripping
+    ``reportReturnType`` on an unrelated later ``return out``.
+    """
+    return out.dtype if isinstance(out, _np.ndarray) else None
+
+
 def _identity_pattern(operands):
     """Build a hashable pattern of which operands are the same Python object.
 
@@ -150,7 +162,7 @@ _LARGE_K_THRESHOLD = 8
 def _resolve_optimize_for_k(optimize, k: int):
     """Auto-downgrade 'auto' to 'greedy' for k >= 8 to avoid optimal/B&B
     cold-call latency on large operand counts. Explicit user choices
-    (optimal/branch/dp/etc.) are honored verbatim. See spec §10.
+    (optimal/branch/dp/etc.) are honored verbatim.
     """
     if optimize == "auto" and k >= _LARGE_K_THRESHOLD:
         return "greedy"
@@ -576,11 +588,23 @@ def einsum(
         effective_out_symmetry = out.symmetry
     target_symmetry = _prepare_symmetric_out(out, effective_out_symmetry)
 
+    operand_arrays = [
+        o if isinstance(o, _np.ndarray) else _np.asarray(o) for o in operands
+    ]
+    billing_dtypes = tuple(a.dtype for a in operand_arrays)
+    out_dtype = _dtype_of_ndarray_out(out)
+    if out_dtype is not None:
+        billing_dtypes += (out_dtype,)
+    resolved = _np.result_type(*billing_dtypes) if billing_dtypes else None
+    complex_override = contraction_complex_override(accumulation_cost, resolved)
+
     with budget.deduct(
         "einsum",
         flop_cost=accumulation_cost.total,
         subscripts=canonical_subscripts,
         shapes=tuple(shapes),
+        dtypes=billing_dtypes,
+        complex_factor_override=complex_override,
     ):
         if path_info.steps:
             result = _execute_pairwise(path_info, list(operands))
@@ -636,7 +660,9 @@ def einsum_path(
         Diagnostics including per-step costs and symmetry savings.
     """
     budget = require_budget()
-    with budget.deduct("einsum_path", flop_cost=1, subscripts=None, shapes=()):
+    with budget.deduct(
+        "einsum_path", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+    ):
         pass
     canonical_subscripts, input_parts, output_subscript, shapes, path_info = (
         _get_path_info(
@@ -674,6 +700,7 @@ from flopscope._accumulation._cache import (  # noqa: E402, F401
 from flopscope._accumulation._cache import (  # noqa: E402
     rebuild_accumulation_cache as _rebuild_accumulation_cache_fn,
 )
+from flopscope._accumulation._cost import contraction_complex_override  # noqa: E402
 from flopscope._accumulation._public import (  # noqa: E402
     _accumulation_fingerprint,
     _identity_pattern,

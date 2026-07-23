@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math as _math
+
 import numpy as _np
 
 from flopscope._budget import _counted_wrapper
@@ -45,9 +47,11 @@ class ContinuousDistribution:
         cost_per_elem : int
             Flat FLOP cost per output element.
         x : array_like
-            Primary input array (determines output size).
+            Primary input array (broadcast with the distribution parameters,
+            it determines the output size).
         *args, **kwargs
-            Forwarded to ``_compute_{method}``.
+            Distribution parameters (numeric array_likes), forwarded to
+            ``_compute_{method}``.
 
         Returns
         -------
@@ -57,18 +61,33 @@ class ContinuousDistribution:
 
         Notes
         -----
-        The deducted FLOP charge is ``cost_per_elem * max(numel(x), 1)``.
+        The deducted FLOP charge is ``cost_per_elem * max(numel(out), 1)``
+        where ``out`` is the broadcast of ``x`` with every array-valued
+        distribution parameter. Array ``loc``/``scale`` (or ``a``/``b``/``s``)
+        broadcast the output larger than ``x``, so charging on ``x`` alone
+        would undercount.
         """
         budget = require_budget()
         x = _np.asarray(x, dtype=_np.float64)
-        n = max(x.size, 1)
+        param_shapes = tuple(
+            _np.shape(v) for v in (*args, *kwargs.values()) if v is not None
+        )
+        try:
+            out_shape = _np.broadcast_shapes(x.shape, *param_shapes)
+        except ValueError:
+            # Incompatible shapes: keep the old x-based charge and let the
+            # compute call below raise numpy's own broadcast error -- billing
+            # must not change the exception surface for invalid calls.
+            out_shape = x.shape
+        n = max(_math.prod(out_shape), 1)
         op_name = f"stats.{self._name}.{method}"
         compute_fn = getattr(self, f"_compute_{method}")
         with budget.deduct(
             op_name,
             flop_cost=cost_per_elem * n,
             subscripts=None,
-            shapes=(x.shape,),
+            shapes=(out_shape,),
+            dtypes=(x.dtype,),
         ):
             result = compute_fn(x, *args, **kwargs)
         return _asflopscope(result)

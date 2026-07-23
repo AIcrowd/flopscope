@@ -83,13 +83,15 @@ def test_linspace_costs_broadcast_output():
 
 def test_geomspace_logspace_cost_broadcast_output_times_transcendental():
     load_weights()  # conftest resets weights; reload packaged weights for this test
-    assert cost(lambda: fnp.geomspace(1.0, 1000.0, 50)) == 16 * 50
-    assert cost(lambda: fnp.logspace(0.0, 3.0, 50)) == 16 * 50
+    # geomspace/logspace bill np.result_type(start, stop) (float64 here, since
+    # neither call passes dtype=); dtype_rate 2.0 * weight 1.0.
+    assert cost(lambda: fnp.geomspace(1.0, 1000.0, 50)) == 2 * 16 * 50
+    assert cost(lambda: fnp.logspace(0.0, 3.0, 50)) == 2 * 16 * 50
     start = fnp.asarray(np.ones(100))
     stop = fnp.asarray(np.full(100, 1000.0))
     assert (
-        cost(lambda: fnp.geomspace(start, stop, 50)) == 16 * 50 * 100
-    )  # broadcast B=100
+        cost(lambda: fnp.geomspace(start, stop, 50)) == 2 * 16 * 50 * 100
+    )  # broadcast B=100, dtype_rate 2.0
 
 
 def test_polydiv_scales_with_quotient_length():

@@ -1,0 +1,528 @@
+import warnings
+
+import numpy as np
+
+import flopscope as flops
+import flopscope.numpy as fnp
+
+
+def _bill(thunk):
+    with flops.BudgetContext(flop_budget=10**16, quiet=True) as bc:
+        thunk()
+    return bc.flops_used
+
+
+def test_solve_bills_broadcast_batch_from_b():
+    rng = np.random.default_rng(0)
+    C = fnp.asarray(rng.standard_normal((64, 64)))
+    B1 = fnp.asarray(rng.standard_normal((64, 32)))
+    B8 = fnp.asarray(rng.standard_normal((8, 64, 32)))
+    b1 = _bill(lambda: fnp.linalg.solve(C, B1))
+    b8 = _bill(lambda: fnp.linalg.solve(C, B8))
+    assert b8 == 8 * b1  # batch of 8 independent solves
+
+
+def test_tensorsolve_degenerate_scales_with_n():
+    rng = np.random.default_rng(1)
+    A50 = fnp.asarray(rng.standard_normal((50, 50)))
+    b50 = fnp.asarray(rng.standard_normal(50))
+    A100 = fnp.asarray(rng.standard_normal((100, 100)))
+    b100 = fnp.asarray(rng.standard_normal(100))
+    c50 = _bill(lambda: fnp.linalg.tensorsolve(A50, b50))
+    c100 = _bill(lambda: fnp.linalg.tensorsolve(A100, b100))
+    assert c50 > 100  # not the flat 4-FLOP floor
+    assert c100 >= 7 * c50  # ~ (100/50)^3
+
+
+def test_tensorsolve_axes_bills_true_solved_dimension():
+    # Regression pin for the axes-reordering under-bill: numpy's
+    # tensorsolve(a, b, axes=...) transposes `axes` to the tail of `a`
+    # *before* reshaping to the real (n, n) system it solves, so a formula
+    # that reads the split point off the UN-transposed `a.shape` (e.g. the
+    # earlier `n = prod(a.shape[b.ndim:])`) can diverge arbitrarily from the
+    # true solved dimension once `axes` is passed.
+    #
+    # a=(6,1,3,2), b=(1,3,2), axes=(0,): axis 0 moves to the tail, giving a
+    # transposed shape (1,3,2,6); the real system solved is n=6 (matches
+    # `honest_n` cross-checked against a manual transpose+reshape+solve in
+    # .superpowers/sdd/reprobe_tensorsolve.py-style probes). The old
+    # ind=b.ndim formula instead read n=prod(a.shape[3:])=2 from the
+    # untransposed shape -> solve_cost(2,1)=13 (analytical), 26 under
+    # production rates (float64 dtype_rate=2.0) -- an under-bill even
+    # relative to the pre-`ind`-threading baseline for this shape.
+    from tests.test_dtype_cost import _billed_with_production_rates
+
+    rng = np.random.default_rng(7)
+    a = fnp.asarray(rng.standard_normal((6, 1, 3, 2)))
+    b = fnp.asarray(rng.standard_normal((1, 3, 2)))
+    billed, dt = _billed_with_production_rates(
+        lambda: fnp.linalg.tensorsolve(a, b, axes=(0,))
+    )
+    assert dt == "float64"
+    assert billed == 432  # solve_cost(6, 1)=216 x dtype_rate(float64)=2.0
+    assert billed != 26  # the old under-billed (ind-based) production value
+
+
+def test_percentile_family_scales_with_q_count():
+    a = fnp.asarray(np.random.default_rng(2).standard_normal(1000))
+    for op in (fnp.percentile, fnp.quantile, fnp.nanpercentile, fnp.nanquantile):
+        hi = 100.0 if op in (fnp.percentile, fnp.nanpercentile) else 1.0
+        scalar = _bill(lambda op=op, hi=hi: op(a, hi / 2))
+        many = _bill(lambda op=op, hi=hi: op(a, np.linspace(0, hi, 1000)))
+        assert many > scalar, f"{op.__name__} flat-bills q-array"
+        assert many >= scalar + 999  # at least +1 FLOP per extra quantile
+
+
+def test_fftn_family_bills_leading_batch_when_s_given():
+    # numpy: when `s` is given and `axes` is omitted, the transform runs
+    # over the TRAILING len(s) axes and batches over every leading axis.
+    # `_batch_count_nd` short-circuits `axes is None` to batch=1, which is
+    # only correct when `s` is also None -- so this path was silently
+    # dropping the leading batch dimension from the bill.
+    rng = np.random.default_rng(3)
+    a1 = fnp.asarray(rng.standard_normal((16, 16)))
+    a8 = fnp.asarray(rng.standard_normal((8, 16, 16)))
+    with warnings.catch_warnings():
+        # numpy 2.x DeprecationWarning: "`axes` should not be `None` if `s`
+        # is not `None`" -- expected on this path, not under test here.
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        for op in (fnp.fft.fftn, fnp.fft.ifftn):
+            b1 = _bill(lambda op=op: op(a1, s=(16, 16)))
+            b8 = _bill(lambda op=op: op(a8, s=(16, 16)))
+            assert b8 == 8 * b1, (
+                f"{op.__name__} drops leading batch on axes=None,s given"
+            )
+
+
+def test_rfftn_family_bills_leading_batch_when_s_given():
+    # Same bug, real-FFT siblings: rfftn transforms real input, irfftn
+    # consumes the (conjugate-symmetric) complex spectrum rfftn produces.
+    rng = np.random.default_rng(4)
+    raw1 = rng.standard_normal((16, 16))
+    raw8 = rng.standard_normal((8, 16, 16))
+    a1 = fnp.asarray(raw1)
+    a8 = fnp.asarray(raw8)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        b1 = _bill(lambda: fnp.fft.rfftn(a1, s=(16, 16)))
+        b8 = _bill(lambda: fnp.fft.rfftn(a8, s=(16, 16)))
+        assert b8 == 8 * b1, "rfftn drops leading batch on axes=None,s given"
+
+        # Reference complex spectra built with plain numpy (outside any
+        # BudgetContext, so building them doesn't pollute the bill below).
+        c1 = fnp.asarray(np.fft.rfftn(raw1, s=(16, 16)))
+        c8 = fnp.asarray(np.fft.rfftn(raw8, s=(16, 16)))
+        i1 = _bill(lambda: fnp.fft.irfftn(c1, s=(16, 16)))
+        i8 = _bill(lambda: fnp.fft.irfftn(c8, s=(16, 16)))
+        assert i8 == 8 * i1, "irfftn drops leading batch on axes=None,s given"
+
+
+def test_fft2_family_bills_leading_batch_when_axes_explicitly_none():
+    # fft2/ifft2/rfft2/irfft2 route through the same `_batch_count_nd`
+    # helper as the fftn family, and `axes` defaults to (-2, -1) rather
+    # than None -- but numpy still accepts an explicit `axes=None`
+    # (fft2(a, s, axes) delegates straight to fftn(a, s, axes)), so the
+    # same leading-batch-axis under-bill is reachable here too.
+    rng = np.random.default_rng(5)
+    raw1 = rng.standard_normal((16, 16))
+    raw8 = rng.standard_normal((8, 16, 16))
+    a1 = fnp.asarray(raw1)
+    a8 = fnp.asarray(raw8)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        for op in (fnp.fft.fft2, fnp.fft.ifft2):
+            b1 = _bill(lambda op=op: op(a1, s=(16, 16), axes=None))
+            b8 = _bill(lambda op=op: op(a8, s=(16, 16), axes=None))
+            assert b8 == 8 * b1, (
+                f"{op.__name__} drops leading batch on axes=None,s given"
+            )
+
+        r1 = _bill(lambda: fnp.fft.rfft2(a1, s=(16, 16), axes=None))
+        r8 = _bill(lambda: fnp.fft.rfft2(a8, s=(16, 16), axes=None))
+        assert r8 == 8 * r1, "rfft2 drops leading batch on axes=None,s given"
+
+        c1 = fnp.asarray(np.fft.rfft2(raw1, s=(16, 16)))
+        c8 = fnp.asarray(np.fft.rfft2(raw8, s=(16, 16)))
+        j1 = _bill(lambda: fnp.fft.irfft2(c1, s=(16, 16), axes=None))
+        j8 = _bill(lambda: fnp.fft.irfft2(c8, s=(16, 16), axes=None))
+        assert j8 == 8 * j1, "irfft2 drops leading batch on axes=None,s given"
+
+
+def test_fftn_s_negative_one_sentinel_bills_real_cost():
+    # numpy >= 2.0 treats `-1` in `s` as "use the whole input" along that
+    # transform axis. The old s_for_cost builder passed `-1` straight
+    # through into fftn_cost's `prod(shape)`, collapsing N to <= 1 and
+    # billing 0 for a transform that numpy actually runs at full size -- a
+    # live budget bypass (the real result is still computed and returned).
+    from tests.test_dtype_cost import _billed_with_production_rates
+
+    rng = np.random.default_rng(6)
+    a = fnp.asarray(rng.standard_normal((6, 5, 8, 8)))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        billed_neg1, _ = _billed_with_production_rates(
+            lambda: fnp.fft.fftn(a, s=(-1, 8))
+        )
+    assert billed_neg1 > 0
+    # -1 on axis 2 (size 8) resolves to the same real cost as writing the
+    # size out explicitly: fftn(a, s=(8, 8)) bills 115200 (production
+    # rates: float64 input -> complex128 compute dtype, rate 2.0).
+    assert billed_neg1 == 115200
+
+
+def test_fftn_s_none_sentinel_resolves_to_transform_axis_not_leading_axis():
+    # When `axes` is omitted and `s` is given, numpy transforms the
+    # TRAILING len(s) axes (here axes (2, 3), both size 8) and a `None`
+    # entry in `s` resolves to the input size along ITS transform axis. The
+    # s_for_cost None-fill used `range(a.ndim)` (leading axes 0, 1 = sizes
+    # 6, 5) instead of the same trailing axes the batch count uses,
+    # under-billing 86400 vs the real 115200 for this shape.
+    rng = np.random.default_rng(6)
+    a = fnp.asarray(rng.standard_normal((6, 5, 8, 8)))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        billed_none = _bill(lambda: fnp.fft.fftn(a, s=(None, 8)))
+        billed_concrete = _bill(lambda: fnp.fft.fftn(a, s=(8, 8)))
+    assert billed_none == billed_concrete
+
+
+def test_cov_corrcoef_bill_rowvar_false_orientation():
+    # numpy's cov/corrcoef treat `rowvar` as an orientation switch, not a
+    # cosmetic flag: rowvar=True (default) reads m as (features, samples) --
+    # f=m.shape[0], s=m.shape[1]. rowvar=False transposes that reading --
+    # each COLUMN is a variable, each ROW an observation -- so f=m.shape[1],
+    # s=m.shape[0]. `_cov_cost`/`_corrcoef_cost` hardcoded the rowvar=True
+    # binding regardless of what was actually passed, so a (3, 2000) input
+    # billed identically under both orientations even though numpy's real
+    # rowvar=False path builds a much larger 2000x2000 Gram matrix (f=2000,
+    # s=3) instead of the cheap 3x3 one (f=3, s=2000) -- an unbounded
+    # under-bill as the "wrong-axis" dimension grows.
+    m = fnp.asarray(np.random.default_rng(4).standard_normal((3, 2000)))
+    for op in (fnp.cov, fnp.corrcoef):
+        t = _bill(lambda op=op: op(m, rowvar=True))
+        f = _bill(lambda op=op: op(m, rowvar=False))
+        assert f > 100 * t  # ~ (2000/3) orientation factor
+
+
+def test_cov_corrcoef_rowvar_false_y_orientation_matches_transposed_rowvar_true():
+    # `y` follows the same rowvar-dependent orientation as `x`: numpy
+    # transposes `y` under rowvar=False before stacking it onto `x` (checked
+    # against real numpy: `cov(m, y, rowvar=False)` is bit-identical to
+    # `cov(m.T, y.T, rowvar=True)`), so the two equivalent call forms must
+    # bill identically too. This exercises the `y_arr.shape[1]` branch in
+    # `_cov_cost`/`_corrcoef_cost` (and `_corrcoef_cost`'s own duplicated f/f2
+    # computation for its normalization term) independently of the no-y pin
+    # above, which never passes `y` and so never reaches this branch.
+    rng = np.random.default_rng(9)
+    raw_m = rng.standard_normal((4, 2))
+    raw_y = rng.standard_normal((4, 3))
+    m = fnp.asarray(raw_m)
+    y = fnp.asarray(raw_y)
+    m_t = fnp.asarray(raw_m.T)
+    y_t = fnp.asarray(raw_y.T)
+    for op in (fnp.cov, fnp.corrcoef):
+        billed_false = _bill(lambda op=op: op(m, y, rowvar=False))
+        billed_true_transposed = _bill(lambda op=op: op(m_t, y_t, rowvar=True))
+        assert billed_false == billed_true_transposed
+        assert billed_false > 0
+
+
+def test_mvhg_count_scales_with_sum_colors():
+    # method="count" allocates and fills a temporary int64 array of length
+    # sum(colors) (numpy's own docstring: "The 'count' algorithm uses a
+    # temporary array of integers with length sum(colors)") -- real work
+    # that scales with sum(colors), not with the output shape. The old
+    # formula was flat "numel(output)", blind to sum(colors) entirely: the
+    # same len(colors)=2 output shape bills identically whether sum(colors)
+    # is 6 or 2*10**6.
+    g = fnp.random.default_rng(5)
+    small = _bill(lambda: g.multivariate_hypergeometric([3, 3, 3], 4, method="count"))
+    big = _bill(
+        lambda: g.multivariate_hypergeometric([10**6, 10**6], 4, method="count")
+    )
+    assert big > 1000 * small
+
+
+def test_mvhg_count_detected_when_method_passed_positionally():
+    # Generator.multivariate_hypergeometric(colors, nsample, size=None,
+    # method='marginals') accepts `method` as the 4th positional argument,
+    # not just as a kwarg. A formula that only checks kwargs.get("method")
+    # would silently default to "marginals" for a positional "count" call
+    # and re-introduce the same under-bill this task fixes.
+    g = fnp.random.default_rng(9)
+    small = _bill(lambda: g.multivariate_hypergeometric([3, 3, 3], 4, None, "count"))
+    big = _bill(lambda: g.multivariate_hypergeometric([10**6, 10**6], 4, None, "count"))
+    assert big > 1000 * small
+
+
+def test_mvhg_marginals_default_stays_at_numel_output():
+    # Global constraint: the fix must only RAISE the bill for method="count";
+    # method="marginals" (the default -- never allocates the sum(colors)
+    # buffer) must stay exactly at numel(output), same as before this task.
+    g = fnp.random.default_rng(11)
+    colors = [10**6, 10**6]  # huge sum(colors); must not leak into the bill
+    implicit_default = _bill(lambda: g.multivariate_hypergeometric(colors, 4))
+    explicit = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 4, method="marginals")
+    )
+    assert implicit_default == 2  # len(colors) == numel(output), not sum(colors)
+    assert explicit == 2
+
+
+def test_mvhg_count_colors_as_flopscope_array_does_not_crash():
+    # `colors` can be a caller-supplied FlopscopeArray (e.g. fnp.asarray(...))
+    # rather than a plain list. Summing it directly from inside the cost
+    # formula (itself called from inside the counted-method wrapper) would
+    # re-enter NumPy's __array_function__ dispatch and trip flopscope's
+    # from-inside-a-wrapper tripwire (RuntimeError) -- verified this is a
+    # real, not theoretical, risk by reproducing the crash against a bare
+    # `np.sum(FlopscopeArray)` call from inside a @_counted_wrapper frame.
+    g = fnp.random.default_rng(10)
+    colors = fnp.asarray([3, 3, 3])
+    billed = _bill(lambda: g.multivariate_hypergeometric(colors, 4, method="count"))
+    # sum(colors)=9 + draws(2 x num_variates=1 x min(nsample=4, total-nsample=5)=4)
+    # + numel(output)=3 = 9+8+3 = 20. (Was pinned to 12 = sum(colors)+numel(output)
+    # before the draw term below existed -- see test_mvhg_count_scales_with_
+    # nsample_and_size for why that flat value was itself an under-bill. Then
+    # 16 with a 1x draw coefficient, before numpy's real shuffle-pass +
+    # count-pass over the same drawn entries was found to be 2 full passes,
+    # not 1 -- see random_multivariate_hypergeometric_count in numpy's C
+    # source.)
+    assert billed == 20
+
+
+def test_permuted_list_counts_all_elements():
+    # _numel_input's non-ndarray fallback used len(a), which for a nested
+    # Python list counts only the OUTER dimension -- a raw list is never
+    # coerced to ndarray before reaching the cost formula (only ndarray
+    # operands get the _to_base_ndarray treatment in _make_counted_method's
+    # movement-method branch), so a (2, N) nested list forwarded uncoerced
+    # bills len==2 regardless of how wide each row is, while numpy actually
+    # shuffles all 2*N elements.
+    g = fnp.random.default_rng(6)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.permuted(thin, axis=1))
+    b_wide = _bill(lambda: g.permuted(wide, axis=1))
+    assert b_wide >= 900 * b_thin
+
+
+def test_mvhg_count_scales_with_nsample_and_size():
+    # _mvhg_cost's "count" branch billed a flat sum(colors) + numel(output),
+    # blind to nsample and to num_variates (from `size`) beyond
+    # numel(output)'s own num_variates*num_colors contribution. numpy's real
+    # "count" algorithm (random_multivariate_hypergeometric_count in numpy's
+    # C source) does TWO separate passes -- a partial Fisher-Yates shuffle,
+    # then a distinct counting pass -- over the same
+    # min(nsample, sum(colors)-nsample) entries of a sum(colors)-length
+    # buffer for EVERY variate, so the true cost scales with
+    # 2 * num_variates * nsample -- a dimension the old formula never looked
+    # at (and, before the 2x-draws fix, under-counted by half). Before this
+    # fix, nsample=1 and nsample=500 billed identically here: flat
+    # sum(colors)+numel(output) = 1000 + 10000*2 = 21000 either way.
+    g = fnp.random.default_rng(12)
+    colors = [500, 500]
+    small_nsample = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 1, size=10000, method="count")
+    )
+    big_nsample = _bill(
+        lambda: g.multivariate_hypergeometric(colors, 500, size=10000, method="count")
+    )
+    # small_nsample: sum(colors)=1000 + draws(2 x 10000 variates x min(1,999)=1)
+    #   + numel(output)=20000 = 1000+20000+20000 = 41000.
+    assert small_nsample == 41_000
+    # big_nsample: sum(colors)=1000 + draws(2 x 10000 variates x min(500,500)=500)
+    #   + numel(output)=20000 = 1000+10_000_000+20000 = 10_021_000.
+    assert big_nsample == 10_021_000
+    assert big_nsample > 100 * small_nsample  # scales with nsample, not flat
+    assert big_nsample > 200 * sum(colors)  # far past the sum(colors)-only floor
+
+
+def test_permutation_list_scales_with_axis_not_outer_len():
+    # _shape_axis's non-ndarray fallback used len(a) regardless of `axis` --
+    # len() only ever reports the outer dimension (shape[0]), so
+    # permutation(rows, axis=1) billed shape[0] no matter how wide each row
+    # was. A raw list is never coerced before reaching the cost formula (see
+    # _numel_input's comment for why), so this diverged arbitrarily from the
+    # equivalent-ndarray bill as soon as axis != 0.
+    g = fnp.random.default_rng(13)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.permutation(thin, axis=1))
+    b_wide = _bill(lambda: g.permutation(wide, axis=1))
+    assert b_thin == 4  # shape[1], not shape[0]=2
+    assert b_wide == 4000  # shape[1], not shape[0]=2
+    assert b_wide == 1000 * b_thin
+
+    # 1-D lists are unaffected: shape[0] is the only axis either way, and
+    # len(a) already agreed with asarray(a).shape[0] -- the bug only shows
+    # up once axis picks out a dimension len() cannot see.
+    seq = [10, 20, 30, 40, 50]
+    b_1d_list = _bill(lambda: g.permutation(seq))
+    b_1d_arr = _bill(lambda: g.permutation(np.asarray(seq)))
+    assert b_1d_list == b_1d_arr == len(seq)
+
+
+def test_choice_list_replace_false_scales_with_sampled_axis():
+    # _choice_pool_size's non-ndarray fallback used len(a) regardless of
+    # `axis` -- len() only ever reports the outer dimension (shape[0]), so
+    # Generator.choice(pool, replace=False, axis=1) billed shape[0] no
+    # matter how wide the sampled axis was. A raw list is never coerced
+    # before reaching the cost formula (see _numel_input's comment for why),
+    # so this diverged arbitrarily from the equivalent-ndarray bill as soon
+    # as axis != 0 -- the exact sibling of the permutation/_shape_axis bug
+    # fixed above, and an unbounded under-bill (billed the fixed axis-0
+    # length no matter how large the sampled axis grew).
+    g = fnp.random.default_rng(14)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    b_thin = _bill(lambda: g.choice(thin, size=1, replace=False, axis=1))
+    b_wide = _bill(lambda: g.choice(wide, size=1, replace=False, axis=1))
+    assert b_thin == 4  # shape[1], not shape[0]=2
+    assert b_wide == 4000  # shape[1], not shape[0]=2
+    assert b_wide == 1000 * b_thin
+
+    # list bills exactly the same as the ndarray equivalent.
+    nd_thin = fnp.asarray(np.asarray(thin))
+    nd_wide = fnp.asarray(np.asarray(wide))
+    b_nd_thin = _bill(lambda: g.choice(nd_thin, size=1, replace=False, axis=1))
+    b_nd_wide = _bill(lambda: g.choice(nd_wide, size=1, replace=False, axis=1))
+    assert b_thin == b_nd_thin
+    assert b_wide == b_nd_wide
+
+    # axis=0 (the only dimension len() ever sees) was never affected --
+    # len(a) already agreed with asarray(a).shape[0] -- and stays so.
+    b_thin_axis0 = _bill(lambda: g.choice(thin, size=1, replace=False, axis=0))
+    b_wide_axis0 = _bill(lambda: g.choice(wide, size=1, replace=False, axis=0))
+    assert b_thin_axis0 == b_wide_axis0 == 2  # shape[0], same for both pools
+
+    # replace=True bills numel(output) regardless of pool size, so it stays
+    # unaffected by the axis-bug fix: same `size` -> same output shape ->
+    # same bill, whether the pool is thin or wide along axis 1.
+    b_thin_replace_true = _bill(lambda: g.choice(thin, size=3, replace=True, axis=1))
+    b_wide_replace_true = _bill(lambda: g.choice(wide, size=3, replace=True, axis=1))
+    assert b_thin_replace_true == b_wide_replace_true
+
+
+def test_choice_replace_true_with_p_bills_cdf_term_over_sampled_axis():
+    # Sibling pin to test_choice_list_replace_false_scales_with_sampled_axis
+    # above, for the OTHER branch of _choice_cost: replace=True WITH `p`
+    # given adds a CDF-build term (cumsum + normalise + a final pass, then a
+    # binary search per draw) on top of the numel(output) base cost --
+    # `3*n + numel(output)*ceil_log2(n)`, where `n` is the pool size along
+    # the sampled `axis` (the 5th positional / `axis` kwarg). That `n` is
+    # read via the same axis-aware `_choice_pool_size` helper the
+    # replace=False path above uses (already fixed to route non-ndarray
+    # array-likes through `asarray()` instead of axis-blind `len(a)`), so
+    # this path already bills correctly today -- this pins it down so it
+    # can't silently regress.
+    #
+    # This is NOT a fix -- both assertions below already hold on unmodified
+    # code. If either ever fails, that is a real regression, not a stale
+    # test: stop and report it rather than "fixing" the assertion.
+    g = fnp.random.default_rng(15)
+    thin = [[float(j) for j in range(4)] for _ in range(2)]  # (2,4)
+    wide = [[float(j) for j in range(4000)] for _ in range(2)]  # (2,4000)
+    # p is a uniform vector over the sampled axis (shape[1]): required to
+    # sum to 1 and match the pool's extent along `axis` for numpy to accept
+    # the call at all; its actual values never affect the bill (only its
+    # presence and `n` do -- see _choice_cost), so uniform is as good as any.
+    p_thin = np.full(4, 1.0 / 4)
+    p_wide = np.full(4000, 1.0 / 4000)
+
+    b_thin = _bill(lambda: g.choice(thin, size=3, replace=True, p=p_thin, axis=1))
+    b_wide = _bill(lambda: g.choice(wide, size=3, replace=True, p=p_wide, axis=1))
+    # out_size = numel((2, 3)) = 6; cost = out_size + 3*n + out_size*ceil_log2(n).
+    assert b_thin == 30  # 6 + 3*4 + 6*ceil_log2(4)   = 6 + 12 + 12
+    assert b_wide == 12078  # 6 + 3*4000 + 6*ceil_log2(4000) = 6 + 12000 + 72
+    assert b_wide > b_thin  # the CDF term scales with the sampled axis (shape[1])
+
+    # list pool bills exactly the same as the equivalent ndarray pool.
+    nd_thin = fnp.asarray(np.asarray(thin))
+    nd_wide = fnp.asarray(np.asarray(wide))
+    b_nd_thin = _bill(lambda: g.choice(nd_thin, size=3, replace=True, p=p_thin, axis=1))
+    b_nd_wide = _bill(lambda: g.choice(nd_wide, size=3, replace=True, p=p_wide, axis=1))
+    assert b_thin == b_nd_thin
+    assert b_wide == b_nd_wide
+
+
+def test_pad_stat_bills_all_reduced_axes():
+    a = fnp.asarray(np.random.default_rng(7).standard_normal((20, 20, 20)))
+    # pad only the LAST axis in mean mode: numpy still reduces all 3 axes.
+    billed = _bill(lambda: fnp.pad(a, ((0, 0), (0, 0), (2, 2)), mode="mean"))
+    # Exact pin (not just `> 20*20`): the old bound passed even under the
+    # pre-fix pad bug, which billed ~36000 here -- comfortably clearing
+    # `> 400` without actually proving the two unpadded axes were counted.
+    # The precise honest value (_pad_true_stat_cost in tests/batch_scan.py,
+    # fuzz-validated against a monkeypatched numpy trace) pins the real
+    # per-axis reduction cost exactly, so a regression that drops either
+    # unpadded axis's contribution -- or otherwise perturbs the formula --
+    # is caught immediately instead of hiding under a loose inequality.
+    assert billed == 34800
+
+
+def test_polyadd_sub_scale_with_inner_width():
+    # polyadd/polysub billed only max(len(a1), len(a2)) -- axis-0 length --
+    # regardless of how wide the trailing axes were. Two (3, N) inputs with
+    # the SAME axis-0 length (3) but very different inner width (4 vs 4096)
+    # used to bill identically; numpy's real elementwise add scales with the
+    # full (broadcast) size, not just axis 0.
+    a1n = fnp.asarray(np.random.default_rng(8).standard_normal((3, 4)))
+    a2n = fnp.asarray(np.random.default_rng(9).standard_normal((3, 4)))
+    a1w = fnp.asarray(np.random.default_rng(8).standard_normal((3, 4096)))
+    a2w = fnp.asarray(np.random.default_rng(9).standard_normal((3, 4096)))
+    for op in (fnp.polyadd, fnp.polysub):
+        assert _bill(lambda op=op: op(a1w, a2w)) > _bill(lambda op=op: op(a1n, a2n))
+
+
+def test_polyadd_sub_scalar_broadcast_blowup_bills_true_output_size():
+    # A far more severe instance of the same family: numpy.polyadd/polysub
+    # zero-pad the axis-0-SHORTER operand (a bare 1-D vector, even a 0-d
+    # scalar promoted via atleast_1d qualifies) and then broadcast it
+    # against the other operand's FULL shape -- broadcasting aligns from
+    # the TRAILING axis, not axis 0. A naive "zero-pad axis 0 to
+    # max(len), then broadcast the trailing dims" formula (i.e. treating
+    # axis 0 as the leading/aligned axis even when ranks differ) gets this
+    # case badly wrong: it would bill len0 * prod(trailing) = 1000 * 1 =
+    # 1000, but numpy actually pads the scalar to a length-1000 vector and
+    # broadcasts it against a (1000, 1) array, producing a real (1000,
+    # 1000) result -- 1_000_000 elements, a 1000x under-bill if missed.
+    scalar = fnp.asarray(np.array(5.0))
+    tall = fnp.asarray(np.random.default_rng(12).standard_normal((1000, 1)))
+    for op in (fnp.polyadd, fnp.polysub):
+        billed = _bill(lambda op=op: op(scalar, tall))
+        assert billed == 1_000_000, (
+            f"{op.__name__}(scalar, (1000,1)) billed {billed}, expected the "
+            "true broadcast result size 1_000_000 (not the naive axis-0 "
+            "estimate 1000)"
+        )
+
+
+def test_polyfit_scales_with_rhs_columns():
+    # polyfit_cost now delegates to lstsq_cost (numpy.polyfit builds a
+    # Vandermonde matrix and solves it via SVD least-squares), replacing the
+    # old normal-equations-shaped 2*m*(deg+1)^2*ncols estimate -- which billed
+    # 3-13x CHEAPER than the identical solve billed through linalg.lstsq,
+    # letting a least-squares solve dodge its true price by routing through
+    # polyfit instead. See polyfit_cost's docstring.
+    #
+    # That old formula also scaled *linearly* in ncols (the number of RHS
+    # columns in a 2-D y): a (50, 100) y billed exactly 100x a (50, 1) y.
+    # lstsq_cost does not: its SVD factorization -- the dominant cost term,
+    # fixed by (m, deg+1) alone -- is shared across every RHS column; only
+    # the back-substitution (U^T b, divide-by-s, reconstruction) scales with
+    # ncols. So more columns is still more work (b100 > b1), just
+    # *sublinearly* -- a (50, 100) y now bills ~5.1x a (50, 1) y, not ~100x.
+    x = np.linspace(0, 1, 50)
+    y1 = fnp.asarray(np.random.default_rng(10).standard_normal((50, 1)))
+    y100 = fnp.asarray(np.random.default_rng(11).standard_normal((50, 100)))
+    b1 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y1, 5))
+    b100 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y100, 5))
+    assert b1 == 16036  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=1)
+    assert b100 == 81970  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=100)
+    assert b100 > b1  # still scales with ncols ...
+    assert b100 < 100 * b1  # ... but sublinearly: SVD factorization is shared
+    # The under-bill is closed: the OLD formula would have billed the 1-D-y
+    # (ncols=1) fit at only 3600 -- the new bill is well over 4x that.
+    old_model_b1 = 2 * 50 * (5 + 1) ** 2 * 1
+    assert b1 > old_model_b1

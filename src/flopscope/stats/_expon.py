@@ -24,10 +24,10 @@ class ExponDistribution(ContinuousDistribution):
     Notes
     -----
     ``loc`` shifts the origin and ``scale`` is the reciprocal of the rate.
-    Per-method FLOP costs (weight 1.0): pdf deducts ``22 * numel(input)``
+    Per-method FLOP costs (weight 1.0): pdf deducts ``22 * numel(broadcast(input, loc, scale))``
     (composite: z=(x-loc)/scale(2) + exp(-z)(17) + /scale(1) + where(2),
-    FMA=2), cdf deducts ``22 * numel(input)`` (composite: z(2) + exp(-z)(17)
-    + 1-exp(1) + where(2), FMA=2), ppf deducts ``27 * numel(input)``
+    FMA=2), cdf deducts ``22 * numel(broadcast(input, loc, scale))`` (composite: z(2) + exp(-z)(17)
+    + 1-exp(1) + where(2), FMA=2), ppf deducts ``27 * numel(broadcast(input, loc, scale))``
     (composite: log1p(-q)(19) + 3 where/cmp/and(8), FMA=2).
     """
 
@@ -54,7 +54,7 @@ class ExponDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.expon.pdf(x, loc, scale)``.
-        FLOP cost: ``22 * numel(x)`` (composite: z=(x-loc)/scale(2) +
+        FLOP cost: ``22 * numel(broadcast(x, loc, scale))`` (composite: z=(x-loc)/scale(2) +
         exp(-z)(17) + /scale(1) + where(2), FMA=2, weight 1.0).
 
         Examples
@@ -87,7 +87,7 @@ class ExponDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.expon.cdf(x, loc, scale)``.
-        FLOP cost: ``22 * numel(x)`` (composite: z(2) + exp(-z)(17) +
+        FLOP cost: ``22 * numel(broadcast(x, loc, scale))`` (composite: z(2) + exp(-z)(17) +
         1-exp(1) + where(2), FMA=2, weight 1.0).
 
         Examples
@@ -120,7 +120,7 @@ class ExponDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.expon.ppf(q, loc, scale)``.
-        FLOP cost: ``27 * numel(q)`` (composite: loc-scale*log1p(-q)(19) +
+        FLOP cost: ``27 * numel(broadcast(q, loc, scale))`` (composite: loc-scale*log1p(-q)(19) +
         3 where/cmp/and(8), FMA=2, weight 1.0).
 
         Examples

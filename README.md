@@ -282,7 +282,7 @@ including triple products and block symmetries.
 
 **Concepts**
 
-- [FLOP Counting Model](website/content/docs/understanding/flop-counting-model.mdx)
+- [FLOP Counting Model](docs/reference/cost-model.md)
 - [Operation Categories](website/content/docs/understanding/operation-categories.mdx)
 
 **Development**

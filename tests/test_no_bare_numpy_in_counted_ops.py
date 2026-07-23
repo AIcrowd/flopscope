@@ -45,6 +45,7 @@ _ALLOWLIST = {
     "ndim",
     "shape",
     "size",
+    "dtype",
     "result_type",
     "promote_types",
     "min_scalar_type",

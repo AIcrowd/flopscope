@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
+from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._validation import require_budget
 from flopscope.numpy.linalg._solvers import _batch_size, _has_zero_dim
@@ -39,7 +40,6 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
     Notes
     -----
     Uses dynamic programming for optimal parenthesization.
-    Source: Cormen et al., *Introduction to Algorithms* (CLRS), §15.2.
 
     Each binary matmul step (m x k) @ (k x n) is delegated to
     ``matmul_cost(m, k, n)`` (= 2*m*k*n - m*n), matching ``fnp.matmul`` and
@@ -86,7 +86,11 @@ def multi_dot(
     cost = multi_dot_cost(shapes)
     out_stripped = _to_base_ndarray(out) if out is not None else None
     with budget.deduct(
-        "linalg.multi_dot", flop_cost=cost, subscripts=None, shapes=tuple(shapes)
+        "linalg.multi_dot",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=tuple(shapes),
+        dtypes=tuple(arr.dtype for arr in arrays),
     ):
         result = _call_numpy(
             _np.linalg.multi_dot,
@@ -150,8 +154,16 @@ def matrix_power(a: ArrayLike, n: int) -> FlopscopeArray:
     size = a.shape[-1]
     batch = _batch_size(a.shape)
     cost = matrix_power_cost(size, n) * batch if not _has_zero_dim(a.shape) else 0
+    # n>=0 runs an integer matmul chain (int stays int); n<0 inverts via LAPACK
+    # first, so integer input runs the float64 driver -- resolve that side only
+    # for the inversion branch (f32 stays f32 via linalg_billing_dtypes).
+    power_dtypes = linalg_billing_dtypes(a.dtype) if n < 0 else (a.dtype,)
     with budget.deduct(
-        "linalg.matrix_power", flop_cost=cost, subscripts=None, shapes=(a.shape,)
+        "linalg.matrix_power",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=power_dtypes,
     ):
         result = _call_numpy(_np.linalg.matrix_power, _to_base_ndarray(a), n)
     if isinstance(result, _np.ndarray) and inputs_were_whest:
