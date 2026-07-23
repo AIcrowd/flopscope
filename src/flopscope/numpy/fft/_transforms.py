@@ -18,6 +18,12 @@ from flopscope._dtype_billing import fft_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._validation import require_budget
 
+# numpy 2.1 reversed the remaining-axis execution order that rfftn/rfft2 use
+# after the real FFT on the last axis (forward on 2.0.x, reversed from 2.1
+# onward); staged_fftn_cost's r2c branch replays that order exactly, so it
+# must branch on the installed numpy version to stay correct across 2.0-2.4.
+_NUMPY_GE_2_1 = tuple(int(x) for x in _np.__version__.split(".")[:2]) >= (2, 1)
+
 
 def fft_cost(n: int) -> int:
     """FLOP cost of a 1-D complex FFT.
@@ -181,11 +187,15 @@ def staged_fftn_cost(
             ax, n = axes[pos], s_resolved[pos]
             total += stage(ax, n, False)
             current[ax] = n
-    elif kind == "r2c":  # rfft last axis, then remaining axes reversed (numpy order)
+    elif kind == "r2c":  # rfft last axis first, then remaining c2c axes
+        # (reversed from numpy 2.1 onward; forward on 2.0.x -- see
+        # _NUMPY_GE_2_1)
         ax, n = axes[-1], s_resolved[-1]
         total += stage(ax, n, True)
         current[ax] = n // 2 + 1
-        for pos in reversed(range(len(axes) - 1)):
+        remaining = range(len(axes) - 1)
+        remaining = reversed(remaining) if _NUMPY_GE_2_1 else remaining
+        for pos in remaining:
             ax, n = axes[pos], s_resolved[pos]
             total += stage(ax, n, False)
             current[ax] = n
@@ -233,16 +243,6 @@ def _batch_count_1d(a: _np.ndarray, axis: int) -> int:
     if a.ndim == 0 or a.shape[axis] == 0:
         return 1
     return a.size // a.shape[axis]
-
-
-def _batch_count_nd(a: _np.ndarray, axes: tuple[int, ...] | None) -> int:
-    """Number of independent N-D transforms over *axes*."""
-    if axes is None:
-        return 1  # all axes are transform axes
-    batch = a.size
-    for ax in axes:
-        batch //= a.shape[ax]
-    return max(batch, 1)
 
 
 # 1-D transforms

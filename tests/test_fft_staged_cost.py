@@ -3,6 +3,7 @@ import numpy as np
 import flopscope as f
 import flopscope.numpy as fnp
 from flopscope._weights import load_weights
+from flopscope.numpy.fft._transforms import _NUMPY_GE_2_1
 
 
 def _billed(fn):
@@ -58,12 +59,31 @@ def test_rfftn_3axis_matches_numpy_cascade():
     def fused():
         return fnp.fft.rfftn(x, s=(4, 16, 4), axes=(0, 1, 2))
 
-    def cascade():  # numpy: rfft(last), then remaining REVERSED
+    # numpy: rfft(last) first, then the remaining c2c axes -- REVERSED from
+    # numpy 2.1 onward, forward on 2.0.x. Same `_NUMPY_GE_2_1` gate that
+    # staged_fftn_cost's r2c branch uses, so this test tracks numpy's actual
+    # per-version order instead of hardcoding one of the two.
+    def cascade():
         y = fnp.fft.rfft(x, n=4, axis=2)
-        y = fnp.fft.fft(y, n=16, axis=1)
-        return fnp.fft.fft(y, n=4, axis=0)
+        if _NUMPY_GE_2_1:
+            y = fnp.fft.fft(y, n=16, axis=1)
+            return fnp.fft.fft(y, n=4, axis=0)
+        y = fnp.fft.fft(y, n=4, axis=0)
+        return fnp.fft.fft(y, n=16, axis=1)
 
     assert _billed(fused) == _billed(cascade)
+
+    # Anchor to numpy's actual behavior, not just internal self-consistency:
+    # the same-order manual cascade run through plain numpy must reproduce
+    # np.fft.rfftn's own output.
+    y_ref = np.fft.rfft(x, n=4, axis=2)
+    if _NUMPY_GE_2_1:
+        y_ref = np.fft.fft(y_ref, n=16, axis=1)
+        y_ref = np.fft.fft(y_ref, n=4, axis=0)
+    else:
+        y_ref = np.fft.fft(y_ref, n=4, axis=0)
+        y_ref = np.fft.fft(y_ref, n=16, axis=1)
+    assert np.allclose(y_ref, np.fft.rfftn(x, s=(4, 16, 4), axes=(0, 1, 2)))
 
 
 def test_irfftn_3axis_matches_numpy_cascade():

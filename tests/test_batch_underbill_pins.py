@@ -76,9 +76,11 @@ def test_percentile_family_scales_with_q_count():
 def test_fftn_family_bills_leading_batch_when_s_given():
     # numpy: when `s` is given and `axes` is omitted, the transform runs
     # over the TRAILING len(s) axes and batches over every leading axis.
-    # `_batch_count_nd` short-circuits `axes is None` to batch=1, which is
-    # only correct when `s` is also None -- so this path was silently
-    # dropping the leading batch dimension from the bill.
+    # The old batch helper short-circuited `axes is None` to batch=1, which
+    # is only correct when `s` is also None -- so this path was silently
+    # dropping the leading batch dimension from the bill. The staged cost
+    # model (`staged_fftn_cost`) resolves the effective transform axes
+    # explicitly before pricing, so this batch dimension is never dropped.
     rng = np.random.default_rng(3)
     a1 = fnp.asarray(rng.standard_normal((16, 16)))
     a8 = fnp.asarray(rng.standard_normal((8, 16, 16)))
@@ -118,11 +120,11 @@ def test_rfftn_family_bills_leading_batch_when_s_given():
 
 
 def test_fft2_family_bills_leading_batch_when_axes_explicitly_none():
-    # fft2/ifft2/rfft2/irfft2 route through the same `_batch_count_nd`
-    # helper as the fftn family, and `axes` defaults to (-2, -1) rather
-    # than None -- but numpy still accepts an explicit `axes=None`
-    # (fft2(a, s, axes) delegates straight to fftn(a, s, axes)), so the
-    # same leading-batch-axis under-bill is reachable here too.
+    # fft2/ifft2/rfft2/irfft2 route through the same staged cost model as
+    # the fftn family, and `axes` defaults to (-2, -1) rather than None --
+    # but numpy still accepts an explicit `axes=None` (fft2(a, s, axes)
+    # delegates straight to fftn(a, s, axes)), so the same leading-batch-axis
+    # under-bill this test guards against is reachable here too.
     rng = np.random.default_rng(5)
     raw1 = rng.standard_normal((16, 16))
     raw8 = rng.standard_normal((8, 16, 16))

@@ -1655,9 +1655,7 @@ def asarray(
         "asarray", subscripts=None, shapes=(_probe.shape,), dtypes=(_probe.dtype,)
     ) as _op:
         result = _call_numpy(_np.asarray, a, dtype=dtype, **kwargs)
-        base = (
-            _to_base_ndarray(result) if not isinstance(result, _np.ndarray) else result
-        )
+        base = result  # np.asarray always returns a base ndarray, never a subclass
         materialized = not _np.may_share_memory(base, _probe)
         if materialized:
             _op.set_cost(base.size)
