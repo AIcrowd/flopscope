@@ -1,5 +1,7 @@
 import math
+
 import numpy as np
+
 import flopscope as f
 import flopscope.numpy as fnp
 from flopscope._weights import load_weights
@@ -20,10 +22,10 @@ def _billed(fn):
 
 N = 8192
 RNG = np.random.default_rng(0)
-X = RNG.standard_normal(N)          # float64 -> rate 2.0
+X = RNG.standard_normal(N)  # float64 -> rate 2.0
 W = np.ones(N)
 Q = np.arange(1, N + 1) / N
-L = math.ceil(math.log2(N))         # 13
+L = math.ceil(math.log2(N))  # 13
 
 
 def test_scalar_unweighted_unchanged():
@@ -36,21 +38,23 @@ def test_dense_unweighted_clears_sort():
     load_weights()
     dense = _billed(lambda: fnp.quantile(X, Q, method="inverted_cdf"))
     srt = _billed(lambda: fnp.sort(X))
-    assert dense >= srt                      # extraction closed
-    assert dense == (N * (1 + 4 * L) + 4 * N) * 2   # 933,888
+    assert dense >= srt  # extraction closed
+    assert dense == (N * (1 + 4 * L) + 4 * N) * 2  # 933,888
 
 
 def test_scalar_weighted_clears_sort():
     load_weights()
     wq = _billed(lambda: fnp.quantile(X, 0.5, weights=W, method="inverted_cdf"))
     assert wq >= _billed(lambda: fnp.sort(X))
-    assert wq == (4 * N * L + 3 * N + 1 * (L + 4)) * 2   # 901,154
+    assert wq == (4 * N * L + 3 * N + 1 * (L + 4)) * 2  # 901,154
 
 
 def test_weighted_ge_unweighted_and_all_four_ops():
     load_weights()
     for op in (fnp.quantile, fnp.percentile, fnp.nanquantile, fnp.nanpercentile):
         qval = 0.5 if "percentile" not in op.__name__ else 50.0
-        uw = _billed(lambda: op(X, qval))
-        wt = _billed(lambda: op(X, qval, weights=W, method="inverted_cdf"))
+        uw = _billed(lambda op=op, qval=qval: op(X, qval))
+        wt = _billed(
+            lambda op=op, qval=qval: op(X, qval, weights=W, method="inverted_cdf")
+        )
         assert wt >= uw >= (N + 4) * 2 - 2, op.__name__

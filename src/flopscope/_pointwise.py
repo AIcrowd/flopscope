@@ -2511,7 +2511,9 @@ def nanpercentile(
     cost = _tier2_reduction_cost(
         a,
         axis,
-        dense_per_output_cost=_quantile_dense_cost(axis_dim, q_count, weighted=weighted),
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
     )
 
     out_sym = (
@@ -2595,7 +2597,9 @@ def nanquantile(
     cost = _tier2_reduction_cost(
         a,
         axis,
-        dense_per_output_cost=_quantile_dense_cost(axis_dim, q_count, weighted=weighted),
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
     )
 
     out_sym = (
@@ -2673,7 +2677,9 @@ def percentile(
     cost = _tier2_reduction_cost(
         a,
         axis,
-        dense_per_output_cost=_quantile_dense_cost(axis_dim, q_count, weighted=weighted),
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
     )
 
     out_sym = (
@@ -2750,7 +2756,9 @@ def quantile(
     cost = _tier2_reduction_cost(
         a,
         axis,
-        dense_per_output_cost=_quantile_dense_cost(axis_dim, q_count, weighted=weighted),
+        dense_per_output_cost=_quantile_dense_cost(
+            axis_dim, q_count, weighted=weighted
+        ),
     )
 
     out_sym = (
