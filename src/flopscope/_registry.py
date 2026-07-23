@@ -1712,7 +1712,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Convert input to array. Cost: numel(input) at the heavier of source/destination dtype rate when dtype= actually converts the buffer; 0 when no conversion happens (no dtype=, or dtype already matches).",
+        "notes": "Convert input to array. Cost: numel(output) at the heavier of source/destination dtype rate whenever the call materializes a fresh buffer (dtype conversion, copy=True, or an order= that forces a copy); 0 when NumPy returns a view of the existing buffer.",
     },
     "isnan": {
         "category": "counted_custom",
