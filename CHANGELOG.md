@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.1 (2026-07-23)
+
+### Fix
+
+- **billing**: cost-model accuracy follow-ups from the #150 review (#151)
+
 ## v0.9.0 (2026-07-23)
 
 ### Feat

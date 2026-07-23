@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flopscope-server"
-version = "0.9.0"
+version = "0.9.1"
 description = "Backend server for flopscope client-server architecture"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "flopscope==0.9.0",
+    "flopscope==0.9.1",
     "numpy>=2.0.0,<2.5.0",
     "pyzmq>=26.0.0",
     "msgpack>=1.0.0",
