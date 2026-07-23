@@ -1345,13 +1345,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.fftfreq": {
         "category": "counted_custom",
@@ -1381,13 +1381,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D complex FFT. Cost: 5*N*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D complex FFT. Cost: staged -- replays numpy's 1-D FFT cascade in reverse axis order, summing 5*batch*ceil(log2(s_i)) per axis with batch taken from the shape at that point in the cascade (not the final transform shape); reduces to 5*N*sum(ceil(log2(s_i))), N=prod(s), when no axis is resized. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.ifftshift": {
         "category": "counted_custom",
@@ -1411,13 +1411,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse 2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse 2-D real FFT. Cost: staged -- replays numpy's cascade as complex FFTs over the leading axes (forward order) followed by the real (Hermitian-reconstructing) inverse on the last axis, with batch at each stage taken from the shape at that point in the cascade (not the final transform shape). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.irfftn": {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "Inverse N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "Inverse N-D real FFT. Cost: staged -- replays numpy's cascade as complex FFTs over the leading axes (forward order) followed by the real (Hermitian-reconstructing) inverse on the last axis, with batch at each stage taken from the shape at that point in the cascade (not the final transform shape). Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfft": {
         "category": "counted_custom",
@@ -1429,7 +1429,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "2-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "2-D real FFT. Cost: staged -- replays numpy's cascade as a real FFT on the last axis followed by complex FFTs over the remaining axes (forward order), with batch at each stage taken from the shape at that point in the cascade (not the final transform shape); the Hermitian reduction after the first stage changes the batch seen by later stages, so this no longer reduces to a uniform 5*(N//2)*sum(ceil(log2(s_i))) even without resizing. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     "fft.rfftfreq": {
         "category": "counted_custom",
@@ -1441,7 +1441,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.fft",
         "complex_factor": 1.0,
-        "notes": "N-D real FFT. Cost: 5*(N//2)*sum(ceil(log2(s_i))) over transform axes, N=prod(s) (radix-2). Cost formula already counts complex real-FLOPs; priced-in.",
+        "notes": "N-D real FFT. Cost: staged -- replays numpy's cascade as a real FFT on the last axis followed by complex FFTs over the remaining axes (forward order), with batch at each stage taken from the shape at that point in the cascade (not the final transform shape); the Hermitian reduction after the first stage changes the batch seen by later stages, so this no longer reduces to a uniform 5*(N//2)*sum(ceil(log2(s_i))) even without resizing. Cost formula already counts complex real-FLOPs; priced-in.",
     },
     # ------------------------------------------------------------------
     # free — implemented in _array_ops.py
