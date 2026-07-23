@@ -49,3 +49,34 @@ def test_rfftn_and_irfftn_shape_change():
         return fnp.fft.fft(y, n=4, axis=0)
 
     assert fused_r == _billed(staged_r)
+
+
+def test_rfftn_3axis_matches_numpy_cascade():
+    load_weights()
+    x = np.random.default_rng(0).standard_normal((4, 2, 4))
+
+    def fused():
+        return fnp.fft.rfftn(x, s=(4, 16, 4), axes=(0, 1, 2))
+
+    def cascade():  # numpy: rfft(last), then remaining REVERSED
+        y = fnp.fft.rfft(x, n=4, axis=2)
+        y = fnp.fft.fft(y, n=16, axis=1)
+        return fnp.fft.fft(y, n=4, axis=0)
+
+    assert _billed(fused) == _billed(cascade)
+
+
+def test_irfftn_3axis_matches_numpy_cascade():
+    load_weights()
+    rng = np.random.default_rng(1)
+    x = rng.standard_normal((4, 3, 5)) + 1j * rng.standard_normal((4, 3, 5))
+
+    def fused():
+        return fnp.fft.irfftn(x, s=(4, 6, 8), axes=(0, 1, 2))
+
+    def cascade():  # numpy: remaining ifft FORWARD, then irfft(last)
+        y = fnp.fft.ifft(x, n=4, axis=0)
+        y = fnp.fft.ifft(y, n=6, axis=1)
+        return fnp.fft.irfft(y, n=8, axis=2)
+
+    assert _billed(fused) == _billed(cascade)

@@ -181,11 +181,11 @@ def staged_fftn_cost(
             ax, n = axes[pos], s_resolved[pos]
             total += stage(ax, n, False)
             current[ax] = n
-    elif kind == "r2c":  # rfft last axis first, then c2c forward
+    elif kind == "r2c":  # rfft last axis, then remaining axes reversed (numpy order)
         ax, n = axes[-1], s_resolved[-1]
         total += stage(ax, n, True)
         current[ax] = n // 2 + 1
-        for pos in range(len(axes) - 1):
+        for pos in reversed(range(len(axes) - 1)):
             ax, n = axes[pos], s_resolved[pos]
             total += stage(ax, n, False)
             current[ax] = n
