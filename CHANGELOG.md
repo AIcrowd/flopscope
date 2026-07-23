@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.0 (2026-07-23)
+
+### Feat
+
+- **billing**: dtype-aware four-factor cost model + reviewer-driven re-tiering (#150)
+
+### Fix
+
+- **client,server**: tag list index keys on the wire to disambiguate from tuples (#148)
+- **cost**: charge zero for empty contractions and reductions (#146)
+
 ## v0.8.0rc5 (2026-06-25)
 
 ### Fix

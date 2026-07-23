@@ -1,6 +1,6 @@
 [project]
 name = "flopscope"
-version = "0.8.0rc5"
+version = "0.9.0"
 description = "NumPy-compatible math primitives with FLOP counting for the Mechanistic Estimation Challenge"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-server = ["flopscope-server==0.8.0rc5"]
+server = ["flopscope-server==0.9.0"]
 dev = [
     "commitizen>=4.0",
     "gitlint>=0.19",
