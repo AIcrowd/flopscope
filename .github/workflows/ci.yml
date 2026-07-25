@@ -296,7 +296,16 @@ jobs:
       - name: "Parity GATE: fast client/in-process differential"
         run: make test-parity-fast
 
-      - name: "Parity full sweep (release gate; blocks push to main, not on pull requests)"
+      # Reports on pull requests so a divergence is seen and triaged BEFORE it
+      # can turn the release gate below red on main. Non-blocking here on
+      # purpose: the sweep takes about five minutes and runs concurrently with
+      # the rest of the job matrix, so it costs no serialised PR latency.
+      - name: "Parity full sweep (report-only on pull requests)"
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: make test-parity-full
+
+      - name: "Parity full sweep (release gate; blocks push to main)"
         if: github.event_name == 'push'
         run: make test-parity-full
 
