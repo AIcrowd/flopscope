@@ -255,7 +255,7 @@ def test_run_corpus_stops_the_server_even_when_a_backend_run_raises(monkeypatch)
     stopped = []
     sentinel = object()
 
-    monkeypatch.setattr(runner, "start_server", lambda: sentinel)
+    monkeypatch.setattr(runner, "start_server", lambda base_port: sentinel)
     monkeypatch.setattr(runner, "stop_server", lambda proc: stopped.append(proc))
 
     def _boom(backend, cases):
@@ -273,7 +273,7 @@ def test_run_corpus_stops_the_server_on_the_infrastructure_early_return(monkeypa
     stopped = []
     sentinel = object()
 
-    monkeypatch.setattr(runner, "start_server", lambda: sentinel)
+    monkeypatch.setattr(runner, "start_server", lambda base_port: sentinel)
     monkeypatch.setattr(runner, "stop_server", lambda proc: stopped.append(proc))
     monkeypatch.setattr(
         runner,
@@ -294,7 +294,7 @@ def test_run_corpus_reports_restart_count_and_flags_infrastructure_on_it(monkeyp
     # it must still be flagged — and the restart count itself must land on
     # the result, keyed by backend, so a 40-restart run is visibly different
     # from a clean one.
-    monkeypatch.setattr(runner, "start_server", lambda: object())
+    monkeypatch.setattr(runner, "start_server", lambda base_port: object())
     monkeypatch.setattr(runner, "stop_server", lambda proc: None)
     monkeypatch.setattr(
         runner,
@@ -314,7 +314,7 @@ def test_run_corpus_reports_restart_count_and_flags_infrastructure_on_it(monkeyp
 
 
 def test_run_corpus_surfaces_failing_backend_stderr_in_the_result(monkeypatch):
-    monkeypatch.setattr(runner, "start_server", lambda: object())
+    monkeypatch.setattr(runner, "start_server", lambda base_port: object())
     monkeypatch.setattr(runner, "stop_server", lambda proc: None)
     monkeypatch.setattr(
         runner,

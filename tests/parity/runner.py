@@ -26,6 +26,12 @@ from tests.parity.observe import observe_worker_died
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _BACKENDS = ("inproc", "client")
+#: Own port range for this harness's server, well clear of
+#: ``tests/client_compat``'s (15571 + one slot per xdist worker, so up to the
+#: high 15500s on a many-core CI box). A leaked or TIME_WAIT-lingering server
+#: from that suite must never be mistakable for this harness's own — the two
+#: harnesses can otherwise run back-to-back in the same CI job.
+_PARITY_BASE_PORT = 15671
 _CASE_TIMEOUT_S = 30.0
 #: Hard ceiling on one backend's whole-corpus run, regardless of case count.
 _RUN_TIMEOUT_CAP_S = 1800.0
@@ -37,7 +43,7 @@ _RUN_TIMEOUT_CAP_S = 1800.0
 _CONNECTION_MARKERS = ("ConnectionError", "ZMQError", "Again")
 #: How much of a failing worker's stderr to fold into the infrastructure
 #: failure message; the full text still lives on ``RunResult.stderr``.
-_STDERR_EXCERPT_LEN = 500
+_STDERR_EXCERPT_LEN = 2500
 #: Hard ceiling on how many times ``_run_backend`` will restart a dying
 #: worker for one backend's run. Without this, a corpus that kills the
 #: worker on literally every case (e.g. a broken import) would restart
@@ -249,7 +255,7 @@ def run_corpus(cases: list[Case]) -> RunResult:
     first: dict[str, dict[str, dict]] = {}
     second: dict[str, dict[str, dict]] = {}
 
-    server = start_server()
+    server = start_server(_PARITY_BASE_PORT)
     try:
         for backend in _BACKENDS:
             observations, stderr_text, restarts = _run_backend(backend, cases)
@@ -257,7 +263,10 @@ def run_corpus(cases: list[Case]) -> RunResult:
             result.stderr[backend] = stderr_text
             result.restarts[backend] = restarts
             if _looks_like_infrastructure(first[backend], restarts):
-                excerpt = stderr_text.strip()[:_STDERR_EXCERPT_LEN]
+                # Keep the TAIL, not the head: a Python traceback puts the
+                # exception type and message last, so truncating from the front
+                # reliably discards the only part worth reading.
+                excerpt = stderr_text.strip()[-_STDERR_EXCERPT_LEN:]
                 detail = f" worker stderr: {excerpt!r}" if excerpt else ""
                 restart_note = (
                     f" ({restarts} worker restart{'s' if restarts != 1 else ''})"
