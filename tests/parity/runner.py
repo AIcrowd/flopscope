@@ -2,6 +2,12 @@
 
 The parent process MUST NOT import either backend: doing so silently pins one
 of them for the whole run. Only workers import a backend.
+
+A worker can die mid-corpus (a segfault in native code, for instance, which no
+Python ``try``/``except`` can catch). That must cost only the one in-flight
+case: the parent records that single case as ``worker_died`` and restarts a
+fresh worker on the cases after it, rather than backfilling every case the
+dead worker never got to as fake failures.
 """
 
 from __future__ import annotations
@@ -32,6 +38,18 @@ _CONNECTION_MARKERS = ("ConnectionError", "ZMQError", "Again")
 #: How much of a failing worker's stderr to fold into the infrastructure
 #: failure message; the full text still lives on ``RunResult.stderr``.
 _STDERR_EXCERPT_LEN = 500
+#: Hard ceiling on how many times ``_run_backend`` will restart a dying
+#: worker for one backend's run. Without this, a corpus that kills the
+#: worker on literally every case (e.g. a broken import) would restart
+#: forever, one case at a time, and never finish.
+_MAX_WORKER_RESTARTS = 50
+#: A worker that needed at least this many restarts is not "unlucky on a
+#: couple of cases" any more: it is trending toward burning through the
+#: whole restart budget above, which itself always counts as
+#: infrastructure. Set well under the cap (a fifth of it) so a run that is
+#: clearly heading for exhaustion is reported honestly rather than only
+#: once it actually hits the ceiling.
+_SYSTEMIC_RESTART_THRESHOLD = 10
 
 
 @dataclass
@@ -40,16 +58,43 @@ class RunResult:
     flaky: list[str] = field(default_factory=list)
     observations: dict[str, dict[str, dict]] = field(default_factory=dict)
     #: Captured worker stderr from each backend's first run, keyed by backend
-    #: name. Empty string when a backend produced no stderr output.
+    #: name. Empty string when a backend produced no stderr output. When a
+    #: worker was restarted mid-run, this is every restart's stderr for that
+    #: run, concatenated in order.
     stderr: dict[str, str] = field(default_factory=dict)
+    #: How many times each backend's worker was restarted after dying
+    #: mid-corpus, keyed by backend name, from each backend's first run. 0
+    #: for a clean run; a nonzero count is normal (one segfaulting case
+    #: costs exactly one restart) but a large one is a red flag on its own -
+    #: see ``_looks_like_infrastructure``.
+    restarts: dict[str, int] = field(default_factory=dict)
     infrastructure_failure: str | None = None
 
 
-def _run_backend(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]:
-    """Run the whole corpus on one backend.
+def _run_worker(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]:
+    """Run *cases* through exactly ONE worker process; no restart on death.
 
-    Returns ``(observations by case id, captured stderr text)``. ``stderr`` is
-    ``""`` when the worker produced none.
+    Returns ``(observations by case id for every case the worker actually
+    emitted a record for, captured stderr text)``. ``stderr`` is ``""`` when
+    the worker produced none. If the worker dies partway through *cases*, the
+    returned dict simply has fewer entries than ``cases`` - the caller
+    (``_run_backend``) is what turns "fewer entries than expected" into a
+    ``worker_died`` record and a restart; this function only ever reports
+    what the worker actually said.
+
+    Empirically verified (not just assumed): the worker flushes stdout after
+    every case (see ``worker.run_stream``), and a killed child's already
+    -flushed writes are sitting in the OS pipe buffer, which survives the
+    process's death - closing the write end just signals EOF to the reader.
+    ``subprocess.run`` drains stdout concurrently while the child runs, so
+    nothing flushed before a segfault is lost. Confirmed by feeding a worker
+    two cheap cases followed by the real segfaulting
+    ``grid/random.Generator.spawn::scalar-operand`` case: the worker exits
+    139 with no traceback, and stdout still contains the two prior cases'
+    records in full. Because of this, cases are fed to the worker in one
+    shot per restart (the whole remaining slice), not in small chunks: there
+    is nothing further to lose to buffering, and chunking would only add
+    process-spawn overhead.
     """
     env = dict(os.environ)
     env["PYTHONPATH"] = _ROOT + os.pathsep + env.get("PYTHONPATH", "")
@@ -69,9 +114,10 @@ def _run_backend(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]
         stderr = proc.stderr
     except subprocess.TimeoutExpired as exc:
         # A hung worker never gets to print anything more; treat whatever it
-        # emitted before the hang as final and let the setdefault loop below
-        # fill in the rest as worker_died so a stuck backend can't wedge the
-        # whole run.
+        # emitted before the hang as final. `_run_backend` treats a timeout
+        # exactly like a death: the next unrecorded case is marked
+        # worker_died and a fresh worker resumes after it, so a stuck
+        # backend can't wedge the whole run.
         stdout = exc.stdout if isinstance(exc.stdout, str) else ""
         stderr = exc.stderr if isinstance(exc.stderr, str) else ""
     out: dict[str, dict] = {}
@@ -81,26 +127,90 @@ def _run_backend(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]
             continue
         record = json.loads(line)
         out[record.pop("id")] = record
-    # A worker that died mid-corpus leaves later cases unrecorded.
-    for case in cases:
-        out.setdefault(case.id, observe_worker_died())
     return out, stderr or ""
 
 
-def _looks_like_infrastructure(observations: dict[str, dict]) -> bool:
-    """A backend counts as having failed to run the corpus — as opposed to
-    merely producing individual failing cases — when either:
+def _run_backend(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str, int]:
+    """Run the whole corpus on one backend, restarting the worker on death.
 
+    Feeds *cases* to a worker via ``_run_worker``. If the worker exits before
+    every case in the slice it was given got a record, exactly ONE case pays
+    for that death - the next case after the ones it did emit records for,
+    per the worker's in-order-per-line protocol - and a fresh worker resumes
+    from the case after that. This repeats until every case has a record or
+    ``_MAX_WORKER_RESTARTS`` is exhausted, at which point every remaining
+    case is marked ``worker_died`` and the loop stops (so a pathological
+    corpus that kills the worker on every case cannot loop forever).
+
+    Returns ``(observations by case id, captured stderr text, restart
+    count)``. ``stderr`` is every worker invocation's stderr for this run,
+    concatenated in order (empty ones dropped); ``""`` when none produced
+    any.
+    """
+    out: dict[str, dict] = {}
+    stderr_chunks: list[str] = []
+    restarts = 0
+    start = 0
+    while start < len(cases):
+        remaining = cases[start:]
+        emitted, stderr_text = _run_worker(backend, remaining)
+        if stderr_text:
+            stderr_chunks.append(stderr_text)
+        out.update(emitted)
+        if len(emitted) >= len(remaining):
+            # The worker produced a record for every case it was given: it
+            # made it through the rest of the corpus.
+            break
+        # The worker died (or hung and was killed on timeout) before
+        # finishing. It emits one record per case, in order, so the count of
+        # records it did emit is exactly how far it got; the next case in
+        # the slice it was fed is the one that killed it.
+        died_case = cases[start + len(emitted)]
+        out[died_case.id] = observe_worker_died()
+        start = start + len(emitted) + 1
+        if start >= len(cases):
+            break  # that was the last case; nothing left to resume.
+        if restarts >= _MAX_WORKER_RESTARTS:
+            # Restart budget exhausted: stop trying to resume and mark
+            # everything still unrun as dead, same as a single run used to
+            # do for the whole corpus.
+            for case in cases[start:]:
+                out.setdefault(case.id, observe_worker_died())
+            break
+        restarts += 1
+    return out, "\n".join(stderr_chunks), restarts
+
+
+def _looks_like_infrastructure(
+    observations: dict[str, dict], restarts: int = 0
+) -> bool:
+    """A backend counts as having failed to run the corpus — as opposed to
+    merely producing individual failing cases — when any of:
+
+    - the worker needed ``_SYSTEMIC_RESTART_THRESHOLD`` or more restarts to
+      get through the corpus (this subsumes hitting ``_MAX_WORKER_RESTARTS``
+      outright, since the cap is well above the threshold). Now that a dying
+      worker costs only the one case that killed it, a handful of restarts
+      (one segfaulting case among thousands, say) is normal and expected;
+      this many is the worker dying over and over, not bad luck on a couple
+      of cases,
     - a majority of cases never got the chance to raise anything (the worker
-      died outright, so there is no exception to compare), or
+      died outright, so there is no exception to compare) — kept as a
+      fallback for callers that pass observations without a restart count,
+      and for the pathological case of a corpus so small the restart cap
+      fills it with ``worker_died`` before ``_SYSTEMIC_RESTART_THRESHOLD`` is
+      reached, or
     - a majority raised the exact same transport-failure exception type.
 
-    The "exact same type" requirement is deliberate: a corpus where different
-    cases fail for different reasons (including a domain exception a corpus
-    family provokes on purpose, e.g. ``NoBudgetContextError``) is real
-    per-case signal, not a broken backend, and must not be swallowed here.
+    The "exact same type" requirement on the last one is deliberate: a corpus
+    where different cases fail for different reasons (including a domain
+    exception a corpus family provokes on purpose, e.g.
+    ``NoBudgetContextError``) is real per-case signal, not a broken backend,
+    and must not be swallowed here.
     """
     if not observations:
+        return True
+    if restarts >= _SYSTEMIC_RESTART_THRESHOLD:
         return True
     total = len(observations)
     died = sum(
@@ -142,18 +252,25 @@ def run_corpus(cases: list[Case]) -> RunResult:
     server = start_server()
     try:
         for backend in _BACKENDS:
-            observations, stderr_text = _run_backend(backend, cases)
+            observations, stderr_text, restarts = _run_backend(backend, cases)
             first[backend] = observations
             result.stderr[backend] = stderr_text
-            if _looks_like_infrastructure(first[backend]):
+            result.restarts[backend] = restarts
+            if _looks_like_infrastructure(first[backend], restarts):
                 excerpt = stderr_text.strip()[:_STDERR_EXCERPT_LEN]
                 detail = f" worker stderr: {excerpt!r}" if excerpt else ""
+                restart_note = (
+                    f" ({restarts} worker restart{'s' if restarts != 1 else ''})"
+                    if restarts
+                    else ""
+                )
                 result.infrastructure_failure = (
                     f"{backend} backend failed to run the corpus; this is an "
-                    f"infrastructure failure, not a parity failure.{detail}"
+                    f"infrastructure failure, not a parity failure."
+                    f"{restart_note}{detail}"
                 )
                 return result
-            second[backend], _ = _run_backend(backend, cases)
+            second[backend], _, _ = _run_backend(backend, cases)
     finally:
         stop_server(server)
 
