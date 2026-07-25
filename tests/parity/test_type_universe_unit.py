@@ -11,11 +11,23 @@ def test_covers_every_position():
         "list-element",
         "index-key",
         "slice-bound",
+        "second-positional",
+        "dict-literal",
     } <= names
 
 
 def test_includes_the_seed_bug_value():
     assert "complex" in {name for name, _, _ in type_universe.VALUES}
+
+
+def test_includes_numpy_complex_scalars():
+    names = {name for name, _, _ in type_universe.VALUES}
+    assert {"np-complex64", "np-complex128"} <= names
+
+
+def test_includes_negative_integer_boundaries():
+    names = {name for name, _, _ in type_universe.VALUES}
+    assert {"int64-min", "int64-min-minus-one", "huge-negative-int"} <= names
 
 
 def test_numpy_values_are_tagged_so_they_can_be_skipped():
@@ -33,3 +45,8 @@ def test_builds_the_full_cross_product():
 def test_case_ids_encode_value_and_position():
     ids = {case.id for case in type_universe.build()}
     assert "types/complex::slice-bound" in ids
+
+
+def test_every_case_is_tagged_with_its_position():
+    for case in type_universe.build():
+        assert any(tag.startswith("position:") for tag in case.tags), case.id
