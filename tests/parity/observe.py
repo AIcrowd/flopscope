@@ -54,7 +54,7 @@ def fingerprint(value: Any) -> str:
 
 def _container_of(value: Any) -> str:
     if isinstance(value, tuple) and hasattr(value, "_fields"):
-        fields = ",".join(value._fields)
+        fields = ",".join(getattr(value, "_fields"))  # noqa: B009
         return f"namedtuple:{type(value).__name__}({fields})"
     if isinstance(value, tuple):
         return "tuple"
