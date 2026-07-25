@@ -10,9 +10,10 @@ def test_enumerates_the_core_registry():
     assert "fft.rfft" in names
 
 
-def test_builds_one_case_per_op_and_pattern():
+def test_builds_one_case_per_op_and_pattern_minus_segfault_exclusions():
     cases = registry_grid.build()
-    assert len(cases) == len(registry_grid.op_names()) * len(registry_grid.PATTERNS)
+    full_grid = len(registry_grid.op_names()) * len(registry_grid.PATTERNS)
+    assert len(cases) == full_grid - len(registry_grid.SEGFAULT_EXCLUDED_CASE_IDS)
 
 
 def test_case_ids_encode_op_and_pattern():
@@ -27,3 +28,26 @@ def test_tuple_axis_is_one_of_the_patterns():
 def test_undriven_ops_are_reported_not_dropped():
     # Whatever cannot be driven must be COUNTED, never silently skipped.
     assert isinstance(registry_grid.undriven(), dict)
+
+
+def test_segfaulting_cases_are_excluded_from_the_built_corpus():
+    # These 17 case ids crash the in-process worker (SIGSEGV, exit 139); a
+    # crash cannot be caught, so they must never reach `build()`'s output.
+    ids = {case.id for case in registry_grid.build()}
+    assert registry_grid.SEGFAULT_EXCLUDED_CASE_IDS, "exclusion set must not be empty"
+    assert ids.isdisjoint(registry_grid.SEGFAULT_EXCLUDED_CASE_IDS)
+
+
+def test_undriven_accounts_for_every_segfault_exclusion():
+    # Silent truncation is the failure mode this harness exists to prevent:
+    # every excluded case must be COUNTED somewhere, with a reason attached.
+    undriven = registry_grid.undriven()
+    for case_id in registry_grid.SEGFAULT_EXCLUDED_CASE_IDS:
+        assert case_id in undriven
+        assert undriven[case_id].strip()
+
+
+def test_exactly_seventeen_cases_are_segfault_excluded():
+    # Pinned to the measured count so a silent change in the exclusion set
+    # (accidentally widening or narrowing it) fails loudly.
+    assert len(registry_grid.SEGFAULT_EXCLUDED_CASE_IDS) == 17

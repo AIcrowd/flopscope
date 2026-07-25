@@ -91,3 +91,69 @@ def test_shipped_entries_are_valid():
     from tests.parity.allowlist import ENTRIES
 
     assert validate_entries(ENTRIES) == []
+
+
+def test_glob_case_id_matches_every_case_it_covers():
+    glob_entry = Entry(
+        case_id="grid/fft.*::*",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason="Family 9: fft submodule is missing from the client surface.",
+        issue="INTERNAL-P4-family-9",
+    )
+    div_a = Divergence("grid/fft.rfft::array", "outcome", "returned", "raised")
+    div_b = Divergence("grid/fft.fftn::vector", "outcome", "returned", "raised")
+    result = apply([div_a, div_b], entries=(glob_entry,))
+    assert result.unexplained == []
+    assert result.stale == []
+    assert set(result.allowed) == {div_a, div_b}
+
+
+def test_glob_case_id_does_not_match_outside_its_pattern():
+    glob_entry = Entry(
+        case_id="grid/fft.*::*",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason="Family 9.",
+        issue="INTERNAL-P4-family-9",
+    )
+    unrelated = Divergence("grid/sum::array", "outcome", "returned", "raised")
+    result = apply([unrelated], entries=(glob_entry,))
+    assert result.unexplained == [unrelated]
+    # The entry matched nothing, so it is stale, exactly like a literal entry.
+    assert result.stale == [glob_entry]
+
+
+def test_glob_entry_still_requires_dimension_to_match_exactly():
+    glob_entry = Entry(
+        case_id="grid/fft.*::*",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason="Family 9.",
+        issue="INTERNAL-P4-family-9",
+    )
+    value_div = Divergence("grid/fft.rfft::array", "value", "1", "2")
+    result = apply([value_div], entries=(glob_entry,))
+    assert result.unexplained == [value_div]
+    assert result.stale == [glob_entry]
+
+
+def test_match_counts_are_reported_per_entry():
+    glob_entry = Entry(
+        case_id="grid/fft.*::*",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason="Family 9.",
+        issue="INTERNAL-P4-family-9",
+    )
+    div_a = Divergence("grid/fft.rfft::array", "outcome", "returned", "raised")
+    div_b = Divergence("grid/fft.fftn::vector", "outcome", "returned", "raised")
+    result = apply([_DIV, div_a, div_b], entries=(_ENTRY, glob_entry))
+    assert result.match_counts[_ENTRY] == 1
+    assert result.match_counts[glob_entry] == 2
+
+
+def test_unmatched_entry_has_a_zero_match_count():
+    result = apply([], entries=(_ENTRY,))
+    assert result.match_counts[_ENTRY] == 0
+    assert result.stale == [_ENTRY]

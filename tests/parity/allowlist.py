@@ -15,6 +15,7 @@ is a smell that belongs in review.
 from __future__ import annotations
 
 import enum
+import fnmatch
 from dataclasses import dataclass
 
 from tests.parity.compare import DIMENSIONS, Divergence
@@ -31,6 +32,18 @@ class Category(enum.Enum):
 
 @dataclass(frozen=True)
 class Entry:
+    """One allowlisted divergence, or one root-cause-shaped family of them.
+
+    ``case_id`` is either an exact case id (``idiom/complex-mul``) or an
+    ``fnmatch`` glob (``grid/fft.*::*``) — the same idiom
+    ``tests/client_compat/conftest.py`` uses for its xfail patterns. A glob
+    lets one entry explain every divergence that shares one root cause
+    instead of forcing an individual entry per case, but it can also hide a
+    lot: see ``AllowlistResult.match_counts``, which reports exactly how many
+    divergences each entry matched, so a glob silently covering hundreds of
+    cases is visible to a reviewer rather than invisible.
+    """
+
     case_id: str
     dimension: str
     category: Category
@@ -40,6 +53,19 @@ class Entry:
     def key(self) -> tuple[str, str]:
         return (self.case_id, self.dimension)
 
+    def matches(self, divergence: Divergence) -> bool:
+        """True if this entry explains *divergence*.
+
+        The dimension must match exactly. The case id must either be
+        identical to the divergence's case id, or match it as an ``fnmatch``
+        glob.
+        """
+        if self.dimension != divergence.dimension:
+            return False
+        return divergence.case_id == self.case_id or fnmatch.fnmatch(
+            divergence.case_id, self.case_id
+        )
+
 
 @dataclass(frozen=True)
 class AllowlistResult:
@@ -47,6 +73,11 @@ class AllowlistResult:
     stale: list[Entry]
     allowed: list[Divergence]
     counts: dict[str, int]
+    #: How many divergences each entry matched. A glob entry that silently
+    #: covers hundreds of divergences must be obvious to a reviewer, not
+    #: invisible; this is what makes that visible. An entry present in
+    #: ``entries`` but absent (or mapped to 0) here is stale.
+    match_counts: dict[Entry, int]
 
 
 #: Populated by Task 11 from a first full run. Starts empty so that the eight
@@ -75,21 +106,29 @@ def validate_entries(entries: tuple[Entry, ...]) -> list[str]:
 def apply(
     divergences: list[Divergence], entries: tuple[Entry, ...] = ENTRIES
 ) -> AllowlistResult:
-    """Split *divergences* into allowed and unexplained, and find stale entries."""
-    by_key = {entry.key(): entry for entry in entries}
-    matched: set[tuple[str, str]] = set()
+    """Split *divergences* into allowed and unexplained, and find stale entries.
+
+    A divergence matched by no entry FAILS as unexplained; an entry matching
+    no divergence FAILS as stale. A divergence may be matched by more than
+    one entry (overlapping globs); it is allowed as long as at least one
+    entry matches, and every matching entry's count in ``match_counts`` is
+    incremented.
+    """
+    match_counts: dict[Entry, int] = dict.fromkeys(entries, 0)
     allowed: list[Divergence] = []
     unexplained: list[Divergence] = []
 
     for divergence in divergences:
-        if divergence.key() in by_key:
-            allowed.append(divergence)
-            matched.add(divergence.key())
-        else:
+        matching = [entry for entry in entries if entry.matches(divergence)]
+        if not matching:
             unexplained.append(divergence)
+            continue
+        allowed.append(divergence)
+        for entry in matching:
+            match_counts[entry] += 1
 
-    stale = [entry for entry in entries if entry.key() not in matched]
+    stale = [entry for entry in entries if match_counts[entry] == 0]
     counts = {category.value: 0 for category in Category}
     for entry in entries:
         counts[entry.category.value] += 1
-    return AllowlistResult(unexplained, stale, allowed, counts)
+    return AllowlistResult(unexplained, stale, allowed, counts, match_counts)

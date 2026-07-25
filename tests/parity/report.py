@@ -26,6 +26,19 @@ def render(result: RunResult, allow: AllowlistResult, coverage: dict) -> str:
     lines.append("")
     lines.append(f"Allowlist: {dict(sorted(allow.counts.items()))}")
 
+    if allow.match_counts:
+        lines.append("")
+        lines.append("Allowlist entries (match count - a glob can hide a lot):")
+        by_count = sorted(
+            allow.match_counts.items(),
+            key=lambda pair: (-pair[1], pair[0].case_id, pair[0].dimension),
+        )
+        for entry, count in by_count:
+            lines.append(
+                f"  [{count:>5}] {entry.case_id} [{entry.dimension}] "
+                f"({entry.category.value}) {entry.reason}"
+            )
+
     if allow.unexplained:
         lines.append("")
         lines.append(f"UNEXPLAINED DIVERGENCES ({len(allow.unexplained)}):")

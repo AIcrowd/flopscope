@@ -57,14 +57,83 @@ def op_names() -> list[str]:
     return json.loads(proc.stdout)
 
 
-def undriven() -> dict[str, str]:
-    """Ops no generic pattern can drive, with the reason. Counted, not dropped.
+#: SEGFAULT EXCLUSIONS - do not remove without re-measuring.
+#:
+#: These three ops crash the in-process worker with SIGSEGV (exit 139) for
+#: the patterns listed below, confirmed by running each case in its own
+#: subprocess and observing the return code directly. A segfault is
+#: uncatchable by any Python `try`/`except` (`tests/parity/worker.py` /
+#: `tests/parity/runner.py`'s restart machinery exists for exactly this
+#: class of crash), so these cases must never be fed to a worker at all -
+#: they are excluded here, at corpus-assembly time, rather than relying on
+#: the runner to survive them.
+#:
+#: All three are unbound-method calls (`fnp.random.RandomState.get_state(A)`
+#: etc.) where a plain array fixture stands in for `self`; the patterns that
+#: crash are exactly the ones that pass a fixture as the first positional
+#: argument with no extra keyword (`array`, `array-pair`, `vector`,
+#: `scalar-operand`, `integer`, `boolean`, `empty`, `zero-d`) - the patterns
+#: that add a keyword argument (`axis-int`, `axis-tuple`, `axis-negative`,
+#: `keepdims`, `dtype`) raise a normal, catchable `TypeError` instead
+#: (rejected before the C code ever dereferences `self`), and `no-arg`
+#: never supplies a `self` at all.
+_SEGFAULT_PATTERNS_BY_OP: dict[str, tuple[str, ...]] = {
+    "random.RandomState.get_state": (
+        "array",
+        "array-pair",
+        "vector",
+        "scalar-operand",
+        "integer",
+        "boolean",
+        "empty",
+        "zero-d",
+    ),
+    "random.RandomState.seed": (
+        "array",
+        "array-pair",
+        "vector",
+        "scalar-operand",
+        "integer",
+        "boolean",
+        "empty",
+        "zero-d",
+    ),
+    "random.Generator.spawn": ("scalar-operand",),
+}
 
-    Populated from the first full run: an op whose every pattern raises
-    identically on BOTH backends is not being exercised, and saying so is more
-    honest than reporting it as agreement.
+#: The 17 exact `grid/<op>::<pattern>` case ids that `_SEGFAULT_PATTERNS_BY_OP`
+#: names, precomputed once so both `build()` and `undriven()` read the same
+#: set instead of recomputing it.
+SEGFAULT_EXCLUDED_CASE_IDS: frozenset[str] = frozenset(
+    f"grid/{op}::{pattern}"
+    for op, patterns in _SEGFAULT_PATTERNS_BY_OP.items()
+    for pattern in patterns
+)
+
+
+def undriven() -> dict[str, str]:
+    """Grid cases no run can safely include, with the reason. Counted, not
+    dropped.
+
+    Two kinds of entry can appear here:
+
+    * a case excluded because it segfaults the worker (see
+      `SEGFAULT_EXCLUDED_CASE_IDS` above) - populated below from real
+      measurement;
+    * (populated from a first full run, currently none) an op whose every
+      remaining pattern raises identically on BOTH backends, which is not
+      being exercised, and saying so is more honest than reporting it as
+      agreement.
+
+    Either way, an entry here means "not in `build()`'s output, and here is
+    why", so coverage counts stay honest instead of silently shrinking.
     """
-    return {}
+    segfault_reason = (
+        "SIGSEGV (exit 139) in the in-process backend: an unbound-method "
+        "call with an array fixture standing in for `self`; uncatchable, "
+        "so excluded from the corpus rather than fed to a worker"
+    )
+    return dict.fromkeys(sorted(SEGFAULT_EXCLUDED_CASE_IDS), segfault_reason)
 
 
 def build() -> tuple[Case, ...]:
@@ -76,4 +145,5 @@ def build() -> tuple[Case, ...]:
         )
         for op in op_names()
         for pattern_name, template in PATTERNS
+        if f"grid/{op}::{pattern_name}" not in SEGFAULT_EXCLUDED_CASE_IDS
     )
