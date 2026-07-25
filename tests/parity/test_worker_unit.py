@@ -152,6 +152,53 @@ def test_run_stream_rebuilds_fixtures_so_one_case_cannot_contaminate_the_next():
     assert spy.call_count == 2
 
 
+#: A value whose `.shape` attribute RAISES when merely accessed (not just
+#: reports a wrong type) defeats `observe_result`'s own type-based defenses,
+#: exercising the backstop in `run_case` itself. This is the real-world
+#: shape: a registry operation returning a class rather than an instance
+#: leaves `.shape` as a descriptor that misbehaves when read.
+_HOSTILE_SETUP = """
+class Hostile:
+    @property
+    def shape(self):
+        raise RuntimeError("shape blew up")
+"""
+
+
+def test_run_case_records_a_result_that_fails_to_describe_instead_of_raising():
+    case = Case(id="t/hostile", source="Hostile()", setup=_HOSTILE_SETUP)
+    obs = run_case(_ns(), case, _FakeCtx([0, 0]))
+    assert obs["id"] == "t/hostile"
+    assert obs["outcome"] == "record_failed"
+    assert obs["exc_type"] == "RuntimeError"
+
+
+def test_run_stream_processes_the_next_case_after_a_record_failure():
+    # The important half of this regression test: a case that defeats
+    # `observe_result` must not cost the worker every case still queued
+    # behind it on stdin. This is the exact failure mode a real corpus run
+    # hit: an unhandled exception from recording (not from the expression
+    # itself) propagated out of `run_case`, out of `run_stream`, and killed
+    # the worker process mid-run.
+    bad = Case(id="t/hostile", source="Hostile()", setup=_HOSTILE_SETUP)
+    good = Case(id="t/after", source="1 + 1")
+    stdin = io.StringIO(
+        json.dumps(bad.to_json()) + "\n" + json.dumps(good.to_json()) + "\n"
+    )
+    stdout = io.StringIO()
+
+    run_stream(_FakeFnp(), _FakeCtx([0, 0]), stdin, stdout)
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(lines) == 2
+    assert lines[0]["id"] == "t/hostile"
+    assert lines[0]["outcome"] == "record_failed"
+    # The case queued behind the bad one still ran and was recorded: the
+    # worker did not die and did not skip it.
+    assert lines[1]["id"] == "t/after"
+    assert lines[1]["outcome"] == "returned"
+
+
 def test_run_stream_skips_malformed_lines_without_losing_queued_cases(capsys):
     good = Case(id="t/ok2", source="1 + 1")
     stdin = io.StringIO(

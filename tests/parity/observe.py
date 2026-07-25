@@ -78,7 +78,15 @@ def _container_of(value: Any) -> str:
 def _materialize(value: Any) -> Any:
     tolist = getattr(value, "tolist", None)
     if callable(tolist):
-        return tolist()
+        try:
+            return tolist()
+        except Exception:
+            # A `tolist` attribute that promises the ndarray protocol but
+            # blows up when actually called (e.g. `value` is a class, so
+            # `tolist` is an unbound function expecting `self`) must not
+            # take the whole recording down with it. Fall back to the raw
+            # value, same as if `tolist` had never been callable.
+            return value
     if isinstance(value, (list, tuple)):
         return [_materialize(item) for item in value]
     item = getattr(value, "item", None)
@@ -109,15 +117,69 @@ def _pytype_of(value: Any) -> str:
     return _ARRAY_WRAPPER_TOKEN if name in _ARRAY_WRAPPER_CLASS_NAMES else name
 
 
+#: A real dtype's ``str()`` is always a short label (``"float32"``,
+#: ``"dtype('complex128')"``, ...). A misattributed descriptor's default
+#: repr (e.g. ``"<attribute 'dtype' of 'X' objects>"`` for a class's
+#: getset_descriptor, ``"<property object at 0x...>"`` for a class's
+#: property) is not, which is how this tells the two apart without
+#: hard-coding any backend's dtype type: both are the generic
+#: ``<... at 0x...>`` / ``<... of ... objects>`` shape Python's default
+#: ``__repr__``/``__str__`` produces for objects with no custom string form,
+#: i.e. angle-bracket-wrapped end to end. A genuine dtype string is never
+#: wrapped like that (numpy's own byte-order-prefixed forms, e.g.
+#: ``"<U10"``, start with ``<`` but do not end with ``>``).
+_MAX_PLAUSIBLE_DTYPE_LEN = 64
+
+
+def _shape_of(value: Any) -> list | None:
+    """Return ``value.shape`` as a list, or ``None`` if it is not genuinely one.
+
+    ``value`` may be a class rather than an instance (a real defect this
+    harness has observed from the registry under test), in which case a
+    ``.shape`` attribute implemented as a C-level getset descriptor resolves
+    to the descriptor object itself rather than a tuple. ``list()`` on that
+    raises, so it must be validated before use, not just null-checked.
+    """
+    shape = getattr(value, "shape", None)
+    if not isinstance(shape, (tuple, list)):
+        return None
+    if not all(isinstance(dim, int) and not isinstance(dim, bool) for dim in shape):
+        return None
+    return list(shape)
+
+
+def _dtype_of(value: Any) -> str | None:
+    """Return ``str(value.dtype)``, or ``None`` if that is not a plausible dtype.
+
+    Same hazard as ``_shape_of``: on a misbehaving ``value`` the ``dtype``
+    attribute can be a descriptor object rather than a real dtype. ``str()``
+    on it will not raise, so this also rejects the implausible-looking
+    result (long, multi-line, or otherwise not dtype-shaped) rather than
+    recording it as if it were faithful.
+    """
+    dtype = getattr(value, "dtype", None)
+    if dtype is None:
+        return None
+    try:
+        text = str(dtype)
+    except Exception:
+        return None
+    if not isinstance(text, str) or not text:
+        return None
+    if len(text) > _MAX_PLAUSIBLE_DTYPE_LEN or "\n" in text:
+        return None
+    if text.startswith("<") and text.endswith(">"):
+        return None
+    return text
+
+
 def observe_result(value: Any, flops: int) -> dict:
     """Record a successful return."""
-    shape = getattr(value, "shape", None)
-    dtype = getattr(value, "dtype", None)
     return {
         "outcome": "returned",
         "pytype": _pytype_of(value),
-        "dtype": None if dtype is None else str(dtype),
-        "shape": None if shape is None else list(shape),
+        "dtype": _dtype_of(value),
+        "shape": _shape_of(value),
         "container": _container_of(value),
         "value": fingerprint(_materialize(value)),
         "flops": flops,
@@ -140,6 +202,21 @@ def observe_exception(exc: BaseException, flops: int) -> dict:
         "exc_type": type(exc).__name__,
         "exc_bases": bases,
         "exc_msg": str(exc),
+        "flops": flops,
+    }
+
+
+def observe_record_failure(exc: BaseException, flops: int) -> dict:
+    """Record that the harness itself failed to describe a result.
+
+    A last-resort outcome for when ``observe_result`` itself raises despite
+    its own defenses (an object hostile enough to defeat ``_shape_of``,
+    ``_dtype_of`` and ``_materialize`` alike). The case is still recorded,
+    with the FLOP delta preserved, rather than taking the worker down.
+    """
+    return {
+        "outcome": "record_failed",
+        "exc_type": type(exc).__name__,
         "flops": flops,
     }
 

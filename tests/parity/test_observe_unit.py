@@ -7,6 +7,7 @@ import math
 from tests.parity.observe import (
     fingerprint,
     observe_exception,
+    observe_record_failure,
     observe_result,
     observe_timeout,
     observe_worker_died,
@@ -140,6 +141,66 @@ def test_array_wrapper_classes_do_not_diverge_on_pytype():
     inproc = observe_result(FlopscopeArray(), flops=0)
     client = observe_result(RemoteArray(), flops=0)
     assert inproc["pytype"] == client["pytype"]
+
+
+def test_observe_result_survives_a_class_whose_shape_is_a_descriptor():
+    # Real-world crash: some registry operations return a *class* rather
+    # than an instance (e.g. `numpy.common_type` handing back a scalar
+    # type). On a class, `.shape` resolves through the descriptor protocol
+    # to the descriptor object itself (a `getset_descriptor` in the real
+    # crash; a `property` object here, which triggers the identical hazard
+    # without depending on numpy). `list()` on that raises unless guarded.
+    class Weird:
+        @property
+        def shape(self):
+            return (2, 3)
+
+    obs = observe_result(Weird, flops=0)
+    assert obs["outcome"] == "returned"
+    assert obs["shape"] is None
+
+
+def test_observe_result_treats_a_shape_with_non_integer_elements_as_absent():
+    class FakeArray:
+        shape = ("rows", "cols")
+
+        def tolist(self):
+            return [[1.0]]
+
+    obs = observe_result(FakeArray(), flops=0)
+    assert obs["shape"] is None
+
+
+def test_observe_result_survives_a_class_whose_dtype_is_a_descriptor():
+    class Weird:
+        @property
+        def dtype(self):
+            return "float32"
+
+    obs = observe_result(Weird, flops=0)
+    assert obs["outcome"] == "returned"
+    assert obs["dtype"] is None
+
+
+def test_observe_result_survives_a_tolist_that_raises():
+    class Weird:
+        shape = (2,)
+        dtype = "float32"
+
+        def tolist(self):
+            raise RuntimeError("boom")
+
+    obs = observe_result(Weird(), flops=0)
+    assert obs["outcome"] == "returned"
+    # Falls back to fingerprinting the value itself rather than propagating.
+    assert obs["value"] is not None
+
+
+def test_observe_record_failure_reports_outcome_and_exception_class():
+    obs = observe_record_failure(TypeError("not iterable"), flops=11)
+    assert obs["outcome"] == "record_failed"
+    assert obs["exc_type"] == "TypeError"
+    assert obs["flops"] == 11
 
 
 def test_plain_bool_against_a_scalar_wrapper_still_diverges_on_pytype():

@@ -19,7 +19,11 @@ import os
 import sys
 
 from tests.parity.case import Case
-from tests.parity.observe import observe_exception, observe_result
+from tests.parity.observe import (
+    observe_exception,
+    observe_record_failure,
+    observe_result,
+)
 
 #: Fixtures are rebuilt per case: an audit pass was discarded to in-place-op
 #: contamination, so shared mutable fixtures are a known failure mode.
@@ -68,7 +72,17 @@ def run_case(namespace: dict, case: Case, ctx) -> dict:
         ctx.summary()
         return {"id": case.id, **observe_exception(exc, ctx.flops_used - before)}
     ctx.summary()
-    return {"id": case.id, **observe_result(value, ctx.flops_used - before)}
+    delta = ctx.flops_used - before
+    try:
+        result = observe_result(value, delta)
+    except Exception as exc:  # noqa: BLE001 - recording, not handling
+        # observe_result describing an arbitrary returned value is itself
+        # fallible (e.g. a registry op handing back a class instead of an
+        # instance, whose attributes lie about their own shape). A failure
+        # here must be recorded like any other outcome, not propagate and
+        # kill the worker mid-stream, discarding every case still queued.
+        result = observe_record_failure(exc, delta)
+    return {"id": case.id, **result}
 
 
 def _import_backend(backend: str):
