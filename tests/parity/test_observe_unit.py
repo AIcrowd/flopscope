@@ -116,3 +116,45 @@ def test_materialize_unwraps_item_style_scalars():
             return 1.5
 
     assert observe_result(ItemScalar(), flops=0)["value"] == fingerprint(1.5)
+
+
+def test_array_wrapper_classes_do_not_diverge_on_pytype():
+    # inproc's `FlopscopeArray` and the client's `RemoteArray` are two
+    # different classes by construction (two implementations of the same
+    # array type); raw class names would report a spurious divergence on
+    # every single array-returning case. They must collapse to one token.
+    class FlopscopeArray:
+        dtype = "float32"
+        shape = ()
+
+        def tolist(self):
+            return 1.0
+
+    class RemoteArray:
+        dtype = "float32"
+        shape = ()
+
+        def tolist(self):
+            return 1.0
+
+    inproc = observe_result(FlopscopeArray(), flops=0)
+    client = observe_result(RemoteArray(), flops=0)
+    assert inproc["pytype"] == client["pytype"]
+
+
+def test_plain_bool_against_a_scalar_wrapper_still_diverges_on_pytype():
+    # A plain Python bool on one backend against a wrapper object on the
+    # other means a value failed to unwrap the way it should have — this
+    # is the real defect class "pytype" exists to catch, and the array-
+    # wrapper collapse above must not blind the harness to it.
+    class RemoteScalar:
+        dtype = "bool"
+        shape = ()
+
+        def tolist(self):
+            return True
+
+    inproc = observe_result(True, flops=0)
+    client = observe_result(RemoteScalar(), flops=0)
+    assert inproc["pytype"] != client["pytype"]
+    assert inproc["pytype"] == "bool"

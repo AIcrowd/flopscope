@@ -91,13 +91,31 @@ def _materialize(value: Any) -> Any:
     return value
 
 
+#: The two backends' concrete array-wrapper classes. Two implementations of
+#: the same array type are necessarily two different classes, so comparing
+#: their raw names would report a "pytype" divergence on essentially every
+#: array-returning case, drowning any real signal. Collapsed here to one
+#: shared token. Scalar wrapper classes (e.g. the client's ``RemoteScalar``)
+#: are deliberately excluded from this collapse: a plain Python ``bool`` or
+#: ``int`` on one backend against a wrapper object on the other means a value
+#: failed to unwrap the way it should have, which is a real defect that
+#: "pytype" exists to catch.
+_ARRAY_WRAPPER_CLASS_NAMES = frozenset({"FlopscopeArray", "RemoteArray"})
+_ARRAY_WRAPPER_TOKEN = "<array-wrapper>"
+
+
+def _pytype_of(value: Any) -> str:
+    name = type(value).__name__
+    return _ARRAY_WRAPPER_TOKEN if name in _ARRAY_WRAPPER_CLASS_NAMES else name
+
+
 def observe_result(value: Any, flops: int) -> dict:
     """Record a successful return."""
     shape = getattr(value, "shape", None)
     dtype = getattr(value, "dtype", None)
     return {
         "outcome": "returned",
-        "pytype": type(value).__name__,
+        "pytype": _pytype_of(value),
         "dtype": None if dtype is None else str(dtype),
         "shape": None if shape is None else list(shape),
         "container": _container_of(value),
