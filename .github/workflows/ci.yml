@@ -306,7 +306,7 @@ jobs:
         run: make test-parity-full
 
       - name: "Parity full sweep (release gate; blocks push to main)"
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: make test-parity-full
 
   client-server-sync:

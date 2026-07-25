@@ -80,11 +80,12 @@ class AllowlistResult:
     match_counts: dict[Entry, int]
 
 
-#: Populated from a full differential corpus run (see task-11-report.md for
-#: how it was derived). Each entry is grouped by root cause: a whole missing
-#: client namespace, a whole server-side error-wrapping mechanism, a single
-#: op, or a single case. `KNOWN_BUG` reaching zero is the definition of done
-#: for the whole wire-protocol programme.
+#: Populated from a full differential corpus run: both backends were driven
+#: over the whole case corpus, every divergence found was triaged, and each
+#: entry below records one root cause. Each entry is grouped by root cause: a
+#: whole missing client namespace, a whole server-side error-wrapping
+#: mechanism, a single op, or a single case. `KNOWN_BUG` reaching zero is the
+#: definition of done for the whole wire-protocol programme.
 ENTRIES: tuple[Entry, ...] = (
     Entry(
         case_id="grid/fft.*::*",
@@ -5451,8 +5452,8 @@ ENTRIES: tuple[Entry, ...] = (
         category=Category.KNOWN_BUG,
         reason=(
             "`fnp.array(X)` bills a nonzero amount in-process (a real copy) but the"
-            " client always bills 0, treating the reconstruction as a free passthrough"
-            " of the existing remote handle - a pure cost-model mismatch."
+            " client always bills 0 for the same call - a pure cost-model mismatch"
+            " between the two backends' `array` implementations."
         ),
         issue="INTERNAL-P3-family-13",
     ),

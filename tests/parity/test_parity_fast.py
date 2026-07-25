@@ -38,5 +38,15 @@ def test_corpus_has_not_silently_shrunk():
 def test_fast_tier_has_no_unexplained_divergences():
     result = run_corpus(fast_cases())
     assert result.infrastructure_failure is None, result.infrastructure_failure
+    # The 11 fast cases are deterministic now that the RNG is seeded, so the
+    # twice-run self-check flagging any of them flaky is never expected
+    # variation - it quarantines the case from comparison entirely (see
+    # ``run_corpus``), which is exactly the silent-agreement failure this
+    # harness exists to prevent. Any flakiness here is a real regression.
+    assert not result.flaky, (
+        f"{len(result.flaky)} fast-tier case(s) flagged flaky (expected 0); "
+        f"these were skipped from comparison instead of being checked: "
+        f"{result.flaky}"
+    )
     allow = apply(result.divergences, ENTRIES)
     assert not allow.unexplained, render(result, allow, coverage={})
