@@ -27,7 +27,24 @@ from tests.parity.observe import (
 
 #: Fixtures are rebuilt per case: an audit pass was discarded to in-place-op
 #: contamination, so shared mutable fixtures are a known failure mode.
+#:
+#: The fixed seed below (an arbitrary but memorable constant, not derived
+#: from anything) reseeds the global RNG identically on both backends before
+#: every case. Without it, a case that draws from `fnp.random.*` compares two
+#: independently-seeded streams, so the two backends only agree by chance
+#: (e.g. 1-in-6 for a 6-element `random.choice`) - a coin flip, not a
+#: comparison. Confirmed by direct measurement (not just assumed) that a
+#: seeded draw is bit-identical between the two backends: `fnp.random.seed
+#: (1234); fnp.random.choice(V)` returns `1.0` on both, and `fnp.random.seed
+#: (1234); fnp.random.rand(3)` returns the same three float64 values to the
+#: last bit. This call costs 0 FLOPs on both backends (`random.seed` is a
+#: free/configuration op, not a sampler), and even if it billed something,
+#: this line runs as part of fixture construction in `build_namespace`,
+#: which executes (and is fully accounted for) before `run_case` takes its
+#: `before` FLOP snapshot - so it can never leak into a case's measured
+#: delta either way.
 FIXTURE_SOURCE = """
+fnp.random.seed(1234)
 A = fnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype="float32")
 B = fnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype="float32")
 V = fnp.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0], dtype="float32")

@@ -10,10 +10,14 @@ def test_enumerates_the_core_registry():
     assert "fft.rfft" in names
 
 
-def test_builds_one_case_per_op_and_pattern_minus_segfault_exclusions():
+def test_builds_one_case_per_op_and_pattern_minus_exclusions():
     cases = registry_grid.build()
     full_grid = len(registry_grid.op_names()) * len(registry_grid.PATTERNS)
-    assert len(cases) == full_grid - len(registry_grid.SEGFAULT_EXCLUDED_CASE_IDS)
+    excluded = (
+        registry_grid.SEGFAULT_EXCLUDED_CASE_IDS
+        | registry_grid.UNINITIALIZED_VALUE_EXCLUDED_CASE_IDS
+    )
+    assert len(cases) == full_grid - len(excluded)
 
 
 def test_case_ids_encode_op_and_pattern():
@@ -51,3 +55,29 @@ def test_exactly_seventeen_cases_are_segfault_excluded():
     # Pinned to the measured count so a silent change in the exclusion set
     # (accidentally widening or narrowing it) fails loudly.
     assert len(registry_grid.SEGFAULT_EXCLUDED_CASE_IDS) == 17
+
+
+def test_uninitialized_value_cases_are_excluded_from_the_built_corpus():
+    # `empty`/`empty_like` return uninitialized memory for these patterns;
+    # their value can never be meaningfully compared, so they must never
+    # reach `build()`'s output.
+    ids = {case.id for case in registry_grid.build()}
+    assert registry_grid.UNINITIALIZED_VALUE_EXCLUDED_CASE_IDS, (
+        "exclusion set must not be empty"
+    )
+    assert ids.isdisjoint(registry_grid.UNINITIALIZED_VALUE_EXCLUDED_CASE_IDS)
+
+
+def test_undriven_accounts_for_every_uninitialized_value_exclusion():
+    # Silent truncation is the failure mode this harness exists to prevent:
+    # every excluded case must be COUNTED somewhere, with a reason attached.
+    undriven = registry_grid.undriven()
+    for case_id in registry_grid.UNINITIALIZED_VALUE_EXCLUDED_CASE_IDS:
+        assert case_id in undriven
+        assert undriven[case_id].strip()
+
+
+def test_exactly_nine_cases_are_uninitialized_value_excluded():
+    # Pinned to the measured count so a silent change in the exclusion set
+    # (accidentally widening or narrowing it) fails loudly.
+    assert len(registry_grid.UNINITIALIZED_VALUE_EXCLUDED_CASE_IDS) == 9

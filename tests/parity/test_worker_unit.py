@@ -112,12 +112,23 @@ def test_fixture_source_builds_every_documented_fixture():
         assert f"{name} = " in FIXTURE_SOURCE
 
 
+class _FakeRandom:
+    """Stands in for `flopscope.numpy.random`: only `seed()` is needed, since
+    `FIXTURE_SOURCE` calls it unconditionally as its first statement."""
+
+    @staticmethod
+    def seed(value=None):
+        pass
+
+
 class _FakeFnp:
     """Stands in for `flopscope.numpy`: `array()` returns a fresh, plain
     mutable `list` on every call (scalars pass through as-is, since a bare
     float has nothing mutable to protect), so a case that mutates a fixture
     in place can only ever corrupt the namespace it was handed, never a
     later case's."""
+
+    random = _FakeRandom()
 
     @staticmethod
     def array(values, dtype=None):

@@ -5356,17 +5356,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-12",
     ),
     Entry(
-        case_id="grid/empty*::*",
-        dimension="value",
-        category=Category.PROXY_INHERENT,
-        reason=(
-            "`fnp.empty`/`fnp.empty_like` return uninitialized memory; their"
-            " contents are non-deterministic implementation details that cannot be"
-            " made to match between two independent allocations, in-process or"
-            " remote, even in principle."
-        ),
-    ),
-    Entry(
         case_id="grid/random.[!GR]*::*",
         dimension="pytype",
         category=Category.KNOWN_BUG,
