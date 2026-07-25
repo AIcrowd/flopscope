@@ -100,3 +100,19 @@ def test_observe_exception_records_only_builtin_ancestors():
 def test_terminal_outcomes():
     assert observe_timeout(flops=3)["outcome"] == "timeout"
     assert observe_worker_died()["outcome"] == "worker_died"
+
+
+def test_container_fingerprints_do_not_collide_on_separator_chars():
+    # Structural separators appearing inside string content must not make two
+    # different values fingerprint identically.
+    assert fingerprint(["s:x", "y"]) != fingerprint(["s:x,s:y"])
+    assert fingerprint(["a", "b"]) != fingerprint(["a,b"])
+    assert fingerprint([""]) != fingerprint([])
+
+
+def test_materialize_unwraps_item_style_scalars():
+    class ItemScalar:
+        def item(self):
+            return 1.5
+
+    assert observe_result(ItemScalar(), flops=0)["value"] == fingerprint(1.5)
