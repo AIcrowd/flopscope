@@ -51,7 +51,7 @@ def run_case(namespace: dict, case: Case, ctx) -> dict:
         if case.setup:
             exec(case.setup, local)  # noqa: S102 - corpus is ours, not user input
         value = eval(case.source, local)  # noqa: S307 - corpus is ours
-    except BaseException as exc:  # noqa: BLE001 - recording, not handling
+    except Exception as exc:  # noqa: BLE001 - recording, not handling
         return {"id": case.id, **observe_exception(exc, ctx.flops_used - before)}
     return {"id": case.id, **observe_result(value, ctx.flops_used - before)}
 
@@ -69,6 +69,30 @@ def _import_backend(backend: str):
     return flopscope, fnp
 
 
+def run_stream(fnp, ctx, stdin, stdout) -> None:
+    """Read cases from *stdin*, write one observation line per case to *stdout*.
+
+    Fixtures are rebuilt fresh for every case (`build_namespace` is called
+    inside this loop, not hoisted above it): a prior measurement pass had to
+    be discarded because an in-place operation in one case contaminated a
+    later one via a shared fixture object.
+    """
+    for line in stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            case = Case.from_json(json.loads(line))
+        except Exception as exc:  # noqa: BLE001 - a bad line must not kill the worker
+            # Never write diagnostics to stdout: it carries the observation
+            # records and the parent parses it line-by-line as JSON.
+            print(f"worker: skipping malformed case line: {exc}", file=sys.stderr)
+            continue
+        observation = run_case(build_namespace(fnp), case, ctx)
+        stdout.write(json.dumps(observation) + "\n")
+        stdout.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=("inproc", "client"), required=True)
@@ -80,14 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = flopscope.BudgetContext(flop_budget=_BUDGET, quiet=True)
     ctx.__enter__()
     try:
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            case = Case.from_json(json.loads(line))
-            observation = run_case(build_namespace(fnp), case, ctx)
-            sys.stdout.write(json.dumps(observation) + "\n")
-            sys.stdout.flush()
+        run_stream(fnp, ctx, sys.stdin, sys.stdout)
     finally:
         ctx.__exit__(None, None, None)
     return 0

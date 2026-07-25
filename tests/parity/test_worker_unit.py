@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import io
+import json
+from unittest.mock import patch
+
 from tests.parity.case import Case
-from tests.parity.worker import FIXTURE_SOURCE, run_case
+from tests.parity.observe import fingerprint
+from tests.parity.worker import FIXTURE_SOURCE, build_namespace, run_case, run_stream
 
 
 class _FakeCtx:
@@ -54,3 +59,66 @@ def test_a_syntactically_invalid_case_is_recorded_not_crashed():
 def test_fixture_source_builds_every_documented_fixture():
     for name in ("A", "B", "V", "I", "M", "E", "S"):
         assert f"{name} = " in FIXTURE_SOURCE
+
+
+class _FakeFnp:
+    """Stands in for `flopscope.numpy`: `array()` returns a fresh, plain
+    mutable `list` on every call (scalars pass through as-is, since a bare
+    float has nothing mutable to protect), so a case that mutates a fixture
+    in place can only ever corrupt the namespace it was handed, never a
+    later case's."""
+
+    @staticmethod
+    def array(values, dtype=None):
+        if isinstance(values, (list, tuple)):
+            return list(values)
+        return values
+
+
+def test_run_stream_rebuilds_fixtures_so_one_case_cannot_contaminate_the_next():
+    # This is the regression test for the exact bug that discarded a prior
+    # measurement pass: an in-place mutation in one case leaking into the
+    # next via a fixture shared across cases. It only passes if `run_stream`
+    # calls `build_namespace(fnp)` fresh inside the loop, per case.
+    mutate = Case(id="t/mutate", source="V[0]", setup="V[0] = 999.0")
+    read = Case(id="t/read", source="V[0]")
+    stdin = io.StringIO(
+        json.dumps(mutate.to_json()) + "\n" + json.dumps(read.to_json()) + "\n"
+    )
+    stdout = io.StringIO()
+
+    with patch("tests.parity.worker.build_namespace", wraps=build_namespace) as spy:
+        run_stream(_FakeFnp(), _FakeCtx([0, 0]), stdin, stdout)
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(lines) == 2
+    assert lines[0]["id"] == "t/mutate"
+    assert lines[0]["value"] == fingerprint(999.0)
+    # The second case must see a pristine V, not the first case's mutation.
+    assert lines[1]["id"] == "t/read"
+    assert lines[1]["value"] == fingerprint(3.0)
+    # One fresh namespace per case, not one shared namespace for the run.
+    assert spy.call_count == 2
+
+
+def test_run_stream_skips_malformed_lines_without_losing_queued_cases(capsys):
+    good = Case(id="t/ok2", source="1 + 1")
+    stdin = io.StringIO(
+        "not json at all\n"
+        + json.dumps({"source": "1"})  # well-formed JSON, missing required "id"
+        + "\n"
+        + json.dumps(good.to_json())
+        + "\n"
+    )
+    stdout = io.StringIO()
+
+    run_stream(_FakeFnp(), _FakeCtx([0, 0]), stdin, stdout)
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["id"] == "t/ok2"
+    assert lines[0]["outcome"] == "returned"
+    # Diagnostics go to stderr; stdout carries only clean observation JSON
+    # (already implied above by every stdout line parsing as JSON).
+    captured = capsys.readouterr()
+    assert "skipping malformed case line" in captured.err
