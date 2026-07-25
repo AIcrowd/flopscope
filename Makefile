@@ -77,6 +77,14 @@ test-client-parity-measure:  ## MEASUREMENT (non-blocking): numpy's own suite vs
 	-$(UV) pytest tests/client_compat/test_numpy_function_classes.py -n auto -q
 	-$(UV) pytest tests/client_compat/methods/test_numpy_classes.py -n auto -q
 
+.PHONY: test-parity-fast
+test-parity-fast:  ## GATE: fast client/in-process differential parity (must be green)
+	$(UV) pytest tests/parity/ -q -x --ignore=tests/parity/test_parity_full.py
+
+.PHONY: test-parity-full
+test-parity-full:  ## Full differential parity sweep (blocks releases)
+	$(UV) pytest tests/parity/test_parity_full.py -q
+
 .PHONY: client-parity-inventory
 client-parity-inventory:  ## Run the client-parity harness and emit the categorized failure inventory
 	$(UV) python scripts/client_parity_inventory.py

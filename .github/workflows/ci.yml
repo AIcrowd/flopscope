@@ -293,6 +293,13 @@ jobs:
       - name: "Client-parity measurement (non-blocking): numpy's own suite vs the client"
         run: make test-client-parity-measure
 
+      - name: "Parity GATE: fast client/in-process differential"
+        run: make test-parity-fast
+
+      - name: "Parity full sweep (release gate; blocks push to main, not on pull requests)"
+        if: github.event_name == 'push'
+        run: make test-parity-full
+
   client-server-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 45
