@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from tests.parity.case import Case
-from tests.parity.corpus import idioms
+from tests.parity.corpus import idioms, registry_grid
 
 
 def all_cases() -> list[Case]:
     """Every case from every source."""
-    return list(idioms.CASES)
+    return list(idioms.CASES) + list(registry_grid.build())
 
 
 def fast_cases() -> list[Case]:
