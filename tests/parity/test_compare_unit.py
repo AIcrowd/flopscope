@@ -17,6 +17,12 @@ def _returned(**overrides) -> dict:
     return base
 
 
+def _raised(**overrides) -> dict:
+    base = observe_exception(ValueError("x"), flops=10)
+    base.update(overrides)
+    return base
+
+
 def _dims(inproc: dict, client: dict) -> set[str]:
     return {d.dimension for d in compare_observations("x/y", inproc, client)}
 
@@ -60,10 +66,10 @@ def test_detects_flops():
 
 
 def test_detects_exception_class():
+    # IndexError and KeyError share builtin ancestry, so only exc_type differs.
     inproc = observe_exception(IndexError("a"), flops=1)
-    client = observe_exception(RuntimeError("b"), flops=1)
-    dims = _dims(inproc, client)
-    assert "exc_type" in dims
+    client = observe_exception(KeyError("b"), flops=1)
+    assert _dims(inproc, client) == {"exc_type"}
 
 
 def test_ignores_exception_message_differences():
@@ -72,11 +78,33 @@ def test_ignores_exception_message_differences():
     assert _dims(inproc, client) == set()
 
 
+def test_detects_exception_ancestry_in_isolation():
+    # Same class name, different builtin ancestry: exactly the drift that
+    # happens when an exception is reconstructed across the wire.
+    inproc = _raised(exc_bases=["Exception", "BaseException"])
+    client = _raised(exc_bases=["LookupError", "Exception", "BaseException"])
+    assert _dims(inproc, client) == {"exc_bases"}
+
+
 def test_flops_compared_even_when_both_raise():
     # The billing family: both raise, but only one charged for it.
     inproc = observe_exception(TypeError("x"), flops=0)
     client = observe_exception(TypeError("x"), flops=341648)
     assert _dims(inproc, client) == {"flops"}
+
+
+def test_outcome_and_flops_both_reported_when_both_differ():
+    # The defect this harness exists to catch: one backend fails the call and
+    # still charges for it. Both dimensions must be reported, independently.
+    inproc = _returned(flops=0)
+    client = observe_exception(TypeError("nope"), flops=341648)
+    assert _dims(inproc, client) == {"outcome", "flops"}
+
+
+def test_outcome_alone_reported_when_flops_agree():
+    inproc = _returned(flops=10)
+    client = observe_exception(TypeError("nope"), flops=10)
+    assert _dims(inproc, client) == {"outcome"}
 
 
 def test_value_dimensions_skipped_when_both_raise():
