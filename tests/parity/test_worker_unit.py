@@ -24,6 +24,41 @@ class _FakeCtx:
         self._i += 1
         return value
 
+    def summary(self):
+        # No-op stand-in for the real refresh call `run_case` now makes before
+        # every `flops_used` read (needed on the client backend; harmless
+        # here since the fake's counter doesn't need refreshing).
+        return ""
+
+
+class _FakeCachedCtx:
+    """Stands in for a BudgetContext whose `flops_used` is a CACHE that only
+    refreshes on an explicit `summary()` call — this is how the real client
+    backend behaves (`flopscope-client/src/flopscope/_budget.py`: the local
+    `_flops_used` cache is only updated from `__enter__`, `__exit__`, or a
+    `summary()` call, never automatically after an individual op dispatch).
+
+    Regression test double for the bug where `run_case` read `ctx.flops_used`
+    immediately after `eval()` without refreshing first: since the worker
+    holds one ambient context open for the whole corpus, that read always
+    landed on a stale cache, so the client backend reported a `flops` delta
+    of 0 for every single case, no matter what actually ran.
+    """
+
+    def __init__(self, true_values):
+        self._true_values = list(true_values)
+        self._true_i = 0
+        self._cached = 0
+
+    def summary(self):
+        self._cached = self._true_values[min(self._true_i, len(self._true_values) - 1)]
+        self._true_i += 1
+        return ""
+
+    @property
+    def flops_used(self):
+        return self._cached
+
 
 def _ns():
     # A tiny stand-in backend: enough for the worker's plumbing.
@@ -41,6 +76,22 @@ def test_records_an_exception_instead_of_propagating():
     obs = run_case(_ns(), Case(id="t/boom", source="V[99]"), _FakeCtx([0, 3]))
     assert obs["outcome"] == "raised"
     assert obs["exc_type"] == "IndexError"
+    assert obs["flops"] == 3
+
+
+def test_run_case_refreshes_the_flops_cache_before_reading_the_delta():
+    # Regression test for a per-case FLOP delta that was always 0 on the
+    # client backend: `run_case` must call `ctx.summary()` (or an equivalent
+    # refresh) before every `ctx.flops_used` read, not just read the
+    # property directly, or a cached-until-refreshed context reports every
+    # case as costing 0 FLOPs regardless of what actually ran.
+    obs = run_case(_ns(), Case(id="t/ok", source="V[0]"), _FakeCachedCtx([0, 5]))
+    assert obs["flops"] == 5
+
+
+def test_run_case_refreshes_the_flops_cache_on_the_exception_path_too():
+    obs = run_case(_ns(), Case(id="t/boom", source="V[99]"), _FakeCachedCtx([0, 3]))
+    assert obs["outcome"] == "raised"
     assert obs["flops"] == 3
 
 

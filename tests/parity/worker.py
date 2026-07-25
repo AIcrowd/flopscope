@@ -44,15 +44,30 @@ def build_namespace(fnp) -> dict:
 
 
 def run_case(namespace: dict, case: Case, ctx) -> dict:
-    """Execute one case in *namespace*, recording the outcome and FLOP delta."""
+    """Execute one case in *namespace*, recording the outcome and FLOP delta.
+
+    ``ctx.summary()`` is called before every ``flops_used`` read, including
+    ``before``. The client backend's ``flops_used`` is a local cache that is
+    only refreshed on context enter/exit or an explicit ``summary()`` call —
+    never automatically after an op dispatch — and this worker holds one
+    ambient context open for the whole corpus rather than one per case, so
+    without this the client's per-case delta would read as 0 for every case.
+    ``summary()`` is a read-only status query on both backends (confirmed: it
+    prints nothing and bills no FLOPs itself), so this is safe to call
+    unconditionally, including on the in-process backend where it is a no-op
+    refresh.
+    """
     local = dict(namespace)
+    ctx.summary()
     before = ctx.flops_used
     try:
         if case.setup:
             exec(case.setup, local)  # noqa: S102 - corpus is ours, not user input
         value = eval(case.source, local)  # noqa: S307 - corpus is ours
     except Exception as exc:  # noqa: BLE001 - recording, not handling
+        ctx.summary()
         return {"id": case.id, **observe_exception(exc, ctx.flops_used - before)}
+    ctx.summary()
     return {"id": case.id, **observe_result(value, ctx.flops_used - before)}
 
 
