@@ -38,3 +38,14 @@ def test_case_is_hashable_and_frozen():
     assert {case}
     with pytest.raises(AttributeError):
         case.source = "2"  # type: ignore[misc]
+
+
+def test_id_segments_must_be_non_empty():
+    for bad in ("/", "foo/", "/bar"):
+        with pytest.raises(ValueError, match="must be '<source>/<name>'"):
+            Case(id=bad, source="1")
+
+
+def test_id_name_segment_may_contain_slashes():
+    # Names legitimately contain further separators, e.g. grid op ids.
+    assert Case(id="grid/fft.rfft::axis-int", source="1").id.startswith("grid/")

@@ -34,11 +34,12 @@ class Case:
     tags: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
-        if "/" not in self.id:
+        parts = self.id.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
             raise ValueError(f"case id {self.id!r} must be '<source>/<name>'")
 
     def family(self) -> str | None:
-        """Return the audit family number this case covers, if tagged."""
+        """Return the defect-family label this case covers, if tagged."""
         for tag in self.tags:
             if tag.startswith("family:"):
                 return tag.split(":", 1)[1]
