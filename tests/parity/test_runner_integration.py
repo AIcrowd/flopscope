@@ -1,9 +1,11 @@
 """End-to-end: both backends, a real server, a known divergence.
 
-This is the CANARY. `idiom/complex-scalar-mul` is the 2026-07-25 seed bug: a
-Python complex operand cannot cross the wire. If this test stops reporting a
-divergence, either the bug was fixed (delete the canary and its allowlist entry)
-or the harness plumbing silently broke (fix the harness).
+This is the CANARY. `idiom/complex-scalar-mul` multiplies an array by a plain
+Python `complex` scalar; that operand cannot cross the wire to the client
+backend, so the two backends disagree on the outcome. If this test stops
+reporting a divergence, either the underlying defect was fixed (delete the
+canary and its allowlist entry) or the harness plumbing silently broke (fix
+the harness).
 """
 
 from __future__ import annotations
