@@ -5227,14 +5227,17 @@ ENTRIES: tuple[Entry, ...] = (
     ),
     Entry(
         case_id="idiom/complex-element-read",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
+        dimension="pytype",
+        category=Category.ACCEPTED_DIVERGENCE,
         reason=(
-            "`fnp.full((2,), 1.0, dtype='complex128')[0]` returns a bare complex"
-            " scalar in-process but raises on the client, which cannot pack a complex"
-            " scalar into its response."
+            "`fnp.full((2,), 1.0, dtype='complex128')[0]` now returns on both"
+            " backends: in-process as a bare `complex128` scalar, and on the client"
+            " as a 0-d array-wrapper handle. A complex scalar has no encodable"
+            " bare-value wire form, so the client necessarily wraps a"
+            " handle-delivered result rather than unwrapping it - the same shape"
+            " as the accepted `idiom/ndim-returns-int` `pytype` divergence."
         ),
-        issue="INTERNAL-P2-family-5",
+        issue="INTERNAL-P5-scalar-wrapper",
     ),
     Entry(
         case_id="idiom/tuple-axis-sum",
@@ -5544,6 +5547,58 @@ ENTRIES: tuple[Entry, ...] = (
             " anything (0 FLOPs)."
         ),
         issue="INTERNAL-P2-family-4",
+    ),
+    Entry(
+        case_id="types/bytes::constructor",
+        dimension="outcome",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "`fnp.asarray(b'\\x01\\x02')` produces an in-process array with a"
+            " byte-string dtype (`|S2`). The client has no decodable"
+            " representation for string/byte-string dtypes, so the server refuses"
+            " to mint a handle for it rather than returning one the client could"
+            " not read back - a deliberate choice, consistent with the client's"
+            " own `array()` already rejecting `bytes`/`str` inputs outright."
+        ),
+        issue="INTERNAL-P5-dtype-representation",
+    ),
+    Entry(
+        case_id="types/dict::constructor",
+        dimension="outcome",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "`fnp.asarray({'k': 1})` produces an in-process array with `object`"
+            " dtype. The client has no decodable representation for `object`"
+            " dtype, so the server refuses to mint a handle for it rather than"
+            " returning one the client could not read back - a deliberate choice."
+        ),
+        issue="INTERNAL-P5-dtype-representation",
+    ),
+    Entry(
+        case_id="types/dict::second-positional",
+        dimension="outcome",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "`fnp.where(M, {'k': 1}, 0.0)` produces an in-process array with"
+            " `object` dtype (from mixing a `dict` operand into the result). The"
+            " client has no decodable representation for `object` dtype, so the"
+            " server refuses to mint a handle for it rather than returning one the"
+            " client could not read back - a deliberate choice."
+        ),
+        issue="INTERNAL-P5-dtype-representation",
+    ),
+    Entry(
+        case_id="grid/where::scalar-operand",
+        dimension="outcome",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "`fnp.where(V, 2.0)` (the two-argument, condition-only form) produces"
+            " an in-process array with `object` dtype. The client has no decodable"
+            " representation for `object` dtype, so the server refuses to mint a"
+            " handle for it rather than returning one the client could not read"
+            " back - a deliberate choice."
+        ),
+        issue="INTERNAL-P5-dtype-representation",
     ),
 )
 
