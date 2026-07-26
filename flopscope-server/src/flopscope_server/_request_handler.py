@@ -590,13 +590,38 @@ class RequestHandler:
             return {"status": "ok", "result": meta, "budget": budget}
 
         if isinstance(result, (tuple, list)):
+            # Validate every element before storing anything: a later element
+            # failing decodability must not leave an earlier element's handle
+            # (array or 0-d scalar) stranded in the store. Refused means
+            # refused for the whole result, not a partial one.
+            for r in result:
+                if isinstance(r, np.generic) and not _is_msgpack_native(r.item()):
+                    dtype_str = str(r.dtype)
+                    if dtype_str not in _CLIENT_DECODABLE_DTYPES:
+                        return {
+                            "status": "error",
+                            "error_type": "UnsupportedReturnType",
+                            "message": (
+                                f"result dtype {dtype_str!r} cannot be "
+                                f"delivered to the client"
+                            ),
+                        }
+
             items = []
             for r in result:
                 if isinstance(r, np.ndarray):
                     handle = self._session.store_array(r)
                     items.append(self._session.array_metadata(handle))
                 elif isinstance(r, np.generic):
-                    items.append({"value": r.item(), "dtype": str(r.dtype)})
+                    item = r.item()
+                    if not _is_msgpack_native(item):
+                        # Not encodable by value, but decodability was already
+                        # confirmed above. Deliver it the way a 0-d array
+                        # result is already delivered.
+                        handle = self._session.store_array(np.asarray(r))
+                        items.append(self._session.array_metadata(handle))
+                    else:
+                        items.append({"value": item, "dtype": str(r.dtype)})
                 elif isinstance(r, (int, float)):
                     dtype_str = "float64" if isinstance(r, float) else "int64"
                     items.append({"value": r, "dtype": dtype_str})
@@ -614,9 +639,19 @@ class RequestHandler:
             dtype_str = str(result.dtype)
             item = result.item()
             if not _is_msgpack_native(item):
-                # Not encodable by value. Deliver it the way a 0-d array
-                # result is already delivered, rather than failing after the
-                # caller has been charged for computing it.
+                if dtype_str not in _CLIENT_DECODABLE_DTYPES:
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result dtype {dtype_str!r} cannot be delivered "
+                            f"to the client"
+                        ),
+                    }
+                # Not encodable by value, but the dtype is one the client can
+                # decode. Deliver it the way a 0-d array result is already
+                # delivered, rather than failing after the caller has been
+                # charged for computing it.
                 handle = self._session.store_array(np.asarray(result))
                 meta = self._session.array_metadata(handle)
                 return {"status": "ok", "result": meta, "budget": budget}
@@ -672,12 +707,16 @@ class RequestHandler:
         # conformance test (tests/test_registry_conformance.py) catches any op
         # whose return type lands here.
         serializable = _make_serializable(result)
-        if _is_msgpack_native(serializable):
-            return {"status": "ok", "result": {"value": serializable}, "budget": budget}
-        raise flops.UnsupportedReturnType(
-            f"{type(result).__name__} is not serializable across the "
-            f"client/server boundary"
-        )
+        if not _is_msgpack_native(serializable):
+            return {
+                "status": "error",
+                "error_type": "UnsupportedReturnType",
+                "message": (
+                    f"result of type {type(result).__name__!r} cannot be "
+                    f"encoded for delivery to the client"
+                ),
+            }
+        return {"status": "ok", "result": {"value": serializable}, "budget": budget}
 
 
 # ---------------------------------------------------------------------------
