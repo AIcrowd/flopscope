@@ -313,6 +313,15 @@ class RequestHandler:
                 "error_type": "ValueError",
                 "message": f"array too large: {len(data)} bytes exceeds {MAX_ARRAY_BYTES} byte limit",
             }
+        if dtype not in _CLIENT_DECODABLE_DTYPES:
+            return {
+                "status": "error",
+                "error_type": "UnsupportedDtypeError",
+                "message": (
+                    f"dtype {dtype!r} is not supported; arrays must use a dtype "
+                    f"the client can decode"
+                ),
+            }
         arr = np.frombuffer(data, dtype=dtype).reshape(shape).copy()
         handle = self._session.store_array(arr)
         meta = self._session.array_metadata(handle)
@@ -585,6 +594,15 @@ class RequestHandler:
                     "error_type": "ValueError",
                     "message": f"result array too large: {result.nbytes} bytes exceeds {MAX_ARRAY_BYTES} byte limit",
                 }
+            dtype_str = str(result.dtype)
+            if dtype_str not in _CLIENT_DECODABLE_DTYPES:
+                return {
+                    "status": "error",
+                    "error_type": "UnsupportedReturnType",
+                    "message": (
+                        f"result dtype {dtype_str!r} cannot be delivered to the client"
+                    ),
+                }
             handle = self._session.store_array(result)
             meta = self._session.array_metadata(handle)
             return {"status": "ok", "result": meta, "budget": budget}
@@ -595,17 +613,23 @@ class RequestHandler:
             # (array or 0-d scalar) stranded in the store. Refused means
             # refused for the whole result, not a partial one.
             for r in result:
+                undecodable_dtype = None
                 if isinstance(r, np.generic) and not _is_msgpack_native(r.item()):
-                    dtype_str = str(r.dtype)
-                    if dtype_str not in _CLIENT_DECODABLE_DTYPES:
-                        return {
-                            "status": "error",
-                            "error_type": "UnsupportedReturnType",
-                            "message": (
-                                f"result dtype {dtype_str!r} cannot be "
-                                f"delivered to the client"
-                            ),
-                        }
+                    undecodable_dtype = str(r.dtype)
+                elif isinstance(r, np.ndarray):
+                    undecodable_dtype = str(r.dtype)
+                if (
+                    undecodable_dtype is not None
+                    and undecodable_dtype not in _CLIENT_DECODABLE_DTYPES
+                ):
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result dtype {undecodable_dtype!r} cannot be "
+                            f"delivered to the client"
+                        ),
+                    }
 
             items = []
             for r in result:

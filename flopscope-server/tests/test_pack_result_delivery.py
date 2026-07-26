@@ -95,3 +95,60 @@ def test_tuple_with_array_then_undecodable_element_leaks_no_handle(handler):
     assert packed["status"] == "error"
     assert packed["error_type"] == "UnsupportedReturnType"
     assert len(handler._session._conn.arrays._arrays) == before
+
+
+def test_array_result_with_undecodable_dtype_is_refused_not_stored(handler):
+    # An array result (not a 0-d scalar) of an undecodable dtype must be
+    # refused at the top-level np.ndarray branch, not stored as a handle the
+    # client would fail to fetch later.
+    before = len(handler._session._conn.arrays._arrays)
+    arr = np.array(["2024-01-01", "2024-01-02"], dtype="datetime64[D]")
+    packed = handler._pack_result(arr)
+    assert packed["status"] == "error"
+    assert packed["error_type"] == "UnsupportedReturnType"
+    assert len(handler._session._conn.arrays._arrays) == before
+
+
+def test_tuple_with_undecodable_array_element_is_refused_not_stored(handler):
+    before = len(handler._session._conn.arrays._arrays)
+    arr = np.array(["2024-01-01"], dtype="datetime64[D]")
+    packed = handler._pack_result((arr, np.float64(1.0)))
+    assert packed["status"] == "error"
+    assert packed["error_type"] == "UnsupportedReturnType"
+    assert len(handler._session._conn.arrays._arrays) == before
+
+
+def test_tuple_with_array_then_undecodable_array_element_leaks_no_handle(handler):
+    # The first (decodable) array element would normally be stored before the
+    # later element is even inspected; the whole result must still be refused
+    # with no handle left over from the first array.
+    before = len(handler._session._conn.arrays._arrays)
+    arr1 = np.arange(3.0)
+    arr2 = np.array(["2024-01-01"], dtype="datetime64[D]")
+    packed = handler._pack_result((arr1, arr2))
+    assert packed["status"] == "error"
+    assert packed["error_type"] == "UnsupportedReturnType"
+    assert len(handler._session._conn.arrays._arrays) == before
+
+
+def test_create_from_data_refuses_an_undecodable_dtype(handler):
+    response = handler.handle(
+        {
+            "op": "create_from_data",
+            "args": [b"\x00" * 16, [2], "datetime64[D]"],
+            "kwargs": {},
+        }
+    )
+    assert response["status"] == "error"
+    assert "datetime64[D]" in response["message"]
+
+
+def test_create_from_data_still_accepts_a_normal_dtype(handler):
+    response = handler.handle(
+        {
+            "op": "create_from_data",
+            "args": [np.arange(3, dtype="float32").tobytes(), [3], "float32"],
+            "kwargs": {},
+        }
+    )
+    assert response["status"] == "ok"
