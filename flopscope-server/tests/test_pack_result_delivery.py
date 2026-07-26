@@ -152,3 +152,19 @@ def test_create_from_data_still_accepts_a_normal_dtype(handler):
         }
     )
     assert response["status"] == "ok"
+
+
+def test_oversize_element_of_a_multi_result_is_refused(handler, monkeypatch):
+    import flopscope_server._request_handler as rh
+
+    monkeypatch.setattr(rh, "MAX_ARRAY_BYTES", 1024)
+    big = np.zeros(4096, dtype="float64")  # 32768 bytes
+    before = len(handler._session._conn.arrays._arrays)
+
+    packed = handler._pack_result((np.zeros(2), big))
+
+    assert packed["status"] == "error"
+    assert "too large" in packed["message"]
+    assert len(handler._session._conn.arrays._arrays) == before, (
+        "a refused multi-result must not leave partial handles behind"
+    )

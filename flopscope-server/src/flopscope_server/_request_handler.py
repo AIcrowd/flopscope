@@ -625,9 +625,21 @@ class RequestHandler:
 
         if isinstance(result, (tuple, list)):
             # Validate every element before storing anything: a later element
-            # failing decodability must not leave an earlier element's handle
-            # (array or 0-d scalar) stranded in the store. Refused means
-            # refused for the whole result, not a partial one.
+            # failing the size or decodability check must not leave an
+            # earlier element's handle (array or 0-d scalar) stranded in the
+            # store. Refused means refused for the whole result, not a
+            # partial one.
+            for r in result:
+                if isinstance(r, np.ndarray) and r.nbytes > MAX_ARRAY_BYTES:
+                    return {
+                        "status": "error",
+                        "error_type": "ValueError",
+                        "message": (
+                            f"result array too large: {r.nbytes} bytes "
+                            f"exceeds {MAX_ARRAY_BYTES} byte limit"
+                        ),
+                    }
+
             for r in result:
                 undecodable_dtype = None
                 if isinstance(r, np.generic) and not _is_msgpack_native(r.item()):
