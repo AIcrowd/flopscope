@@ -2964,7 +2964,13 @@ def mask_indices(*args, **kwargs):
         args[1] = _strip_mask_func(args[1])
     elif "mask_func" in kwargs:
         kwargs["mask_func"] = _strip_mask_func(kwargs["mask_func"])
-    result = _np.mask_indices(*args, **kwargs)
+    # ``mask_func`` is participant code: route it through ``_call_user_code`` so
+    # its runtime books to residual, exactly as ``fromfunction`` / ``fromiter`` /
+    # ``apply_along_axis`` / ``apply_over_axes`` / ``piecewise`` already do.
+    # Calling ``_np.mask_indices`` bare left the callback's entire wall time in
+    # ``flopscope_overhead_time_s``, which is excluded from effective compute --
+    # i.e. arbitrary user computation ran free of charge on both axes.
+    result = _call_user_code(budget, _np.mask_indices, *args, **kwargs)
     cost = max(sum(int(r.size) for r in result), 1)
     with budget.deduct(
         # dtype-neutral (dtypes=()): index bookkeeping, same convention as

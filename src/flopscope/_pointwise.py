@@ -1255,6 +1255,68 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=None)
 
 
+def _ufunc_at_touched_cells(a, indices) -> int:
+    """Number of array cells ``ufunc.at(a, indices, ...)`` actually operates on.
+
+    ``ufunc.at`` applies the ufunc once per *selected cell*, not once per index.
+    An index expression selects along the LEADING axes it consumes; every
+    remaining (trailing) axis is swept in full. Costing by ``size(indices)``
+    alone therefore under-bills by ``prod(a.shape[consumed:])`` -- unbounded in
+    the trailing dimensions, e.g. a length-1 index into an ``(1, n, k, m)``
+    destination performs ``n*k*m`` operations for a bill of 1.
+
+    Rules, mirroring numpy's own indexing semantics:
+
+    * a tuple index consumes one leading axis per non-``newaxis`` entry, and
+      its array-like entries broadcast together;
+    * a single array-like index consumes exactly one axis;
+    * ``slice`` / ``Ellipsis`` entries select along their axis without
+      broadcasting, so they contribute that axis' length;
+    * anything unrecognised falls back to ``a.size`` (fail closed -- the old
+      upper bound), never to 1.
+    """
+    shape = getattr(a, "shape", None)
+    if shape is None:
+        return 1
+    total = int(_np.prod(shape)) if len(shape) else 1
+
+    entries = indices if isinstance(indices, tuple) else (indices,)
+    index_shapes: list = []
+    consumed = 0
+    for entry in entries:
+        if entry is None:  # np.newaxis consumes no source axis
+            continue
+        if consumed >= len(shape):
+            return _builtins.max(total, 1)
+        if entry is Ellipsis:
+            # Ellipsis may span several axes; fail closed rather than guess.
+            return _builtins.max(total, 1)
+        if isinstance(entry, slice):
+            index_shapes.append((len(range(*entry.indices(shape[consumed]))),))
+        elif isinstance(entry, (int, _np.integer)):
+            index_shapes.append(())
+        elif isinstance(entry, _np.ndarray):
+            index_shapes.append(entry.shape)
+        elif isinstance(entry, (list, tuple)):
+            try:
+                index_shapes.append(_np.asarray(entry).shape)
+            except Exception:  # pragma: no cover - exotic nested sequences
+                return _builtins.max(total, 1)
+        else:
+            return _builtins.max(total, 1)
+        consumed += 1
+
+    if consumed == 0:
+        return _builtins.max(total, 1)
+    try:
+        selected = int(_np.prod(_np.broadcast_shapes(*index_shapes))) if index_shapes else 1
+    except ValueError:  # pragma: no cover - numpy raises on the call itself
+        return _builtins.max(total, 1)
+
+    trailing = int(_np.prod(shape[consumed:])) if consumed < len(shape) else 1
+    return _builtins.max(selected * trailing, 1)
+
+
 @_counted_wrapper
 def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     """Cost-tracked ``ufunc.at(a, indices[, values])`` (in-place fancy index).
@@ -1288,14 +1350,7 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     indices_stripped = (
         _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
     )
-    if isinstance(indices, _np.ndarray):
-        n_ops = _builtins.max(int(_np.size(indices)), 1)
-    elif hasattr(a, "size"):
-        # Conservative for non-array index forms (slice / Ellipsis): use
-        # the input size as an upper bound on the touched cells.
-        n_ops = _builtins.max(int(a.size), 1)
-    else:
-        n_ops = 1
+    n_ops = _ufunc_at_touched_cells(a, indices)
     # Strip any flopscope-typed positional values too.
     stripped_args = tuple(
         _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
