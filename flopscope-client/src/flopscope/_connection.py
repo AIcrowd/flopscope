@@ -183,6 +183,14 @@ class Connection:
                     response.get("message", ""),
                 )
 
+            # Every compute-op response carries the server's authoritative
+            # budget; fold it into the active BudgetContext so flops_used is
+            # current after each op with no extra round trip. Lazy import: the
+            # budget module imports this one on its own paths.
+            from flopscope._budget import _sync_active_context_from_response
+
+            _sync_active_context_from_response(response)
+
             return response
 
     def _reset_socket(self) -> None:

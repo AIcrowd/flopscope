@@ -16,6 +16,27 @@ from flopscope._protocol import (
 _active_context = None
 
 
+def _sync_active_context_from_response(response: object) -> None:
+    """Refresh the active budget's cached ``flops_used`` from an op response.
+
+    Every compute-op response carries the server's authoritative budget under a
+    ``"budget"`` key. Consuming it here keeps :attr:`BudgetContext.flops_used`
+    current after every operation with no extra round trip, so a caller that
+    inspects it between ops sees a live value rather than a stale one.
+
+    Responses without a ``"budget"`` key — fetches, frees, the version
+    handshake, and the budget-lifecycle ops, which manage the cache through
+    their own paths — are ignored. Called from the single send/recv chokepoint,
+    so it must stay cheap and never raise.
+    """
+    if _active_context is None:
+        return
+    if isinstance(response, dict):
+        budget_info = response.get("budget")
+        if isinstance(budget_info, dict):
+            _active_context._update_budget(budget_info)
+
+
 def _extract_compute_ns(close_response: object) -> int:
     """Pull total server compute (ns) out of a ``budget_close`` response.
 
@@ -154,12 +175,21 @@ class BudgetContext:
 
     @property
     def flops_used(self) -> int:
-        """FLOPs consumed so far (cached locally, updated from server responses)."""
+        """FLOPs consumed so far.
+
+        Kept current from the budget the server returns on every operation, so
+        this reflects the count as of the most recent op without an extra round
+        trip. Reading it between operations is safe — it is not stale.
+        """
         return self._flops_used
 
     @property
     def flops_remaining(self) -> int:
-        """FLOPs remaining in the budget (``budget - used``)."""
+        """FLOPs remaining in the budget (``budget - used``).
+
+        Tracks :attr:`flops_used`, so it too is current as of the most recent
+        operation.
+        """
         return self._flop_budget - self._flops_used
 
     @property
