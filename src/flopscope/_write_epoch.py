@@ -31,14 +31,20 @@ _ROOTS: dict[int, weakref.ref] = {}
 def buffer_root(arr):
     """Return the array that owns ``arr``'s memory, following the view chain.
 
-    The walk stops at the last ndarray, so the root is always weak-referenceable
-    even when the chain bottoms out in a non-array exporter such as ``bytes``.
+    The walk continues through non-array links and keeps the last ndarray it
+    saw. Some views interpose a non-array object -- ``as_strided`` inserts a
+    private shim -- and stopping there would treat the view as its own root, so
+    a write through it would not reach the tags on the real buffer. Keeping the
+    last ndarray also means the root is always weak-referenceable, even when the
+    chain bottoms out in an exporter such as ``bytes``.
     """
+    root = arr
     base = getattr(arr, "base", None)
-    while isinstance(base, _np.ndarray):
-        arr = base
-        base = getattr(arr, "base", None)
-    return arr
+    while base is not None:
+        if isinstance(base, _np.ndarray):
+            root = base
+        base = getattr(base, "base", None)
+    return root
 
 
 def epoch_of(arr) -> int:

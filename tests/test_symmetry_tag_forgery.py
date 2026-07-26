@@ -129,6 +129,18 @@ def test_write_through_untagged_parent_does_not_forge_tag():
     _assert_claim_does_not_survive(tagged, lambda _: fnp.copyto(parent, _asymmetric()))
 
 
+def test_write_through_a_shim_interposed_view_does_not_forge_tag():
+    """as_strided interposes a non-array object in the view chain, so the root
+    walk has to see through it to reach the tags on the real buffer."""
+    load_weights()
+    parent = _symmetric()
+    tagged = f.as_symmetric(parent, symmetry=(0, 1))
+    strided = np.lib.stride_tricks.as_strided(
+        np.asarray(tagged), shape=(N, N), strides=np.asarray(tagged).strides
+    )
+    _assert_claim_does_not_survive(tagged, lambda _: fnp.copyto(strided, _asymmetric()))
+
+
 def test_write_through_untagged_alias_does_not_forge_tag():
     """fnp.asarray/ravel hand back untagged aliases of a tagged buffer."""
     load_weights()
