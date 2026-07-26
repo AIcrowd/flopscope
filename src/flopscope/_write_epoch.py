@@ -24,8 +24,10 @@ import weakref
 
 import numpy as _np
 
-_EPOCHS: dict[int, int] = {}
-_ROOTS: dict[int, weakref.ref] = {}
+_ExtentKey = tuple[int, int]
+
+_EPOCHS: dict[_ExtentKey, int] = {}
+_ROOTS: dict[_ExtentKey, weakref.ref] = {}
 
 
 def buffer_root(arr):
@@ -47,18 +49,24 @@ def buffer_root(arr):
     return root
 
 
-def epoch_of(arr) -> int:
-    """Number of recorded writes to ``arr``'s buffer.
+def _extent_key(root) -> _ExtentKey:
+    """Identify the memory a root array covers, not the array object itself.
 
-    Returns 0 for a buffer that has never been written. The identity check
-    against the stored weakref means a recycled ``id`` reads as 0 rather than
-    inheriting a dead buffer's count.
+    Arrays built independently over one exporter -- two ``frombuffer`` calls on
+    the same ``bytearray``, say -- each end their view chain at a different
+    ndarray, so object identity would give them separate counters and a write
+    through one would not reach tags on the other. Their address and extent are
+    shared, which is the property that actually matters here.
     """
-    root = buffer_root(arr)
-    ref = _ROOTS.get(id(root))
-    if ref is None or ref() is not root:
-        return 0
-    return _EPOCHS.get(id(root), 0)
+    try:
+        return (root.__array_interface__["data"][0], root.nbytes)
+    except (AttributeError, TypeError, KeyError):
+        return (id(root), -1)
+
+
+def epoch_of(arr) -> int:
+    """Number of recorded writes to ``arr``'s buffer. 0 if never written."""
+    return _EPOCHS.get(_extent_key(buffer_root(arr)), 0)
 
 
 def note_write(target) -> None:
@@ -74,15 +82,18 @@ def note_write(target) -> None:
     if not isinstance(target, _np.ndarray):
         return
     root = buffer_root(target)
-    key = id(root)
-    ref = _ROOTS.get(key)
-    if ref is None or ref() is not root:
-        # First write to this buffer (or a recycled id): start a fresh count.
+    key = _extent_key(root)
+    _EPOCHS[key] = _EPOCHS.get(key, 0) + 1
+    if key not in _ROOTS:
+        # Drop the count once the buffer we first saw at this extent goes away,
+        # so the table tracks live buffers. Losing a count can only make a
+        # stamped epoch stop matching, which voids a tag rather than reviving
+        # one -- the safe direction if the address is later reused.
         def _drop(_dead, key=key):
             _EPOCHS.pop(key, None)
             _ROOTS.pop(key, None)
 
-        _ROOTS[key] = weakref.ref(root, _drop)
-        _EPOCHS[key] = 1
-        return
-    _EPOCHS[key] = _EPOCHS.get(key, 0) + 1
+        try:
+            _ROOTS[key] = weakref.ref(root, _drop)
+        except TypeError:  # pragma: no cover - ndarrays are weak-referenceable
+            pass

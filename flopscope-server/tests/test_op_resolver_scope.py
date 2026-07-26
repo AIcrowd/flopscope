@@ -30,15 +30,31 @@ def handler():
         "_array_ops._np.matmul",  # raw numpy module
         "_symmetry_utils.wrap_with_trusted_symmetry",
         "SymmetricTensor",  # tag mint via the class itself
+        # Public, but not ops: configure mutates process-global settings that
+        # steer later cost decisions (symmetry budgets, einsum path cache).
+        "configure",
+        "BudgetContext",
     ],
 )
-def test_internal_names_are_not_callable_ops(op):
+def test_non_op_names_are_not_callable(op):
     with pytest.raises(AttributeError):
         _get_flopscope_func(op)
 
 
 def test_public_ops_still_resolve():
-    for op in ("matmul", "einsum", "linalg.inv", "fft.fft"):
+    for op in ("matmul", "einsum", "linalg.inv", "fft.fft", "random.default_rng"):
+        assert callable(_get_flopscope_func(op))
+
+
+def test_registered_symmetry_ops_still_resolve():
+    """as_symmetric and symmetrize are counted ops -- as_symmetric validates the
+    data and charges for it before tagging, so it is not a free mint."""
+    for op in ("as_symmetric", "symmetrize"):
+        assert callable(_get_flopscope_func(op))
+
+
+def test_rng_constructors_still_resolve():
+    for op in ("random.RandomState", "random.SeedSequence"):
         assert callable(_get_flopscope_func(op))
 
 

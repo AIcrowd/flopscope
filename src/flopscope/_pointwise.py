@@ -384,8 +384,10 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
         return _call_numpy(np_func, *args, out=out_stripped, **kwargs)
     result = _call_numpy(np_func, *args, **kwargs)
     # Fallback copy when np_func doesn't natively support out=. This is
-    # flopscope's overhead, NOT routed through _call_numpy.
+    # flopscope's overhead, NOT routed through _call_numpy -- so the write has
+    # to be recorded here, or a tag on `out`'s buffer would outlive its data.
     _np.copyto(out_stripped, _np.asarray(result), casting="unsafe")  # type: ignore[arg-type]
+    note_write(out)
     return out
 
 

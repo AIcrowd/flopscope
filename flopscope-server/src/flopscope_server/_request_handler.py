@@ -633,6 +633,23 @@ class RequestHandler:
 # ---------------------------------------------------------------------------
 
 
+# The registry is the generated list of counted ops. RNG constructors are not
+# registry entries but are part of the supported client surface (their sampling
+# methods are gated separately by _ALLOWED_GEN_METHODS/_ALLOWED_RS_METHODS).
+_RNG_CONSTRUCTORS = frozenset(
+    {"random.RandomState", "random.SeedSequence", "random.Generator"}
+)
+
+
+def _callable_ops() -> frozenset[str]:
+    from flopscope._registry import REGISTRY
+
+    return frozenset(REGISTRY) | _RNG_CONSTRUCTORS
+
+
+_CALLABLE_OPS = _callable_ops()
+
+
 def _get_flopscope_func(op_name: str):
     """Look up a flopscope op by dotted name (e.g. 'linalg.svd', 'stats.norm.pdf').
 
@@ -649,13 +666,15 @@ def _get_flopscope_func(op_name: str):
     """
     import flopscope.numpy as fnp
 
-    parts = op_name.split(".")
-    # Only public names are callable ops. Without this the getattr walk reaches
-    # private helpers and the modules they import -- including internal
-    # symmetry-tag constructors, which mint a billing-relevant claim outside any
-    # counted wrapper, and re-exported third-party modules.
-    if any(part.startswith("_") for part in parts):
+    # Resolve against the op registry rather than whatever the getattr walk can
+    # reach. Treating every public attribute as an op exposed process-global
+    # helpers -- `configure` alone lets a caller change symmetry budgets and the
+    # einsum path cache, which steers later cost decisions for the session --
+    # and internal symmetry-tag constructors, which mint a claim the cost model
+    # prices on without going through a counted wrapper.
+    if op_name not in _CALLABLE_OPS:
         raise AttributeError(f"flopscope does not provide {op_name!r}")
+    parts = op_name.split(".")
     for base in (fnp, flops):
         obj = base
         try:
@@ -663,12 +682,6 @@ def _get_flopscope_func(op_name: str):
                 obj = getattr(obj, part)
         except AttributeError:
             continue
-        # Array types are not ops. Constructing one directly sidesteps the
-        # counted constructors -- SymmetricTensor in particular attaches a
-        # symmetry tag, which the cost model prices on, for free. RNG classes
-        # such as RandomState/SeedSequence stay reachable; they are ops.
-        if isinstance(obj, type) and issubclass(obj, np.ndarray):
-            raise AttributeError(f"flopscope does not provide {op_name!r}")
         return obj
     raise AttributeError(f"flopscope does not provide {op_name!r}")
 
