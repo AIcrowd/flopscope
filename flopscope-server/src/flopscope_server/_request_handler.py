@@ -59,14 +59,30 @@ def _allowed_rs_methods() -> frozenset:
 
 _ALLOWED_RS_METHODS = _allowed_rs_methods()
 
-# Ops whose result can store more than one array/scalar handle. The
-# per-request capacity gate in RequestHandler.handle() must know this BEFORE
-# dispatch: flopscope charges FLOPs synchronously as part of running an op
-# (BudgetContext.deduct charges before the numpy kernel is even invoked —
-# see flopscope._budget), so once dispatch begins the charge is permanent.
-# A refusal decided only after the op has already run would no longer be
-# free. Values are a conservative upper bound on the number of handles a
-# single call can produce, keyed by dotted op name.
+# Capacity is enforced in two layers; this table is the first, not the only
+# one:
+#
+#   1. This table + the pre-dispatch gate in RequestHandler.handle() (below,
+#      around _prospective_handle_count). A best-effort OPTIMISATION: when an
+#      op's arity is listed here, a capacity refusal happens before dispatch,
+#      so nothing was computed or charged -- the refusal is free. flopscope
+#      charges FLOPs synchronously as part of running an op
+#      (BudgetContext.deduct charges before the numpy kernel is even invoked
+#      -- see flopscope._budget), so once dispatch begins the charge is
+#      permanent; this table exists to decide BEFORE that point. It is
+#      allowed to be incomplete -- ops with shape-dependent arity (e.g.
+#      nonzero, which returns one array per dimension) are intentionally not
+#      enumerated here.
+#   2. The exact handle count computed in _pack_result, from the actual
+#      result, before its first store. That layer is the GUARANTEE: it is
+#      table-independent and universal, so no operation -- listed here or
+#      not -- can ever strand a handle. It is not free (the op has already
+#      run and been charged by then), only leak-proof.
+#
+# Do not "complete" this table for more ops. Its job is to make the common
+# multi-handle ops free to refuse; the second layer is what makes refusal
+# safe for everything else. Values are a conservative upper bound on the
+# number of handles a single call can produce, keyed by dotted op name.
 _FIXED_MULTI_HANDLE_COUNTS: dict[str, int] = {
     "linalg.eig": 2,
     "linalg.eigh": 2,
@@ -724,6 +740,46 @@ class RequestHandler:
                             f"cannot be encoded for delivery to the client"
                         ),
                     }
+
+            # Second capacity layer, table-independent and exact: the
+            # pre-dispatch gate in RequestHandler.handle() (see
+            # _prospective_handle_count) is a best-effort table of known
+            # multi-handle ops, so a refusal there is free -- the op never
+            # ran. But an op with shape-dependent arity (e.g. nonzero, which
+            # returns one array per dimension) can strand a handle if it is
+            # missing from that table: with one free slot, the loop below
+            # would store its first element, then hit MemoryError storing
+            # its second, leaving the first stranded with no id ever
+            # delivered to the caller to free it.
+            #
+            # By this point in _pack_result the result already exists, so
+            # the number of handles it will actually store is known exactly
+            # -- no table, no guessing. Refusing here closes that gap
+            # universally, for every op, regardless of whether anyone
+            # remembered to list it. The trade-off: the op has already run
+            # and been charged (see the module comment above
+            # _FIXED_MULTI_HANDLE_COUNTS), so unlike the pre-dispatch gate,
+            # this refusal is NOT free for an op the table doesn't cover --
+            # it only guarantees nothing is stranded, and stores nothing
+            # itself.
+            handles_needed = sum(
+                1
+                for r in result
+                if isinstance(r, np.ndarray)
+                or (isinstance(r, np.generic) and not _is_msgpack_native(r.item()))
+            )
+            if (
+                self._session.array_count + handles_needed
+                > _array_store.MAX_ARRAY_COUNT
+            ):
+                return {
+                    "status": "error",
+                    "error_type": "MemoryError",
+                    "message": (
+                        f"array store limit reached: "
+                        f"{_array_store.MAX_ARRAY_COUNT} arrays"
+                    ),
+                }
 
             items = []
             for r in result:

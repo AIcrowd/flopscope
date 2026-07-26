@@ -63,6 +63,48 @@ def test_a_multi_array_result_refuses_before_charging(session, monkeypatch):
     )
 
 
+def test_a_shape_dependent_arity_op_is_charged_but_never_strands_a_handle(
+    session, monkeypatch
+):
+    """nonzero returns one array per dimension of its input -- an arity the
+    static _FIXED_MULTI_HANDLE_COUNTS table does not (and by design should
+    not) enumerate, since it depends on the input's ndim rather than the op
+    name alone. The pre-dispatch gate therefore reserves only 1 slot for it,
+    same as any untabulated op.
+
+    With exactly one free slot, dispatch proceeds, the op runs and is
+    charged, and a 2-D input needs 2 handles. The exact count computed in
+    _pack_result before the first store must still refuse and leave the
+    store untouched -- the second, table-independent layer is what prevents
+    the first handle from being stranded here, not the pre-dispatch table.
+    Unlike the free pre-dispatch refusal, this one is NOT free: the op
+    already ran, so it is still charged. That charge is the accepted
+    trade-off, not a bug -- assert it explicitly so it stays pinned.
+    """
+    handler = RequestHandler(session)
+    a = session.store_array(np.array([[0, 1], [1, 0]], dtype="float64"))
+    # array_count is now 1; MAX_ARRAY_COUNT=2 means exactly one slot free.
+    monkeypatch.setattr(_array_store, "MAX_ARRAY_COUNT", 2)
+    before_flops = session.budget_context.flops_used
+    before_count = session.array_count
+
+    response = handler.handle(
+        {"op": "nonzero", "args": [{"__handle__": a}], "kwargs": {}}
+    )
+
+    assert response["status"] == "error"
+    assert session.array_count == before_count, (
+        "the exact-count check in _pack_result must refuse before storing "
+        "anything, leaving no handle stranded"
+    )
+    assert session.budget_context.flops_used > before_flops, (
+        "this refusal is not free: the op already ran and was charged "
+        "before _pack_result could know its exact handle count -- only the "
+        "pre-dispatch table (which does not cover shape-dependent arity "
+        "ops like nonzero) can make a refusal free"
+    )
+
+
 def test_a_genuine_failure_is_still_charged(session):
     handler = RequestHandler(session)
     singular = session.store_array(np.zeros((64, 64), dtype="float64"))
