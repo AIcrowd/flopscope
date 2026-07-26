@@ -51,6 +51,7 @@ from flopscope._symmetry_utils import (
     unique_elements_for_shape,
 )
 from flopscope._validation import maybe_check_nan_inf, require_budget
+from flopscope._write_epoch import note_write
 from flopscope.errors import (
     CostFallbackWarning,
     SymmetryError,
@@ -241,21 +242,29 @@ def _prepare_symmetric_out(out, target_symmetry):
     return target_symmetry
 
 
-def _validate_result_symmetry(result, symmetry):
+def _validate_result_symmetry(result, symmetry) -> bool:
+    """Raise if ``result`` contradicts ``symmetry``; report whether it was checked.
+
+    The return value is the caller's licence to stamp ``symmetry`` onto a
+    buffer: it is ``True`` only when the data was actually verified against the
+    group. Callers that cannot verify must not re-stamp, otherwise an
+    unverifiable result launders a tag onto asymmetric data.
+    """
     if symmetry is None:
-        return
+        return False
     result_arr = _np.asarray(result)
     # Skip numerical validation when the result has non-finite entries:
     # np.allclose treats inf-inf=nan as not-close, which would raise a
     # false SymmetryError. The symmetry was already enforced structurally
     # by the (symmetric) inputs; numerical checks on inf/nan are meaningless.
     if not _np.all(_np.isfinite(result_arr)):
-        return
+        return False
     if not _check_generators(result_arr, symmetry):
         axes = symmetry.axes
         if axes is None:
             axes = tuple(range(symmetry.degree))
         raise SymmetryError(axes=tuple(axes), max_deviation=float("inf"))
+    return True
 
 
 def _is_oversized_for_cost_model(group):
@@ -424,8 +433,14 @@ def _wrap_result(result, *, out=None, symmetry=None):
             _validate_result_symmetry(result, symmetry)
             return out
         effective_symmetry = _prepare_symmetric_out(out, symmetry)
-        _validate_result_symmetry(result, effective_symmetry)
+        verified = _validate_result_symmetry(result, effective_symmetry)
         _np.copyto(_np.asarray(out), _np.asarray(result), casting="unsafe")
+        # This copy is flopscope-internal and so bypasses _call_numpy's hook.
+        # Whatever ``out`` claimed before describes data that is now gone; the
+        # claim only comes back if this result was verified against the group.
+        note_write(out)
+        if verified:
+            out._symmetry = effective_symmetry
         return out
     if symmetry is not None:
         return SymmetricTensor(_np.asarray(result), symmetry=symmetry)
@@ -2904,8 +2919,9 @@ def _einsum_routed_binary(
         maybe_check_nan_inf(result, op_name)
     if out is not None:
         result = out
-    if info.output_symmetry is not None:
-        _validate_result_symmetry(result, info.output_symmetry)
+    if info.output_symmetry is not None and _validate_result_symmetry(
+        result, info.output_symmetry
+    ):
         return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
     return _asflopscope(result) if inputs_were_whest else result
 

@@ -18,6 +18,7 @@ from flopscope._budget import _counted_wrapper
 from flopscope._ndarray import _asflopscope, _to_base_ndarray
 from flopscope._registry import REGISTRY
 from flopscope._validation import require_budget
+from flopscope._write_epoch import note_write
 from flopscope.errors import UnsupportedFunctionError
 from flopscope.numpy.random._cost_formulas import COST_FORMULAS
 
@@ -64,6 +65,13 @@ def _make_counted_method(
             )
         else:
             call_args = args
+        # numpy is called directly here rather than through _call_numpy, so the
+        # write hook there does not see these destinations.
+        out = kwargs.get("out")
+        if out is not None:
+            note_write(out)
+        if method_name == "shuffle" and args:
+            note_write(args[0])
         result = base_method(plain, *call_args, **kwargs)
         cost = formula(args, kwargs, result)
         if method_name in _movement_methods:

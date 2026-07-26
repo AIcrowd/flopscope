@@ -621,10 +621,15 @@ def einsum(
         maybe_check_nan_inf(out, "einsum")
         return out
 
-    if target_symmetry is not None:
-        _validate_result_symmetry(result, target_symmetry)
+    if target_symmetry is not None and _validate_result_symmetry(
+        result, target_symmetry
+    ):
         result = SymmetricTensor(_np.asarray(result), symmetry=target_symmetry)
     else:
+        # An unverified claim is not stamped. Validation is skipped for
+        # non-finite results, so tagging regardless would let a caller mint a
+        # symmetry claim on asymmetric data by poisoning one entry and then
+        # cleaning it up downstream.
         result = _asflopscope(_np.asarray(result))
 
     maybe_check_nan_inf(result, "einsum")

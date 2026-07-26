@@ -18,6 +18,7 @@ from flopscope._symmetry_utils import (
     validate_symmetry_group,
 )
 from flopscope._validation import require_budget
+from flopscope._write_epoch import epoch_of
 from flopscope.errors import SymmetryError
 
 # ---------------------------------------------------------------------------
@@ -603,7 +604,11 @@ class SymmetricTensor(FlopscopeArray):
     Do not instantiate directly; use :func:`as_symmetric`.
     """
 
-    __slots__ = ("_symmetry", "_symmetry_inferred")
+    __slots__ = (
+        "_symmetry_raw",
+        "_symmetry_inferred",
+        "_symmetry_epoch",
+    )
 
     def __new__(
         cls,
@@ -619,6 +624,26 @@ class SymmetricTensor(FlopscopeArray):
     def __array_finalize__(self, obj: object) -> None:
         self._symmetry = None
         self._symmetry_inferred = False
+
+    # The tag is a billing claim about buffer contents, so it is stamped with
+    # the buffer's write count and voided once that count moves. Gating the
+    # storage rather than the public ``symmetry`` property covers the internal
+    # ``self._symmetry`` reads too, so a voided tag cannot be laundered back
+    # out through ``copy()``, ``.T``, slicing or a pickle round-trip.
+    @property
+    def _symmetry(self):
+        raw = self._symmetry_raw
+        if raw is None:
+            return None
+        if epoch_of(self) != self._symmetry_epoch:
+            self._symmetry_raw = None  # latch: a voided claim never returns
+            return None
+        return raw
+
+    @_symmetry.setter
+    def _symmetry(self, value) -> None:
+        self._symmetry_raw = value
+        self._symmetry_epoch = 0 if value is None else epoch_of(self)
 
     def __array_wrap__(self, out_arr, context=None, return_scalar=False):
         result = super().__array_wrap__(out_arr, context, return_scalar)

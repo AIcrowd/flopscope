@@ -650,6 +650,12 @@ def _get_flopscope_func(op_name: str):
     import flopscope.numpy as fnp
 
     parts = op_name.split(".")
+    # Only public names are callable ops. Without this the getattr walk reaches
+    # private helpers and the modules they import -- including internal
+    # symmetry-tag constructors, which mint a billing-relevant claim outside any
+    # counted wrapper, and re-exported third-party modules.
+    if any(part.startswith("_") for part in parts):
+        raise AttributeError(f"flopscope does not provide {op_name!r}")
     for base in (fnp, flops):
         obj = base
         try:
@@ -657,6 +663,12 @@ def _get_flopscope_func(op_name: str):
                 obj = getattr(obj, part)
         except AttributeError:
             continue
+        # Array types are not ops. Constructing one directly sidesteps the
+        # counted constructors -- SymmetricTensor in particular attaches a
+        # symmetry tag, which the cost model prices on, for free. RNG classes
+        # such as RandomState/SeedSequence stay reachable; they are ops.
+        if isinstance(obj, type) and issubclass(obj, np.ndarray):
+            raise AttributeError(f"flopscope does not provide {op_name!r}")
         return obj
     raise AttributeError(f"flopscope does not provide {op_name!r}")
 

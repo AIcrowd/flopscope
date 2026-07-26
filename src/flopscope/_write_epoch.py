@@ -1,0 +1,82 @@
+"""Buffer write epochs -- the mechanism that voids a symmetry tag when its data changes.
+
+A symmetry tag is a billing claim about buffer contents. It is validated once,
+by :func:`flopscope.as_symmetric` or inferred from shape on a constant fill,
+and from then on the cost model trusts it and never re-reads the data. Any
+write into the buffer therefore invalidates the claim -- including a write made
+through an *untagged* alias, because ``as_symmetric`` returns a view and
+``asarray``/``ravel`` hand back untagged aliases of a tagged buffer.
+
+The aliases of a buffer cannot be enumerated from the buffer, so tags are not
+cleared eagerly on write. Instead each tag records the buffer's write count at
+the moment it was stamped, and reads void the tag when the counts diverge.
+Every alias shares one counter because they share one ``.base`` chain root,
+which is what lets a write through an untagged alias void a tag it cannot see.
+
+Counters exist only for buffers that have actually been written and are dropped
+when the buffer dies, so the table stays proportional to live written buffers
+rather than to all arrays.
+"""
+
+from __future__ import annotations
+
+import weakref
+
+import numpy as _np
+
+_EPOCHS: dict[int, int] = {}
+_ROOTS: dict[int, weakref.ref] = {}
+
+
+def buffer_root(arr):
+    """Return the array that owns ``arr``'s memory, following the view chain.
+
+    The walk stops at the last ndarray, so the root is always weak-referenceable
+    even when the chain bottoms out in a non-array exporter such as ``bytes``.
+    """
+    base = getattr(arr, "base", None)
+    while isinstance(base, _np.ndarray):
+        arr = base
+        base = getattr(arr, "base", None)
+    return arr
+
+
+def epoch_of(arr) -> int:
+    """Number of recorded writes to ``arr``'s buffer.
+
+    Returns 0 for a buffer that has never been written. The identity check
+    against the stored weakref means a recycled ``id`` reads as 0 rather than
+    inheriting a dead buffer's count.
+    """
+    root = buffer_root(arr)
+    ref = _ROOTS.get(id(root))
+    if ref is None or ref() is not root:
+        return 0
+    return _EPOCHS.get(id(root), 0)
+
+
+def note_write(target) -> None:
+    """Record that ``target``'s buffer was written, voiding tags that observe it.
+
+    Accepts the shapes an ``out=`` argument can take, including the tuple form
+    used by multi-output ufuncs, and ignores non-arrays.
+    """
+    if isinstance(target, (tuple, list)):
+        for item in target:
+            note_write(item)
+        return
+    if not isinstance(target, _np.ndarray):
+        return
+    root = buffer_root(target)
+    key = id(root)
+    ref = _ROOTS.get(key)
+    if ref is None or ref() is not root:
+        # First write to this buffer (or a recycled id): start a fresh count.
+        def _drop(_dead, key=key):
+            _EPOCHS.pop(key, None)
+            _ROOTS.pop(key, None)
+
+        _ROOTS[key] = weakref.ref(root, _drop)
+        _EPOCHS[key] = 1
+        return
+    _EPOCHS[key] = _EPOCHS.get(key, 0) + 1
