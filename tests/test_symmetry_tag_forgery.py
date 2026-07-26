@@ -143,7 +143,7 @@ def test_rng_out_does_not_forge_tag():
     with f.BudgetContext(flop_budget=10**18, quiet=True):
         z = fnp.zeros((N, N))
         fnp.random.default_rng(0).random(out=z)
-        assert z.symmetry is None
+        assert getattr(z, "symmetry", None) is None
 
 
 def test_unverified_symmetry_claim_is_not_minted():
@@ -164,7 +164,7 @@ def test_tag_inherited_by_a_constant_fill_still_voids_on_write():
         tagged = f.as_symmetric(_symmetric(), symmetry=(0, 1))
         arena = fnp.zeros_like(tagged)
         fnp.copyto(arena, _asymmetric())
-        assert arena.symmetry is None
+        assert getattr(arena, "symmetry", None) is None
 
 
 # --- the discount must still work when it is honestly earned -------------
