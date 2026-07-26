@@ -11,6 +11,7 @@ import numpy as np
 
 import flopscope as flops
 from flopscope._perm_group import SymmetryGroup, _Permutation
+from flopscope_server import _array_store
 from flopscope_server._session import Session
 
 _HANDLE_RE = re.compile(r"^a\d+$")
@@ -189,6 +190,21 @@ class RequestHandler:
                 return self._handle_free(request)
             if op == "budget_status":
                 return self._handle_budget_status()
+
+            # Capacity is checked before dispatch, on purpose: ArrayStore.put
+            # raises only at store time, which for every op below is after
+            # the op has already run and been charged. Refusing here instead
+            # means an over-capacity request costs the caller nothing.
+            if self._session.array_count >= _array_store.MAX_ARRAY_COUNT:
+                return {
+                    "status": "error",
+                    "error_type": "MemoryError",
+                    "message": (
+                        f"array store limit reached: "
+                        f"{_array_store.MAX_ARRAY_COUNT} arrays"
+                    ),
+                }
+
             if op == "create_from_data":
                 return self._handle_create_from_data(request)
             if op == "__getitem__":
