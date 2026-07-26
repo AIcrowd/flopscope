@@ -97,6 +97,28 @@ def _is_msgpack_native(obj) -> bool:
 #: Maximum allowed array size in bytes (configurable via environment variable).
 MAX_ARRAY_BYTES = int(os.environ.get("FLOPSCOPE_MAX_ARRAY_BYTES", 100 * 1024 * 1024))
 
+#: Dtypes the client knows how to decode off the wire. Mirrors the client's
+#: own table; a handle minted with any other dtype would be unreadable, so a
+#: result carrying one is refused rather than stored.
+_CLIENT_DECODABLE_DTYPES: frozenset[str] = frozenset(
+    {
+        "bool",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
+        "float16",
+        "float32",
+        "float64",
+        "complex64",
+        "complex128",
+    }
+)
+
 
 class RequestHandler:
     """Dispatch decoded request dicts to real flopscope functions.
@@ -590,9 +612,17 @@ class RequestHandler:
         # Scalar or other value
         if isinstance(result, np.generic):
             dtype_str = str(result.dtype)
+            item = result.item()
+            if not _is_msgpack_native(item):
+                # Not encodable by value. Deliver it the way a 0-d array
+                # result is already delivered, rather than failing after the
+                # caller has been charged for computing it.
+                handle = self._session.store_array(np.asarray(result))
+                meta = self._session.array_metadata(handle)
+                return {"status": "ok", "result": meta, "budget": budget}
             return {
                 "status": "ok",
-                "result": {"value": result.item(), "dtype": dtype_str},
+                "result": {"value": item, "dtype": dtype_str},
                 "budget": budget,
             }
         if isinstance(result, bool):
