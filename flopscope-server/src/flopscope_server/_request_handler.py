@@ -677,11 +677,30 @@ def _get_flopscope_func(op_name: str):
     parts = op_name.split(".")
     for base in (fnp, flops):
         obj = base
+        through_class = False
         try:
             for part in parts:
+                # Resolving an attribute OFF a class (e.g. the ``seed`` in
+                # ``random.RandomState.seed``) yields an unbound method that
+                # requires an instance. Calling one with a participant-supplied
+                # array as ``self`` reaches numpy C code that does not
+                # type-check ``self`` and segfaults the whole process. These
+                # fully-qualified names exist in the registry as a billing
+                # catalog only; the supported way to call a generator method is
+                # the client's un-prefixed ``Generator.<method>`` form, routed
+                # onto a real instance well before this function. So a
+                # resolution that crosses a class is always a misuse -- refuse
+                # it with a typed error rather than dispatch an unbound method.
+                if isinstance(obj, type):
+                    through_class = True
                 obj = getattr(obj, part)
         except AttributeError:
             continue
+        if through_class:
+            raise flops.UnsupportedFunctionError(
+                f"{op_name!r} names a method that requires an instance and "
+                f"cannot be called as a standalone operation"
+            )
         return obj
     raise AttributeError(f"flopscope does not provide {op_name!r}")
 
