@@ -59,6 +59,46 @@ def _allowed_rs_methods() -> frozenset:
 
 _ALLOWED_RS_METHODS = _allowed_rs_methods()
 
+# Ops whose result can store more than one array/scalar handle. The
+# per-request capacity gate in RequestHandler.handle() must know this BEFORE
+# dispatch: flopscope charges FLOPs synchronously as part of running an op
+# (BudgetContext.deduct charges before the numpy kernel is even invoked —
+# see flopscope._budget), so once dispatch begins the charge is permanent.
+# A refusal decided only after the op has already run would no longer be
+# free. Values are a conservative upper bound on the number of handles a
+# single call can produce, keyed by dotted op name.
+_FIXED_MULTI_HANDLE_COUNTS: dict[str, int] = {
+    "linalg.eig": 2,
+    "linalg.eigh": 2,
+    "linalg.qr": 2,
+    "linalg.svd": 3,
+    "linalg.slogdet": 2,
+    "linalg.lstsq": 4,
+    "modf": 2,
+    "frexp": 2,
+    "divmod": 2,
+    "polydiv": 2,
+    "histogram": 2,
+    "histogram2d": 3,
+}
+
+# Ops that return one output array per array argument, i.e. arity equals the
+# number of array handles in the request rather than a fixed constant.
+_PER_ARG_MULTI_HANDLE_OPS = frozenset({"meshgrid", "broadcast_arrays", "ix_"})
+
+
+def _prospective_handle_count(op: str, raw_args: list) -> int:
+    """Upper bound on array/scalar handles *op* could store, without dispatching it.
+
+    Used by the pre-dispatch capacity gate in :meth:`RequestHandler.handle`
+    so a capacity refusal never depends on having already run (and therefore
+    already charged) the operation. Defaults to 1 -- a single array or 0-d
+    scalar handle -- which covers every op not listed above.
+    """
+    if op in _PER_ARG_MULTI_HANDLE_OPS:
+        return max(len(raw_args), 1)
+    return _FIXED_MULTI_HANDLE_COUNTS.get(op, 1)
+
 
 def _make_serializable(obj):
     """Convert a nested structure to be msgpack-safe (no numpy types)."""
@@ -194,8 +234,14 @@ class RequestHandler:
             # Capacity is checked before dispatch, on purpose: ArrayStore.put
             # raises only at store time, which for every op below is after
             # the op has already run and been charged. Refusing here instead
-            # means an over-capacity request costs the caller nothing.
-            if self._session.array_count >= _array_store.MAX_ARRAY_COUNT:
+            # means an over-capacity request costs the caller nothing. Some
+            # ops (linalg.eig/eigh/qr/svd, meshgrid, ...) can store more than
+            # one handle for a single call, so the gate reserves that many
+            # slots up front -- checking only for one free slot would let
+            # such a call pass, run, get charged, and then fail partway
+            # through storing its own result.
+            needed = _prospective_handle_count(op, request.get("args") or [])
+            if self._session.array_count + needed > _array_store.MAX_ARRAY_COUNT:
                 return {
                     "status": "error",
                     "error_type": "MemoryError",
@@ -656,6 +702,26 @@ class RequestHandler:
                         "message": (
                             f"result dtype {undecodable_dtype!r} cannot be "
                             f"delivered to the client"
+                        ),
+                    }
+
+            # Any element that is neither a numpy array/scalar (checked
+            # above) nor msgpack-encodable by value -- including one buried
+            # inside a nested list/tuple -- would otherwise fall through to
+            # the storing loop below and only fail once msgpack.packb() runs
+            # on the assembled response, after earlier elements' handles have
+            # already been minted. Refused means refused for the whole
+            # result, so this must be checked before storing anything.
+            for r in result:
+                if isinstance(r, (np.ndarray, np.generic)):
+                    continue
+                if not _is_msgpack_native(_make_serializable(r)):
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result element of type {type(r).__name__!r} "
+                            f"cannot be encoded for delivery to the client"
                         ),
                     }
 

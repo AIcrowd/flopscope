@@ -154,6 +154,20 @@ def test_create_from_data_still_accepts_a_normal_dtype(handler):
     assert response["status"] == "ok"
 
 
+def test_tuple_with_raw_non_numpy_element_is_refused_not_stored(handler):
+    # A plain Python object that is neither a numpy array/scalar nor
+    # msgpack-native (e.g. a raw `complex`) must be caught during
+    # prevalidation, before the array element ahead of it is stored --
+    # otherwise it reaches msgpack.packb() unconverted and fails there with
+    # an opaque error, after the first element's handle has already been
+    # minted.
+    before = len(handler._session._conn.arrays._arrays)
+    packed = handler._pack_result((np.arange(3.0), complex(1, 2)))
+    assert packed["status"] == "error"
+    assert packed["error_type"] == "UnsupportedReturnType"
+    assert len(handler._session._conn.arrays._arrays) == before
+
+
 def test_oversize_element_of_a_multi_result_is_refused(handler, monkeypatch):
     import flopscope_server._request_handler as rh
 
