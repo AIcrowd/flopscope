@@ -46,7 +46,12 @@ def test_internal_module_function_accumulates():
     import flopscope
 
     ns = flopscope.__dict__  # defined *inside* a flopscope module namespace
-    exec(compile("def _probe():\n    import time; time.sleep(0.02)\n", "<probe>", "exec"), ns)
+    exec(
+        compile(
+            "def _probe():\n    import time; time.sleep(0.02)\n", "<probe>", "exec"
+        ),
+        ns,
+    )
     try:
         wrapped = D.timed_dispatch(ns["_probe"])
         before = D.total_dispatch_ns()
