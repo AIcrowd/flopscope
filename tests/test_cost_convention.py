@@ -842,7 +842,7 @@ DEFERRED: dict[str, str] = {
     # tests/test_triage_price_pins.py::test_index_generators_bill_their_outputs
     # and siblings.
     "ravel_multi_index": "numel(output) = N; dtype-neutral",
-    "mask_indices": "numel(output) = 2*k; dtype-neutral (mask scan itself is unbilled; an fnp mask_func bills its own cost on top -- see test_mask_indices_fnp_mask_func_bills_on_top)",
+    "mask_indices": "numel of the scanned n x n mask, priced at its own (int) dtype -- the nonzero convention; an fnp mask_func bills its own cost on top -- see test_mask_indices_fnp_mask_func_bills_on_top",
     "tri": "numel(output); NOT dtype-neutral, bills the actual (possibly requested) output dtype -- mirrors full/ones/eye/identity",
     "tril_indices": "numel(output) = numel of the returned index arrays; dtype-neutral",
     "tril_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",

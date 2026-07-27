@@ -30,6 +30,19 @@ def test_mask_indices_costs_what_nonzero_costs_on_the_same_array():
     assert via_mask == via_nonzero
 
 
+def test_mask_indices_costs_what_nonzero_costs_on_a_dense_mask():
+    """A sparse mask alone does not pin the invariant: a mask that keeps just
+    over half its elements (the default ``triu``/``tril`` case) is exactly
+    where a returned-index-count formula and a mask-scan formula diverge.
+    Assert parity for that case too, at more than one size.
+    """
+    for n in (8, 200):
+        dense = np.triu(np.ones((n, n), int))
+        via_mask = billed(lambda n=n: fnp.mask_indices(n, np.triu))
+        via_nonzero = billed(lambda dense=dense: fnp.nonzero(fnp.asarray(dense)))
+        assert via_mask == via_nonzero
+
+
 def test_mask_indices_scales_with_the_probe_not_the_output():
     """A tiny result must not buy a large scan."""
     small = billed(lambda: fnp.mask_indices(50, lambda m, k: np.zeros((50, 50), bool)))

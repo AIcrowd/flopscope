@@ -2935,11 +2935,13 @@ def mask_indices(*args, **kwargs):
     Cost: numel of the mask that ``mask_func`` produces (the array numpy's
     own ``nonzero(a != 0)`` scans internally), matching the nonzero /
     flatnonzero / argwhere / count_nonzero convention of billing
-    numel(input), priced at the mask's own dtype. ``numpy`` runs
-    ``mask_func`` internally on its own plain (non-flopscope) probe matrix:
-    a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an fnp
-    callable (e.g. ``fnp.triu``) bills its own cost separately through its
-    own wrapper, on top of this op's mask-scan cost.
+    numel(input), priced at the mask's own dtype. The index arrays this op
+    returns are not charged for -- exactly as ``nonzero`` does not charge
+    for the indices it returns. ``numpy`` runs ``mask_func`` internally on
+    its own plain (non-flopscope) probe matrix: a plain-numpy callable
+    (e.g. ``np.triu``) runs unbilled, while an fnp callable (e.g.
+    ``fnp.triu``) bills its own cost separately through its own wrapper,
+    on top of this op's mask-scan cost.
 
     numpy's ``mask_indices`` body ends with a bare top-level ``nonzero(a != 0)``
     on ``a = mask_func(m, k)``. An fnp ``mask_func`` returns a FlopscopeArray,
@@ -2988,16 +2990,21 @@ def mask_indices(*args, **kwargs):
         probe_size = scanned["size"]
         shapes: tuple = (scanned["shape"],)
         dtypes: tuple = (scanned["dtype"],)
-    else:  # defensive: mask_func was never invoked
+    else:  # defensive: mask_func was never invoked under current numpy, so this
+        # path is not reachable; kept fail-safe rather than fail-cheap by
+        # billing at the same dtype the real path's probe uses (`np.ones((n,
+        # n), int)`), so it can never come out cheaper than the real formula.
         n = int(args[0] if args else kwargs["n"])
-        probe_size, shapes, dtypes = n * n, ((n, n),), ()
-    cost = max(probe_size, sum(int(r.size) for r in result), 1)
+        probe_size, shapes, dtypes = n * n, ((n, n),), (_np.dtype(int),)
+    cost = max(probe_size, 1)
     with budget.deduct(
         # Priced as a full value scan of the mask numpy calls ``nonzero`` on,
         # matching the nonzero/flatnonzero/argwhere/count_nonzero convention of
         # billing numel(input). The internal ``ones((n, n))`` probe is not
         # charged (it is never returned) and the ``a != 0`` compare is not
         # charged on top (``nonzero(a != 0)`` is semantically ``nonzero(a)``).
+        # The index arrays this op returns are not charged either -- exactly
+        # as ``nonzero`` itself does not charge for the indices it returns.
         "mask_indices",
         flop_cost=cost,
         subscripts=None,

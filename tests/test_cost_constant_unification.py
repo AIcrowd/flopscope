@@ -1475,12 +1475,14 @@ def test_packbits_formula():
 
 
 def test_mask_indices_formula():
-    """mask_indices: numel of returned index arrays (= 2*k); n=50, triu -> k=1275 pairs."""
-    # np.triu of 50x50: upper triangle = 50*51//2 = 1275 index pairs
-    # formula (Task 8): 2*k = 2550; weight=1.0, dtype-neutral
+    """mask_indices: numel of the scanned n x n mask, priced at its own
+    (int) dtype -- the same convention ``nonzero`` uses, not the count of
+    returned index pairs."""
+    # weight=1.0 here (module resets weights), so charged == flop_cost; the
+    # mask's dtype is int, whose rate is applied by the dtype-aware pricing
+    # path itself (unit-weight `cost()` does not re-scale by dtype rate).
     n = 50
-    k = n * (n + 1) // 2  # 1275
-    expected = 2 * k  # 2550
+    expected = n * n  # numel(mask) = 2500
     assert cost(lambda: fnp.mask_indices(n, np.triu)) == expected
 
 
