@@ -181,23 +181,107 @@ def reduction_billing_dtype(
     """Billed dtype for a reduction: the accumulator numpy actually runs.
 
     An explicit ``dtype=`` (positional or keyword) IS numpy's accumulator --
-    billed as requested, wider or narrower. ``out=`` without ``dtype=``
-    widens the intermediate when it is wider than the input; a narrower
-    ``out`` only casts the final store, so the loop keeps the input's own
-    width. With neither, the family default applies (integer widening for
-    sum/prod, float64 for integer mean/var, the ufunc loop dtype for
-    generic methods), never billed below the operand width: a value-testing
-    loop (comparison, logical) reads full-width operands even though its
-    output is bool.
+    billed as requested, wider or narrower.
+
+    ``out=`` without ``dtype=`` is NOT an accumulator selector. It can only
+    ever *widen*: the family default (integer widening for sum/prod, float64
+    for integer mean/var, the ufunc loop dtype for generic methods) is the
+    floor, and a narrower ``out`` merely casts the final store. So the
+    resolution is ``max(out, family default)`` by rate -- never
+    ``out`` alone.
+
+    numpy's own ``ufunc.reduce`` docs are stale on this point. They say
+    ``dtype`` "defaults to the data-type of the output array if this is
+    provided", which would make ``out=`` replace the default. numpy 2.2.6
+    does not behave that way, and two bit-level probes settle it:
+
+    * ``float64`` input ``[1.0, 5e-8, 5e-8, 5e-8]``: bare gives
+      ``1.0000001499999998``; ``dtype=float32`` gives ``1.0`` (a true
+      float32 accumulation, bits ``1065353216``); ``out=float32`` gives
+      ``1.0000001`` (bits ``1065353217``) -- bit-identical to casting the
+      float64 accumulation down, i.e. the loop stayed float64.
+    * ``int32`` input ``[2**24+1, 1, 1, 1]``: bare accumulates int64 to
+      ``16777220``; ``dtype=float32`` gives ``16777216.0`` (the ``+1``s
+      vanish into float32 rounding); ``out=float32`` gives ``16777220.0``
+      -- again the int64 accumulation, only the store was cast.
+
+    A *wider* ``out=`` does genuinely widen the loop (``float32`` input with
+    ``out=float64`` returns the float64-accurate sum, not the float32 sum
+    widened), which is why widening is honoured here.
+
+    The final floor at ``a_dtype`` stands on top of all of that: a
+    value-testing loop (comparison, logical) reads full-width operands even
+    though its output is bool.
+
+    Widening-only also holds on the KIND axis, not just the width axis. A
+    real ``out=`` cannot make a complex reduction real:
+    ``prod([1+2j, 3+4j, 5+6j], out=float64)`` returns ``-85.0``, the real
+    part of the complex product ``(-85+20j)``, NOT the real-only product
+    ``15.0`` -- numpy accumulated in complex and the store merely dropped the
+    imaginary part. Since the rate axis alone ranks ``float64``/``int64``
+    (2.0) above ``complex64`` (1.0), a plain max-by-rate would let such an
+    ``out`` carry away the complex factor with it (6.0 -> 1.0 for the prod
+    family). The same happens on the ``a_dtype`` floor when the loop dtype is
+    bool (``logical_xor.reduce(complex128)``). Both are pinned back below.
+    No reduce-capable op has a complex factor under 2.0, so re-imposing a
+    complex dtype here can only raise a bill, never lower one.
     """
     if explicit_dtype is not None:
         return _np.dtype(explicit_dtype)
+    # The family default is the floor, not something ``out=`` can replace --
+    # billing ``out`` alone would hand back half the bill whenever numpy's
+    # real accumulator is wider than a narrow ``out`` destination. ``floor``
+    # goes first so a rate tie keeps the accumulator rather than the store.
+    a_dtype = _np.dtype(a_dtype)
+    floor = _np.dtype(default_dtype if default_dtype is not None else a_dtype)
     accumulator = (
-        out_dtype
-        if out_dtype is not None
-        else (default_dtype if default_dtype is not None else a_dtype)
+        heavier_billing_dtype(floor, out_dtype) if out_dtype is not None else floor
     )
-    return heavier_billing_dtype(accumulator, a_dtype)
+    resolved = heavier_billing_dtype(accumulator, a_dtype)
+    # ``out_dtype`` belongs in here alongside the other two. Complex-ness is a
+    # property of ANY participating buffer, and the rate axis cannot see it:
+    # complex64 and float32 both rate 1.0, so the tie-break above hands the
+    # win to whichever came first. Leaving ``out`` out of this list made that
+    # tie-break decide the complex factor, and a complex64 destination on a
+    # real accumulator lost it -- measured prod at 391,680 -> 65,280, a 6x
+    # DROP, which is the same defect this function exists to close, only
+    # pointing the other way.
+    loop_complex = [d for d in (floor, a_dtype) if d.kind == "c"]
+    if loop_complex and resolved.kind != "c":
+        # Complex in the LOOP is intrinsic and a real store cannot carry it
+        # away: prod of complex64 with out=float64 really does accumulate in
+        # complex64 and merely drops the imaginary part on the way out, so the
+        # complex factor has been earned.
+        #
+        # Restoring it must not cost width, though. This function ranks dtypes
+        # by RATE, and cannot see the op's complex factor -- so it cannot tell
+        # whether a complex64 loop (rate 1.0, factor applied later) outprices a
+        # float128 store (rate 4.0, no factor). Swapping the complex dtype in
+        # outright is right when it is the wider of the two and wrong when it
+        # is not: for sum(complex64) into a float128 destination it would trade
+        # rate 4.0 for rate 1.0, and the factor of 2.0 does not make that back.
+        # Promoting instead keeps both properties -- complex kind AND the rate
+        # already earned. It over-bills the case where the complex loop was
+        # genuinely the pricier participant, which is the safe direction for a
+        # meter to err, and the honest fix is to thread the op's complex factor
+        # in so the comparison can be made on effective cost rather than rate.
+        candidate = heavier_billing_dtype(*loop_complex)
+        resolved = (
+            candidate
+            if rate_for(candidate) >= rate_for(resolved)
+            else _np.result_type(resolved, candidate)
+        )
+    elif out_dtype is not None and _np.dtype(out_dtype).kind == "c":
+        # Complex arriving only in the STORE is a different claim: the
+        # arithmetic was real, and the complex buffer is a participant like
+        # any other. So it competes on rate rather than winning outright --
+        # but it wins TIES, because complex64 and float32 both rate 1.0 and
+        # letting argument order decide the complex factor is what produced a
+        # 6x swing in prod. It must not invent width it has not earned: a
+        # complex64 store against an int64 accumulator stays int64, which is
+        # both the heavier rate and what numpy actually accumulates in.
+        resolved = heavier_billing_dtype(_np.dtype(out_dtype), resolved)
+    return resolved
 
 
 def unary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
