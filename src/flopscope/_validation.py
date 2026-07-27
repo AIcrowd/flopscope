@@ -67,10 +67,14 @@ def _normalize_out(out: object, op_name: str, *, nout: int = 1) -> Any:
             f"multi-output {op_name} requires out= to be a tuple of length "
             f"{nout}; got {type(out).__name__} of length {length}"
         )
+    # numpy's own wording ("return arrays must be of ArrayType") is kept in
+    # the message on purpose. Code in the wild matches on it -- numpy's fft
+    # test suite among it -- and intercepting the argument earlier than numpy
+    # does should not change what the failure looks like to a caller.
     raise TypeError(
-        f"{op_name}(): out= must be an array, or a 1-tuple holding one, got "
-        f"{type(out).__name__}. Pass the destination array itself, not a "
-        f"container holding it."
+        f"{op_name}(): return arrays must be of ArrayType -- out= must be an "
+        f"array, or a 1-tuple holding one, not {type(out).__name__}. Pass the "
+        f"destination array itself, not a container holding it."
     )
 
 
