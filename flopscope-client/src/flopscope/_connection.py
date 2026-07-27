@@ -177,19 +177,26 @@ class Connection:
             response["_request_bytes"] = len(raw_request)
             response["_response_bytes"] = len(raw_response)
 
+            # Every compute-op response carries the server's authoritative
+            # budget; fold it into the active BudgetContext so flops_used is
+            # current after each op with no extra round trip. Lazy import: the
+            # budget module imports this one on its own paths.
+            #
+            # This runs BEFORE the error check on purpose. An operation can be
+            # billed and then fail -- charged by the kernel, then refused while
+            # its result is packed -- so an error response's budget has already
+            # advanced. Syncing after the raise would never reach those, and a
+            # caller that catches the exception would go on to read a
+            # flops_used from before the charge.
+            from flopscope._budget import _sync_active_context_from_response
+
+            _sync_active_context_from_response(response)
+
             if response.get("status") == "error":
                 raise_from_response(
                     response.get("error_type", "FlopscopeServerError"),
                     response.get("message", ""),
                 )
-
-            # Every compute-op response carries the server's authoritative
-            # budget; fold it into the active BudgetContext so flops_used is
-            # current after each op with no extra round trip. Lazy import: the
-            # budget module imports this one on its own paths.
-            from flopscope._budget import _sync_active_context_from_response
-
-            _sync_active_context_from_response(response)
 
             return response
 

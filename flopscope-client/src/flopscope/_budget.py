@@ -236,9 +236,15 @@ class BudgetContext:
         budget_info:
             Dict that may contain a ``"flops_used"`` key.  Missing key is
             silently ignored.
+
+        Spent FLOPs never come back, so the cache only ever moves up. Requests
+        are synchronous, so in practice values arrive in order and the clamp
+        does nothing -- but this cache is now refreshed from error responses
+        too, and a cache that could move down would be a way to read a budget
+        as less spent than it is.
         """
         if "flops_used" in budget_info:
-            self._flops_used = int(budget_info["flops_used"])
+            self._flops_used = max(self._flops_used, int(budget_info["flops_used"]))
 
     # ------------------------------------------------------------------
     # Public API
