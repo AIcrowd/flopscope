@@ -1275,3 +1275,92 @@ def test_out_none_and_absent_are_unaffected(budget):
     b = fnp.array([3.0, 4.0])
     assert np.asarray(fnp.multiply(a, b)).tolist() == [3.0, 8.0]
     assert np.asarray(fnp.multiply(a, b, out=None)).tolist() == [3.0, 8.0]
+
+
+# ---------------------------------------------------------------------------
+# The two destination channels that a derived tuple-parity sweep cannot see
+# ---------------------------------------------------------------------------
+#
+# Both of these move the bare and the 1-tuple form by the SAME amount, so the
+# derived parity test above stays green whichever way they go. They need their
+# own assertions, or the fixes they pin can be reverted silently.
+
+
+def test_ptp_folds_its_destination_dtype_like_its_reduction_siblings():
+    # ptp takes out= through **kwargs, so it reached neither the normalization
+    # nor the destination-dtype fold. A wider destination was free: reverting
+    # the fold leaves this at a quarter price while every other test passes.
+    rng = np.random.default_rng(4)
+    with fl.BudgetContext(flop_budget=10**14, quiet=True) as ctx:
+        a = fnp.asarray(rng.standard_normal((200, 200)).astype("float32"))
+        wide = np.zeros(200, dtype="complex128")
+
+        before = ctx.flops_used
+        fnp.ptp(a, axis=-1)
+        bare = ctx.flops_used - before
+
+        before = ctx.flops_used
+        fnp.ptp(a, axis=-1, out=wide)
+        widened = ctx.flops_used - before
+
+        # The sibling is the real oracle: ptp and amax share a registry
+        # category, so whatever ratio a wide destination earns for one it must
+        # earn for the other. Comparing ptp against ITSELF would pass on any
+        # ratio including 1.0; comparing against amax is the outlier check
+        # that found this defect in the first place, and it does not need
+        # re-tuning when the dtype weights move.
+        sibling_wide = np.zeros(200, dtype="complex128")
+        before = ctx.flops_used
+        fnp.amax(a, axis=-1)
+        sibling_bare = ctx.flops_used - before
+
+        before = ctx.flops_used
+        fnp.amax(a, axis=-1, out=sibling_wide)
+        sibling_widened = ctx.flops_used - before
+
+    assert widened > bare, (
+        f"ptp billed {widened} into a complex128 destination against {bare} "
+        f"with none -- the destination's dtype is not reaching the rate"
+    )
+    assert widened / bare == sibling_widened / sibling_bare, (
+        f"ptp widened by {widened / bare}x where its sibling amax widened by "
+        f"{sibling_widened / sibling_bare}x for the same destination"
+    )
+
+
+def test_clip_prices_a_positional_destination_like_a_keyword_one():
+    # clip declares out keyword-only but republishes numpy's signature, which
+    # advertises it as the fourth positional. Without the positional channel
+    # the destination lands in *args and is counted as an extra BOUND, so it
+    # costs MORE than the keyword spelling and its dtype never reaches the rate.
+    rng = np.random.default_rng(4)
+    with fl.BudgetContext(flop_budget=10**14, quiet=True) as ctx:
+        a = fnp.asarray(rng.standard_normal(1000).astype("float32"))
+        kw_dest = np.zeros(1000, dtype="complex128")
+        pos_dest = np.zeros(1000, dtype="complex128")
+
+        before = ctx.flops_used
+        fnp.clip(a, -1.0, 1.0, out=kw_dest)  # pyright: ignore[reportArgumentType]
+        keyword_cost = ctx.flops_used - before
+
+        before = ctx.flops_used
+        fnp.clip(a, -1.0, 1.0, pos_dest)
+        positional_cost = ctx.flops_used - before
+
+    assert positional_cost == keyword_cost
+    assert np.array_equal(np.asarray(kw_dest), np.asarray(pos_dest))
+
+
+def test_clip_does_not_swallow_positionals_past_the_destination_slot():
+    # numpy's clip has four positional slots and rejects a fifth. Consuming
+    # "three or more" here would truncate the extras instead -- and because
+    # `where` is keyword-only in numpy's clip, a caller passing it positionally
+    # would get an UNMASKED clip back rather than numpy's TypeError.
+    rng = np.random.default_rng(4)
+    with fl.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fnp.asarray(rng.standard_normal(100).astype("float64"))
+        dest = np.zeros(100, dtype="float64")
+        mask = np.zeros(100, dtype=bool)
+
+        with pytest.raises(TypeError):
+            fnp.clip(a, -1.0, 1.0, dest, mask)  # pyright: ignore[reportArgumentType]

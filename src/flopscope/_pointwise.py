@@ -1984,7 +1984,24 @@ def clip(
     # otherwise land in *args and be counted as a third BOUND: measured 12,000
     # FLOPs against 8,000 for the identical keyword call, because every bound
     # costs numel, and the destination's dtype never reached the rate at all.
-    if len(args) >= 3:
+    # Exactly three, never "three or more": numpy's clip has four positional
+    # slots and raises for a fifth, and truncating args here would swallow the
+    # extras instead. That is worse than a lenient parse -- ``where`` is
+    # keyword-only in numpy's clip, so a caller passing it positionally gets a
+    # TypeError from numpy, while a silent truncation would hand back an
+    # UNMASKED clip and no warning. Anything past the fourth slot is left for
+    # numpy to reject in its own words.
+    if len(args) > 3:
+        # numpy has exactly four positional slots (a, a_min, a_max, out) and
+        # raises for a fifth. Extras must not be silently absorbed as further
+        # BOUNDS: ``where`` is keyword-only in numpy's clip, so a caller
+        # passing it positionally would otherwise get an UNMASKED clip back
+        # and no warning. Raise in numpy's own words rather than inventing one.
+        raise TypeError(
+            f"clip() takes from 1 to 4 positional arguments but "
+            f"{len(args) + 1} were given"
+        )
+    if len(args) == 3:
         args, out_positional = args[:2], args[2]
         if out is not None and out_positional is not None:
             raise TypeError("clip(): out= given both positionally and by keyword")
