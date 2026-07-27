@@ -101,6 +101,22 @@ def test_numeric_widening_out_still_bills_wider():
     assert via_out == via_astype == 2000
 
 
+@pytest.mark.parametrize("other", ["float64", "complex128"])
+def test_mixed_nonnumeric_operand_still_bills_neutral(other):
+    """A non-numeric *operand* describes the arithmetic even when a numeric
+    operand is alongside it: numpy runs its object loop and returns object.
+    Filtering it out would price the object loop at the numeric rate -- and at
+    the complex factor too, for a complex partner."""
+    load_weights()
+    n = 8
+    o = np.array(np.random.default_rng(0).random((n, n)), dtype=object)
+    partner = np.ones((n, n), dtype=other)
+    both_object = _billed(lambda: fnp.multiply(o, o))
+    mixed = _billed(lambda: fnp.multiply(o, partner))
+    assert np.asarray(fnp.multiply(o, partner)).dtype == object
+    assert mixed == both_object
+
+
 def test_nonnumeric_operands_still_bill_neutral():
     """The 1.0 neutral rate is still correct when the operands themselves are
     non-numeric -- that arithmetic really is interpreted Python."""

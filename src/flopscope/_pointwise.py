@@ -23,6 +23,7 @@ from flopscope._dtype_billing import (
     mean_compute_dtype,
     reduction_billing_dtype,
     resolve_billing_dtype,
+    store_billing_dtypes,
     sum_accumulator_dtype,
     unary_float_loop_dtype,
 )
@@ -529,7 +530,7 @@ def _counted_unary(np_func, op_name: str):
         else:
             billing_dtypes = (x.dtype,)
             if isinstance(out, _np.ndarray):
-                billing_dtypes += (out.dtype,)
+                billing_dtypes += store_billing_dtypes(out)
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -587,7 +588,7 @@ def _free_unary(np_func, op_name: str):
         if kwargs.get("dtype") is not None:
             billing_dtypes += (_np.dtype(kwargs["dtype"]),)
         if isinstance(out, _np.ndarray):
-            billing_dtypes += (out.dtype,)
+            billing_dtypes += store_billing_dtypes(out)
         with budget.deduct(
             op_name,
             flop_cost=0,
@@ -730,7 +731,7 @@ def _counted_binary(np_func, op_name: str):
         else:
             billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
             if isinstance(out, _np.ndarray):
-                billing_dtypes += (out.dtype,)
+                billing_dtypes += store_billing_dtypes(out)
         if op_name in _BINARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -1008,7 +1009,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
             ),
         )
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         f"{ufunc.__name__}.outer",
         flop_cost=cost,
@@ -1171,7 +1172,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         ),
     )
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         f"{ufunc.__name__}.reduceat",
         flop_cost=cost,
@@ -1525,7 +1526,7 @@ def around(
     cost = pointwise_cost(a.shape, symmetry=symmetry)
     billing_dtypes: tuple = (a.dtype,)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "around",
         flop_cost=cost,
@@ -1635,7 +1636,7 @@ def round(
     cost = pointwise_cost(a.shape, symmetry=symmetry)
     billing_dtypes: tuple = (a.dtype,)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "round",
         flop_cost=cost,
@@ -1922,7 +1923,7 @@ def clip(
     _prepare_symmetric_out(out, symmetry)
     cost = _builtins.max(n_bounds, 1) * pointwise_cost(output_shape, symmetry=symmetry)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "clip",
         flop_cost=cost,
@@ -2391,7 +2392,7 @@ def median(
     # otherwise -- the same rule as mean/var/std's compute dtype.
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "median",
         flop_cost=cost,
@@ -2463,7 +2464,7 @@ def nanmedian(
     # the input's own float precision otherwise.
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype),)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "nanmedian",
         flop_cost=cost,
@@ -2550,7 +2551,7 @@ def nanpercentile(
     # float32 `a`) still raises the bill to match numpy's actual widening.
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "nanpercentile",
         flop_cost=cost,
@@ -2627,7 +2628,7 @@ def nanquantile(
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "nanquantile",
         flop_cost=cost,
@@ -2709,7 +2710,7 @@ def percentile(
     # bool `a` always computes in float64, regardless of q's own dtype.
     billing_dtypes: tuple = (mean_compute_dtype(a.dtype), billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "percentile",
         flop_cost=cost,
@@ -2786,7 +2787,7 @@ def quantile(
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "quantile",
         flop_cost=cost,
@@ -2895,7 +2896,7 @@ def _einsum_routed_binary(
     )
     billing_dtypes = (a.dtype, b.dtype)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(info.accumulation, resolved)
     if out is not None:
@@ -3063,7 +3064,7 @@ def outer(
         output_sym = _prepare_symmetric_out(out, output_sym)
     billing_dtypes: tuple = (a.dtype, b.dtype)
     if isinstance(out, _np.ndarray):
-        billing_dtypes += (out.dtype,)
+        billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
         "outer",
         flop_cost=cost,

@@ -40,27 +40,27 @@ def billing_operand(orig, coerced):
     return coerced.dtype
 
 
-def _drop_non_numeric(dtypes: tuple) -> tuple:
-    """Ignore non-numeric contributions when anything numeric participates.
+def store_billing_dtypes(out) -> tuple:
+    """What an ``out=`` buffer contributes to the billing resolution.
+
+    Its dtype, except when that dtype is non-numeric -- then nothing.
 
     ``result_type`` resolves any mix containing a non-numeric kind *to* that
-    kind, which then bills at the neutral rate 1.0 and, for contractions, also
-    drops the complex factor. That is the intended answer only when the
-    arithmetic itself is non-numeric. It is the wrong answer when the
-    non-numeric dtype is merely where the result is stored -- an ``out=`` of
-    object or string dtype -- because the loop still runs at the operands'
-    precision. Dropping those contributions can only raise the resolved rate
-    (they carry the minimum rate), so this never discounts a call.
+    kind, which bills at the neutral rate 1.0 and, for contractions, also drops
+    the complex factor. That is right when the arithmetic itself is
+    non-numeric, and wrong when the non-numeric dtype only says where the
+    result is *stored*: a contraction with an object ``out=`` still runs its
+    loop at the operands' precision and at native speed, so letting the store
+    set the price hands back the whole difference.
+
+    Filtering here rather than inside ``resolve_billing_dtype`` keeps operands
+    alone. A non-numeric *operand* really does describe the arithmetic --
+    ``multiply(object_array, float64_array)`` runs NumPy's object loop and
+    returns object -- and must keep resolving to the neutral rate.
     """
-    numeric = tuple(d for d in dtypes if _resolved_kind(d) not in _NON_NUMERIC_KINDS)
-    return numeric or dtypes
-
-
-def _resolved_kind(dtype_like) -> str:
-    try:
-        return _np.result_type(dtype_like).kind
-    except Exception:
-        return ""
+    if not isinstance(out, _np.ndarray):
+        return ()
+    return () if out.dtype.kind in _NON_NUMERIC_KINDS else (out.dtype,)
 
 
 def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
@@ -74,7 +74,6 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
     """
     if not dtypes:
         return None
-    dtypes = _drop_non_numeric(dtypes)
     try:
         return _np.result_type(*dtypes)
     except _np.exceptions.DTypePromotionError:
@@ -91,8 +90,9 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
 # That reasoning covers operands only. A non-numeric dtype arriving as ``out=``
 # describes where the result is stored, not how it was computed: the loop still
 # runs at the operands' precision, at native speed, so neither the neutral rate
-# nor the residual penalty applies to it. ``_drop_non_numeric`` therefore keeps
-# such a dtype out of the resolution -- otherwise it would drag the rate (and,
+# nor the residual penalty applies to it. ``store_billing_dtypes`` therefore keeps
+# such a dtype out of the resolution when it arrives as ``out=`` -- otherwise it
+# would drag the rate (and,
 # for contractions, the complex factor) down to 1.0.
 #
 # The fail-closed rule targets NUMERIC dtypes absent from the supported table --
