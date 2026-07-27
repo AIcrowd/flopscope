@@ -146,6 +146,20 @@ def test_inert_via_importlib_and_sys_modules():
         assert mod.participant_span_count() == 1
 
 
+def test_inert_via_the_raw_counted_span_primitive():
+    """The primitive that mutates the accumulator carries the check itself.
+
+    Guarding only the public wrappers would put the check somewhere other than
+    the thing being protected: a span opened here from outside would both count
+    and leave the span tally at zero, so the tally could not be relied on.
+    """
+    before = D.total_dispatch_ns()
+    with D._counted_span():
+        _burn()
+    assert D.total_dispatch_ns() == before
+    assert D.participant_span_count() == 1
+
+
 def test_inert_via_reexported_dispatch_span():
     """dispatch_span is re-exported from _budget and _connection, which are on
     the hot path, so the check has to live in the callee."""

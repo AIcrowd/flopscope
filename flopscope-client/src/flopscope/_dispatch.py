@@ -116,6 +116,14 @@ def _count_participant_span() -> None:
     _participant_spans += 1
 
 
+def _caller_is_internal(depth: int) -> bool:
+    """Whether the frame *depth* levels above this one is flopscope's own code."""
+    try:
+        return _globals_are_internal(sys._getframe(depth).f_globals)
+    except (ValueError, AttributeError):  # pragma: no cover - no Python frame
+        return False
+
+
 @contextmanager
 def _null_span():
     """Run the body without touching the accumulator."""
@@ -124,8 +132,18 @@ def _null_span():
 
 @contextmanager
 def _counted_span():
-    """Bracket one full op dispatch; add only this span's own remainder."""
+    """Bracket one full op dispatch; add only this span's own remainder.
+
+    Carries the same caller check as ``dispatch_span``. It is the primitive that
+    actually mutates the accumulator, so leaving it unguarded would place the
+    check on the wrappers rather than on the thing being protected, and a span
+    opened here from outside would both count and leave the span tally at zero.
+    """
     global _total_dispatch_ns
+    if not _caller_is_internal(depth=3):  # caller -> contextmanager -> here
+        _count_participant_span()
+        yield
+        return
     t0 = _now_ns()
     baseline = _total_dispatch_ns
     try:
@@ -144,11 +162,7 @@ def dispatch_span():
     Not a generator: the provenance check must read the CALLER's frame, and by
     the time a ``@contextmanager`` body runs the caller is contextlib.
     """
-    try:
-        caller_globals = sys._getframe(1).f_globals
-    except (ValueError, AttributeError):  # pragma: no cover - no Python frame
-        caller_globals = None
-    if caller_globals is not None and _globals_are_internal(caller_globals):
+    if _caller_is_internal(depth=2):  # our caller, not us
         return _counted_span()
     _count_participant_span()
     return _null_span()

@@ -1,9 +1,10 @@
 """Unit tests for the dispatch-timing accumulator (deterministic fake clock).
 
-The accumulation arithmetic lives in ``_counted_span``; ``dispatch_span`` is the
-entry point that decides from the caller whether a span counts at all. These
-tests drive ``_counted_span`` so the baseline/delta maths is covered independently
-of where the test module happens to live. Which callers count is covered in
+A span only contributes when opened by flopscope's own code, and a test module is
+by definition not that. The ``_internal_caller`` fixture below states "treat this
+call as internal" explicitly, so these tests cover the baseline/delta arithmetic
+without silently depending on where the test file lives. Which callers actually
+count is covered separately in
 ``tests/client_compat/unit/test_dispatch_provenance.py``.
 """
 
@@ -18,7 +19,17 @@ def _fake_clock(values):
     return lambda: next(it)
 
 
-def test_single_span_adds_its_wall(monkeypatch):
+@pytest.fixture
+def _internal_caller(monkeypatch):
+    """Exercise the counting path from a test module.
+
+    The arithmetic under test is independent of provenance; this fixture makes
+    that explicit rather than leaving the tests sensitive to their own location.
+    """
+    monkeypatch.setattr(d, "_caller_is_internal", lambda depth: True)
+
+
+def test_single_span_adds_its_wall(monkeypatch, _internal_caller):
     monkeypatch.setattr(d, "_now_ns", _fake_clock([100, 350]))  # t0=100, t1=350
     d.reset_dispatch()
     with d._counted_span():
@@ -26,7 +37,7 @@ def test_single_span_adds_its_wall(monkeypatch):
     assert d.total_dispatch_ns() == 250
 
 
-def test_nested_spans_count_wall_once(monkeypatch):
+def test_nested_spans_count_wall_once(monkeypatch, _internal_caller):
     # outer t0=0 ; inner t0=100,t1=400 (=300) ; outer t1=500 (=500 wall)
     monkeypatch.setattr(d, "_now_ns", _fake_clock([0, 100, 400, 500]))
     d.reset_dispatch()
@@ -38,7 +49,7 @@ def test_nested_spans_count_wall_once(monkeypatch):
     assert d.total_dispatch_ns() == 500
 
 
-def test_delta_helpers(monkeypatch):
+def test_delta_helpers(monkeypatch, _internal_caller):
     monkeypatch.setattr(d, "_now_ns", _fake_clock([0, 40]))
     d.reset_dispatch()
     base = d.total_dispatch_ns()
@@ -47,7 +58,7 @@ def test_delta_helpers(monkeypatch):
     assert d.total_dispatch_ns() - base == 40
 
 
-def test_accumulates_even_on_exception(monkeypatch):
+def test_accumulates_even_on_exception(monkeypatch, _internal_caller):
     monkeypatch.setattr(d, "_now_ns", _fake_clock([0, 70]))
     d.reset_dispatch()
     with pytest.raises(ValueError):
