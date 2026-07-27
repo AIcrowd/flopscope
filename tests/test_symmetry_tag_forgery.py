@@ -10,6 +10,14 @@ drop the claim. Otherwise a caller obtains a symmetric-rate discount on
 asymmetric data, with numerically correct results and nothing to signal the
 discrepancy.
 
+One route is NOT closed, and is pinned as an expected failure at the bottom of
+this file rather than left to look covered: Python's buffer protocol.
+``memoryview(tagged)[i, j] = ...`` writes the buffer with nothing in the Python
+layer to observe it. Closing it needs either ``__buffer__`` (PEP 688, and so
+Python 3.12+, above this package's floor) or making tagged buffers
+non-writeable, which would break their legitimate use as ``out=``
+destinations. ``.data`` is not a second instance -- NumPy refuses that itself.
+
 Each test performs a write that makes the data asymmetric and then asserts the
 invariant directly: either the write raised, or the array no longer buys the
 discount. Both outcomes are acceptable; keeping the discount is not.
@@ -474,3 +482,44 @@ def test_ufunc_reduceat_does_not_forge_tag():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# Routes that write the buffer beneath the Python layer
+# ---------------------------------------------------------------------------
+
+
+def test_flat_assignment_does_not_forge_tag():
+    """``arr.flat[:] = ...`` is the same category as fill/put/resize.
+
+    A C-level route that writes the buffer without passing through
+    ``__setitem__``, and so without the write-epoch hook ever seeing it.
+    """
+    _assert_claim_does_not_survive(
+        fnp.zeros((N, N)),
+        lambda z: z.flat.__setitem__(slice(None), list(_asymmetric().ravel())),
+    )
+
+
+def test_setfield_does_not_forge_tag():
+    _assert_claim_does_not_survive(
+        fnp.zeros((N, N)), lambda z: z.setfield(_asymmetric(), np.float64)
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known gap: the buffer protocol writes beneath the Python layer, so "
+        "nothing observes memoryview(tagged)[i, j] = value. Closing it needs "
+        "__buffer__ (PEP 688, Python 3.12+, above this package's floor) or "
+        "non-writeable tagged buffers, which would break out= destinations. "
+        "Pinned strict so that whoever closes it is forced to delete this "
+        "marker rather than leave a passing test mislabelled."
+    ),
+)
+def test_memoryview_assignment_does_not_forge_tag():
+    _assert_claim_does_not_survive(
+        fnp.zeros((N, N)),
+        lambda z: memoryview(z).__setitem__((0, 1), 9.0),  # pyright: ignore[reportCallIssue, reportArgumentType]
+    )

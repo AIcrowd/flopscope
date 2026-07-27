@@ -160,10 +160,17 @@ def multi_store_billing_dtypes(out, natural: tuple | None) -> tuple:
         if not slot:
             continue
         if natural is not None and index < len(natural):
-            nat = _np.dtype(natural[index])
-            wider = rate_for(slot[0]) > rate_for(nat)
-            complex_over_real = slot[0].kind == "c" and nat.kind != "c"
-            if not wider and not complex_over_real:
+            # EXACT match, not "no pricier by rate". The thing being skipped
+            # here is a `result_type` JOIN, and rate ordering is a different
+            # relation from promotion: result_type(int32, float32) is float64
+            # even though int32 and float32 rate the same. A rate test
+            # therefore drops every equal-rate CROSS-KIND destination from the
+            # resolution -- measured as a fresh 2x discount on divmod, where a
+            # float32 buffer receiving an int32 quotient is a genuine store of
+            # the computed value and must be priced. Only the destination
+            # numpy would have allocated itself is price-neutral, and that is
+            # an identity, so test it as one.
+            if slot[0] == _np.dtype(natural[index]):
                 continue
         contributed += slot
     return contributed

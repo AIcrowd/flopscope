@@ -110,6 +110,42 @@ def _build_passthrough():
 _INITIAL_PASSTHROUGH = _build_passthrough()
 
 
+class _ReadOnlyFlatIter:
+    """Wraps ``ndarray.flat`` so reads pass through and writes are refused.
+
+    The underlying flatiter writes the buffer directly, so neither
+    ``__setitem__`` nor the write-epoch hook ever sees ``arr.flat[:] = ...``.
+    Everything else about the iterator is forwarded untouched, so reading,
+    iterating, indexing and ``.copy()`` behave exactly as before.
+    """
+
+    __slots__ = ("_it",)
+
+    def __init__(self, it: Any) -> None:
+        object.__setattr__(self, "_it", it)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        raise ValueError(
+            "in-place assignment through .flat is not supported; flopscope "
+            "arrays are immutable. Build the result functionally instead."
+        )
+
+    def __getitem__(self, key: Any) -> Any:
+        return self._it[key]
+
+    def __iter__(self) -> Any:
+        return iter(self._it)
+
+    def __len__(self) -> int:
+        return len(self._it)
+
+    def __array__(self, *args: Any, **kwargs: Any) -> Any:
+        return _np.asarray(self._it, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_it"), name)
+
+
 class FlopscopeArray(_np.ndarray):
     """A numpy ndarray subclass with FLOP-tracked operators.
 
@@ -909,6 +945,26 @@ class FlopscopeArray(_np.ndarray):
             "in-place resize is not supported; flopscope arrays are immutable. "
             "Use fnp.reshape(arr, new_shape) to create a reshaped copy."
         )
+
+    def setfield(self, *args: Any, **kwargs: Any) -> None:
+        raise ValueError(
+            "in-place setfield is not supported; flopscope arrays are "
+            "immutable. Build the result functionally instead."
+        )
+
+    @property
+    def flat(self) -> Any:
+        """Read-only flat iterator.
+
+        ``arr.flat[:] = ...`` is the same category as ``fill``/``put``/
+        ``resize`` above -- a C-level route that writes the buffer without
+        going through ``__setitem__`` -- and it was the one member of that
+        category left unguarded. It matters beyond immutability: a symmetry
+        tag gates a billing discount and is voided when its buffer is
+        written, so a write the library cannot see leaves the tag standing
+        over data it no longer describes.
+        """
+        return _ReadOnlyFlatIter(_np.ndarray.flat.__get__(self))
 
     # ----- Binary arithmetic -----
 
