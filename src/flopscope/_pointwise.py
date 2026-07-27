@@ -1420,10 +1420,11 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # ``ufunc.at`` accepts all of these. Only convert to ndarray when
     # it's already array-like; let scalars / slices / Ellipsis through
     # unchanged so numpy's own semantics apply.
-    indices_stripped = (
-        _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
-    )
-    n_ops = _ufunc_at_touched_cells(a, indices)
+    # Resolve the index ONCE. Everything downstream -- the cost and the write
+    # itself -- must use ``canonical``; re-reading ``indices`` below would let
+    # the billed index and the written index differ.
+    canonical = _canonical_index(indices)
+    n_ops = _ufunc_at_touched_cells(a, canonical)
     # Strip any flopscope-typed positional values too.
     stripped_args = tuple(
         _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
@@ -1468,10 +1469,13 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     ):
         ufunc.at(
             _to_base_ndarray(a),
-            indices_stripped,
+            canonical,
             *stripped_args,
             **kwargs,
         )
+    # ``ufunc.at`` mutates ``a`` in place; record it so any symmetry tag
+    # describing this buffer is invalidated (see flopscope._write_epoch).
+    note_write(a)
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
 
 

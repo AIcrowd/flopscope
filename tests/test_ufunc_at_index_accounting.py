@@ -11,6 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import flopscope
+import flopscope.numpy as fnp
 from flopscope._pointwise import _canonical_index, _ufunc_at_touched_cells
 
 
@@ -108,3 +110,85 @@ def test_canonical_index_does_not_freeze_caller_array():
 
     _canonical_index(Holder())
     assert caller.flags.writeable is True
+
+
+def billed(fn) -> int:
+    with flopscope.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        fn()
+        return ctx.flops_used - before
+
+
+def test_list_index_bills_every_application():
+    """A plain python list index must bill per application, not per destination cell."""
+    dst = fnp.asarray(np.zeros(6, np.float64))
+    idx = [0] * 5000
+    assert billed(lambda: np.add.at(dst, idx, 1.0)) == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(5000, np.float64)), 1.0)
+    )
+
+
+def test_stateful_array_index_bills_what_it_writes():
+    """An index resolved twice could bill one value and write another."""
+    n = 200_000
+
+    class Shifting:
+        def __init__(self):
+            self.calls = 0
+
+        def __array__(self, dtype=None, copy=None):
+            self.calls += 1
+            return np.zeros(1 if self.calls == 1 else n, np.intp)
+
+    dst = fnp.asarray(np.zeros(4, np.float64))
+    probe = Shifting()
+    cost = billed(lambda: np.add.at(dst, probe, 1.0))
+    written = float(np.asarray(dst)[0])
+    assert probe.calls == 1, "index must be resolved exactly once"
+    assert cost == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(int(written), np.float64)), 1.0)
+    )
+
+
+def test_stateful_slice_index_bills_what_it_writes():
+    n = 100_000
+
+    class Shifting:
+        def __init__(self):
+            self.calls = 0
+
+        def __index__(self):
+            self.calls += 1
+            return 1 if self.calls == 1 else n
+
+    dst = fnp.asarray(np.zeros(n, np.float64))
+    cost = billed(lambda: np.add.at(dst, slice(0, Shifting()), 1.0))
+    written = int((np.asarray(dst) != 0).sum())
+    assert cost == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(written, np.float64)), 1.0)
+    )
+
+
+def test_tuple_index_entries_are_stripped():
+    """flopscope-typed tuple entries must not reach numpy's index parser."""
+    dst = fnp.asarray(np.zeros((4, 5), np.float64))
+    rows = fnp.asarray(np.array([0, 1, 2], np.intp))
+    cols = fnp.asarray(np.array([0, 1, 2], np.intp))
+    assert billed(lambda: np.add.at(dst, (rows, cols), 1.0)) == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(3, np.float64)), 1.0)
+    )
+
+
+def test_at_write_through_alias_voids_symmetry_tag():
+    """ufunc.at mutates its target, so the write must be recorded."""
+    from flopscope._write_epoch import epoch_of
+
+    z = fnp.zeros((32, 32))
+    alias = fnp.asarray(z)
+    before = epoch_of(z)
+    np.subtract.at(
+        alias,
+        (np.arange(32), np.zeros(32, np.intp)),
+        np.arange(1, 33).astype(z.dtype),
+    )
+    assert epoch_of(z) != before, "the write must advance the buffer epoch"
