@@ -16,6 +16,16 @@ loop that actually runs. Reductions separately fold ``out=`` into
 ``reduction_billing_dtype`` for a different, genuine reason: there, a wider
 ``out=`` changes the accumulator numpy actually runs, not merely the final
 store, so that path is unaffected by this note.
+
+Two destinations are outside the doctrine because they are not stores of the
+computed value at all, and both are handled by their own helper rather than
+by ``store_billing_dtypes``. A multi-output op can have an output whose dtype
+is part of the op SIGNATURE (``frexp``'s int32 exponent) --
+``multi_store_billing_dtypes``. An index reduction's destination holds
+positions rather than values, so its width says nothing about the arithmetic
+-- ``_pointwise._INDEX_RETURNING_REDUCTIONS``. In both cases supplying the
+buffer numpy would have allocated anyway must be price-neutral against the
+bare call; widening past it still widens the rate.
 """
 
 from __future__ import annotations
@@ -70,6 +80,93 @@ def store_billing_dtypes(out) -> tuple:
     if not isinstance(out, _np.ndarray):
         return ()
     return () if out.dtype.kind in _NON_NUMERIC_KINDS else (out.dtype,)
+
+
+def natural_output_dtypes(np_func, resolved_input: _np.dtype | None) -> tuple | None:
+    """Dtypes numpy allocates for each output slot when ``out=`` is omitted.
+
+    Read out of the ufunc's own loop table via ``resolve_dtypes``, so it
+    tracks whatever numpy in the support matrix is installed rather than a
+    hand-maintained mapping that can drift.
+
+    ``resolved_input`` is the ALREADY-PROMOTED operand dtype -- the same
+    ``result_type`` the rest of the billing runs on, weak Python scalars
+    folded in -- and it is fed to every input slot. Promoting first is what
+    keeps a NEP 50 weak scalar from inventing a natural output wider than the
+    call really has: ``divmod(f32_array, 2.0)`` computes float32, so its
+    natural destinations are float32, and a caller-supplied float64 one is a
+    genuine widening that must still reach the rate. Handing the raw operand
+    dtypes to ``resolve_dtypes`` (which knows nothing of weak scalars) would
+    have reported float64 as natural and handed that widening back for free.
+
+    Returns ``None`` when the loop cannot be resolved at all -- a non-ufunc,
+    an operand kind with no loop, a promotion numpy refuses. Callers then
+    fall back to folding every destination into the rate unconditionally,
+    which over-bills rather than under-bills.
+    """
+    resolve = getattr(np_func, "resolve_dtypes", None)
+    nin = getattr(np_func, "nin", None)
+    nout = getattr(np_func, "nout", None)
+    if resolve is None or not nin or not nout or resolved_input is None:
+        return None
+    try:
+        signature = resolve((resolved_input,) * nin + (None,) * nout)
+    except (TypeError, ValueError, _np.exceptions.DTypePromotionError):
+        return None
+    if signature is None or len(signature) != nin + nout:
+        return None
+    return tuple(signature[nin:])
+
+
+def multi_store_billing_dtypes(out, natural: tuple | None) -> tuple:
+    """What the ``out=`` slots of a multi-output op contribute to the rate.
+
+    Same widest-participating-buffer doctrine as :func:`store_billing_dtypes`,
+    with the one correction a multi-output signature forces: a slot
+    contributes only what it adds ON TOP of the buffer numpy would have
+    allocated for that slot anyway.
+
+    A single-output op does not need the distinction, because its natural
+    destination is the compute dtype already in the resolution -- folding it
+    in again is a no-op. A multi-output op can have an output whose dtype is
+    part of the op SIGNATURE rather than of its arithmetic, and there folding
+    unconditionally prices a buffer the caller merely supplied instead of
+    letting numpy allocate it. ``frexp`` is the case in point: its second
+    output is always ``int32``, whatever the mantissa's precision, so
+    ``np.result_type(float32, float32, int32)`` promoted to float64 and
+    ``frexp(a32, out=(m32, e32))`` billed twice what ``frexp(a32)`` billed --
+    the caller paying the float64 rate for arithmetic numpy runs at float32,
+    purely for naming destinations numpy would have created itself. Supplying
+    the natural destination must be price-neutral.
+
+    Widening is untouched in either axis. A slot pricier than its natural
+    counterpart still joins the resolution, so a float64 mantissa on a
+    float32 ``frexp`` still bills at the float64 rate, and so does an int64
+    exponent buffer where numpy would have made an int32 one. The kind axis
+    is guarded separately: a complex destination over a real natural output
+    joins even at an equal rate, since complex64 and float32 both rate 1.0
+    and the op's complex factor rides on the KIND, not the rate -- the same
+    tie that produced a 6x swing in ``prod`` and is pinned in
+    :func:`reduction_billing_dtype`.
+
+    ``natural=None`` means the loop could not be resolved; every destination
+    then folds in as before, which over-bills rather than under-bills.
+    """
+    if out is None:
+        return ()
+    contributed: tuple = ()
+    for index, slot_out in enumerate(out):
+        slot = store_billing_dtypes(slot_out)
+        if not slot:
+            continue
+        if natural is not None and index < len(natural):
+            nat = _np.dtype(natural[index])
+            wider = rate_for(slot[0]) > rate_for(nat)
+            complex_over_real = slot[0].kind == "c" and nat.kind != "c"
+            if not wider and not complex_over_real:
+                continue
+        contributed += slot
+    return contributed
 
 
 def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:

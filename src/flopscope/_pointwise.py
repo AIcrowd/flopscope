@@ -21,6 +21,8 @@ from flopscope._dtype_billing import (
     binary_float_loop_dtype,
     heavier_billing_dtype,
     mean_compute_dtype,
+    multi_store_billing_dtypes,
+    natural_output_dtypes,
     reduction_billing_dtype,
     resolve_billing_dtype,
     store_billing_dtypes,
@@ -79,6 +81,67 @@ _INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
         "nancumprod",
     }
 )
+
+# Reductions whose result is an INDEX rather than a value. numpy fixes their
+# output dtype at ``np.intp`` regardless of the input's precision, and
+# constrains ``out=`` by KIND rather than by width: any integer or boolean
+# buffer is accepted at any width, and every float or complex one is refused
+# outright, before the reduction runs. Two consequences, both handled in
+# ``_counted_reduction``:
+#
+#   * The refusal is decidable from the destination's dtype alone, so it
+#     belongs ABOVE ``budget.deduct`` and must cost zero. It used to sit
+#     below: ``argmin`` on 10,000 float32 with a float64 destination charged
+#     19,998 FLOPs and only then raised ``ValueError`` from numpy.
+#   * The destination can never be the accumulator. An index buffer holds
+#     positions, not the values being compared, so its width says nothing
+#     about the arithmetic -- ``out`` is kept out of
+#     ``reduction_billing_dtype`` for these ops entirely, which is what makes
+#     supplying the ``intp`` buffer numpy would have allocated anyway
+#     price-neutral against the bare call (both 9,999 on the case above,
+#     where the destination previously doubled the rate).
+#
+# Membership is not hand-maintained: ``test_index_reduction_out_billing``
+# re-derives it from the registry by probing numpy itself, so a reduction
+# that starts returning indices cannot be missed.
+_INDEX_RETURNING_REDUCTIONS = frozenset(
+    {
+        "argmax",
+        "argmin",
+        "nanargmax",
+        "nanargmin",
+    }
+)
+
+
+def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> None:
+    """Refuse an ``out=`` numpy cannot use as an index buffer -- before charging.
+
+    numpy's own rule, measured on 2.2.6 across every scalar dtype and both
+    the ``axis=None`` and ``axis=`` forms of all four ops, is exactly
+    ``can_cast(out.dtype, intp, casting="safe")``: bool and every signed or
+    unsigned integer narrower than ``intp`` are accepted (numpy casts the
+    index down on store), ``uint64``, every float, every complex and every
+    non-numeric dtype are refused. Reproducing the predicate rather than
+    inventing a stricter one is what keeps this guard from failing a call
+    plain numpy would allow.
+
+    Class and wording mirror numpy's, for the same reason
+    :func:`_normalize_out` mirrors the ufunc parser: intercepting the
+    argument earlier than numpy does should not change what the failure looks
+    like to a caller. numpy says "scalar" for the whole-array reduction and
+    "array data" for a per-axis one.
+    """
+    if not isinstance(out, _np.ndarray):
+        return
+    if _np.can_cast(out.dtype, _np.intp, casting="safe"):
+        return
+    noun = "scalar" if axis is None else "array data"
+    raise TypeError(
+        f"{op_name}(): Cannot cast {noun} from {out.dtype!r} to "
+        f"{_np.dtype(_np.intp)!r} according to the rule 'safe'"
+    )
+
 
 # Float-only ufuncs: numpy has no integer loops for these, so integer/bool
 # inputs promote to a float compute dtype (same-size float for unary ops,
@@ -668,6 +731,16 @@ def _counted_unary_multi(np_func, op_name: str):
     int32 regardless of the mantissa's size-mapped precision -- a narrow
     mantissa (float16, from an int8 input) would otherwise undercount the
     fixed-width exponent, so its billed dtype is floored at int32's rate too.
+
+    That floor is the ONLY thing that prices the exponent. A caller-supplied
+    exponent buffer must not price it a second time: an ``int32`` destination
+    is what numpy allocates for that slot anyway, so folding it into
+    ``np.result_type`` alongside a float32 mantissa promoted the whole
+    resolution to float64 and doubled the bill for naming a destination the
+    op was always going to produce. ``multi_store_billing_dtypes`` keeps a
+    slot out of the resolution unless it is genuinely pricier than numpy's
+    own choice for that slot, so widening either output still widens the
+    rate while the natural pair stays free.
     """
     nout = getattr(np_func, "nout", 2)
 
@@ -696,9 +769,13 @@ def _counted_unary_multi(np_func, op_name: str):
             billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (x.dtype,)
-            if out is not None:
-                for o in out:
-                    billing_dtypes += store_billing_dtypes(o)
+            # Only what a destination adds ON TOP of the buffer numpy would
+            # have allocated for that slot: ``frexp``'s exponent is int32 by
+            # signature, not because anything asked for 32-bit integer
+            # arithmetic, so naming it must not promote the resolution.
+            billing_dtypes += multi_store_billing_dtypes(
+                out, natural_output_dtypes(np_func, x.dtype)
+            )
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -899,9 +976,13 @@ def _counted_binary_multi(np_func, op_name: str):
             billing_dtypes = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
-            if out is not None:
-                for o in out:
-                    billing_dtypes += store_billing_dtypes(o)
+            # Resolve the operands FIRST so a NEP 50 weak scalar cannot make
+            # the natural destination look wider than the loop really is --
+            # see ``natural_output_dtypes``.
+            billing_dtypes += multi_store_billing_dtypes(
+                out,
+                natural_output_dtypes(np_func, resolve_billing_dtype(billing_dtypes)),
+            )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1416,6 +1497,12 @@ def _counted_reduction(
             out = _normalize_out(args_list[_out_args_idx], op_name)
             out_came_from_args = True
 
+        # Still above the deduct, and above every read of ``out`` below it:
+        # an index reduction refuses a non-index destination outright, and a
+        # refused form must cost zero.
+        if op_name in _INDEX_RETURNING_REDUCTIONS:
+            _refuse_non_index_destination(op_name, out, axis)
+
         new_symmetry = (
             reduce_group(symmetry, ndim=len(a.shape), axis=axis, keepdims=keepdims)
             if symmetry is not None
@@ -1464,11 +1551,22 @@ def _counted_reduction(
             if op_name in _INTEGER_ACCUMULATING_REDUCTIONS
             else a.dtype
         )
+        # An index destination is not an accumulator: it holds positions, not
+        # the values being compared, so its width says nothing about the
+        # arithmetic and it stays out of the resolution entirely. Supplying
+        # the intp buffer numpy would have allocated anyway then prices
+        # exactly like the bare call.
+        out_dtype = (
+            out.dtype
+            if isinstance(out, _np.ndarray)
+            and op_name not in _INDEX_RETURNING_REDUCTIONS
+            else None
+        )
         billing_dtypes: tuple = (
             reduction_billing_dtype(
                 a.dtype,
                 explicit_dtype=explicit_dtype,
-                out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+                out_dtype=out_dtype,
                 default_dtype=default_dtype,
             ),
         )
