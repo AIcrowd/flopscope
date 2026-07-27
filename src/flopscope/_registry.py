@@ -2158,9 +2158,9 @@ REGISTRY: dict[str, dict] = {
     },
     "mask_indices": {
         "category": "counted_custom",
+        "local_callback": True,
         "module": "numpy",
         "complex_factor": 2.0,
-        "local_callback": True,
         "notes": "Return indices of mask for n x n array. Cost: numel of the scanned mask (numel(input), as for nonzero).",
     },
     "tril_indices": {

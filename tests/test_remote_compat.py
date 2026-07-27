@@ -5,28 +5,24 @@ from __future__ import annotations
 import numpy as np
 
 import flopscope as flops
+from flopscope._registry import REGISTRY
 
+# Derived from REGISTRY, never hand-maintained: a literal copy of this set is
+# exactly how `mask_indices` went missing for so long (its `local_callback`
+# flag was added to the registry but the copy here wasn't updated to match).
+# Deriving it means the dispatch table in `_call()` below is the only thing
+# that still needs a manual entry per op.
 _CALLBACK_OPS = frozenset(
-    {
-        "apply_along_axis",
-        "apply_over_axes",
-        "fromfunction",
-        "fromiter",
-        "mask_indices",
-        "piecewise",
-    }
+    name for name, entry in REGISTRY.items() if entry.get("local_callback")
 )
 
 
 def test_remote_unsupported_ops_returns_frozenset_of_callback_ops():
     ops = flops.remote_unsupported_ops()
     assert isinstance(ops, frozenset)
-    assert ops == _CALLBACK_OPS
 
 
 def test_remote_unsupported_ops_matches_registry_flag():
-    from flopscope._registry import REGISTRY
-
     assert flops.remote_unsupported_ops() == frozenset(
         name for name, entry in REGISTRY.items() if entry.get("local_callback")
     )
