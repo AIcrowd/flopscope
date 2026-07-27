@@ -266,3 +266,51 @@ def test_mis_shaped_destination_is_refused_everywhere(name):
     with f.BudgetContext(flop_budget=10**15, quiet=True):
         with pytest.raises(ValueError, match="wrong shape"):
             fn(a, out=_dest(bad_shape, np.complex128))
+
+
+@pytest.mark.parametrize("name", OP_NAMES)
+def test_the_destination_itself_is_what_comes_back(name):
+    """numpy hands back the very object it was given; so must we.
+
+    Checking the returned VALUE is not enough -- a wrapper that dropped
+    ``return out`` entirely and returned its own freshly allocated result
+    would still carry the right numbers, and every content assertion in this
+    file would keep passing. That is not academic: the point of ``out=`` is
+    that the caller keeps a reference to the buffer and reads it afterwards,
+    so identity is the contract, not equality.
+    """
+    a = _make_input(name)
+    expected = _expected(name, a)
+    dest = _dest(expected.shape, expected.dtype)
+
+    with f.BudgetContext(flop_budget=10**15, quiet=True):
+        returned = getattr(fnp.fft, name)(fnp.asarray(a), out=dest)
+
+    assert np.asarray(returned) is dest or np.asarray(returned).base is dest, (
+        f"fft.{name} returned a different buffer than the destination it was "
+        f"handed -- a caller holding `dest` would read stale data"
+    )
+
+
+@pytest.mark.parametrize("name", OP_NAMES)
+def test_a_wider_destination_receives_the_right_values_too(name):
+    """The intersection of both defects, which neither test alone reaches.
+
+    The rate test measures a complex128 destination and discards the values;
+    the write test only ever uses a same-dtype destination. hfft/ifft2/irfft2
+    with a wide destination are exactly where the repair has to copy ACROSS a
+    cast, so that is the one combination worth asserting on content.
+    """
+    a = _make_input(name)
+    expected = _expected(name, a)
+    wide = np.result_type(expected.dtype, np.complex128)
+    dest = _dest(expected.shape, wide)
+
+    with f.BudgetContext(flop_budget=10**15, quiet=True):
+        returned = getattr(fnp.fft, name)(fnp.asarray(a), out=dest)
+
+    assert not np.any(dest == SENTINEL), (
+        f"fft.{name} left its wide destination unwritten"
+    )
+    np.testing.assert_allclose(dest, expected.astype(wide), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(returned), dest)
