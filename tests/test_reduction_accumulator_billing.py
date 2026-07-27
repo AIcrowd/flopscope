@@ -314,3 +314,48 @@ def test_reduction_billing_dtype_never_bills_below_the_bare_form():
                 # complex structure is never traded away for a wider rate
                 if bare.kind == "c":
                     assert got.kind == "c", (a_dtype, default, out)
+
+
+# ---------------------------------------------------------------------------
+# The kind axis: a complex destination must not lose its factor to a tie-break
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op,expect_ratio",
+    [
+        (lambda a, o: fnp.prod(a, axis=0, out=o), 6.0),
+        (lambda a, o: fnp.sum(a, axis=0, out=o), 2.0),
+        (lambda a, o: fnp.mean(a, axis=0, out=o), 2.0),
+        (lambda a, o: fnp.amax(a, axis=0, out=o), 2.0),
+    ],
+)
+def test_a_complex_destination_never_lowers_the_bill(op, expect_ratio):
+    """Complex-ness belongs to any participating buffer, including ``out=``.
+
+    The rate axis cannot see it -- complex64 and float32 both rate 1.0 -- so
+    whichever dtype wins the tie decides whether the complex factor survives.
+    An earlier form of this guard consulted only the accumulator and the
+    input, so a complex64 destination on a real accumulator silently dropped
+    the factor: prod fell from 391,680 to 65,280, a 6x under-bill of exactly
+    the kind this module exists to prevent, pointing the other way.
+    """
+    rng = np.random.default_rng(11)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True) as ctx:
+        a = fnp.asarray(rng.standard_normal((256, 256)).astype("float32"))
+        real_dest = np.zeros(256, dtype="float32")
+        complex_dest = np.zeros(256, dtype="complex64")
+
+        before = ctx.flops_used
+        op(a, real_dest)
+        real_cost = ctx.flops_used - before
+
+        before = ctx.flops_used
+        op(a, complex_dest)
+        complex_cost = ctx.flops_used - before
+
+    assert complex_cost >= real_cost, (
+        f"a complex destination billed {complex_cost} against {real_cost} for a "
+        f"real one -- the complex factor was dropped"
+    )
+    assert complex_cost == real_cost * expect_ratio

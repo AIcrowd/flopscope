@@ -238,9 +238,31 @@ def reduction_billing_dtype(
         heavier_billing_dtype(floor, out_dtype) if out_dtype is not None else floor
     )
     resolved = heavier_billing_dtype(accumulator, a_dtype)
-    complex_participants = [d for d in (floor, a_dtype) if d.kind == "c"]
-    if complex_participants and resolved.kind != "c":
-        resolved = heavier_billing_dtype(*complex_participants)
+    # ``out_dtype`` belongs in here alongside the other two. Complex-ness is a
+    # property of ANY participating buffer, and the rate axis cannot see it:
+    # complex64 and float32 both rate 1.0, so the tie-break above hands the
+    # win to whichever came first. Leaving ``out`` out of this list made that
+    # tie-break decide the complex factor, and a complex64 destination on a
+    # real accumulator lost it -- measured prod at 391,680 -> 65,280, a 6x
+    # DROP, which is the same defect this function exists to close, only
+    # pointing the other way.
+    loop_complex = [d for d in (floor, a_dtype) if d.kind == "c"]
+    if loop_complex and resolved.kind != "c":
+        # Complex in the LOOP is intrinsic and outranks a higher-rate real
+        # store: prod of complex64 with out=float64 really does accumulate in
+        # complex64 and merely drop the imaginary part on the way out, so the
+        # complex factor has been earned and a real out= cannot carry it away.
+        resolved = heavier_billing_dtype(*loop_complex)
+    elif out_dtype is not None and _np.dtype(out_dtype).kind == "c":
+        # Complex arriving only in the STORE is a different claim: the
+        # arithmetic was real, and the complex buffer is a participant like
+        # any other. So it competes on rate rather than winning outright --
+        # but it wins TIES, because complex64 and float32 both rate 1.0 and
+        # letting argument order decide the complex factor is what produced a
+        # 6x swing in prod. It must not invent width it has not earned: a
+        # complex64 store against an int64 accumulator stays int64, which is
+        # both the heavier rate and what numpy actually accumulates in.
+        resolved = heavier_billing_dtype(_np.dtype(out_dtype), resolved)
     return resolved
 
 
