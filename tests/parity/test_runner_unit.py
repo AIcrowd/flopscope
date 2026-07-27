@@ -124,7 +124,9 @@ def test_run_backend_surfaces_worker_stderr_on_failure():
     assert restarts == 0
 
 
-@pytest.mark.parametrize("encode", [str, lambda s: s.encode("utf-8")], ids=["str", "bytes"])
+@pytest.mark.parametrize(
+    "encode", [str, lambda s: s.encode("utf-8")], ids=["str", "bytes"]
+)
 def test_run_backend_handles_a_subprocess_timeout(monkeypatch, encode):
     # `_run_backend`'s TimeoutExpired handler is exercised without a
     # genuinely hanging worker: `subprocess.run` is monkeypatched to raise it
