@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 import flopscope as flops
 
 _CALLBACK_OPS = frozenset(
-    {"apply_along_axis", "apply_over_axes", "fromfunction", "fromiter", "piecewise"}
+    {
+        "apply_along_axis",
+        "apply_over_axes",
+        "fromfunction",
+        "fromiter",
+        "mask_indices",
+        "piecewise",
+    }
 )
 
 
@@ -46,6 +55,8 @@ def _call(op: str) -> None:
         fnp.fromfunction(lambda i, j: i + j, (3, 3))
     elif op == "fromiter":
         fnp.fromiter((x for x in range(5)), dtype=float)
+    elif op == "mask_indices":
+        fnp.mask_indices(3, np.triu)
     else:  # pragma: no cover
         raise AssertionError(op)
 

@@ -2951,6 +2951,7 @@ def mask_indices(*args, **kwargs):
     way -- the fnp mask_func still runs and bills its own cost; only its
     result is stripped so numpy's own ``nonzero`` sees a plain array.
     """
+    _warn_remote_callback("mask_indices")
     budget = require_budget()
 
     # numpy calls ``nonzero`` on whatever mask_func returns, so that array is
