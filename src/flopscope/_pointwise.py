@@ -3026,6 +3026,33 @@ if hasattr(_np, "ptp"):
 # ---------------------------------------------------------------------------
 
 
+def _ensure_contraction_out_written(dest, result) -> None:
+    """Write ``result`` into ``dest`` when numpy left the destination alone.
+
+    The contraction wrappers hand ``out`` back, so a numpy that accepted the
+    argument and quietly ignored it would return the caller an untouched buffer
+    AS the contraction result, at full price. That is not hypothetical for the
+    project as a whole: ``np.fft.hfft`` / ``ifft2`` / ``irfft2`` hardcode
+    ``out=None`` on numpy 2.0 through 2.4, which is what
+    :func:`flopscope.numpy.fft._transforms._ensure_out_written` exists to
+    repair. No contraction entry point does it on any numpy in the support
+    matrix -- this is a behavioural check, not a version table, so it keeps
+    holding on numpy releases that do not exist yet.
+
+    ``dest`` must be the stripped base ndarray handed to numpy: numpy returns
+    the very array it was given when it honours ``out=``, and it is never shown
+    the caller's ``FlopscopeArray``, so an identity test against that would
+    never match. ``may_share_memory`` covers a version returning a distinct
+    view onto the destination; an ignored ``out=`` is always a fresh
+    allocation, which cannot overlap it.
+    """
+    if not isinstance(dest, _np.ndarray) or not isinstance(result, _np.ndarray):
+        return
+    if result is dest or _np.may_share_memory(result, dest):
+        return
+    _call_numpy(_np.copyto, dest, result, casting="same_kind")
+
+
 def _einsum_routed_binary(
     op_name: str,
     np_fn: Any,
@@ -3059,6 +3086,12 @@ def _einsum_routed_binary(
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     info = _resolve_cost_and_output_symmetry(subs, a, b)
+    # The gate the pointwise factories already apply: a tag the caller paid
+    # ``as_symmetric`` to validate is a claim about this buffer, so a result
+    # that contradicts it is an error; a tag merely inferred from a constant
+    # fill is dropped quietly, which keeps a scratch arena usable.
+    if out is not None:
+        _prepare_symmetric_out(out, info.output_symmetry)
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
@@ -3089,11 +3122,18 @@ def _einsum_routed_binary(
     if nan_check:
         maybe_check_nan_inf(result, op_name)
     if out is not None:
+        _ensure_contraction_out_written(_to_base_ndarray(out), result)
         result = out
     if info.output_symmetry is not None and _validate_result_symmetry(
         result, info.output_symmetry
     ):
-        return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
+        # Only when the caller supplied no destination. Wrapping ``out`` would
+        # hand back a second object of a different type over the caller's own
+        # buffer; numpy and fnp.einsum both return the destination itself.
+        if out is None:
+            return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
+    if out is not None:
+        return out
     return _asflopscope(result) if inputs_were_whest else result
 
 
@@ -3142,8 +3182,14 @@ attach_docstring(dot, _np.dot, "counted_custom", "depends on operand dimensions"
 
 
 @_counted_wrapper
-def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
+def matmul(
+    a: ArrayLike, b: ArrayLike, out: FlopscopeArray | None = None
+) -> FlopscopeArray:
     """Counted version of np.matmul."""
+    # Declared rather than accepted through **kwargs, which is how the derived
+    # out= coverage discovers an op: it reads the wrapper's parameters, so a
+    # destination arriving as varkw is invisible to the sweep. The helper
+    # normalizes and prices it -- see _einsum_routed_binary.
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
@@ -3157,7 +3203,7 @@ def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     else:
         subs = "...ij,...jk->...ik"  # 2-D and batched/broadcast N-D
     return _einsum_routed_binary(
-        "matmul", _np.matmul, subs, a, b, errstate=True, nan_check=True
+        "matmul", _np.matmul, subs, a, b, errstate=True, nan_check=True, out=out
     )
 
 

@@ -594,7 +594,17 @@ def einsum(
     out = _normalize_out(out, "einsum")
 
     effective_out_symmetry = target_symmetry
-    if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
+    if (
+        effective_out_symmetry is None
+        and isinstance(out, SymmetricTensor)
+        and not getattr(out, "_symmetry_inferred", False)
+    ):
+        # Only a tag the caller validated becomes a requirement on the result.
+        # Lifting an *inferred* one made an ordinary scratch arena raise: an
+        # `fnp.zeros((n, n))` destination is auto-tagged symmetric, so writing
+        # any asymmetric contraction into it failed, for a legal numpy call
+        # against metadata the caller never asked for. The pointwise factories
+        # drop an inferred tag quietly; this brings einsum in line.
         effective_out_symmetry = out.symmetry
     target_symmetry = _prepare_symmetric_out(out, effective_out_symmetry)
 
