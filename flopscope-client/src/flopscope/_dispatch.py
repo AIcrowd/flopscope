@@ -44,12 +44,6 @@ from contextlib import contextmanager
 _total_dispatch_ns: int = 0
 _participant_spans: int = 0
 
-# id(module.__dict__) for every imported flopscope module. Rebuilt when
-# sys.modules grows, so lazily-imported submodules are picked up; recomputing it
-# per call would put an O(len(sys.modules)) scan on the hot path.
-_internal_globals: frozenset[int] = frozenset()
-_modules_seen: int = -1
-
 
 def _now_ns() -> int:
     """Monotonic nanosecond clock (indirected so tests can fake it)."""
@@ -78,21 +72,28 @@ def reset_dispatch() -> None:
     _participant_spans = 0
 
 
-def _refresh_internal_globals() -> frozenset[int]:
-    global _internal_globals, _modules_seen
-    if len(sys.modules) != _modules_seen:
-        _modules_seen = len(sys.modules)
-        _internal_globals = frozenset(
-            id(mod.__dict__)
-            for name, mod in list(sys.modules.items())
-            if (name == "flopscope" or name.startswith("flopscope."))
-            and getattr(mod, "__dict__", None) is not None
-        )
-    return _internal_globals
-
-
 def _globals_are_internal(namespace: object) -> bool:
-    return id(namespace) in _refresh_internal_globals()
+    """Whether *namespace* is the live ``__dict__`` of a flopscope module.
+
+    Resolved against ``sys.modules`` on every call rather than from a cached set
+    of ids: a submodule can be evicted and re-imported, which replaces the module
+    dict, and any cache keyed on a cheap sentinel (module count, say) would keep
+    the stale id and silently stop counting that module's spans.
+
+    Still O(1) — the name in the namespace picks the candidate, and the identity
+    comparison against the live module's ``__dict__`` is what decides. The name
+    alone proves nothing (it is an ordinary dict key), so a namespace claiming to
+    be flopscope's fails unless it genuinely is the module's own dict.
+    """
+    if not isinstance(namespace, dict):
+        return False
+    name = namespace.get("__name__")
+    if not isinstance(name, str):
+        return False
+    if name != "flopscope" and not name.startswith("flopscope."):
+        return False
+    module = sys.modules.get(name)
+    return module is not None and getattr(module, "__dict__", None) is namespace
 
 
 def _callable_is_internal(fn: object) -> bool:

@@ -90,6 +90,25 @@ def test_every_shipped_internal_call_site_is_recognised_internal():
         assert D._callable_is_internal(fn), f"{fn!r} was misclassified as external"
 
 
+def test_reimported_submodule_is_still_recognised_internal():
+    """Eviction + re-import replaces a module's dict without changing how many
+    modules exist, so provenance must be resolved live rather than from a cache
+    keyed on a cheap sentinel — otherwise that module's spans silently stop
+    counting after any reload."""
+    import flopscope.linalg as la
+
+    before_len = len(sys.modules)
+    assert D._callable_is_internal(la.norm)
+
+    del sys.modules["flopscope.linalg"]
+    reloaded = importlib.import_module("flopscope.linalg")
+
+    assert len(sys.modules) == before_len, "precondition: module count is unchanged"
+    assert D._callable_is_internal(reloaded.norm), (
+        "a re-imported flopscope submodule was misclassified as external"
+    )
+
+
 def test_internal_dispatch_span_accumulates():
     """The `with dispatch_span():` shape used in _budget/_connection/_remote_array."""
     from flopscope import _connection
