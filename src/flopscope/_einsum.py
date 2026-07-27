@@ -10,6 +10,7 @@ import numpy as _np
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting
+from flopscope._dtype_billing import resolve_billing_dtype, store_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
 from flopscope._pointwise import _prepare_symmetric_out, _validate_result_symmetry
@@ -17,18 +18,6 @@ from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetry_group
 from flopscope._validation import maybe_check_nan_inf, require_budget
 from flopscope._write_epoch import note_write
-
-
-def _dtype_of_ndarray_out(out: Any) -> _np.dtype | None:
-    """``out.dtype`` when ``out`` is an ndarray, else ``None``.
-
-    Kept as a helper (rather than an inline ``isinstance(out, _np.ndarray)``
-    check) because ``out`` is typed ``Any`` at its call sites; an inline
-    ``isinstance`` there leaks a narrowed-``out`` union into pyright's
-    control-flow analysis of the rest of the function, tripping
-    ``reportReturnType`` on an unrelated later ``return out``.
-    """
-    return out.dtype if isinstance(out, _np.ndarray) else None
 
 
 def _identity_pattern(operands):
@@ -593,10 +582,8 @@ def einsum(
         o if isinstance(o, _np.ndarray) else _np.asarray(o) for o in operands
     ]
     billing_dtypes = tuple(a.dtype for a in operand_arrays)
-    out_dtype = _dtype_of_ndarray_out(out)
-    if out_dtype is not None:
-        billing_dtypes += (out_dtype,)
-    resolved = _np.result_type(*billing_dtypes) if billing_dtypes else None
+    billing_dtypes += store_billing_dtypes(out)
+    resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(accumulation_cost, resolved)
 
     with budget.deduct(
