@@ -77,6 +77,19 @@ class RunResult:
     infrastructure_failure: str | None = None
 
 
+def _as_text(value) -> str:
+    """Decode subprocess output that may arrive as bytes.
+
+    ``TimeoutExpired`` carries bytes on ``.stdout``/``.stderr`` even when the
+    call requested text mode, so callers must not assume ``str``.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", "replace")
+    return ""
+
+
 def _run_worker(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]:
     """Run *cases* through exactly ONE worker process; no restart on death.
 
@@ -124,8 +137,14 @@ def _run_worker(backend: str, cases: list[Case]) -> tuple[dict[str, dict], str]:
         # exactly like a death: the next unrecorded case is marked
         # worker_died and a fresh worker resumes after it, so a stuck
         # backend can't wedge the whole run.
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        # `TimeoutExpired` carries BYTES on .stdout/.stderr even when the call
+        # passed text=True, so treating a non-str as "no output" would discard
+        # every record the worker flushed before it hung. `_run_backend` would
+        # then blame the first case of the remaining slice instead of the one
+        # that actually hung, misattributing the death and re-running cases the
+        # worker had already completed.
+        stdout = _as_text(exc.stdout)
+        stderr = _as_text(exc.stderr)
     out: dict[str, dict] = {}
     for line in stdout.splitlines():
         line = line.strip()
@@ -287,8 +306,18 @@ def run_corpus(cases: list[Case]) -> RunResult:
 
     for case in cases:
         # Self-check: a backend that disagrees with itself is nondeterministic.
+        # Compare only the modeled dimensions, via the same comparator used for
+        # the real diff. Comparing whole records would also compare `exc_msg`,
+        # which the comparator deliberately ignores because messages carry
+        # process-specific detail like memory addresses -- a case whose message
+        # merely differs between two worker processes would be quarantined and
+        # then skipped entirely, silently shrinking what the gate compares.
         flaky = any(
-            first[backend].get(case.id) != second[backend].get(case.id)
+            compare_observations(
+                case.id,
+                first[backend].get(case.id, {}),
+                second[backend].get(case.id, {}),
+            )
             for backend in _BACKENDS
         )
         if flaky:

@@ -83,7 +83,11 @@ test-parity-fast:  ## GATE: fast client/in-process differential parity (must be 
 
 .PHONY: test-parity-full
 test-parity-full:  ## Full differential parity sweep (blocks releases)
-	$(UV) pytest tests/parity/test_parity_full.py -q
+	# -s keeps stdout uncaptured so a PASSING run still prints the report:
+	# coverage counts and the per-entry allowlist match counts are the
+	# safeguard against a broad glob quietly absorbing a new divergence, and
+	# under default capture they would only ever appear on failure.
+	$(UV) pytest tests/parity/test_parity_full.py -q -s
 
 .PHONY: client-parity-inventory
 client-parity-inventory:  ## Run the client-parity harness and emit the categorized failure inventory

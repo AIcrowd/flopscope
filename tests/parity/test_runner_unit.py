@@ -124,19 +124,25 @@ def test_run_backend_surfaces_worker_stderr_on_failure():
     assert restarts == 0
 
 
-def test_run_backend_handles_a_subprocess_timeout(monkeypatch):
+@pytest.mark.parametrize("encode", [str, lambda s: s.encode("utf-8")], ids=["str", "bytes"])
+def test_run_backend_handles_a_subprocess_timeout(monkeypatch, encode):
     # `_run_backend`'s TimeoutExpired handler is exercised without a
     # genuinely hanging worker: `subprocess.run` is monkeypatched to raise it
     # directly, carrying partial stdout for one case as it would if the
     # worker had produced output before hanging.
+    #
+    # Parametrized over str AND bytes on purpose: a real TimeoutExpired carries
+    # BYTES even when the call requested text mode. A str-only test passes even
+    # if the handler drops byte output, which would silently discard every
+    # record the worker completed before hanging.
     completed_line = json.dumps({"id": "t/first", "outcome": "returned", "flops": 0})
 
     def _raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(
             cmd=["worker"],
             timeout=1,
-            output=completed_line + "\n",
-            stderr="partial stderr",
+            output=encode(completed_line + "\n"),
+            stderr=encode("partial stderr"),
         )
 
     monkeypatch.setattr(runner.subprocess, "run", _raise_timeout)
