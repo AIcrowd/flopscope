@@ -197,6 +197,12 @@ def _bad_forms(dest):
     }
 
 
+#: numpy distinguishes the two: a tuple of the wrong LENGTH is a ValueError
+#: ("The 'out' tuple must have exactly one entry per ufunc output"), anything
+#: of the wrong TYPE is a TypeError ("return arrays must be of ArrayType").
+_WRONG_LENGTH = {"two-tuple", "empty-tuple"}
+
+
 @pytest.mark.parametrize("form", sorted(_bad_forms(None)))
 def test_a_refused_out_form_costs_nothing_on_every_path(budget, form):
     # Every array is built BEFORE the measurement starts. Constructing one
@@ -215,7 +221,8 @@ def test_a_refused_out_form_costs_nothing_on_every_path(budget, form):
     for name, call, dest in cases:
         bad = _bad_forms(dest)[form]
         before = budget.flops_used
-        with pytest.raises(TypeError):
+        expected = ValueError if form in _WRONG_LENGTH else TypeError
+        with pytest.raises(expected):
             call(bad)
         assert budget.flops_used == before, (
             f"{name} was billed for refusing out={form}; a refusal must be free"
@@ -234,7 +241,8 @@ def test_einsum_refuses_the_container_forms_it_used_to_mis_write(budget):
 
     for bad in bad_forms:
         dest_before = budget.flops_used
-        with pytest.raises(TypeError, match="out= must be an array"):
+        expected = ValueError if isinstance(bad, tuple) else TypeError
+        with pytest.raises(expected):
             fnp.einsum("ij,jk->ik", a, b, out=bad)
         assert budget.flops_used == dest_before
 
@@ -273,7 +281,7 @@ def test_a_wrong_length_multi_output_tuple_is_refused_for_free(budget):
     src = fnp.array([1.5, 2.5])
     dest = fnp.zeros(2)
     before = budget.flops_used
-    with pytest.raises(TypeError, match="tuple of length 2"):
+    with pytest.raises(ValueError, match="exactly one entry per ufunc output"):
         fnp.modf(src, out=(dest,))  # pyright: ignore[reportArgumentType]
     assert budget.flops_used == before
 

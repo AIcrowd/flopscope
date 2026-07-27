@@ -1977,6 +1977,19 @@ def clip(
     Output shape is the broadcast of a with all bound arrays.
     """
     budget = require_budget()
+    # ``out`` is keyword-only in this signature but numpy's is
+    # ``clip(a, a_min, a_max, out=None, ...)``, and clip.__signature__ is
+    # overwritten with numpy's below -- so a caller following the advertised
+    # signature passes the destination as the third positional. It would
+    # otherwise land in *args and be counted as a third BOUND: measured 12,000
+    # FLOPs against 8,000 for the identical keyword call, because every bound
+    # costs numel, and the destination's dtype never reached the rate at all.
+    if len(args) >= 3:
+        args, out_positional = args[:2], args[2]
+        if out is not None and out_positional is not None:
+            raise TypeError("clip(): out= given both positionally and by keyword")
+        if out is None:
+            out = out_positional
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
@@ -2941,14 +2954,34 @@ def ptp(
     )
 
     budget = require_budget()
+    # ``out`` arrives inside **kwargs here rather than as a named parameter,
+    # which is how it escaped both the normalization every sibling reduction
+    # gets and the destination-dtype fold below. Left alone, a wider
+    # destination was free -- ptp into a complex128 buffer billed the same as
+    # no destination at all, where max/min bill four times as much -- a
+    # refused form was charged in full before numpy rejected it, and an
+    # unstripped FlopscopeArray reached numpy and tripped an internal guard.
+    out = _normalize_out(kwargs.pop("out", None), "ptp")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     axes_summed = _normalize_axis(axis, a.ndim)
     symmetry = a.symmetry if isinstance(a, SymmetricTensor) else None
     m = _num_output_orbits(tuple(a.shape), axes_summed, symmetry)
     cost = 2 * reduction_cost(a.shape, axis, symmetry=symmetry) + m
+    billing_dtype = reduction_billing_dtype(
+        a.dtype,
+        explicit_dtype=kwargs.get("dtype"),
+        out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+        default_dtype=a.dtype,
+    )
+    if out is not None:
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct(
-        "ptp", flop_cost=cost, subscripts=None, shapes=(a.shape,), dtypes=(a.dtype,)
+        "ptp",
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(a.shape,),
+        dtypes=(billing_dtype,),
     ):
         stripped = _to_base_ndarray(a)
         if hasattr(_np, "ptp"):
@@ -2957,7 +2990,7 @@ def ptp(
             result = _call_numpy(_np.max, stripped, axis=axis, **kwargs) - _call_numpy(
                 _np.min, stripped, axis=axis, **kwargs
             )
-    return result  # type: ignore[return-value]
+    return _wrap_result(result, out=out, symmetry=None)  # type: ignore[return-value]
 
 
 attach_docstring(

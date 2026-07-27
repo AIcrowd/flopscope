@@ -622,7 +622,7 @@ def test_we_modf_invalid_out_tuple_length_raises():
     with flops.BudgetContext(flop_budget=int(1e10)):
         a = fnp.array([1.5, 2.5, 3.0])
         single = fnp.zeros(3)
-        with pytest.raises(TypeError, match="tuple of length 2"):
+        with pytest.raises(ValueError, match="exactly one entry per ufunc output"):
             fnp.modf(a, out=(single,))  # pyright: ignore[reportArgumentType]
 
 
