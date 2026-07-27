@@ -102,6 +102,31 @@ _FIXED_MULTI_HANDLE_COUNTS: dict[str, int] = {
 # number of array handles in the request rather than a fixed constant.
 _PER_ARG_MULTI_HANDLE_OPS = frozenset({"meshgrid", "broadcast_arrays", "ix_"})
 
+# Ops that mint no array handle whatever their arguments, so reserving an
+# array slot for them would refuse a request the server can in fact deliver.
+# `save`/`savez`/`savez_compressed` route to _handle_save, which bills egress
+# and returns None; the RNG constructors return a Generator/RandomState/
+# SeedSequence, which _pack_result puts in the connection's separate
+# generator store (Session.store_generator), never in the array store.
+#
+# Only ops whose zero-handle result is unconditional belong here. A reduction
+# like `sum` does not qualify even though `sum(V)` returns a msgpack-native
+# scalar and stores nothing: `sum(V, axis=0)` returns an array and does store
+# one, and which of the two a call is cannot be read off the op name. Those
+# stay on the conservative default of 1 -- refused free at full capacity,
+# never charged -- with the exact, table-independent gate in _pack_result as
+# the guarantee against a stranded handle.
+_ZERO_ARRAY_HANDLE_OPS = frozenset(
+    {
+        "save",
+        "savez",
+        "savez_compressed",
+        "random.default_rng",
+        "random.SeedSequence",
+        "random.RandomState",
+    }
+)
+
 
 def _prospective_handle_count(op: str, raw_args: list) -> int:
     """Upper bound on array/scalar handles *op* could store, without dispatching it.
@@ -111,6 +136,8 @@ def _prospective_handle_count(op: str, raw_args: list) -> int:
     already charged) the operation. Defaults to 1 -- a single array or 0-d
     scalar handle -- which covers every op not listed above.
     """
+    if op in _ZERO_ARRAY_HANDLE_OPS:
+        return 0
     if op in _PER_ARG_MULTI_HANDLE_OPS:
         return max(len(raw_args), 1)
     return _FIXED_MULTI_HANDLE_COUNTS.get(op, 1)
@@ -127,6 +154,33 @@ def _make_serializable(obj):
     if isinstance(obj, dict):
         return {k: _make_serializable(v) for k, v in obj.items()}
     return obj
+
+
+def _unresolvable_operand(value) -> str | None:
+    """Name the type of an operand the protocol can never turn into a value.
+
+    msgpack delivers only ``None``/bool/int/float/str/bytes/list/dict, and
+    :meth:`RequestHandler._resolve_arg` converts every dict shape the protocol
+    defines -- array handle, generator handle, symmetry group -- into the
+    object it names. A dict that survives resolution therefore names nothing:
+    NumPy can only coerce it to an ``object`` array, and ``object`` is not a
+    dtype the client can decode, so the response is undeliverable however the
+    kernel runs.
+
+    Refusing it here, before dispatch, keeps the refusal free. The alternative
+    is to run the kernel, charge the caller for it, and only discover at pack
+    time that nothing can be sent back -- a charge with no result, which is
+    the exact outcome this module exists to prevent. Returns the offending
+    type's name, or ``None`` if every operand is representable.
+    """
+    if isinstance(value, dict):
+        return type(value).__name__
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            found = _unresolvable_operand(item)
+            if found is not None:
+                return found
+    return None
 
 
 _MSGPACK_SCALARS = (type(None), bool, int, float, str, bytes)
@@ -553,6 +607,18 @@ class RequestHandler:
         func = _get_flopscope_func(op)
         resolved_args = [self._resolve_arg(a) for a in raw_args]
         resolved_kwargs = {k: self._resolve_arg(v) for k, v in kwargs.items()}
+
+        for operand in (*resolved_args, *resolved_kwargs.values()):
+            bad_type = _unresolvable_operand(operand)
+            if bad_type is not None:
+                return {
+                    "status": "error",
+                    "error_type": "TypeError",
+                    "message": (
+                        f"{op}() received an argument of type {bad_type!r}, "
+                        f"which cannot be used as an array operand"
+                    ),
+                }
 
         result = self._run_kernel(func, *resolved_args, **resolved_kwargs)
 

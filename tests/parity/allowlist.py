@@ -3864,6 +3864,32 @@ ENTRIES: tuple[Entry, ...] = (
     ),
     Entry(
         case_id="types/dict::*",
+        dimension="flops",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "In-process numpy coerces a `dict` operand to an `object` array and runs"
+            " the kernel, charging for it, before anything notices the result is"
+            " unusable. The server cannot deliver an `object` array to the client at"
+            " all, so it refuses the operand before dispatch and charges nothing."
+            " Charging for a result that provably cannot be returned is the worse"
+            " behaviour of the two, so the client stays at zero here deliberately."
+        ),
+        issue="INTERNAL-P3-refuse-before-charging",
+    ),
+    Entry(
+        case_id="types/*::dict-literal",
+        dimension="flops",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "Same deliberate choice as the `types/dict::*` flops entry, reached from"
+            " the other direction: the dict-literal position wraps every value family"
+            " in a `dict`, so whatever the value is, the operand is one the server"
+            " refuses before dispatch while in-process numpy runs and charges for it."
+        ),
+        issue="INTERNAL-P3-refuse-before-charging",
+    ),
+    Entry(
+        case_id="types/dict::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(

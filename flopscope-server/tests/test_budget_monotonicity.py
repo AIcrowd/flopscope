@@ -159,3 +159,94 @@ def test_no_op_record_carries_a_negative_flop_cost(session, monkeypatch):
     assert all(record.flop_cost >= 0 for record in op_log), (
         f"a negative flop_cost slipped into the op log: {op_log}"
     )
+
+
+def test_a_full_store_still_serves_ops_that_mint_no_array_handle(session, monkeypatch):
+    # The pre-dispatch gate reserves a slot per prospective handle, which
+    # would refuse an op that needs none. `random.default_rng` returns a
+    # Generator, and _pack_result puts that in the connection's separate
+    # generator store -- the array store being full says nothing about
+    # whether this response can be delivered, so it must not be refused.
+    session.store_array(np.ones(4, dtype="float64"))
+    monkeypatch.setattr(_array_store, "MAX_ARRAY_COUNT", 1)
+
+    response = RequestHandler(session).handle(
+        {"op": "random.default_rng", "args": [7], "kwargs": {}}
+    )
+
+    assert response["status"] == "ok", response.get("message")
+    assert "gen_id" in response["result"]
+
+
+def test_a_full_store_refuses_an_op_whose_handle_count_is_argument_dependent(
+    session, monkeypatch
+):
+    # The other side of the exemption: `sum` is NOT exempt, because its
+    # handle count cannot be read off the op name. `sum(a)` returns a
+    # msgpack-native scalar and stores nothing, but `sum(a, axis=0)` returns
+    # an array and stores one, so the gate stays conservative for it. The
+    # cost of that conservatism is a refusal the server could have served --
+    # but the refusal is free, which is the property being protected here.
+    a = session.store_array(np.ones((4, 4), dtype="float64"))
+    monkeypatch.setattr(_array_store, "MAX_ARRAY_COUNT", 1)
+    before = session.budget_context.flops_used
+
+    response = RequestHandler(session).handle(
+        {"op": "sum", "args": [{"__handle__": a}], "kwargs": {}}
+    )
+
+    assert response["status"] == "error"
+    assert response["error_type"] == "MemoryError"
+    assert session.budget_context.flops_used == before
+
+
+def test_an_unrepresentable_operand_is_refused_before_any_charge(session):
+    # A dict that survives _resolve_arg names nothing the protocol defines,
+    # so NumPy can only coerce it to an `object` array -- a dtype the client
+    # has no decoder for. Running the kernel would charge for a result that
+    # could never be sent back, so the refusal has to happen before dispatch.
+    handler = RequestHandler(session)
+    v = session.store_array(np.array([True, False, True]))
+    before = session.budget_context.flops_used
+
+    response = handler.handle(
+        {"op": "where", "args": [{"__handle__": v}, {"k": 1}, 0.0], "kwargs": {}}
+    )
+
+    assert response["status"] == "error"
+    assert response["error_type"] == "TypeError"
+    assert "dict" in response["message"]
+    assert session.budget_context.flops_used == before, (
+        "an undeliverable operand must cost the caller nothing"
+    )
+
+
+def test_an_unrepresentable_operand_is_found_inside_a_sequence(session):
+    # concatenate([a, {...}]) hides the dict one level down, where
+    # _resolve_arg recurses -- so the check has to recurse too, or the
+    # nested case falls through to the kernel and gets charged.
+    handler = RequestHandler(session)
+    a = session.store_array(np.ones(3, dtype="float64"))
+    before = session.budget_context.flops_used
+
+    response = handler.handle(
+        {"op": "concatenate", "args": [[{"__handle__": a}, {"k": 1}]], "kwargs": {}}
+    )
+
+    assert response["status"] == "error"
+    assert response["error_type"] == "TypeError"
+    assert session.budget_context.flops_used == before
+
+
+def test_handle_envelopes_are_not_mistaken_for_unrepresentable_operands(session):
+    # The check runs on *resolved* arguments precisely so that the protocol's
+    # own dict envelopes -- which arrive as dicts and leave as arrays -- are
+    # never caught by it. Without that ordering this refuses every op.
+    handler = RequestHandler(session)
+    a = session.store_array(np.ones((4, 4), dtype="float64"))
+
+    response = handler.handle(
+        {"op": "matmul", "args": [{"__handle__": a}, {"__handle__": a}], "kwargs": {}}
+    )
+
+    assert response["status"] == "ok", response.get("message")
