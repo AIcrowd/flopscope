@@ -13,10 +13,13 @@ from flopscope._config import get_setting
 from flopscope._dtype_billing import resolve_billing_dtype, store_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
-from flopscope._pointwise import _prepare_symmetric_out, _validate_result_symmetry
+from flopscope._pointwise import (
+    _prepare_symmetric_out,
+    _validate_result_symmetry,
+)
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetry_group
-from flopscope._validation import maybe_check_nan_inf, require_budget
+from flopscope._validation import _normalize_out, maybe_check_nan_inf, require_budget
 from flopscope._write_epoch import note_write
 
 
@@ -583,6 +586,13 @@ def einsum(
         target_symmetry = normalize_symmetry_input(symmetry, ndim=len(output_subscript))
     else:
         target_symmetry = info.output_symmetry
+    # Before anything is billed: a wrapped destination (``out=[dest]``) would
+    # otherwise reach the copy below, where ``_np.asarray`` builds a new array
+    # from the container -- the result lands in that temporary, ``dest`` keeps
+    # its old contents, and the caller gets the untouched wrapper back having
+    # paid for the contraction.
+    out = _normalize_out(out, "einsum")
+
     effective_out_symmetry = target_symmetry
     if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
         effective_out_symmetry = out.symmetry
@@ -615,7 +625,13 @@ def einsum(
 
     if out is not None:
         _validate_result_symmetry(result, target_symmetry)
-        _np.copyto(_np.asarray(out), _np.asarray(result), casting="unsafe")
+        # ``_to_base_ndarray``, never ``_np.asarray``: asarray on anything that
+        # is not already an array builds a NEW buffer, and the copy below then
+        # fills that temporary while the caller's destination keeps its old
+        # contents. Guarding the argument stops a container getting here, but
+        # taking the materialising call out is what makes the whole class of
+        # silent mis-write structurally impossible rather than merely gated.
+        _np.copyto(_to_base_ndarray(out), _np.asarray(result), casting="unsafe")
         # Internal copy, so _call_numpy's hook never sees it: record the write
         # or a tag on out's buffer (or on an alias of it) would survive.
         note_write(out)

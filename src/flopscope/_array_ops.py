@@ -21,7 +21,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from flopscope import _symmetry_transport as _st
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
-from flopscope._dtype_billing import billing_operand
+from flopscope._dtype_billing import billing_operand, store_billing_dtypes
 from flopscope._dtype_billing import heavier_billing_dtype as _heavier_billing_dtype
 from flopscope._ndarray import (
     FlopscopeArray,
@@ -38,7 +38,7 @@ from flopscope._symmetry_utils import (
     wrap_with_symmetry,
     wrap_with_trusted_symmetry,
 )
-from flopscope._validation import require_budget
+from flopscope._validation import _normalize_out, require_budget
 from flopscope.errors import (
     SymmetryError,
     UnsupportedFunctionError,
@@ -655,16 +655,36 @@ def concatenate(
 ) -> FlopscopeArray:
     """Join arrays along an axis. Cost: numel(output)."""
     budget = require_budget()
+    # ``out`` arrives through **kwargs here, so it reached neither the
+    # normalization every declared-parameter sibling gets nor the billing
+    # fold below. See the note on the destination dtype further down.
+    out = _normalize_out(kwargs.pop("out", None), "concatenate")
     arr_list = [_np.asarray(a) for a in arrays]
     cost = max(sum(a.size for a in arr_list), 1)
     groups = [(a.symmetry if isinstance(a, SymmetricTensor) else None) for a in arrays]
     raw_arrs = [_to_base_ndarray(a) for a in arrays]
+    # numpy's default casting for concatenate is ``same_kind``, which admits
+    # float -> complex, so the copy loop that actually runs is the
+    # DESTINATION's: joining float32 blocks into a complex128 buffer converts
+    # every element on the way in (measured 1.100 ms against 0.225 ms for a
+    # float32 destination, and 0.886 ms for the same join with complex128
+    # inputs). Folding the destination into the rate prices that loop --
+    # 80,000 for the case that used to bill 20,000, exactly what the
+    # all-complex128 join bills.
+    billing_dtypes = tuple(a.dtype for a in arr_list) + store_billing_dtypes(out)
+    if out is not None:
+        # Unstripped, a FlopscopeArray destination reaches numpy still wrapped
+        # and trips the internal "reached numpy.concatenate from inside an fnp
+        # wrapper" guard -- which used to happen AFTER the deduct, at full
+        # price. Passing it as ``out=`` also lets _call_numpy record the write,
+        # voiding any symmetry tag that observed the destination's buffer.
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct(
         "concatenate",
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=tuple(a.dtype for a in arr_list),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.concatenate, raw_arrs, axis=axis, **kwargs)
     out_group = _st.transport_concatenate(
@@ -681,6 +701,13 @@ def concatenate(
             ],
             reason="concatenate breaks block symmetry or mixes with plain inputs",
         )
+    if out is not None:
+        # numpy.concatenate returns the destination, so hand back the caller's
+        # own object rather than a fresh view of it. A destination never
+        # carries a symmetry tag out: a tag is a billing discount, and this op
+        # cannot verify one against a buffer the caller already owns and may
+        # keep writing to.
+        return out  # type: ignore[return-value]
     if out_group is not None:
         return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
@@ -697,15 +724,23 @@ def stack(
 ) -> FlopscopeArray:
     """Stack arrays along a new axis. Cost: numel(output)."""
     budget = require_budget()
+    # See ``concatenate`` above: ``out`` arrives through **kwargs, so it
+    # reached neither the normalization nor the destination-dtype fold, and an
+    # unstripped FlopscopeArray destination tripped the internal strip guard
+    # after the deduct rather than before it.
+    out = _normalize_out(kwargs.pop("out", None), "stack")
     arr_list = [_np.asarray(a) for a in arrays]
     cost = max(sum(a.size for a in arr_list), 1)
     groups = [a.symmetry if isinstance(a, SymmetricTensor) else None for a in arrays]
+    billing_dtypes = tuple(a.dtype for a in arr_list) + store_billing_dtypes(out)
+    if out is not None:
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct(
         "stack",
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=tuple(a.dtype for a in arr_list),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(
             _np.stack, _to_base_ndarray_tree(arrays), axis=axis, **kwargs
@@ -720,6 +755,8 @@ def stack(
             ],
             reason="stack inputs disagree or include plain arrays",
         )
+    if out is not None:
+        return out  # type: ignore[return-value]
     if out_group is not None:
         return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
@@ -1676,23 +1713,61 @@ attach_docstring(
 )
 
 
-@_counted_wrapper
-def isnan(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Test element-wise for NaN. Cost: numel(input)."""
+def _counted_predicate(op_name, ufunc, x, kwargs):
+    """Shared body of ``isnan`` / ``isinf`` / ``isfinite``.
+
+    These three take ``out=`` through **kwargs, which is how the destination
+    escaped normalization, escaped the billing rate, and reached numpy still
+    wrapped when a caller passed a FlopscopeArray -- tripping the internal
+    strip guard *after* the deduct, at full price.
+
+    On the rate, the destination is folded in, but NOT because numpy runs a
+    wider predicate loop -- it does not. Every loop these ufuncs publish ends
+    in ``?`` (``np.isnan.types`` is ``'e->?', 'f->?', 'd->?', ...``), and
+    ``np.isnan.resolve_dtypes((float32, float64))`` reports ``(float32,
+    bool)``: the ``f->?`` loop runs and the bool answer is then cast into the
+    caller's buffer. The destination is a cast target, nothing more.
+
+    It is folded in because that cast is real, measurable work, not a
+    bookkeeping detail. Over 4e6 float32 values: into a bool destination
+    0.179 ms, into a float64 destination 1.314 ms, and the explicit two-step
+    -- predicate into bool (0.179 ms) then ``bool.astype(float64)``
+    (1.090 ms) -- 1.269 ms. The fused spelling IS the two-step, to within 4%,
+    so leaving the destination out of the rate handed back a free ``astype``:
+    under the shipped weights the written-out cast bills 20,000 where the
+    fused form billed 10,000.
+
+    Folding is the widest-participating-buffer rule from ``_dtype_billing``
+    applied unchanged, and what it buys is stated without reference to any
+    weights profile: a destination now widens the rate exactly as an equally
+    wide OPERAND does, so ``isnan(f32, out=f64)`` bills what ``isnan(f64)``
+    bills. A bool destination -- the natural one -- resolves with the input
+    and changes nothing.
+    """
     budget = require_budget()
+    out = _normalize_out(kwargs.pop("out", None), op_name)
     x_arr = _np.asarray(x)
     cost = x_arr.size
+    if out is not None:
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct(
-        "isnan",
+        op_name,
         flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape,),
-        dtypes=(x_arr.dtype,),
+        dtypes=(x_arr.dtype,) + store_billing_dtypes(out),
     ):
         # Strip flopscope subclasses so the raw NumPy ufunc does not
         # re-dispatch through __array_ufunc__ and recurse.
-        result = _call_numpy(_np.isnan, _to_base_ndarray(x), **kwargs)
-    return result  # type: ignore[return-value]
+        result = _call_numpy(ufunc, _to_base_ndarray(x), **kwargs)
+    # numpy hands the destination back; so do we, as the caller's own object.
+    return out if out is not None else result
+
+
+@_counted_wrapper
+def isnan(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
+    """Test element-wise for NaN. Cost: numel(input)."""
+    return _counted_predicate("isnan", _np.isnan, x, kwargs)
 
 
 attach_docstring(isnan, _np.isnan, "counted_custom", "numel(input) FLOPs")
@@ -1701,18 +1776,7 @@ attach_docstring(isnan, _np.isnan, "counted_custom", "numel(input) FLOPs")
 @_counted_wrapper
 def isfinite(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     """Test element-wise for finiteness. Cost: numel(input)."""
-    budget = require_budget()
-    x_arr = _np.asarray(x)
-    cost = x_arr.size
-    with budget.deduct(
-        "isfinite",
-        flop_cost=cost,
-        subscripts=None,
-        shapes=(x_arr.shape,),
-        dtypes=(x_arr.dtype,),
-    ):
-        result = _call_numpy(_np.isfinite, _to_base_ndarray(x), **kwargs)
-    return result  # type: ignore[return-value]
+    return _counted_predicate("isfinite", _np.isfinite, x, kwargs)
 
 
 attach_docstring(isfinite, _np.isfinite, "counted_custom", "numel(input) FLOPs")
@@ -1721,18 +1785,7 @@ attach_docstring(isfinite, _np.isfinite, "counted_custom", "numel(input) FLOPs")
 @_counted_wrapper
 def isinf(x: ArrayLike, **kwargs: Any) -> FlopscopeArray:
     """Test element-wise for Inf. Cost: numel(input)."""
-    budget = require_budget()
-    x_arr = _np.asarray(x)
-    cost = x_arr.size
-    with budget.deduct(
-        "isinf",
-        flop_cost=cost,
-        subscripts=None,
-        shapes=(x_arr.shape,),
-        dtypes=(x_arr.dtype,),
-    ):
-        result = _call_numpy(_np.isinf, _to_base_ndarray(x), **kwargs)
-    return result  # type: ignore[return-value]
+    return _counted_predicate("isinf", _np.isinf, x, kwargs)
 
 
 attach_docstring(isinf, _np.isinf, "counted_custom", "numel(input) FLOPs")
@@ -2221,10 +2274,21 @@ def compress(
     copies each selected element at gather-tier cost (4 FLOPs each).
     """
     budget = require_budget()
+    # ``out`` arrives through **kwargs. deduct_after already made a refusal
+    # free (__exit__ does not charge on an exception), so what was actually
+    # broken here is the strip: a FlopscopeArray destination reached numpy
+    # still wrapped and tripped the internal guard. The destination's dtype
+    # deliberately does NOT join the rate -- numpy's take/compress require
+    # ``can_cast(out.dtype, a.dtype, "safe")``, so a WIDER destination is
+    # unreachable (float32 input with a float64 out is a TypeError); only
+    # same-or-narrower destinations exist, and those never move the rate.
+    out = _normalize_out(kwargs.pop("out", None), "compress")
     _warn_if_symmetric(a, "compress")
     condition_arr = _np.asarray(condition)
     cond_len = condition_arr.size
     a_arr = _np.asarray(a)
+    if out is not None:
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct_after(
         "compress", subscripts=None, shapes=(), dtypes=(a_arr.dtype,)
     ) as _op:
@@ -2243,7 +2307,8 @@ def compress(
             else 1
         )
         _op.set_cost(cond_len + 4 * out_size)
-    return result
+    # numpy.compress returns the destination when given one.
+    return out if out is not None else result
 
 
 attach_docstring(
@@ -2259,7 +2324,15 @@ def concat(
 ) -> FlopscopeArray:
     """Join arrays along an axis. Cost: numel(output)."""
     budget = require_budget()
+    # concat IS concatenate under another name, and had the same two defects:
+    # the destination's dtype never reached the rate (see the measurement in
+    # ``concatenate``), and an unstripped FlopscopeArray destination tripped
+    # the internal guard. deduct_after already made a refusal free.
+    out = _normalize_out(kwargs.pop("out", None), "concat")
     _concat_dtypes = tuple(_np.asarray(a).dtype for a in arrays)
+    _concat_dtypes += store_billing_dtypes(out)
+    if out is not None:
+        kwargs["out"] = _to_base_ndarray(out)
     with budget.deduct_after(
         "concat", subscripts=None, shapes=(), dtypes=_concat_dtypes
     ) as _op:
@@ -2267,7 +2340,7 @@ def concat(
             _np.concat, _to_base_ndarray_tree(arrays), axis=axis, **kwargs
         )  # type: ignore[arg-type, call-overload]
         _op.set_cost(result.size if hasattr(result, "size") else 1)
-    return result  # type: ignore[return-value]
+    return out if out is not None else result  # type: ignore[return-value]
 
 
 attach_docstring(concat, _np.concat, "counted_custom", "numel(output) FLOPs")
@@ -3393,6 +3466,15 @@ def take(
 ) -> FlopscopeArray:
     """Take elements from array along axis. Cost: numel(output)."""
     budget = require_budget()
+    # take already declared ``out`` and already stripped it, but it was the one
+    # op in the codebase that accepted ``out=dest`` and refused ``out=(dest,)``
+    # -- every sibling unwraps the one-tuple numpy's own ufunc protocol
+    # unwraps. Normalizing here makes the two spellings the same call.
+    # No destination-dtype fold: numpy requires
+    # ``can_cast(out.dtype, a.dtype, "safe")``, so a wider destination cannot
+    # be reached (float32 input, float64 out -> TypeError), and a narrower one
+    # never moves the rate.
+    out = _normalize_out(out, "take")
     _a_arr = _np.asarray(a)
     with budget.deduct_after(
         "take", subscripts=None, shapes=(), dtypes=(_a_arr.dtype,)
@@ -3406,7 +3488,9 @@ def take(
             mode=mode,  # type: ignore[arg-type]
         )
         _op.set_cost(result.size if hasattr(result, "size") else 1)
-    return result  # type: ignore[return-value]
+    # numpy.take returns the destination; hand back the caller's own object
+    # rather than the stripped view we passed down.
+    return out if out is not None else result  # type: ignore[return-value]
 
 
 attach_docstring(take, _np.take, "counted_custom", "numel(output) FLOPs")

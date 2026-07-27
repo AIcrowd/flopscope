@@ -726,7 +726,7 @@ class TestMultiOutputOps:
         x = numpy.array([1.5, 2.7])
         single = numpy.zeros(2)
         with BudgetContext(flop_budget=10**6):
-            with pytest.raises(TypeError, match="length"):
+            with pytest.raises(ValueError, match="exactly one entry per ufunc output"):
                 modf(x, out=(single,))  # pyright: ignore[reportArgumentType]
 
     def test_modf_invalid_out_type_raises(self):

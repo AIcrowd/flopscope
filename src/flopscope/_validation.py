@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import builtins as _builtins
 import warnings
+from typing import Any
 
 import numpy as np
 
@@ -18,6 +20,79 @@ def require_budget():
     from flopscope._budget import _get_global_default
 
     return _get_global_default()
+
+
+def _normalize_out(out: object, op_name: str, *, nout: int = 1) -> Any:
+    """Reduce ``out=`` to the destination array itself, or refuse it.
+
+    numpy's ufunc protocol lets a caller pass the destination either bare or
+    inside a tuple of length ``nout``; ``np.multiply(a, b, out=(dest,))`` and
+    ``out=dest`` mean the same thing. flopscope has to see through the tuple
+    for itself, because it reads ``out`` several times before numpy ever gets
+    it -- to pick the billing dtype, to check symmetry, and to decide what to
+    hand back. A tuple slipping past those reads is not a cosmetic difference:
+    the destination's dtype stops participating in the rate, so a contraction
+    into a wider buffer bills as if the buffer were not there.
+
+    Worse on the einsum path, which never forwards ``out`` to numpy at all:
+    there a container reaches ``_np.asarray(container)``, which builds a NEW
+    array, so the result lands in that temporary, the real destination keeps
+    its old contents, and the caller gets the untouched container back having
+    paid in full.
+
+    So: unwrap what numpy would unwrap, refuse everything else, and do it
+    before a single FLOP is charged.
+
+    Returns the value ``out`` should be for the rest of the call -- ``None``,
+    the bare destination, or (for a multi-output op) the tuple unchanged.
+    Typed ``Any`` because which of those it is depends on ``nout``, and
+    every caller assigns it straight back over its own ``out`` parameter.
+
+    The refusals mirror numpy's ufunc parser exactly, both in class and in
+    wording, because intercepting the argument earlier than numpy does should
+    not change what the failure looks like to a caller. Measured on numpy
+    2.2.6 -- a length mismatch is a ``ValueError`` and a type mismatch is a
+    ``TypeError``, which is not a distinction worth inventing our own version
+    of::
+
+        np.modf(a, out=d)         TypeError:  'out' must be a tuple of arrays
+        np.modf(a, out=(d,))      ValueError: The 'out' tuple must have
+                                              exactly one entry per ufunc output
+        np.multiply(a, a, out=()) ValueError: (same)
+        np.multiply(a, a, out=[d]) TypeError: return arrays must be of ArrayType
+    """
+    if out is None:
+        return out
+
+    if isinstance(out, np.ndarray):
+        if nout == 1:
+            return out
+        # A bare array names one destination, and a multi-output ufunc needs
+        # one per output. numpy deprecated this in 1.10 and made it a hard
+        # error in gh-14682; refusing it here is what makes it free rather
+        # than charged, since numpy only gets to see it after the deduct.
+        raise TypeError(f"{op_name}(): 'out' must be a tuple of arrays")
+
+    # ``type(out) is tuple``, not ``isinstance``: numpy refuses a namedtuple
+    # or any tuple subclass here, and being more permissive than numpy buys
+    # nothing. ``_builtins.all`` rather than ``all``: ``all`` is itself a
+    # counted flopscope operation, and this module's callers rebind the name
+    # to it -- validating an argument must never bill.
+    if type(out) is tuple:
+        if len(out) != nout:
+            raise ValueError(
+                f"{op_name}(): The 'out' tuple must have exactly one entry "
+                f"per ufunc output"
+            )
+        if _builtins.all(o is None or isinstance(o, np.ndarray) for o in out):
+            return out[0] if nout == 1 else out
+
+    raise TypeError(
+        f"{op_name}(): return arrays must be of ArrayType -- out= must be an "
+        f"array, or a tuple of {nout} holding one per output, not "
+        f"{type(out).__name__}. Pass the destination array itself, not a "
+        f"container holding it."
+    )
 
 
 def validate_ndarray(*arrays: object) -> None:

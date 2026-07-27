@@ -196,5 +196,85 @@ def test_scratch_buffer_idiom_still_works():
     assert np.allclose(np.asarray(arena), _asymmetric())
 
 
+# --- the same routes, with the destination inside a container ------------
+
+
+def _assert_the_write_landed_and_voided_the_tag(tagged, write, expected):
+    """Stricter than :func:`_assert_claim_does_not_survive`, on purpose.
+
+    That helper accepts a raised exception as a pass, which is the right
+    contract for it: for most of these routes, refusing the write and dropping
+    the claim are equally safe outcomes. It is the wrong contract for the
+    container tests. A container that is refused, or one whose write silently
+    lands in a temporary, produces no forgery to detect — so a test built on
+    that helper passes whether or not the guard exists, and one of the two
+    added with this fix never reached its assertion at all: einsum raises a
+    SymmetryError for the container and for the bare array alike, so it was
+    not testing the container.
+
+    Here the write must HAPPEN — asserted against the expected values, in the
+    tagged buffer — and the tag must then be gone. Both halves can fail:
+    unwrap the container into a temporary and the values assertion fails;
+    skip the symmetry check for containers and the tag assertion fails.
+    """
+    load_weights()
+    honest = _honest()
+
+    write(tagged)
+
+    written = np.asarray(tagged)
+    assert np.allclose(written, expected), (
+        "the write did not reach the tagged buffer — it landed in a temporary "
+        "built from the container, which is the silent-wrong-answer failure"
+    )
+    assert not np.allclose(written, written.T), (
+        "test bug: the write did not actually break symmetry"
+    )
+    assert getattr(tagged, "symmetry", None) is None, (
+        "the symmetry tag survived a write that invalidated it"
+    )
+    assert _probe(tagged) == honest, (
+        "asymmetric data still bills at the symmetric rate through a container"
+    )
+
+
+def test_ufunc_out_does_not_forge_tag_through_a_container():
+    """A tuple-wrapped destination must void the tag exactly as a bare one does.
+
+    It reaches ``_prepare_symmetric_out`` only once ``out`` is normalized;
+    before that the symmetry check was simply skipped for the container, while
+    numpy wrote through the tuple perfectly happily — data in, claim intact.
+    """
+    tagged = fnp.zeros((N, N))
+    source = _asymmetric()
+    _assert_the_write_landed_and_voided_the_tag(
+        tagged,
+        lambda z: fnp.multiply(source, 1.0, out=(z,)),  # pyright: ignore[reportArgumentType]
+        expected=source,
+    )
+
+
+def test_contraction_out_does_not_forge_tag_through_a_container():
+    """einsum is where a container is worst: it copies into ``out`` itself.
+
+    The destination here is an untagged ALIAS of the tagged buffer — the
+    spelling a caller reaches for when handing a scratch array to a routine —
+    so the write is not refused and the tag has to be voided by the write
+    itself. Unwrap the alias out of its tuple and everything works; leave the
+    tuple standing and ``_np.asarray(container)`` builds a new array, the
+    tagged buffer keeps its zeros AND its claim, and the caller pays full
+    price for a contraction they never receive.
+    """
+    tagged = fnp.zeros((N, N))
+    alias = fnp.asarray(tagged)
+    assert getattr(alias, "symmetry", None) is None, "the alias must be untagged"
+    source = _asymmetric()
+    _assert_the_write_landed_and_voided_the_tag(
+        tagged,
+        lambda _: fnp.einsum("ij,jk->ik", source, fnp.eye(N), out=(alias,)),
+        expected=source,
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
