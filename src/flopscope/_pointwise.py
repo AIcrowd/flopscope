@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins as _builtins
 import functools as _functools
 import inspect as _inspect
+import operator as _operator
 import warnings as _warnings
 from math import prod as _math_prod
 from typing import Any
@@ -1255,66 +1256,138 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=None)
 
 
+def _canon_entry(entry):
+    """Resolve one index entry to an immutable canonical form.
+
+    Branch order is load-bearing. ``bool`` must be tested before ``int``
+    (Python ``bool`` implements ``__index__`` but numpy treats it as a 0-d
+    mask that ADDS an axis); ``ndarray`` must be tested before ``__index__``
+    (a 0-d integer array implements it).
+
+    Boolean arrays are snapshotted because their cost depends on their
+    VALUES (``count_nonzero``), so a caller could otherwise mutate the mask
+    between costing and writing. Integer arrays are not snapshotted: their
+    cost depends only on ``.size``, which cannot change while we hold a
+    reference. We only ever freeze copies WE made -- ``_np.asarray`` can
+    hand back the caller's own array, and freezing that would leave a
+    participant's array permanently read-only.
+    """
+    if entry is None or entry is Ellipsis:
+        return entry
+    if isinstance(entry, slice):
+
+        def _ix(part):
+            return None if part is None else _operator.index(part)
+
+        return slice(_ix(entry.start), _ix(entry.stop), _ix(entry.step))
+    if isinstance(entry, (bool, _np.bool_)) and not isinstance(entry, _np.ndarray):
+        return _np.bool_(entry)
+    if isinstance(entry, _np.ndarray):
+        base = _to_base_ndarray(entry)
+        if base.dtype == _np.bool_:
+            snapshot = _np.array(base, dtype=bool, copy=True)
+            snapshot.flags.writeable = False
+            return snapshot
+        if base.dtype.kind not in "biu":
+            raise IndexError(
+                "arrays used as indices must be of integer (or boolean) type"
+            )
+        return base
+    if hasattr(type(entry), "__index__"):
+        return _operator.index(entry)
+    arr = _np.asarray(entry)
+    if arr.size == 0 and arr.dtype.kind not in "biu":
+        # numpy accepts an empty non-ndarray sequence as an index but rejects a
+        # bare empty float ndarray; the ndarray branch above preserves that
+        # asymmetry, so this must NOT be gated on the entry's python type.
+        arr = arr.astype(_np.intp)
+    if arr.dtype.kind not in "biu":
+        raise IndexError("arrays used as indices must be of integer (or boolean) type")
+    if arr.dtype == _np.bool_:
+        snapshot = _np.array(arr, dtype=bool, copy=True)
+        snapshot.flags.writeable = False
+        return snapshot
+    return arr
+
+
+def _canonical_index(indices):
+    """Resolve ``indices`` exactly once into a form safe to bill from AND execute with.
+
+    A top-level tuple is the only multi-axis index form; anything else is a
+    single entry (numpy does not treat a bare list as multi-axis).
+    """
+    if isinstance(indices, tuple):
+        return tuple(_canon_entry(e) for e in indices)
+    return _canon_entry(indices)
+
+
 def _ufunc_at_touched_cells(a, indices) -> int:
-    """Number of array cells ``ufunc.at(a, indices, ...)`` actually operates on.
+    """Number of cells ``ufunc.at(a, indices, ...)`` operates on.
 
-    ``ufunc.at`` applies the ufunc once per *selected cell*, not once per index.
-    An index expression selects along the LEADING axes it consumes; every
-    remaining (trailing) axis is swept in full. Costing by ``size(indices)``
-    alone therefore under-bills by ``prod(a.shape[consumed:])`` -- unbounded in
-    the trailing dimensions, e.g. a length-1 index into an ``(1, n, k, m)``
-    destination performs ``n*k*m`` operations for a bill of 1.
+    ``indices`` MUST already be canonical (see :func:`_canonical_index`).
 
-    Rules, mirroring numpy's own indexing semantics:
+    ``ufunc.at`` applies the ufunc once per selected cell and does not
+    deduplicate repeated indices, so this equals the size of the indexing
+    result::
 
-    * a tuple index consumes one leading axis per non-``newaxis`` entry, and
-      its array-like entries broadcast together;
-    * a single array-like index consumes exactly one axis;
-    * ``slice`` / ``Ellipsis`` entries select along their axis without
-      broadcasting, so they contribute that axis' length;
-    * anything unrecognised falls back to ``a.size`` (fail closed -- the old
-      upper bound), never to 1.
+        prod(broadcast(advanced)) * prod(slice lengths) * prod(trailing axes)
+
+    Advanced operands (integer arrays, boolean masks, integer scalars)
+    broadcast together; basic (slice) axes are independent and MULTIPLY, both
+    with each other and with the advanced result. Any axis no entry consumes
+    is swept in full.
     """
     shape = getattr(a, "shape", None)
     if shape is None:
         return 1
-    total = int(_np.prod(shape)) if len(shape) else 1
-
+    ndim = len(shape)
     entries = indices if isinstance(indices, tuple) else (indices,)
-    index_shapes: list = []
-    consumed = 0
+
+    def _consumes(entry) -> int:
+        if entry is None or entry is Ellipsis:
+            return 0
+        if isinstance(entry, _np.ndarray) and entry.dtype == _np.bool_:
+            return entry.ndim
+        if isinstance(entry, (bool, _np.bool_)):
+            return 0
+        return 1
+
+    filler = ndim - _builtins.sum(_consumes(e) for e in entries)
+    expanded: list = []
     for entry in entries:
-        if entry is None:  # np.newaxis consumes no source axis
-            continue
-        if consumed >= len(shape):
-            return _builtins.max(total, 1)
         if entry is Ellipsis:
-            # Ellipsis may span several axes; fail closed rather than guess.
-            return _builtins.max(total, 1)
-        if isinstance(entry, slice):
-            index_shapes.append((len(range(*entry.indices(shape[consumed]))),))
-        elif isinstance(entry, (int, _np.integer)):
-            index_shapes.append(())
-        elif isinstance(entry, _np.ndarray):
-            index_shapes.append(entry.shape)
-        elif isinstance(entry, (list, tuple)):
-            try:
-                index_shapes.append(_np.asarray(entry).shape)
-            except Exception:  # pragma: no cover - exotic nested sequences
-                return _builtins.max(total, 1)
+            expanded.extend([slice(None)] * _builtins.max(filler, 0))
         else:
-            return _builtins.max(total, 1)
-        consumed += 1
+            expanded.append(entry)
 
-    if consumed == 0:
-        return _builtins.max(total, 1)
-    try:
-        selected = int(_np.prod(_np.broadcast_shapes(*index_shapes))) if index_shapes else 1
-    except ValueError:  # pragma: no cover - numpy raises on the call itself
-        return _builtins.max(total, 1)
+    adv_shapes: list = []
+    basic = 1
+    axis = 0
+    for entry in expanded:
+        if entry is None:
+            continue
+        if isinstance(entry, _np.ndarray) and entry.dtype == _np.bool_:
+            adv_shapes.append((int(_np.count_nonzero(entry)),))
+            axis += entry.ndim
+            continue
+        if isinstance(entry, (bool, _np.bool_)):
+            adv_shapes.append((int(bool(entry)),))
+            continue
+        if isinstance(entry, slice):
+            if axis < ndim:
+                basic *= len(range(*entry.indices(shape[axis])))
+            axis += 1
+            continue
+        if isinstance(entry, _np.ndarray):
+            adv_shapes.append(entry.shape)
+            axis += 1
+            continue
+        adv_shapes.append(())
+        axis += 1
 
-    trailing = int(_np.prod(shape[consumed:])) if consumed < len(shape) else 1
-    return _builtins.max(selected * trailing, 1)
+    selected = int(_np.prod(_np.broadcast_shapes(*adv_shapes))) if adv_shapes else 1
+    trailing = int(_math_prod(shape[axis:])) if axis < ndim else 1
+    return _builtins.max(selected * basic * trailing, 1)
 
 
 @_counted_wrapper
