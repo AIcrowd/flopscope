@@ -16,6 +16,7 @@ from flopscope._pointwise import _prepare_symmetric_out, _validate_result_symmet
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetry_group
 from flopscope._validation import maybe_check_nan_inf, require_budget
+from flopscope._write_epoch import note_write
 
 
 def _dtype_of_ndarray_out(out: Any) -> _np.dtype | None:
@@ -618,13 +619,21 @@ def einsum(
     if out is not None:
         _validate_result_symmetry(result, target_symmetry)
         _np.copyto(_np.asarray(out), _np.asarray(result), casting="unsafe")
+        # Internal copy, so _call_numpy's hook never sees it: record the write
+        # or a tag on out's buffer (or on an alias of it) would survive.
+        note_write(out)
         maybe_check_nan_inf(out, "einsum")
         return out
 
-    if target_symmetry is not None:
-        _validate_result_symmetry(result, target_symmetry)
+    if target_symmetry is not None and _validate_result_symmetry(
+        result, target_symmetry
+    ):
         result = SymmetricTensor(_np.asarray(result), symmetry=target_symmetry)
     else:
+        # An unverified claim is not stamped. Validation is skipped for
+        # non-finite results, so tagging regardless would let a caller mint a
+        # symmetry claim on asymmetric data by poisoning one entry and then
+        # cleaning it up downstream.
         result = _asflopscope(_np.asarray(result))
 
     maybe_check_nan_inf(result, "einsum")

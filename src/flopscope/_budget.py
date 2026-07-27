@@ -9,6 +9,9 @@ import time
 import weakref
 from typing import Any, Literal, NamedTuple
 
+import numpy as _np
+
+from flopscope._write_epoch import note_write
 from flopscope.errors import BudgetExhaustedError
 
 
@@ -230,6 +233,21 @@ class _DeferredOpTimer:
         return False
 
 
+# numpy callables that write through their first argument rather than ``out=``.
+# Reaching one of these means the destination buffer's contents changed, so any
+# symmetry tag observing it must be voided -- see flopscope._write_epoch.
+_MUTATES_FIRST_ARG = frozenset(
+    {
+        _np.copyto,
+        _np.put,
+        _np.putmask,
+        _np.place,
+        _np.fill_diagonal,
+        _np.put_along_axis,
+    }
+)
+
+
 def _call_numpy(fn: Any, *args: Any, **kwargs: Any) -> Any:
     """Invoke a numpy callable, attributing only its wall time to backend time.
 
@@ -245,6 +263,11 @@ def _call_numpy(fn: Any, *args: Any, **kwargs: Any) -> Any:
     convention used by ``_call_with_optional_out``. Wrappers' explicit return
     annotations carry the public type contract.
     """
+    out = kwargs.get("out")
+    if out is not None:
+        note_write(out)
+    if fn in _MUTATES_FIRST_ARG and args:
+        note_write(args[0])
     t0 = time.perf_counter()
     try:
         return fn(*args, **kwargs)
