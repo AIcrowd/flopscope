@@ -3093,7 +3093,13 @@ def _einsum_routed_binary(
     if info.output_symmetry is not None and _validate_result_symmetry(
         result, info.output_symmetry
     ):
-        return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
+        # Only when the caller supplied no destination. Wrapping ``out`` would
+        # hand back a second object of a different type over the caller's own
+        # buffer; numpy and fnp.einsum both return the destination itself.
+        if out is None:
+            return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
+    if out is not None:
+        return out
     return _asflopscope(result) if inputs_were_whest else result
 
 
@@ -3142,8 +3148,14 @@ attach_docstring(dot, _np.dot, "counted_custom", "depends on operand dimensions"
 
 
 @_counted_wrapper
-def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
+def matmul(
+    a: ArrayLike, b: ArrayLike, out: FlopscopeArray | None = None
+) -> FlopscopeArray:
     """Counted version of np.matmul."""
+    # Declared rather than accepted through **kwargs, which is how the derived
+    # out= coverage discovers an op: it reads the wrapper's parameters, so a
+    # destination arriving as varkw is invisible to the sweep. The helper
+    # normalizes and prices it -- see _einsum_routed_binary.
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
@@ -3157,7 +3169,7 @@ def matmul(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     else:
         subs = "...ij,...jk->...ik"  # 2-D and batched/broadcast N-D
     return _einsum_routed_binary(
-        "matmul", _np.matmul, subs, a, b, errstate=True, nan_check=True
+        "matmul", _np.matmul, subs, a, b, errstate=True, nan_check=True, out=out
     )
 
 
