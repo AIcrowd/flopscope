@@ -2896,7 +2896,7 @@ def _einsum_routed_binary(
     billing_dtypes = (a.dtype, b.dtype)
     if isinstance(out, _np.ndarray):
         billing_dtypes += (out.dtype,)
-    resolved = _np.result_type(*billing_dtypes)
+    resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(info.accumulation, resolved)
     if out is not None:
         call_kwargs = {**call_kwargs, "out": _to_base_ndarray(out)}
@@ -3182,7 +3182,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         canonical_subs = info.canonical_subscripts
         out_sym = info.output_symmetry  # scalar output — always None
         billing_dtypes = (a.dtype, b.dtype)
-        resolved = _np.result_type(*billing_dtypes)
+        resolved = resolve_billing_dtype(billing_dtypes)
         complex_override = contraction_complex_override(info.accumulation, resolved)
         with budget.deduct(
             "tensordot",
@@ -3291,7 +3291,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
             canonical_subs = None
     billing_dtypes = (a.dtype, b.dtype)
-    resolved = _np.result_type(*billing_dtypes)
+    resolved = resolve_billing_dtype(billing_dtypes)
     # accumulation_for_billing is None for the oversized-symmetry / rank>52
     # branches above, which never reach _resolve_cost_and_output_symmetry and
     # so have no AccumulationCost to draw an exact override from; leave
@@ -3342,7 +3342,7 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     cost = info.accumulation.total
     canonical_subs = info.canonical_subscripts
     billing_dtypes = (a.dtype, b.dtype)
-    resolved = _np.result_type(*billing_dtypes)
+    resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(info.accumulation, resolved)
     with budget.deduct(
         "vdot",

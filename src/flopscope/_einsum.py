@@ -10,6 +10,7 @@ import numpy as _np
 
 from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._config import get_setting
+from flopscope._dtype_billing import resolve_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
 from flopscope._pointwise import _prepare_symmetric_out, _validate_result_symmetry
@@ -596,7 +597,7 @@ def einsum(
     out_dtype = _dtype_of_ndarray_out(out)
     if out_dtype is not None:
         billing_dtypes += (out_dtype,)
-    resolved = _np.result_type(*billing_dtypes) if billing_dtypes else None
+    resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(accumulation_cost, resolved)
 
     with budget.deduct(

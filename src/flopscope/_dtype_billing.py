@@ -40,6 +40,29 @@ def billing_operand(orig, coerced):
     return coerced.dtype
 
 
+def _drop_non_numeric(dtypes: tuple) -> tuple:
+    """Ignore non-numeric contributions when anything numeric participates.
+
+    ``result_type`` resolves any mix containing a non-numeric kind *to* that
+    kind, which then bills at the neutral rate 1.0 and, for contractions, also
+    drops the complex factor. That is the intended answer only when the
+    arithmetic itself is non-numeric. It is the wrong answer when the
+    non-numeric dtype is merely where the result is stored -- an ``out=`` of
+    object or string dtype -- because the loop still runs at the operands'
+    precision. Dropping those contributions can only raise the resolved rate
+    (they carry the minimum rate), so this never discounts a call.
+    """
+    numeric = tuple(d for d in dtypes if _resolved_kind(d) not in _NON_NUMERIC_KINDS)
+    return numeric or dtypes
+
+
+def _resolved_kind(dtype_like) -> str:
+    try:
+        return _np.result_type(dtype_like).kind
+    except Exception:
+        return ""
+
+
 def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
     """Resolved calculation dtype, or None for a declared dtype-neutral call.
 
@@ -51,6 +74,7 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
     """
     if not dtypes:
         return None
+    dtypes = _drop_non_numeric(dtypes)
     try:
         return _np.result_type(*dtypes)
     except _np.exceptions.DTypePromotionError:
@@ -59,13 +83,22 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
 
 
 # Non-numeric dtype kinds: object (O), str (U), bytes (S), void/structured (V),
-# datetime64 (M), timedelta64 (m). These are not floating-point arithmetic, so
-# no precision-packing exploit is possible through them -- they bill at the
-# neutral rate 1.0 instead of failing closed. (Their wall time is covered by
-# the residual-time penalty.) The fail-closed rule targets NUMERIC dtypes
-# absent from the supported table -- future types numpy or an extension
-# package might introduce; every known numpy numeric dtype (including the
-# extended-precision longdouble family) carries an explicit rate.
+# datetime64 (M), timedelta64 (m). As OPERANDS these are not floating-point
+# arithmetic, so no precision-packing exploit is possible through them -- they
+# bill at the neutral rate 1.0 instead of failing closed, and their wall time is
+# covered by the residual-time penalty.
+#
+# That reasoning covers operands only. A non-numeric dtype arriving as ``out=``
+# describes where the result is stored, not how it was computed: the loop still
+# runs at the operands' precision, at native speed, so neither the neutral rate
+# nor the residual penalty applies to it. ``_drop_non_numeric`` therefore keeps
+# such a dtype out of the resolution -- otherwise it would drag the rate (and,
+# for contractions, the complex factor) down to 1.0.
+#
+# The fail-closed rule targets NUMERIC dtypes absent from the supported table --
+# future types numpy or an extension package might introduce; every known numpy
+# numeric dtype (including the extended-precision longdouble family) carries an
+# explicit rate.
 _NON_NUMERIC_KINDS = frozenset("OUSVMm")
 
 
