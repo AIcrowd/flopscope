@@ -206,6 +206,46 @@ def test_inert_for_a_bound_method():
     assert D.participant_span_count() == 1
 
 
+def test_unwrapping_is_by_type_not_by_attribute_name():
+    """A `.func` attribute is ordinary metadata on wrapper and decorator objects.
+
+    Following it by name would hand the decision to the object being judged: an
+    external callable could point it at a flopscope function and be treated as
+    internal. Unwrapping is therefore restricted to real bound methods and
+    functools.partial.
+    """
+    from flopscope import flops
+
+    class Wrapper:
+        func = flops.einsum_cost  # metadata pointing at a flopscope function
+
+        def __call__(self):
+            _burn()
+
+    obj = Wrapper()
+    assert not D._callable_is_internal(obj)
+    before = D.total_dispatch_ns()
+    D.timed_dispatch(obj)()
+    assert D.total_dispatch_ns() == before
+    assert D.participant_span_count() == 1
+
+
+def test_real_methods_and_partials_still_unwrap():
+    """The shapes flopscope actually decorates must keep working."""
+    import functools
+
+    from flopscope import _remote_array, flops
+
+    assert D._callable_is_internal(_remote_array.RemoteArray._fetch_data)
+    assert D._callable_is_internal(functools.partial(flops.einsum_cost, "ij,jk->ik"))
+
+    class Ext:
+        def method(self):
+            pass
+
+    assert not D._callable_is_internal(Ext().method)
+
+
 def test_external_callable_still_runs_and_returns():
     """The wrapper must be a no-op, not an error: same behaviour, same result."""
     calls = []

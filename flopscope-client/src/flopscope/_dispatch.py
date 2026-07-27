@@ -39,6 +39,7 @@ from __future__ import annotations
 import functools
 import sys
 import time
+import types
 from contextlib import contextmanager
 
 _total_dispatch_ns: int = 0
@@ -97,17 +98,24 @@ def _globals_are_internal(namespace: object) -> bool:
 
 
 def _callable_is_internal(fn: object) -> bool:
-    """Whether *fn* was defined inside the flopscope package."""
-    # Unwrap the shapes flopscope actually decorates: bound/unbound methods and
-    # functools.partial. Anything with no __globals__ (C builtins, arbitrary
-    # objects with __call__) is treated as external, which is the safe default.
-    seen = 0
-    while seen < 10:
-        seen += 1
-        inner = getattr(fn, "__func__", None) or getattr(fn, "func", None)
-        if inner is None or inner is fn:
+    """Whether *fn* was defined inside the flopscope package.
+
+    Unwrapping is by TYPE, not by attribute name. Following any object that
+    happens to expose ``func``/``__func__`` would hand the decision to the object
+    being judged: ``.func`` is ordinary metadata on wrapper and decorator objects,
+    so an external callable could point it at a flopscope function and be
+    classified internal.
+
+    Anything without ``__globals__`` after unwrapping (C builtins, arbitrary
+    objects with ``__call__``) is external, which is the safe default.
+    """
+    for _ in range(10):  # bounded: partial(partial(...)) nests, but not forever
+        if isinstance(fn, types.MethodType):
+            fn = fn.__func__
+        elif isinstance(fn, functools.partial):
+            fn = fn.func
+        else:
             break
-        fn = inner
     namespace = getattr(fn, "__globals__", None)
     return namespace is not None and _globals_are_internal(namespace)
 
