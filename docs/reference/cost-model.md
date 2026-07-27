@@ -439,6 +439,22 @@ Worked consequences:
   work, and pricing it at that wider rate holds `out=`-casting at exact `astype`
   parity in both directions: a wider `out=` costs what the equivalent `astype` costs,
   so `out=` can never be used to buy a cheaper wide copy than `astype` would.
+- **A destination NumPy would have allocated anyway is price-neutral.** The rule above
+  prices a destination as a buffer the call materializes — but two kinds of destination
+  are not stores of the computed value at all, and naming them must cost exactly what
+  letting NumPy allocate them costs. A **multi-output** op can have an output whose dtype
+  belongs to the op signature rather than to its arithmetic: `frexp`'s second output is
+  always `int32`, whatever precision the mantissa runs at, so `frexp(a_f32, out=(m_f32,
+  e_i32))` bills what `frexp(a_f32)` bills (`10000` for a 10,000-element call), not the
+  float64 rate that `result_type(float32, float32, int32)` would have promoted to. An
+  **index reduction**'s destination holds positions, not values: `argmin`/`argmax`/
+  `nanargmin`/`nanargmax` return `intp` regardless of the input's precision, so
+  `argmin(a_f32, out=intp_arr)` bills what `argmin(a_f32)` bills (`9999`). Widening past
+  NumPy's own choice still widens the rate in both families — a float64 mantissa or an
+  int64 exponent on `frexp` bills `20000`. Index reductions additionally constrain `out=`
+  by **kind**: NumPy accepts any integer or boolean buffer at any width and refuses every
+  float and complex one, and that refusal is decided before the reduction runs, so it
+  costs `0`.
 - **Casting/converting bills like `copy`.** `astype` and `asarray` bill `numel(input)`
   at the heavier of source/destination rate — via `heavier_billing_dtype`, not
   `result_type`, which would over-promote a cross-kind cast such as `float32 → int32`
