@@ -136,6 +136,20 @@ _UFUNC_ALIAS_RENAMES: dict[str, str] = {
     "divmod": "floor_divide",  # divmod >= floor_divide work; 16.0 is a conservative floor
 }
 
+# Generic ufunc-method op names are synthesized at billing time as
+# f"{ufunc.__name__}.{method}" (see flopscope._pointwise) and are deliberately
+# NOT rows in the weights table: each method applies the BASE ufunc's
+# arithmetic once per billed unit, so it inherits the base's per-application
+# weight. Single-sourced here so the weight and the complex factor can never
+# disagree about what counts as a ufunc method.
+_UFUNC_METHOD_SUFFIXES: tuple[str, ...] = (
+    ".reduce",
+    ".accumulate",
+    ".reduceat",
+    ".outer",
+    ".at",
+)
+
 
 def get_weight(op_name: str) -> float:
     """Return the FLOP weight multiplier for an operation.
@@ -174,14 +188,27 @@ def get_weight(op_name: str) -> float:
                 return _ACTIVE_WEIGHTS[legacy_op]
             break
 
-    # 3. NumPy 2.x ufunc-alias fallback (acos→arccos, pow→power, ...). The alias
+    # 3. Generic ufunc-method fallback. ``.at``/``.outer`` apply the base ufunc
+    #    once per output cell; ``.reduce``/``.accumulate``/``.reduceat`` once
+    #    per input element -- in every case the base ufunc's per-application
+    #    weight IS the rate. Without this a heavier ufunc silently bills at the
+    #    neutral 1.0 when reached through a method (the same substitution the
+    #    alias fallback below exists to prevent).
+    for suffix in _UFUNC_METHOD_SUFFIXES:
+        if op_name.endswith(suffix):
+            base = op_name[: -len(suffix)]
+            if base in _ACTIVE_WEIGHTS or base in _UFUNC_ALIAS_RENAMES:
+                return get_weight(base)
+            break
+
+    # 4. NumPy 2.x ufunc-alias fallback (acos→arccos, pow→power, ...). The alias
     #    is the same ufunc as its canonical twin, so it must bill the same weight
     #    rather than fall through to 1.0 (a 16x substitution exploit otherwise).
     canonical = _UFUNC_ALIAS_RENAMES.get(op_name)
     if canonical is not None and canonical in _ACTIVE_WEIGHTS:
         return _ACTIVE_WEIGHTS[canonical]
 
-    # 4. Default fallback (unchanged).
+    # 5. Default fallback (unchanged).
     return 1.0
 
 
