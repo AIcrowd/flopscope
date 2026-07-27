@@ -1151,7 +1151,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         shapes=(a.shape, b.shape),
         dtypes=billing_dtypes,
     ):
-        result = ufunc.outer(
+        result = _call_numpy(
+            ufunc.outer,
             _to_base_ndarray(a),
             _to_base_ndarray(b),
             out=out_stripped,
@@ -1207,7 +1208,8 @@ def _counted_ufunc_reduce_generic(
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = ufunc.reduce(
+        result = _call_numpy(
+            ufunc.reduce,
             _to_base_ndarray(a),
             axis=axis,
             out=out_stripped,
@@ -1262,7 +1264,8 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = ufunc.accumulate(
+        result = _call_numpy(
+            ufunc.accumulate,
             _to_base_ndarray(a),
             axis=axis,
             out=out_stripped,
@@ -1326,7 +1329,8 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = ufunc.reduceat(
+        result = _call_numpy(
+            ufunc.reduceat,
             _to_base_ndarray(a),
             indices_stripped,
             axis=axis,
@@ -1419,7 +1423,16 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         shapes=(a.shape,) if hasattr(a, "shape") else (),
         dtypes=billing_dtypes,
     ):
-        ufunc.at(
+        # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
+        # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
+        # cannot list it either -- that set holds module-level function objects
+        # and ``at`` is a fresh bound method per ufunc. Record the write here.
+        # The refusal above keeps a tagged SymmetricTensor out of this path, but
+        # a plain alias of a tagged buffer reaches it, which is exactly the case
+        # a guard on tagged arrays cannot cover.
+        note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
+        _call_numpy(
+            ufunc.at,
             _to_base_ndarray(a),
             indices_stripped,
             *stripped_args,
@@ -1577,6 +1590,15 @@ def _counted_reduction(
             shapes=(a.shape,),
             dtypes=billing_dtypes,
         ):
+            if out_came_from_args:
+                # The destination travels in a positional slot of ``args_list``,
+                # so ``np_out_kwarg`` is None and _call_numpy's out= hook never
+                # sees it -- the same write that the keyword spelling records
+                # would otherwise go unnoticed, leaving a symmetry tag standing
+                # over data it no longer describes. Recorded here rather than
+                # above the deduct so a refused op does not void a tag on a
+                # buffer numpy was never given the chance to write.
+                note_write(out_for_np)
             if _axis_is_second_positional:
                 result = _call_with_optional_out(
                     np_func,
