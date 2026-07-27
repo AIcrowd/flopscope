@@ -1,16 +1,20 @@
 """Einsum pairwise execution must go through numpy's optimized dispatch.
 
-``_execute_pairwise`` receives steps that are already single pairwise
-contractions — the path was chosen (and billed) before execution — so
-numpy's per-call optimizer cannot change *what* is contracted, only
-whether the step routes through tensordot/BLAS. These tests pin three
-properties of that arrangement:
+``_execute_pairwise`` receives steps whose path was chosen (and billed)
+before execution, so optimized dispatch may only change *how* a step
+executes, never what is contracted or what the caller observes beyond
+float summation order. These tests pin the properties of that
+arrangement:
 
-1. every executed step passes ``optimize=True`` to ``numpy.einsum``;
+1. every two-operand numeric step passes ``optimize=True`` to
+   ``numpy.einsum``, and runs at BLAS speed rather than at the speed of
+   numpy's non-dispatching sum-of-products loop;
 2. a multi-operand contraction still executes the billed path step by
-   step, never as one fused numpy call over all operands;
-3. a two-operand contraction runs at BLAS speed, not at the speed of
-   numpy's non-dispatching sum-of-products loop.
+   step, never as one fused numpy call over all operands — including a
+   user-pinned n-ary step, which numpy must not re-plan;
+3. object-dtype steps keep the plain-einsum element semantics
+   (multiplication order, accumulator seeding, scalar-output dtype);
+4. billed FLOPs and result values are unaffected by dispatch.
 """
 
 import time
@@ -19,6 +23,7 @@ import numpy as np
 
 import flopscope as flops
 import flopscope.numpy as fnp
+from flopscope._symmetric import SymmetricTensor
 
 
 def test_pairwise_steps_call_numpy_einsum_with_optimize(monkeypatch):
@@ -56,6 +61,113 @@ def test_pairwise_steps_call_numpy_einsum_with_optimize(monkeypatch):
 
     expected = np.einsum("ab,bc,cd,de->ae", *ops, optimize=True)
     np.testing.assert_allclose(np.asarray(result), expected, rtol=1e-12)
+
+
+def test_explicit_nary_path_step_executes_as_billed(monkeypatch):
+    # A caller may pin an n-ary step (all three operands contracted at
+    # once). numpy's optimizer would silently decompose it into its own
+    # pairwise path; execution must instead honor the step as billed.
+    rng = np.random.default_rng(2)
+    a = rng.standard_normal((6, 7))
+    b = rng.standard_normal((7, 8))
+    c = rng.standard_normal((8, 5))
+
+    real_einsum = np.einsum
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append((len(args) - 1, kwargs.get("optimize", False)))
+        return real_einsum(*args, **kwargs)
+
+    monkeypatch.setattr(np, "einsum", spy)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True):
+        result = fnp.einsum("ij,jk,kl->il", a, b, c, optimize=[(0, 1, 2)])
+
+    assert calls == [(3, False)]
+    np.testing.assert_allclose(
+        np.asarray(result),
+        real_einsum("ij,jk,kl->il", a, b, c),
+        rtol=1e-12,
+        atol=1e-10,
+    )
+
+
+class _NC:
+    """Object payload that records evaluation order (non-commutative)."""
+
+    def __init__(self, tag):
+        self.tag = tag
+
+    def __mul__(self, other):
+        return _NC(f"({self.tag}*{other.tag})")
+
+    def __add__(self, other):
+        return _NC(f"({self.tag}+{other.tag})")
+
+    def __radd__(self, other):
+        return _NC(f"({other}+{self.tag})")
+
+
+def test_object_dtype_steps_keep_plain_einsum_element_semantics(monkeypatch):
+    # The optimized route changes object-element semantics: tensordot
+    # flips per-term multiplication order and drops c_einsum's
+    # `0 + first_term` accumulator seeding. Object steps must stay on
+    # the plain path: the spy pins the dispatch, the `(0+` prefix on
+    # every accumulated element pins c_einsum's seeding semantics
+    # (the tensordot route never seeds with 0).
+    A = np.empty((2, 3), dtype=object)
+    B = np.empty((3, 2), dtype=object)
+    for i in range(2):
+        for j in range(3):
+            A[i, j] = _NC(f"a{i}{j}")
+    for i in range(3):
+        for j in range(2):
+            B[i, j] = _NC(f"b{i}{j}")
+
+    real_einsum = np.einsum
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs.get("optimize", False))
+        return real_einsum(*args, **kwargs)
+
+    monkeypatch.setattr(np, "einsum", spy)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True):
+        got = fnp.einsum("ij,jk->ik", A, B)
+
+    assert calls == [False]
+    got = np.asarray(got)
+    assert got.dtype == np.object_
+    for element in got.flat:
+        # e.g. '(((0+(b00*a00))+(b10*a01))+(b20*a02))' — the '(0+' seed
+        # is only ever produced by c_einsum calling __radd__ with 0.
+        assert "(0+" in element.tag
+
+
+def test_object_scalar_output_dtype_matches_plain_einsum():
+    # Plain np.einsum returns a raw Python scalar for 'i,i->' on object
+    # input, which asarray coerces to int64; the optimized route would
+    # return a 0-d object array instead. Pin the plain behavior.
+    obj = np.array([2, 3, 4], dtype=object)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True):
+        result = fnp.einsum("i,i->", obj, obj)
+    arr = np.asarray(result)
+    assert arr.dtype == np.int64
+    assert arr == 29
+
+
+def test_nonfinite_result_with_declared_symmetry_is_never_stamped():
+    # Symmetry validation skips non-finite results and must then refuse
+    # to stamp: an unverifiable claim never becomes a SymmetricTensor
+    # (which would grant downstream discounts). Summation order may
+    # decide *whether* an overflow-boundary result is finite, so this
+    # invariant is what keeps that dispatch-dependent — but always
+    # safe — rather than exploitable.
+    big = np.full((2, 8), 9.5e153)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True):
+        result = fnp.einsum("ij,kj->ik", big, big, symmetry=(0, 1))
+    assert not np.all(np.isfinite(np.asarray(result)))
+    assert not isinstance(result, SymmetricTensor)
 
 
 def test_two_operand_einsum_reaches_blas_speed():
