@@ -140,7 +140,8 @@ def test_narrower_out_does_not_discount_float_power_reduce():
     a = _arr(np.float32)
     dst = fnp.zeros(N, dtype=np.float32)
     bare = _billed(lambda: np.float_power.reduce(a, axis=0))
-    assert bare == REDUCE_COST * 2  # float64 loop -> rate 2.0
+    # float64 loop -> rate 2.0 * float_power weight 16.0
+    assert bare == REDUCE_COST * 2 * 16
     assert _billed(lambda: np.float_power.reduce(a, axis=0, out=dst)) == bare
 
 
@@ -251,7 +252,7 @@ def test_power_reduce_sibling_is_unmoved_by_out():
     a = _arr(np.float32)
     dst = fnp.zeros(N, dtype=np.float32)
     bare = _billed(lambda: np.power.reduce(a, axis=0))
-    assert bare == REDUCE_COST
+    assert bare == REDUCE_COST * 16  # float32 loop -> rate 1.0 * power weight 16.0
     assert _billed(lambda: np.power.reduce(a, axis=0, out=dst)) == bare
 
 

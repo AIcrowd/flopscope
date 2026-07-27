@@ -1237,7 +1237,7 @@ def test_outer_float_only_binary_bills_float64_and_int_stays_int():
             warnings.simplefilter("ignore", UserWarning)
             np.add.outer(a, a)
         billed_add = b.flops_used - before
-    assert billed_hypot == 200  # 10*10 dense numel * float64 rate 2.0
+    assert billed_hypot == 3200  # 10*10 dense numel * f64 rate 2.0 * hypot weight 16.0
     assert billed_add == 100  # 10*10 dense numel * int32 rate 1.0 (unaffected)
 
 
@@ -1293,7 +1293,8 @@ def test_reduceat_bool_loop_floors_at_input_rate():
 def test_outer_float_widening_survives_the_floor():
     # The floor is a MAX, so float-widening cases (float64 rate 2.0 >= int64
     # rate 2.0, and strictly > narrower int rates) are never lowered by it.
-    assert _i64_method_billed(lambda a: np.hypot.outer(a, a)) == (200, "float64")
+    # 10*10 dense numel * f64 rate 2.0 * hypot weight 16.0
+    assert _i64_method_billed(lambda a: np.hypot.outer(a, a)) == (3200, "float64")
 
 
 def test_reduceat_float_widening_survives_the_floor():
@@ -1433,7 +1434,7 @@ def test_ufunc_at_float_only_bills_loop_dtype():
     vals = np.ones(1000, dtype=np.int32)
     assert _ufunc_at_billed(
         lambda a: np.exp.at(a, slice(None))  # pyright: ignore[reportArgumentType]
-    ) == (2000, "float64")
+    ) == (32000, "float64")  # 1000 elems * f64 rate 2.0 * exp weight 16.0
     assert _ufunc_at_billed(
         lambda a: np.true_divide.at(a, slice(None), vals)  # pyright: ignore[reportArgumentType]
     ) == (2000, "float64")
