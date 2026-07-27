@@ -139,8 +139,15 @@ def _execute_pairwise(path_info, operands: list):
         # Pop operands in reverse sorted order (same as opt_einsum convention)
         inds = sorted(contract_inds, reverse=True)
         tensors = [ops.pop(i) for i in inds]
+        # Each step is a single pairwise contraction whose path was chosen
+        # (and billed) before execution, so numpy's per-call optimizer cannot
+        # change what is contracted — only route the step through
+        # tensordot/BLAS instead of the non-dispatching sum-of-products loop.
         result = _call_numpy(
-            _np.einsum, step.subscript, *[_to_base_ndarray(t) for t in tensors]
+            _np.einsum,
+            step.subscript,
+            *[_to_base_ndarray(t) for t in tensors],
+            optimize=True,
         )
         ops.append(result)
     return ops[0]
