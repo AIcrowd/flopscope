@@ -12,7 +12,7 @@ from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import linalg_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
-from flopscope._validation import require_budget
+from flopscope._validation import _normalize_out, require_budget
 from flopscope.numpy.linalg._solvers import _batch_size, _has_zero_dim
 
 
@@ -80,6 +80,10 @@ def multi_dot(
 ) -> FlopscopeArray:
     """Efficient multi-matrix dot product with FLOP counting."""
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "linalg.multi_dot")
     inputs_were_whest = any(isinstance(a, FlopscopeArray) for a in arrays)
     arrays = [a if isinstance(a, _np.ndarray) else _np.asarray(a) for a in arrays]
     shapes = [arr.shape for arr in arrays]

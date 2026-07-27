@@ -198,3 +198,20 @@ def test_scratch_buffer_idiom_still_works():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_ufunc_out_does_not_forge_tag_through_a_container():
+    """A tuple-wrapped destination must void the tag exactly as a bare one
+    does. It reaches _prepare_symmetric_out only once ``out`` is normalized;
+    before that the symmetry check was simply skipped for the container."""
+    _assert_claim_does_not_survive(
+        fnp.zeros((N, N)),
+        lambda z: fnp.multiply(_asymmetric(), 1.0, out=(z,)),  # pyright: ignore[reportArgumentType]
+    )
+
+
+def test_contraction_out_does_not_forge_tag_through_a_container():
+    _assert_claim_does_not_survive(
+        fnp.zeros((N, N)),
+        lambda z: fnp.einsum("ij,jk->ik", _asymmetric(), fnp.eye(N), out=(z,)),
+    )

@@ -16,7 +16,7 @@ from flopscope._budget import _call_numpy, _counted_wrapper
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import fft_billing_dtype
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
-from flopscope._validation import require_budget
+from flopscope._validation import _normalize_out, require_budget
 
 # numpy 2.1 reversed the remaining-axis execution order that rfftn/rfft2 use
 # after the real FFT on the last axis (forward on 2.0.x, reversed from 2.1
@@ -255,6 +255,10 @@ def fft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.fft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:
@@ -292,6 +296,10 @@ def ifft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.ifft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:
@@ -329,6 +337,10 @@ def rfft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.rfft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:
@@ -366,6 +378,10 @@ def irfft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.irfft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:
@@ -404,6 +420,10 @@ def fft2(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.fft2")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -460,6 +480,10 @@ def ifft2(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.ifft2")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -516,6 +540,10 @@ def rfft2(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.rfft2")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -572,6 +600,10 @@ def irfft2(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.irfft2")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -646,6 +678,10 @@ def fftn(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.fftn")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -702,6 +738,10 @@ def ifftn(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.ifftn")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -758,6 +798,10 @@ def rfftn(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.rfftn")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -814,6 +858,10 @@ def irfftn(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.irfftn")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if axes is None:
@@ -888,6 +936,10 @@ def hfft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.hfft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:
@@ -928,6 +980,10 @@ def ihfft(
     out: ArrayLike | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "fft.ihfft")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if n is None:

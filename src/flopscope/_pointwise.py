@@ -51,7 +51,7 @@ from flopscope._symmetry_utils import (
     restrict_group_to_axes,
     unique_elements_for_shape,
 )
-from flopscope._validation import maybe_check_nan_inf, require_budget
+from flopscope._validation import _normalize_out, maybe_check_nan_inf, require_budget
 from flopscope._write_epoch import note_write
 from flopscope.errors import (
     CostFallbackWarning,
@@ -219,14 +219,27 @@ def _supports_out_argument(np_func) -> bool:
         return False
 
 
-def _require_ndarray_out(out, op_name):
-    """``out=`` must be the destination array itself, not a container holding it.
+def _is_out_like(value) -> bool:
+    """Is *value*, sitting in a positional ``out`` slot, meant to be ``out``?
 
-    numpy rejects a wrapped destination for ufuncs, but not everywhere: on the
-    einsum path ``_np.asarray([dest])`` silently builds a NEW array, so the copy
-    lands in that temporary, ``dest`` keeps its old contents, and the caller gets
-    the untouched wrapper back -- charged in full for a result they never
-    received. Reject it up front, before anything is billed.
+    Anything that is not ``None`` is. The slot index comes from numpy's own
+    parameter list for the op (``_params.index("out")``), so a value there is
+    the caller's ``out`` whatever its type -- and numpy's ``out`` accepts only
+    an array or ``None``. Recognising it is what lets :func:`_normalize_out`
+    refuse a bad one for free; leaving it unrecognised would pass it through
+    to numpy, which raises only after the reduction has been billed.
+    """
+    return value is not None
+
+
+def _require_ndarray_out(out, op_name):
+    """Internal tripwire: ``out`` must already have been normalized.
+
+    Every public entry point rebinds ``out`` through :func:`_normalize_out` at
+    the top of its wrapper, so by the time control reaches here a container is
+    unreachable by construction. It is kept because the failure it catches is
+    silent otherwise: a wrapper added later without the normalize call would
+    not raise, it would quietly bill the contraction at the wrong rate.
     """
     if out is None or isinstance(out, _np.ndarray):
         return
@@ -532,6 +545,10 @@ def _counted_unary(np_func, op_name: str):
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name)
         if not isinstance(x, _np.ndarray):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
@@ -598,6 +615,10 @@ def _free_unary(np_func, op_name: str):
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name)
         if not isinstance(x, _np.ndarray):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
@@ -657,6 +678,10 @@ def _counted_unary_multi(np_func, op_name: str):
         **kwargs: Any,
     ) -> tuple[FlopscopeArray, FlopscopeArray]:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name, nout=nout)
         if not isinstance(x, _np.ndarray):
             x = _np.asarray(x)
         symmetry = _symmetry_of(x)
@@ -713,6 +738,10 @@ def _counted_binary(np_func, op_name: str):
         x: ArrayLike, y: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name)
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -834,6 +863,10 @@ def _counted_binary_multi(np_func, op_name: str):
         **kwargs: Any,
     ) -> tuple[FlopscopeArray, FlopscopeArray]:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name, nout=nout)
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -967,6 +1000,10 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     :func:`_symmetry_adjusted_cost`).
     """
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
@@ -1055,6 +1092,10 @@ def _counted_ufunc_reduce_generic(
     :func:`reduce_group(symmetry, ndim, axis, keepdims)`.
     """
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -1107,6 +1148,10 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     symmetry on the accumulate axis only).
     """
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -1154,6 +1199,10 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     boundaries don't respect any axis-permutation group action.
     """
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     cost = _builtins.max(int(a.size), 1)
@@ -1351,15 +1400,20 @@ def _counted_reduction(
         # Resolve `out` from either kwargs OR a positional slot in args
         # (per-function — see _out_args_idx computed at factory build time).
         args_list = list(args)
-        out = kwargs.pop("out", None)
+        # Normalized before anything reads it: unlike the other wrappers this
+        # one cannot normalize at the top, because ``out`` is not bound yet --
+        # it arrives either as a keyword or in a positional slot. Both routes
+        # go through the same helper here, ahead of _prepare_symmetric_out,
+        # the out_dtype billing fold below, and the deduct.
+        out = _normalize_out(kwargs.pop("out", None), op_name)
         out_came_from_args = False
         if (
             out is None
             and _out_args_idx is not None
             and 0 <= _out_args_idx < len(args_list)
-            and isinstance(args_list[_out_args_idx], _np.ndarray)
+            and _is_out_like(args_list[_out_args_idx])
         ):
-            out = args_list[_out_args_idx]
+            out = _normalize_out(args_list[_out_args_idx], op_name)
             out_came_from_args = True
 
         new_symmetry = (
@@ -1534,6 +1588,10 @@ def around(
 ) -> FlopscopeArray | Any:
     """Counted version of np.around. Cost = numel(output) FLOPs."""
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "around")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -1644,6 +1702,10 @@ def round(
 ) -> FlopscopeArray | Any:
     """Counted version of np.round. Cost = numel(output) FLOPs."""
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "round")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -1915,6 +1977,10 @@ def clip(
     Output shape is the broadcast of a with all bound arrays.
     """
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "clip")
     a_orig = a
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -2006,6 +2072,10 @@ def _counted_mean(np_func, op_name: str):
         )
 
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name)
         if not isinstance(a, _np.ndarray):
             a = _np.asarray(a)
         symmetry = _symmetry_of(a)
@@ -2105,6 +2175,10 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         **kwargs: Any,
     ) -> FlopscopeArray:
         budget = require_budget()
+        # Above every later read of ``out`` -- the billing dtype, the
+        # symmetry check, and what gets returned -- and above the deduct,
+        # so a refused form costs nothing.
+        out = _normalize_out(out, op_name)
         if not isinstance(a, _np.ndarray):
             a = _np.asarray(a)
         symmetry = _symmetry_of(a)
@@ -2382,6 +2456,10 @@ def median(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "median")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2456,6 +2534,10 @@ def nanmedian(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "nanmedian")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2522,6 +2604,10 @@ def nanpercentile(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "nanpercentile")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2608,6 +2694,10 @@ def nanquantile(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "nanquantile")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2688,6 +2778,10 @@ def percentile(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "percentile")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2767,6 +2861,10 @@ def quantile(
     import math as _math
 
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "quantile")
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
@@ -2902,6 +3000,10 @@ def _einsum_routed_binary(
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
     budget = require_budget()
+    # Above every later read of ``out``: the billing gate below, the forward
+    # to numpy, and ``result = out``. A tuple reaching those bills the
+    # contraction without the destination's dtype and hands the tuple back.
+    out = _normalize_out(out, op_name)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
@@ -3047,6 +3149,10 @@ def outer(
 ) -> FlopscopeArray:
     """Counted version of np.outer."""
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "outer")
     # Capture aliasing BEFORE asarray conversion so outer(v, v) is detected
     # even when v is a list or other non-ndarray type.
     a_orig_is_b_orig = a is b

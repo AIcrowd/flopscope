@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import builtins as _builtins
 import warnings
+from typing import Any
 
 import numpy as np
 
@@ -18,6 +20,58 @@ def require_budget():
     from flopscope._budget import _get_global_default
 
     return _get_global_default()
+
+
+def _normalize_out(out: object, op_name: str, *, nout: int = 1) -> Any:
+    """Reduce ``out=`` to the destination array itself, or refuse it.
+
+    numpy's ufunc protocol lets a caller pass the destination either bare or
+    inside a tuple of length ``nout``; ``np.multiply(a, b, out=(dest,))`` and
+    ``out=dest`` mean the same thing. flopscope has to see through the tuple
+    for itself, because it reads ``out`` several times before numpy ever gets
+    it -- to pick the billing dtype, to check symmetry, and to decide what to
+    hand back. A tuple slipping past those reads is not a cosmetic difference:
+    the destination's dtype stops participating in the rate, so a contraction
+    into a wider buffer bills as if the buffer were not there.
+
+    Worse on the einsum path, which never forwards ``out`` to numpy at all:
+    there a container reaches ``_np.asarray(container)``, which builds a NEW
+    array, so the result lands in that temporary, the real destination keeps
+    its old contents, and the caller gets the untouched container back having
+    paid in full.
+
+    So: unwrap what numpy would unwrap, refuse everything else, and do it
+    before a single FLOP is charged.
+
+    Returns the value ``out`` should be for the rest of the call -- ``None``,
+    the bare destination, or (for a multi-output op) the tuple unchanged.
+    Typed ``Any`` because which of those it is depends on ``nout``, and
+    every caller assigns it straight back over its own ``out`` parameter.
+    """
+    if out is None or isinstance(out, np.ndarray):
+        return out
+    # ``type(out) is tuple``, not ``isinstance``: numpy refuses a namedtuple
+    # or any tuple subclass here, and being more permissive than numpy buys
+    # nothing. ``_builtins.all`` rather than ``all``: ``all`` is itself a
+    # counted flopscope operation, and the modules that call this helper
+    # rebind the name to it -- validating an argument must never bill.
+    if (
+        type(out) is tuple
+        and len(out) == nout
+        and _builtins.all(o is None or isinstance(o, np.ndarray) for o in out)
+    ):
+        return out[0] if nout == 1 else out
+    if nout != 1:
+        length = len(out) if isinstance(out, (tuple, list)) else "?"
+        raise TypeError(
+            f"multi-output {op_name} requires out= to be a tuple of length "
+            f"{nout}; got {type(out).__name__} of length {length}"
+        )
+    raise TypeError(
+        f"{op_name}(): out= must be an array, or a 1-tuple holding one, got "
+        f"{type(out).__name__}. Pass the destination array itself, not a "
+        f"container holding it."
+    )
 
 
 def validate_ndarray(*arrays: object) -> None:

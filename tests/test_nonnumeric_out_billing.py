@@ -137,3 +137,30 @@ def test_nonnumeric_operands_still_bill_neutral():
     neutral = _billed(lambda: fnp.multiply(o, o))
     same_shape_f64 = _billed(lambda: fnp.multiply(np.ones((2, 2)), np.ones((2, 2))))
     assert neutral < same_shape_f64  # f64 rate is 2.0, object stays 1.0
+
+
+# --- the gate must not be reachable around, via a container ---------------
+
+
+@pytest.mark.parametrize("wrap", [lambda d: d, lambda d: (d,)], ids=["bare", "tuple"])
+def test_a_nonnumeric_out_does_not_discount_through_a_container(wrap):
+    """The whole gate is ``isinstance(out, np.ndarray)``, so a container used
+    to slip past it -- billing as though no destination were supplied at all.
+    Normalizing ``out`` before the gate is what keeps the tuple honest."""
+    load_weights()
+    a, b = _complex_pair()
+    honest = _billed(lambda: fnp.vecdot(a, b))
+    out = np.empty(N, dtype=object)
+    assert _billed(lambda: fnp.vecdot(a, b, out=wrap(out))) == honest
+
+
+@pytest.mark.parametrize("wrap", [lambda d: d, lambda d: (d,)], ids=["bare", "tuple"])
+def test_a_numeric_widening_out_bills_wider_through_a_container(wrap):
+    """The converse direction: the widest-participating-buffer charge must
+    apply to a wrapped destination exactly as it does to a bare one, or the
+    container becomes a way to buy a wide accumulator at the narrow rate."""
+    load_weights()
+    a, b = _real_pair()
+    narrow = _billed(lambda: fnp.vecdot(a, b))
+    wide = np.zeros(N, dtype=np.complex128)
+    assert _billed(lambda: fnp.vecdot(a, b, out=wrap(wide))) > narrow

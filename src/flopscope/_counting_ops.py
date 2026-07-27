@@ -25,7 +25,7 @@ from flopscope._dtype_billing import (
 )
 from flopscope._flops import _ceil_log2
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray, _to_base_ndarray_tree
-from flopscope._validation import require_budget
+from flopscope._validation import _normalize_out, require_budget
 from flopscope.errors import _warn_remote_callback
 
 # Estimator surcharge multipliers for string-bins histogram calls (FLOPs/elem above 2n min/max floor)
@@ -56,6 +56,10 @@ def trace(
     out: FlopscopeArray | None = None,
 ) -> FlopscopeArray:
     budget = require_budget()
+    # Above every later read of ``out`` -- the billing dtype, the
+    # symmetry check, and what gets returned -- and above the deduct,
+    # so a refused form costs nothing.
+    out = _normalize_out(out, "trace")
     a = _np.asarray(a)
     # Normalise negative axes
     ndim = a.ndim
