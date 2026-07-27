@@ -33,6 +33,7 @@ import pytest
 
 import flopscope as fl
 import flopscope.numpy as fnp
+from flopscope._symmetric import SymmetricTensor
 
 
 @pytest.fixture()
@@ -119,6 +120,271 @@ def test_a_one_tuple_out_bills_exactly_like_a_bare_out(budget, name, call, make_
         f"{name}: out=(dest,) billed {tuple_cost} where out=dest billed "
         f"{bare_cost} — the destination's dtype is not reaching the rate"
     )
+
+
+#: The ops whose ``out=`` arrives inside **kwargs rather than as a declared
+#: parameter, which is how they escaped the normalization every sibling gets.
+#: ``take`` is the odd one out: it declares ``out``, strips it, and still
+#: refused ``out=(dest,)`` — the only op in the codebase inconsistent with its
+#: siblings on the one-tuple.
+_KWARGS_OUT_OPS = [
+    (
+        "concatenate",
+        lambda o: fnp.concatenate([_f32(64, 32), _f32(64, 32)], out=o),
+        lambda: fnp.zeros((128, 32), dtype="float32"),
+    ),
+    (
+        "stack",
+        lambda o: fnp.stack([_f32(64, 32), _f32(64, 32)], out=o),
+        lambda: fnp.zeros((2, 64, 32), dtype="float32"),
+    ),
+    (
+        "concat",
+        lambda o: fnp.concat([_f32(64, 32), _f32(64, 32)], out=o),
+        lambda: fnp.zeros((128, 32), dtype="float32"),
+    ),
+    (
+        "isnan",
+        lambda o: fnp.isnan(_f32(64, 32), out=o),
+        lambda: fnp.zeros((64, 32), dtype="bool"),
+    ),
+    (
+        "isinf",
+        lambda o: fnp.isinf(_f32(64, 32), out=o),
+        lambda: fnp.zeros((64, 32), dtype="bool"),
+    ),
+    (
+        "isfinite",
+        lambda o: fnp.isfinite(_f32(64, 32), out=o),
+        lambda: fnp.zeros((64, 32), dtype="bool"),
+    ),
+    (
+        "compress",
+        lambda o: fnp.compress(
+            np.array([True, False] * 32), _f32(64, 32), axis=0, out=o
+        ),
+        lambda: fnp.zeros((32, 32), dtype="float32"),
+    ),
+    (
+        "take",
+        lambda o: fnp.take(_f32(64, 32), np.arange(32), axis=0, out=o),
+        lambda: fnp.zeros((32, 32), dtype="float32"),
+    ),
+    (
+        "outer",
+        lambda o: fnp.outer(_f32(64), _f32(64), out=o),
+        lambda: fnp.zeros((64, 64), dtype="float32"),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,call,make_dest", _KWARGS_OUT_OPS, ids=[c[0] for c in _KWARGS_OUT_OPS]
+)
+def test_a_kwargs_out_op_bills_a_one_tuple_like_a_bare_array(
+    budget, name, call, make_dest
+):
+    bare_cost, _ = _billed(budget, lambda: call(make_dest()))
+    tuple_cost, _ = _billed(budget, lambda: call((make_dest(),)))
+    assert tuple_cost == bare_cost, (
+        f"{name}: out=(dest,) billed {tuple_cost} where out=dest billed {bare_cost}"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,call,make_dest", _KWARGS_OUT_OPS, ids=[c[0] for c in _KWARGS_OUT_OPS]
+)
+def test_a_kwargs_out_op_refuses_a_list_for_free(budget, name, call, make_dest):
+    # Built before the measurement: allocating the destination costs FLOPs of
+    # its own, and building it inside is how "refusal is free" measures the
+    # wrong thing. Every one of these charged in full before refusing.
+    dest = make_dest()
+    before = budget.flops_used
+    with pytest.raises(TypeError, match="out= must be an array"):
+        call([dest])
+    assert budget.flops_used == before, f"{name} was billed for refusing out=[dest]"
+
+
+@pytest.mark.parametrize(
+    "name,call,make_dest", _KWARGS_OUT_OPS, ids=[c[0] for c in _KWARGS_OUT_OPS]
+)
+def test_a_kwargs_out_op_accepts_a_flopscope_destination(budget, name, call, make_dest):
+    # The destination a participant actually holds is a FlopscopeArray. Every
+    # one of these forwarded it to numpy still wrapped, tripping the internal
+    # "missing _to_base_ndarray() strip" guard — after the deduct, so the
+    # caller paid in full and then got a RuntimeError.
+    dest = make_dest()
+    result = call(dest)
+    assert result is dest, f"{name} did not hand back the destination"
+
+
+@pytest.mark.parametrize(
+    "name,call,make_dest", _KWARGS_OUT_OPS, ids=[c[0] for c in _KWARGS_OUT_OPS]
+)
+def test_a_kwargs_out_op_treats_a_none_holding_tuple_as_no_destination(
+    budget, name, call, make_dest
+):
+    # out=(None,) is numpy's "allocate this slot for me", not a destination.
+    result = call((None,))
+    assert result is not None and result.dtype != np.dtype(object)
+
+
+# ---------------------------------------------------------------------------
+# The destination's dtype has to reach the rate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,call,shape",
+    [
+        ("concatenate", lambda o, a, b: fnp.concatenate([a, b], out=o), (128, 32)),
+        ("stack", lambda o, a, b: fnp.stack([a, b], out=o), (2, 64, 32)),
+        ("concat", lambda o, a, b: fnp.concat([a, b], out=o), (128, 32)),
+    ],
+)
+def test_a_join_into_a_wider_destination_bills_the_destinations_loop(
+    budget, name, call, shape
+):
+    """float32 blocks joined into a complex128 buffer convert on the way in.
+
+    numpy's default casting for these is ``same_kind``, which admits
+    float -> complex, so the copy loop that runs is the destination's. It used
+    to bill as though the destination were not there — the same price as the
+    all-float32 join, for a complex128 result.
+    """
+    a, b = _f32(64, 32), _f32(64, 32)
+    native, _ = _billed(budget, lambda: call(fnp.zeros(shape, dtype="float32"), a, b))
+    wider, _ = _billed(budget, lambda: call(fnp.zeros(shape, dtype="complex128"), a, b))
+
+    # The reference is the same join with complex128 INPUTS: writing that many
+    # complex128 elements costs what it costs, whichever end declares the dtype.
+    ac, bc = fnp.astype(a, "complex128"), fnp.astype(b, "complex128")
+    reference, _ = _billed(
+        budget, lambda: call(fnp.zeros(shape, dtype="complex128"), ac, bc)
+    )
+
+    assert wider > native, f"{name}: a complex128 destination billed as float32"
+    assert wider == reference, (
+        f"{name}: complex128 destination billed {wider}, but the same write from "
+        f"complex128 inputs bills {reference}"
+    )
+
+
+@pytest.mark.parametrize("op", ["isnan", "isinf", "isfinite"])
+def test_a_predicate_into_a_wider_destination_bills_the_cast_it_performs(budget, op):
+    """The predicates return bool, and numpy does NOT widen their loop.
+
+    Every loop these ufuncs publish ends in ``?``, and
+    ``np.isnan.resolve_dtypes((float32, float64))`` reports ``(float32, bool)``:
+    the float32 loop runs and the bool answer is cast into the caller's buffer.
+    The destination is a cast target, not a wider predicate.
+
+    It is still charged, because that cast is real work flopscope already
+    prices: over 4e6 float32 values, into bool 0.179 ms, into float64 1.314 ms,
+    and the explicit two-step (predicate into bool, then ``astype(float64)``)
+    1.269 ms — the fused spelling IS the two-step. Leaving the destination out
+    of the rate handed back a free ``astype``.
+    """
+    call = getattr(fnp, op)
+    x = _f32(64, 32)
+    bool_dest = fnp.zeros((64, 32), dtype="bool")
+    f64_dest = fnp.zeros((64, 32), dtype="float64")
+    c128_dest = fnp.zeros((64, 32), dtype="complex128")
+    # Same values, declared wide by the OPERAND instead of by the destination.
+    x_f64 = fnp.astype(x, "float64")
+    x_c128 = fnp.astype(x, "complex128")
+
+    plain, _ = _billed(budget, lambda: call(x))
+    natural, _ = _billed(budget, lambda: call(x, out=bool_dest))
+    assert natural == plain, "a bool destination is the natural one; it must be free"
+
+    # The rule, stated so it does not depend on the weights profile: the
+    # destination widens the rate exactly as an equally wide OPERAND does —
+    # "widest participating buffer", not "widest operand".
+    for dest, wide_operand, label in (
+        (f64_dest, x_f64, "float64"),
+        (c128_dest, x_c128, "complex128"),
+    ):
+        via_dest, _ = _billed(budget, lambda d=dest: call(x, out=d))
+        via_operand, _ = _billed(budget, lambda w=wide_operand: call(w))
+        assert via_dest == via_operand, (
+            f"{op} into a {label} destination billed {via_dest}, but the same "
+            f"predicate over {label} operands bills {via_operand}"
+        )
+
+    # A strict increase, pinned on the complex destination rather than the
+    # float64 one: the complex structure factor comes from the registry, not
+    # the weights table, so this bites under any weights profile — including
+    # the test profile, where float64 and float32 happen to share a rate and a
+    # float64 destination legitimately costs the same as a bool one.
+    c128_cost, _ = _billed(budget, lambda: call(x, out=c128_dest))
+    assert c128_cost > natural, (
+        f"{op} into a complex128 destination billed {c128_cost}, the same as "
+        f"the bool destination — the cast into it is free"
+    )
+
+
+@pytest.mark.parametrize("op", ["take", "compress"])
+def test_take_and_compress_cannot_reach_a_wider_destination_at_all(budget, op):
+    """Why those two get no destination-dtype fold, unlike their siblings.
+
+    numpy requires ``can_cast(out.dtype, a.dtype, "safe")`` for take/compress,
+    so a wider destination is not a mispriced call — it is not a call. Only
+    same-or-narrower destinations exist, and those never move the rate. This
+    pins the premise; if numpy ever relaxes it, the fold becomes necessary and
+    this test is what says so.
+    """
+    a = np.arange(64 * 32, dtype="float32").reshape(64, 32)
+    wider = np.zeros((32, 32), dtype="float64")
+    with pytest.raises(TypeError, match="Cannot cast"):
+        if op == "take":
+            np.take(a, np.arange(32), axis=0, out=wider)
+        else:
+            np.compress(np.array([True, False] * 32), a, axis=0, out=wider)
+
+
+# ---------------------------------------------------------------------------
+# outer: a symmetric destination used to be returned unwritten
+# ---------------------------------------------------------------------------
+
+
+def test_outer_writes_a_symmetric_destination_it_used_to_silently_skip(budget):
+    """``fnp.zeros((n, n))`` IS a SymmetricTensor — a square constant fill picks
+    up an inferred symmetry tag — so this is the obvious way to build a
+    destination, not an exotic one.
+
+    numpy was handed ``out=None`` for it (correct: a direct write would leave
+    the tag standing over data numpy never showed us), but nothing then copied
+    the result across when the result carried no symmetry of its own. The
+    caller got their untouched destination back, having paid the whole
+    contraction, with no exception raised.
+    """
+    dest = fnp.zeros((8, 8))
+    # The premise of the whole test, asserted rather than assumed.
+    assert isinstance(dest, SymmetricTensor) and dest.symmetry is not None
+    a = fnp.asarray(np.arange(8.0))
+    b = fnp.asarray(np.arange(8.0) + 1.0)
+
+    result = fnp.outer(a, b, out=dest)
+
+    assert result is dest
+    assert np.allclose(np.asarray(dest), np.outer(np.arange(8.0), np.arange(8.0) + 1.0))
+    # The inferred tag described the zeros; it must not survive the write.
+    assert dest.symmetry is None
+
+
+def test_outer_still_carries_a_real_symmetry_into_a_symmetric_destination(budget):
+    dest = fnp.zeros((8, 8))
+    assert isinstance(dest, SymmetricTensor)
+    v = fnp.asarray(np.arange(8.0) + 1.0)
+
+    result = fnp.outer(v, v, out=dest)
+
+    assert result is dest
+    assert np.allclose(
+        np.asarray(dest), np.outer(np.arange(8.0) + 1, np.arange(8.0) + 1)
+    )
+    assert dest.symmetry is not None
 
 
 def test_a_one_tuple_out_bills_like_a_bare_out_through_the_positional_slot(budget):

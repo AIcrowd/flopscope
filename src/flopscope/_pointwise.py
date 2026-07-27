@@ -3217,6 +3217,15 @@ def outer(
     canonical_subs = info.canonical_subscripts
     if output_sym is not None:
         output_sym = _prepare_symmetric_out(out, output_sym)
+    elif isinstance(out, SymmetricTensor):
+        # A SymmetricTensor destination is not exotic: a square constant fill
+        # picks up an INFERRED symmetry tag, so ``fnp.zeros((n, n))`` -- the
+        # obvious way to build a destination -- already is one. numpy is not
+        # allowed to write it directly (that would leave the tag standing over
+        # data it never saw), so the write is done by ``_wrap_result`` below.
+        # Validating the tag HERE, above the deduct, keeps a destination whose
+        # tag cannot survive the result free to refuse rather than charged.
+        _prepare_symmetric_out(out, None)
     billing_dtypes: tuple = (a.dtype, b.dtype)
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
@@ -3231,12 +3240,25 @@ def outer(
             _np.outer,
             _to_base_ndarray(a),
             _to_base_ndarray(b),
-            out=None if isinstance(out, SymmetricTensor) else out,
+            # The operands are stripped; the destination was not, so a
+            # FlopscopeArray ``out`` reached numpy still wrapped and tripped
+            # the internal "reached numpy.outer from inside an fnp wrapper"
+            # guard -- after the deduct, so the caller paid the whole
+            # contraction and then got a RuntimeError. The strip is a
+            # zero-copy view, so numpy still writes the caller's buffer.
+            out=None if isinstance(out, SymmetricTensor) else _to_base_ndarray(out),
         )
-    if output_sym is None:
+    if output_sym is None and not isinstance(out, SymmetricTensor):
         if out is not None:
             return out
         return result  # type: ignore[return-value]
+    # A SymmetricTensor destination reaches _wrap_result even when the result
+    # carries no symmetry. It used to take the branch above and return itself
+    # UNWRITTEN: numpy had been handed out=None, nothing ever copied the answer
+    # across, and the caller got their untouched destination back having paid
+    # the whole contraction, with no exception. _wrap_result copies the result
+    # in, records the write so no tag outlives the data it described, and drops
+    # the inferred tag the destination no longer earns.
     return _wrap_result(result, out=out, symmetry=output_sym)  # type: ignore[return-value]
 
 

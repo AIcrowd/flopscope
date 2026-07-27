@@ -76,6 +76,11 @@ def test_every_wrapper_with_budget_deduct_is_decorated():
                 # function call outside any wrapper) -- must not be wrapped
                 # a second time, same shape as _einsum_routed_binary above.
                 "_bill_save_egress",
+                # Shared body of isnan/isinf/isfinite (src/flopscope/_array_ops.py).
+                # The three public wrappers each carry @_counted_wrapper and do
+                # nothing but call this; wrapping it too would double-bracket
+                # every call. Same shape as _einsum_routed_binary above.
+                "_counted_predicate",
             ):
                 continue
             if not _has_counted_wrapper_decorator(fn):
