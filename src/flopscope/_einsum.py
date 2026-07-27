@@ -13,7 +13,11 @@ from flopscope._config import get_setting
 from flopscope._dtype_billing import resolve_billing_dtype, store_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
-from flopscope._pointwise import _prepare_symmetric_out, _validate_result_symmetry
+from flopscope._pointwise import (
+    _prepare_symmetric_out,
+    _require_ndarray_out,
+    _validate_result_symmetry,
+)
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetry_group
 from flopscope._validation import maybe_check_nan_inf, require_budget
@@ -583,6 +587,13 @@ def einsum(
         target_symmetry = normalize_symmetry_input(symmetry, ndim=len(output_subscript))
     else:
         target_symmetry = info.output_symmetry
+    # Before anything is billed: a wrapped destination (``out=[dest]``) would
+    # otherwise reach the copy below, where ``_np.asarray`` builds a new array
+    # from the container -- the result lands in that temporary, ``dest`` keeps
+    # its old contents, and the caller gets the untouched wrapper back having
+    # paid for the contraction.
+    _require_ndarray_out(out, "einsum")
+
     effective_out_symmetry = target_symmetry
     if effective_out_symmetry is None and isinstance(out, SymmetricTensor):
         effective_out_symmetry = out.symmetry

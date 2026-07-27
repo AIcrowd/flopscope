@@ -219,6 +219,23 @@ def _supports_out_argument(np_func) -> bool:
         return False
 
 
+def _require_ndarray_out(out, op_name):
+    """``out=`` must be the destination array itself, not a container holding it.
+
+    numpy rejects a wrapped destination for ufuncs, but not everywhere: on the
+    einsum path ``_np.asarray([dest])`` silently builds a NEW array, so the copy
+    lands in that temporary, ``dest`` keeps its old contents, and the caller gets
+    the untouched wrapper back -- charged in full for a result they never
+    received. Reject it up front, before anything is billed.
+    """
+    if out is None or isinstance(out, _np.ndarray):
+        return
+    raise TypeError(
+        f"{op_name}(): out= must be an array, got {type(out).__name__}. "
+        f"Pass the destination array itself, not a container holding it."
+    )
+
+
 def _prepare_symmetric_out(out, target_symmetry):
     if not isinstance(out, SymmetricTensor):
         return target_symmetry
@@ -378,6 +395,7 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
             kwargs[k] = _to_base_ndarray(v)
         elif isinstance(v, (tuple, list)):
             kwargs[k] = _to_base_ndarray_tree(v)
+    _require_ndarray_out(out, getattr(np_func, "__name__", "op"))
     out_stripped = _to_base_ndarray(out) if out is not None else None
     if out is None:
         return _call_numpy(np_func, *args, **kwargs)
