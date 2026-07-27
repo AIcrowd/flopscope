@@ -248,11 +248,29 @@ def reduction_billing_dtype(
     # pointing the other way.
     loop_complex = [d for d in (floor, a_dtype) if d.kind == "c"]
     if loop_complex and resolved.kind != "c":
-        # Complex in the LOOP is intrinsic and outranks a higher-rate real
-        # store: prod of complex64 with out=float64 really does accumulate in
-        # complex64 and merely drop the imaginary part on the way out, so the
-        # complex factor has been earned and a real out= cannot carry it away.
-        resolved = heavier_billing_dtype(*loop_complex)
+        # Complex in the LOOP is intrinsic and a real store cannot carry it
+        # away: prod of complex64 with out=float64 really does accumulate in
+        # complex64 and merely drops the imaginary part on the way out, so the
+        # complex factor has been earned.
+        #
+        # Restoring it must not cost width, though. This function ranks dtypes
+        # by RATE, and cannot see the op's complex factor -- so it cannot tell
+        # whether a complex64 loop (rate 1.0, factor applied later) outprices a
+        # float128 store (rate 4.0, no factor). Swapping the complex dtype in
+        # outright is right when it is the wider of the two and wrong when it
+        # is not: for sum(complex64) into a float128 destination it would trade
+        # rate 4.0 for rate 1.0, and the factor of 2.0 does not make that back.
+        # Promoting instead keeps both properties -- complex kind AND the rate
+        # already earned. It over-bills the case where the complex loop was
+        # genuinely the pricier participant, which is the safe direction for a
+        # meter to err, and the honest fix is to thread the op's complex factor
+        # in so the comparison can be made on effective cost rather than rate.
+        candidate = heavier_billing_dtype(*loop_complex)
+        resolved = (
+            candidate
+            if rate_for(candidate) >= rate_for(resolved)
+            else _np.result_type(resolved, candidate)
+        )
     elif out_dtype is not None and _np.dtype(out_dtype).kind == "c":
         # Complex arriving only in the STORE is a different claim: the
         # arithmetic was real, and the complex buffer is a participant like

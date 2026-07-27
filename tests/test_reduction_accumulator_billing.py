@@ -165,7 +165,13 @@ def test_real_out_does_not_strip_complex_factor_from_prod():
     dst = fnp.zeros(N, dtype=np.float64)
     bare = _billed(lambda: fnp.prod(a, axis=0))
     assert bare == REDUCE_COST * 6  # rate 1.0 * complex factor 6.0
-    assert _billed(lambda: fnp.prod(a, axis=0, out=dst)) == bare
+    # A real store cannot strip the complex factor -- that is the point of
+    # this test -- but it does contribute its own rate, so the widened form
+    # bills ABOVE the bare one rather than equal to it. What must never happen
+    # is falling below `bare`, which is what stripping the factor would do.
+    widened = _billed(lambda: fnp.prod(a, axis=0, out=dst))
+    assert widened >= bare
+    assert widened == bare * 2  # float64 store rate 2.0 over complex64's 1.0
 
 
 def test_real_out_does_not_strip_complex_factor_from_bool_loop_reduce():
@@ -259,6 +265,7 @@ def test_out_combines_with_the_family_default_instead_of_replacing_it():
     i32, i64 = np.dtype(np.int32), np.dtype(np.int64)
     f32, f64 = np.dtype(np.float32), np.dtype(np.float64)
     c64 = np.dtype(np.complex64)
+    c128 = np.dtype(np.complex128)
 
     # A narrower out= cannot pull the bill below the family default...
     assert reduction_billing_dtype(i32, out_dtype=i32, default_dtype=i64) == i64
@@ -266,10 +273,18 @@ def test_out_combines_with_the_family_default_instead_of_replacing_it():
     # ...nor below the operand width when there is no family default.
     assert reduction_billing_dtype(f64, out_dtype=f32) == f64
     # ...and a real out= cannot make a complex accumulator real.
-    assert reduction_billing_dtype(c64, out_dtype=f64, default_dtype=c64) == c64
+    # complex128, not complex64: restoring the complex kind must not cost the
+    # rate the float64 store already earned. This function ranks by rate and
+    # cannot see the op's complex factor, so it cannot tell which participant
+    # is genuinely pricier; promoting keeps BOTH properties and errs toward
+    # over-billing, which is the safe direction for a meter.
+    assert reduction_billing_dtype(c64, out_dtype=f64, default_dtype=c64) == c128
+    # Also complex128 rather than complex64, and for the same reason: the
+    # int64 accumulator's rate 2.0 has been earned and restoring the complex
+    # kind must not spend it.
     assert (
         reduction_billing_dtype(c64, out_dtype=i64, default_dtype=np.dtype(np.bool_))
-        == c64
+        == c128
     )
     # A wider out= still widens.
     assert reduction_billing_dtype(f32, out_dtype=f64, default_dtype=f32) == f64
