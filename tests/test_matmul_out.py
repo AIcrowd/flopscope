@@ -175,8 +175,7 @@ def test_a_bad_container_is_refused_before_anything_is_billed():
 
 
 def test_a_tag_on_the_destination_is_voided_not_raised():
-    """The contraction helper and the fft family both void a tag the write
-    invalidates; only fnp.einsum raises. matmul follows its own family."""
+    """An inferred tag is dropped quietly across the whole family now."""
     load_weights()
     a, b = _pair()
     with f.BudgetContext(flop_budget=10**18, quiet=True):
@@ -184,3 +183,86 @@ def test_a_tag_on_the_destination_is_voided_not_raised():
         fnp.matmul(a, b, out=dest)  # pyright: ignore[reportArgumentType, reportCallIssue]
         assert getattr(dest, "symmetry", None) is None
         np.testing.assert_allclose(np.asarray(dest), a @ b)
+
+
+# --- aligning the contraction family with the pointwise gate --------------
+
+
+def test_a_validated_tag_on_the_destination_is_an_error():
+    """A tag the caller paid ``as_symmetric`` to validate is a claim about that
+    buffer. Contradicting it is a mistake worth surfacing -- which is what the
+    pointwise factories already do, via the same gate."""
+    load_weights()
+    a, b = _pair()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        dest = f.as_symmetric(_symmetric(), symmetry=(0, 1))
+        with pytest.raises((ValueError, f.SymmetryError)):
+            fnp.matmul(a, b, out=dest)  # pyright: ignore[reportArgumentType, reportCallIssue]
+
+
+def test_an_inferred_tag_on_the_destination_is_not_an_error():
+    """The converse: a tag merely inferred from a constant fill is dropped
+    quietly, so an ordinary scratch arena keeps working."""
+    load_weights()
+    a, b = _pair()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        dest = fnp.zeros((N, N))
+        fnp.matmul(a, b, out=dest)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        assert getattr(dest, "symmetry", None) is None
+
+
+def test_the_siblings_gain_the_same_gate():
+    """The gate lives in the shared helper, so vecdot inherits it. Batched
+    operands so the result is 2-D and a two-axis tag is meaningful."""
+    load_weights()
+    a, b = _pair()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        dest = f.as_symmetric(_symmetric(), symmetry=(0, 1))
+        with pytest.raises((ValueError, f.SymmetryError)):
+            fnp.vecdot(a[:, None, :], b[None, :, :], out=dest)
+
+
+def test_einsum_stops_raising_on_a_merely_inferred_tag():
+    """einsum lifted the destination's own tag into a requirement on the
+    result, so a scratch arena from fnp.zeros made a legal contraction raise.
+    A validated tag must still raise."""
+    load_weights()
+    a, b = _pair()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        arena = fnp.zeros((N, N))
+        fnp.einsum("ij,jk->ik", a, b, out=arena)
+        np.testing.assert_allclose(np.asarray(arena), a @ b)
+        assert getattr(arena, "symmetry", None) is None
+
+
+def test_einsum_still_raises_on_a_validated_tag():
+    load_weights()
+    a, b = _pair()
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        dest = f.as_symmetric(_symmetric(), symmetry=(0, 1))
+        with pytest.raises((ValueError, f.SymmetryError)):
+            fnp.einsum("ij,jk->ik", a, b, out=dest)
+
+
+# --- the destination must actually be written ----------------------------
+
+
+def test_a_destination_numpy_ignored_is_still_written(monkeypatch):
+    """numpy has shipped functions that silently hardcode out=None (hfft,
+    ifft2, irfft2 on 2.0-2.4). The contraction path returns ``out``, so if that
+    ever happened here the caller would receive an untouched buffer AS the
+    result, at full price. Simulate it rather than wait for a numpy that does."""
+    load_weights()
+    a, b = _pair()
+    real = np.matmul
+
+    def ignores_out(x, y, **kwargs):
+        kwargs.pop("out", None)  # pretend numpy dropped the destination
+        return real(x, y)
+
+    monkeypatch.setattr(np, "matmul", ignores_out)
+    with f.BudgetContext(flop_budget=10**18, quiet=True):
+        dest = np.zeros((N, N))
+        r = fnp.matmul(a, b, out=dest)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        assert r is dest
+        np.testing.assert_allclose(dest, a @ b)
