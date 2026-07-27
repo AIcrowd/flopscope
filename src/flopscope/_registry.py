@@ -2160,7 +2160,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Return indices of mask for n x n array. Cost: numel of the returned index arrays (= 2*k); dtype-neutral.",
+        "notes": "Return indices of mask for n x n array. Cost: numel of the scanned mask (numel(input), as for nonzero).",
     },
     "tril_indices": {
         "category": "counted_custom",

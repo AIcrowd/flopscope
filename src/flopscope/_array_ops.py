@@ -2932,28 +2932,41 @@ attach_docstring(ix_, _np.ix_, "free", "0 FLOPs")
 def mask_indices(*args, **kwargs):
     """Return indices to access main or off-diagonal of array.
 
-    Cost: numel of the returned index arrays (= ``2*k``, where *k* is the
-    number of selected index pairs) at weight 1.0, dtype-neutral. ``numpy``
-    runs ``mask_func`` internally on its own plain (non-flopscope) probe
-    matrix: a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an
-    fnp callable (e.g. ``fnp.triu``) bills its own cost separately through
-    its own wrapper, on top of this op's own ``2*k``.
+    Cost: numel of the mask that ``mask_func`` produces (the array numpy's
+    own ``nonzero(a != 0)`` scans internally), matching the nonzero /
+    flatnonzero / argwhere / count_nonzero convention of billing
+    numel(input), priced at the mask's own dtype. ``numpy`` runs
+    ``mask_func`` internally on its own plain (non-flopscope) probe matrix:
+    a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an fnp
+    callable (e.g. ``fnp.triu``) bills its own cost separately through its
+    own wrapper, on top of this op's mask-scan cost.
 
     numpy's ``mask_indices`` body ends with a bare top-level ``nonzero(a != 0)``
     on ``a = mask_func(m, k)``. An fnp ``mask_func`` returns a FlopscopeArray,
     which would leak into that internal ``nonzero`` and trip the wrapper-depth
     guard. We coerce the mask_func's return value to a base ndarray before
-    numpy continues -- the fnp mask_func still runs and bills its own cost; only
-    its result is stripped so numpy's own ``nonzero`` sees a plain array.
+    numpy continues, capturing its size/shape/dtype for billing along the
+    way -- the fnp mask_func still runs and bills its own cost; only its
+    result is stripped so numpy's own ``nonzero`` sees a plain array.
     """
     budget = require_budget()
+
+    # numpy calls ``nonzero`` on whatever mask_func returns, so that array is
+    # what this op scans. Capture its size/dtype here -- the wrapper already
+    # intercepts the return value, so this costs no extra numpy work.
+    scanned: dict[str, Any] = {}
 
     def _strip_mask_func(fn: Any) -> Any:
         if not callable(fn):
             return fn
 
         def _wrapped(*a: Any, **kw: Any) -> Any:
-            return _to_base_ndarray(fn(*a, **kw))
+            out = _to_base_ndarray(fn(*a, **kw))
+            mask = _np.asarray(out)
+            scanned["size"] = int(mask.size)
+            scanned["shape"] = mask.shape
+            scanned["dtype"] = mask.dtype
+            return out
 
         return _wrapped
 
@@ -2971,23 +2984,31 @@ def mask_indices(*args, **kwargs):
     # ``flopscope_overhead_time_s``, which is excluded from effective compute --
     # i.e. arbitrary user computation ran free of charge on both axes.
     result = _call_user_code(budget, _np.mask_indices, *args, **kwargs)
-    cost = max(sum(int(r.size) for r in result), 1)
+    if "size" in scanned:
+        probe_size = scanned["size"]
+        shapes: tuple = (scanned["shape"],)
+        dtypes: tuple = (scanned["dtype"],)
+    else:  # defensive: mask_func was never invoked
+        n = int(args[0] if args else kwargs["n"])
+        probe_size, shapes, dtypes = n * n, ((n, n),), ()
+    cost = max(probe_size, sum(int(r.size) for r in result), 1)
     with budget.deduct(
-        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
-        # the tri*_indices family.
+        # Priced as a full value scan of the mask numpy calls ``nonzero`` on,
+        # matching the nonzero/flatnonzero/argwhere/count_nonzero convention of
+        # billing numel(input). The internal ``ones((n, n))`` probe is not
+        # charged (it is never returned) and the ``a != 0`` compare is not
+        # charged on top (``nonzero(a != 0)`` is semantically ``nonzero(a)``).
         "mask_indices",
         flop_cost=cost,
         subscripts=None,
-        shapes=(),
-        dtypes=(),
+        shapes=shapes,
+        dtypes=dtypes,
     ):
         pass  # numpy call already executed above
     return result
 
 
-attach_docstring(
-    mask_indices, _np.mask_indices, "counted_custom", "numel(output) FLOPs"
-)
+attach_docstring(mask_indices, _np.mask_indices, "counted_custom", "numel(mask) FLOPs")
 
 
 def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
