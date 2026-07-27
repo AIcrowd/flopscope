@@ -57,6 +57,15 @@ def store_billing_dtypes(out) -> tuple:
     alone. A non-numeric *operand* really does describe the arithmetic --
     ``multiply(object_array, float64_array)`` runs NumPy's object loop and
     returns object -- and must keep resolving to the neutral rate.
+
+    Applied uniformly to every ``out=``, which slightly over-charges the one
+    case where the store *does* pick the loop: a ufunc forwards ``out=`` to
+    NumPy, so an object ``out`` really does run object arithmetic (measured
+    15.5x slower), where a contraction computes natively and only then copies
+    (1.00x). Billing those at the operand rate rather than the neutral one is
+    deliberate and matches how ``out=`` is already treated elsewhere -- see the
+    widest-participating-buffer note at the top of this module. The alternative
+    reopens a discount on a pathological call for no legitimate gain.
     """
     if not isinstance(out, _np.ndarray):
         return ()

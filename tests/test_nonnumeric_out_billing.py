@@ -101,6 +101,18 @@ def test_numeric_widening_out_still_bills_wider():
     assert via_out == via_astype == 2000
 
 
+@pytest.mark.parametrize("op", ["divmod", "modf", "frexp"])
+def test_multi_output_nonnumeric_out_does_not_discount(op):
+    """The multi-output ufuncs fold each out= element's dtype separately."""
+    load_weights()
+    a = np.random.default_rng(0).random((32, 32)) + 1.0
+    args = (a, a + 1.0) if op == "divmod" else (a,)
+    fn = getattr(fnp, op)
+    honest = _billed(lambda: fn(*args))
+    outs = (np.empty((32, 32), dtype=object), np.empty((32, 32), dtype=object))
+    assert _billed(lambda: fn(*args, out=outs)) == honest
+
+
 @pytest.mark.parametrize("other", ["float64", "complex128"])
 def test_mixed_nonnumeric_operand_still_bills_neutral(other):
     """A non-numeric *operand* describes the arithmetic even when a numeric

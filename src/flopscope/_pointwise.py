@@ -655,8 +655,7 @@ def _counted_unary_multi(np_func, op_name: str):
             billing_dtypes = (x.dtype,)
             if out is not None:
                 for o in out:
-                    if isinstance(o, _np.ndarray):
-                        billing_dtypes += (o.dtype,)
+                    billing_dtypes += store_billing_dtypes(o)
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
@@ -851,8 +850,7 @@ def _counted_binary_multi(np_func, op_name: str):
             billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
             if out is not None:
                 for o in out:
-                    if isinstance(o, _np.ndarray):
-                        billing_dtypes += (o.dtype,)
+                    billing_dtypes += store_billing_dtypes(o)
         with budget.deduct(
             op_name,
             flop_cost=cost,
