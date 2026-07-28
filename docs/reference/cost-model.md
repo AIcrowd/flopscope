@@ -491,10 +491,18 @@ same way `sum` does — a batched diagonal sum is still a sum — and the generi
 `ufunc.reduce` / `accumulate` / `reduceat` paths resolve their accumulator through the
 identical rule: `np.add.reduce` is the same machinery `sum` runs on, so
 `np.add.reduce(int32_arr, dtype=int32)` bills exactly like `sum(int32_arr, dtype=int32)`.
-`reduceat`'s default accumulator widens the same way, regardless of the segment
-indices: a 1000-element `int32` input bills `np.add.reduceat` at the int64 rate
-(1000 × 2.0 = **2000**), while `np.subtract.reduceat` on the same input has no such
-accumulator and keeps the int32 loop (**1000**). `ufunc.outer` is not itself an
+
+`reduceat`'s base cost follows numpy's own per-segment semantics rather than a flat
+per-element charge: for segment `i`, `indices[i] < indices[i+1]` reduces the elements
+between them (a length-`L` segment costs `L-1` applications, the same `n-1` convention
+`reduce` uses), while a non-monotonic pair (`indices[i] >= indices[i+1]`) is a plain
+element copy with no arithmetic — the segment costs 0. The final segment always runs to
+the end of the axis. That per-segment count is then billed at the accumulator dtype,
+which widens the same way `reduce` does regardless of where the segment boundaries fall:
+applied as a single whole-axis segment (`indices=[0]`) to a 1000-element `int32` input,
+that's one `L=1000` segment, 999 applications — `np.add.reduceat` bills at the int64 rate
+(999 × 2.0 = **1998**), while `np.subtract.reduceat` on the same input has no such
+accumulator and keeps the int32 loop (999 × 1.0 = **999**). `ufunc.outer` is not itself an
 accumulating reduction, but an explicit `dtype=` on it resolves through the same
 request-is-the-loop rule: the dtype names the loop numpy actually runs, not a discount,
 so `np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over

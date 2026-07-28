@@ -1247,11 +1247,14 @@ def test_reduceat_float_only_binary_bills_float64_and_add_widens_too():
     # like reduce/sum -- runs add through numpy's integer-widening
     # accumulator, so an int32 input still bills int64 (see the dedicated
     # add/subtract accumulator pins below for that story in isolation).
+    # arr is the 100-element np.arange(1, 101); indices=[0, 10] cuts two
+    # segments: [0,10) length 10 -> 9 applications, [10,100) length 90 ->
+    # 89 applications; 9 + 89 = 98 applications * f64/int64 rate 2.0 = 196.
     assert (
         _generic_ufunc_method_billed(lambda a: np.true_divide.reduceat(a, [0, 10]))
-        == 200
+        == 196
     )
-    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 200
+    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 196
 
 
 def _i64_method_billed(method_call) -> tuple[int, str | None]:
@@ -1336,24 +1339,29 @@ def test_reduceat_add_multiply_use_sum_accumulator_dtype():
     # integer-widening accumulator by default, regardless of the segment
     # indices: an int32 input bills int64. subtract has no such accumulator
     # and keeps its native int32 loop -- the contrast pin.
-    assert _reduceat_billed(lambda a: np.add.reduceat(a, [0])) == 2000
-    assert _reduceat_billed(lambda a: np.subtract.reduceat(a, [0])) == 1000
+    # n=1000, indices=[0] is a single whole-axis segment: length 1000 ->
+    # 999 applications. add widens to int64 (rate 2.0): 999 * 2.0 = 1998.
+    # subtract keeps the native int32 loop (rate 1.0): 999 * 1.0 = 999.
+    assert _reduceat_billed(lambda a: np.add.reduceat(a, [0])) == 1998
+    assert _reduceat_billed(lambda a: np.subtract.reduceat(a, [0])) == 999
 
 
 def test_reduceat_explicit_dtype_is_the_accumulator_not_a_discount():
     # An explicit dtype= on reduceat IS the accumulator numpy runs -- billed
     # exactly as requested, wider or narrower, mirroring reduce/sum.
+    # Same 999-application whole-axis segment as above (n=1000, indices=[0]);
+    # only the billed rate changes with the explicit accumulator dtype=.
     assert (
         _reduceat_billed(
             lambda a: np.add.reduceat(a, [0], dtype=np.float64), dtype=np.float32
         )
-        == 2000
+        == 1998  # 999 applications * float64 rate 2.0
     )
     assert (
         _reduceat_billed(
             lambda a: np.subtract.reduceat(a, [0], dtype=np.float32), dtype=np.float64
         )
-        == 1000
+        == 999  # 999 applications * float32 rate 1.0
     )
 
 

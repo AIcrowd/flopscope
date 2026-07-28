@@ -1275,13 +1275,54 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
+def _reduceat_applications_per_lane(indices, n: int) -> int:
+    """Honest per-lane application count for ``ufunc.reduceat(a, indices)``.
+
+    ``indices`` MUST already be the frozen, owned snapshot built by
+    :func:`_counted_ufunc_reduceat` -- reading it here must be the only
+    read of it, matching the single-read discipline
+    :func:`_ufunc_at_touched_cells` follows for ``ufunc.at``'s index.
+
+    NumPy's semantics per segment ``i``: if ``indices[i] < indices[i+1]``,
+    ``result[i] = reduce(a[indices[i]:indices[i+1]])`` (``L-1`` applications
+    for a length-``L`` segment); otherwise ``result[i] = a[indices[i]]``, a
+    plain copy with no arithmetic (0 applications). The final segment always
+    runs to the end of the axis (length ``n``). Segments may overlap or run
+    backwards, so the true application count is bounded by the INDEX
+    VALUES, not by the array's own size.
+
+    A 1-D index array on a valid in-range ``n`` is the only combination
+    ``ufunc.reduceat`` itself accepts (it rejects a scalar/>=2-D index
+    array, and an out-of-range or ``None`` axis resolves to ``n == 0``
+    upstream); anything else returns 0 rather than mis-index the shape math
+    below. The real call still sees the untouched snapshot and original
+    ``axis``, so numpy raises its own error for these -- this floor never
+    masks a rejection, it just declines to guess a cost for an input the
+    call is about to refuse anyway.
+    """
+    k = indices.shape[0] if indices.ndim == 1 else 0
+    if k == 0 or n == 0:
+        return 0
+    idx64 = indices.astype(_np.int64)
+    ends = _np.empty(k, dtype=_np.int64)
+    ends[:-1] = idx64[1:]
+    ends[-1] = n  # the final segment always runs to the axis end
+    lengths = ends - idx64
+    # A real reduce segment of length L costs L-1 applications; the
+    # non-monotonic (indices[i] >= indices[i+1]) branch is a plain element
+    # copy and costs 0 -- np.maximum(lengths - 1, 0) covers both uniformly.
+    return int(_np.sum(_np.maximum(lengths - 1, 0)))
+
+
 @_counted_wrapper
 def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     """Cost-tracked ``ufunc.reduceat(a, indices, axis=...)``.
 
-    Cost is dense ``numel(input)`` — every element is touched by
-    exactly one segment. Output symmetry is ``None``: arbitrary segment
-    boundaries don't respect any axis-permutation group action.
+    Cost is the honest per-segment application count from
+    :func:`_reduceat_applications_per_lane`, times the number of lanes
+    (every combination of indices in the axes other than ``axis``).
+    Output symmetry is ``None``: arbitrary segment boundaries don't respect
+    any axis-permutation group action.
     """
     budget = require_budget()
     # Above every later read of ``out`` -- the billing dtype, the
@@ -1290,15 +1331,44 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
-    cost = _builtins.max(int(a.size), 1)
     out_stripped = _to_base_ndarray(out) if out is not None else None
-    # Strip ``indices`` only when it's already a flopscope-typed ndarray —
-    # otherwise let numpy handle the dtype coercion (e.g. an empty
-    # Python list must reach numpy as-is so it doesn't get the float64
-    # default that ``np.asarray([])`` would assign).
-    indices_stripped = (
-        _to_base_ndarray(indices) if isinstance(indices, _np.ndarray) else indices
+    # Snapshot ``indices`` into ONE owned, frozen copy -- the cost formula
+    # below reads the index VALUES (not just ``.size``), which opens a
+    # time-of-check/time-of-use gap a live view can't close: numpy re-reads
+    # the index buffer from inside ``ufunc.reduceat`` itself, and
+    # ``ndarray.resize(n, refcheck=False)`` mutates ``.size`` in place even
+    # through a read-only view (see ``_canon_entry`` for the identical gap
+    # in ``ufunc.at``). Only an owned copy, unreachable from the caller,
+    # closes it. This same snapshot is what gets costed AND what gets
+    # handed to ``ufunc.reduceat`` below -- ``indices`` itself must not be
+    # read again after this point.
+    #
+    # An already-ndarray ``indices`` keeps its own dtype: numpy's ndarray
+    # path only safe-casts (an int32 array widens fine; a float64 array
+    # still raises downstream exactly as it would have unconverted -- we
+    # must not turn a rejected input into an accepted one). A non-ndarray
+    # ``indices`` (list, tuple, range, ...) goes through the same lenient
+    # sequence-to-intp coercion numpy's own converter applies for that
+    # form -- an unsafe cast where floats truncate, and an empty sequence
+    # stays intp instead of the float64 ``np.asarray([])`` would infer
+    # (which ``ufunc.reduceat`` would then reject).
+    if isinstance(indices, _np.ndarray):
+        indices_base = _to_base_ndarray(indices)
+        indices_snapshot = _np.array(indices_base, dtype=indices_base.dtype, copy=True)
+    else:
+        indices_snapshot = _np.array(indices, dtype=_np.intp, copy=True)
+    indices_snapshot.flags.writeable = False
+    # An out-of-range or ``None`` axis is left for the real call below to
+    # reject; treating it as ``n = 0`` here just declines to guess a cost
+    # for an input that's about to be refused anyway.
+    n = (
+        a.shape[axis]
+        if axis is not None and a.ndim > 0 and -a.ndim <= axis < a.ndim
+        else 0
     )
+    applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
+    lanes = a.size // n if n else 0
+    cost = _builtins.max(lanes * applications_per_lane, 1)
     # This default path (no explicit dtype=) shares the operand-width
     # behavior of the generic reduce/accumulate paths: reduceat runs the
     # ufunc's own resolved loop dtype by default (true_divide(int32) ->
@@ -1333,7 +1403,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         result = _call_numpy(
             ufunc.reduceat,
             _to_base_ndarray(a),
-            indices_stripped,
+            indices_snapshot,
             axis=axis,
             out=out_stripped,
             **kwargs,
