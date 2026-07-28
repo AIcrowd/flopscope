@@ -250,6 +250,20 @@ def _resolve_out_compute_dtype(
     return op_dtype
 
 
+def _expands_when_materialized(array) -> bool:
+    """Would copying *array* cost far more than the memory it occupies?
+
+    True for a broadcast view (a zero stride repeats one element across a
+    whole axis) and for any view whose logical size dwarfs the buffer it
+    looks at. Casting such an operand allocates its logical shape, which is
+    unbounded relative to what the caller actually handed over.
+    """
+    if 0 in array.strides and array.size > 1:
+        return True
+    base = array.base
+    return base is not None and getattr(base, "nbytes", array.nbytes) * 4 < array.nbytes
+
+
 def _execute_pairwise(path_info, operands: list):
     """Execute pairwise contractions according to the optimized path."""
     ops = list(operands)
@@ -767,22 +781,48 @@ def einsum(
         # in numpy and -56 if the contraction runs in int8 first, and
         # `bool x bool` into any numeric destination counts the matches
         # (3) where a bool contraction only ors them (1).
-        exec_operands = operands
-        if compute_dtype is not None and any(
+        needs_promotion = compute_dtype is not None and any(
             a.dtype != compute_dtype for a in operand_arrays
-        ):
-            exec_operands = [
-                _to_base_ndarray(a).astype(compute_dtype, copy=False)
-                for a in operand_arrays
-            ]
-        if path_info.steps:
-            result = _execute_pairwise(path_info, list(exec_operands))
-        else:
+        )
+        # Casting an operand materializes its LOGICAL shape. That is fine for
+        # a dense array -- the copy is the same size as the original -- but
+        # ruinous for an operand whose logical size far exceeds its storage:
+        # a broadcast view has O(1) bytes and O(numel) logical size, so
+        # promoting one turned a 4-byte view into an allocation the size of
+        # the contraction (~80GB for a 100000^2 view; measured 128MB against
+        # numpy's 0.1MB at 4000^2).
+        expansive = needs_promotion and any(
+            _expands_when_materialized(_to_base_ndarray(a)) for a in operand_arrays
+        )
+        if expansive:
+            # ``dtype=`` casts inside numpy's iterator, per element, so the
+            # view is never materialized. This gives up the planned pairwise
+            # path for these operands, which is the right trade only BECAUSE
+            # they are the expansive ones -- the plan is not worth an
+            # allocation proportional to a logical shape. Dense operands keep
+            # their path below.
             result = _call_numpy(
                 _np.einsum,
                 canonical_subscripts,
-                *[_to_base_ndarray(o) for o in exec_operands],
+                *[_to_base_ndarray(o) for o in operands],
+                dtype=compute_dtype,
+                casting=requested_casting,
             )
+        else:
+            exec_operands = operands
+            if needs_promotion:
+                exec_operands = [
+                    _to_base_ndarray(a).astype(compute_dtype, copy=False)
+                    for a in operand_arrays
+                ]
+            if path_info.steps:
+                result = _execute_pairwise(path_info, list(exec_operands))
+            else:
+                result = _call_numpy(
+                    _np.einsum,
+                    canonical_subscripts,
+                    *[_to_base_ndarray(o) for o in exec_operands],
+                )
 
     if out is not None:
         _validate_result_symmetry(result, target_symmetry)
