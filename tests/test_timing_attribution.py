@@ -223,3 +223,30 @@ def test_data_movement_ops_bill_to_backend(invoke):
         invoke(big)
     s = b.summary_dict()
     assert s["flopscope_backend_time_s"] > s["flopscope_overhead_time_s"], s
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        lambda big: np.subtract.outer(big[0], big[0]),
+        lambda big: np.subtract.reduce(big, axis=0),
+        lambda big: np.subtract.accumulate(big, axis=0),
+        lambda big: np.subtract.reduceat(big, [0, big.shape[0] // 2], axis=0),
+        lambda big: np.add.at(big, (np.arange(big.shape[0]),), 1.0),
+    ],
+    ids=["outer", "reduce", "accumulate", "reduceat", "at"],
+)
+def test_ufunc_methods_bill_to_backend(invoke):
+    """The ufunc-method wrappers invoked numpy directly instead of through
+    ``_call_numpy``, so their whole backend cost was misfiled as flopscope
+    overhead -- ``flopscope_backend_time_s`` came back at exactly 0.0 for calls
+    taking milliseconds. The same omission is why their writes went unrecorded
+    (pinned in ``test_symmetry_tag_forgery``); this is the timing half.
+    """
+    big = flops.numpy.array(np.random.randn(2000, 2000))
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
+        invoke(big)
+    s = b.summary_dict()
+    assert s["flopscope_backend_time_s"] > 0.0, s
+    assert s["flopscope_backend_time_s"] > s["flopscope_overhead_time_s"], s

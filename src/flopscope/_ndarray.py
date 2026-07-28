@@ -110,6 +110,57 @@ def _build_passthrough():
 _INITIAL_PASSTHROUGH = _build_passthrough()
 
 
+class _TrackedFlatIter:
+    """Wraps ``ndarray.flat`` so a write through it is observed.
+
+    ``arr.flat[:] = ...`` and ``arr.flat = ...`` write the buffer directly,
+    below ``__setitem__`` and below the ``out=`` keyword the write-epoch hook
+    watches. A symmetry tag gates a billing discount and is voided when its
+    buffer is written, so an unobserved write leaves the claim standing over
+    data it no longer describes.
+
+    These writes are RECORDED rather than refused, unlike the ``fill``/
+    ``put``/``resize`` overrides above. Assigning through ``.flat`` is a
+    documented NumPy idiom that NumPy's own test suite exercises
+    (``a.flat = range(1, 37)``), and it worked here before the tag machinery
+    existed -- refusing it would break working code to fix a billing hole
+    that voiding closes just as well.
+    """
+
+    __slots__ = ("_it", "_owner")
+
+    def __init__(self, it: Any, owner: Any) -> None:
+        object.__setattr__(self, "_it", it)
+        object.__setattr__(self, "_owner", owner)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        from flopscope._write_epoch import note_write
+
+        self._it[key] = value
+        note_write(self._owner)
+
+    def __getitem__(self, key: Any) -> Any:
+        return self._it[key]
+
+    def __iter__(self) -> Any:
+        # Returning ``iter(self._it)`` would hand back the raw flatiter, and a
+        # caller holding it could write straight through ``it[:] = ...``,
+        # around both the setitem above and the epoch hook. Stay wrapped.
+        return self
+
+    def __next__(self) -> Any:
+        return next(self._it)
+
+    def __len__(self) -> int:
+        return len(self._it)
+
+    def __array__(self, *args: Any, **kwargs: Any) -> Any:
+        return _np.asarray(self._it, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_it"), name)
+
+
 class FlopscopeArray(_np.ndarray):
     """A numpy ndarray subclass with FLOP-tracked operators.
 
@@ -909,6 +960,28 @@ class FlopscopeArray(_np.ndarray):
             "in-place resize is not supported; flopscope arrays are immutable. "
             "Use fnp.reshape(arr, new_shape) to create a reshaped copy."
         )
+
+    def setfield(self, *args: Any, **kwargs: Any) -> None:
+        raise ValueError(
+            "in-place setfield is not supported; flopscope arrays are "
+            "immutable. Build the result functionally instead."
+        )
+
+    @property
+    def flat(self) -> Any:
+        """Flat iterator whose writes are observed. See :class:`_TrackedFlatIter`."""
+        # Via a base-ndarray view rather than the descriptor: the view shares
+        # this array's buffer, so the iterator it yields writes through to us.
+        return _TrackedFlatIter(self.view(_np.ndarray).flat, self)
+
+    @flat.setter
+    def flat(self, value: Any) -> None:
+        from flopscope._write_epoch import note_write
+
+        # numpy's stubs declare `flat` read-only; the runtime descriptor has a
+        # setter, which is the whole reason this override has to exist.
+        self.view(_np.ndarray).flat = value  # pyright: ignore[reportAttributeAccessIssue]
+        note_write(self)
 
     # ----- Binary arithmetic -----
 
