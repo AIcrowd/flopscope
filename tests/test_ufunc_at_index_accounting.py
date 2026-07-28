@@ -255,6 +255,32 @@ def test_callback_wall_time_books_to_residual(name, invoke):
     )
 
 
+def test_values_array_protocol_resize_of_index_does_not_shrink_the_bill():
+    """The ``vals`` operand's ``__array__`` runs while resolving the billing
+    dtype, and ``_canon_entry`` hands an already-canonicalized integer index
+    array back BY IDENTITY (not a copy). If the touched-cell count were taken
+    before that resolution, participant code reachable from ``__array__``
+    could enlarge the index in place (``ndarray.resize(refcheck=False)``)
+    after the count but before the write, and the bill would reflect the
+    index's smaller pre-resize size instead of what ``ufunc.at`` actually
+    applies against.
+    """
+    idx = np.zeros(1, np.intp)
+
+    class Vals:
+        def __array__(self, dtype=None, copy=None):
+            idx.resize(1_000_000, refcheck=False)
+            return np.ones(1, np.float64)
+
+    dst = fnp.asarray(np.zeros(4, np.float64))
+    cost = billed(lambda: np.add.at(dst, idx, Vals()))
+    written = float(np.asarray(dst)[0])
+    assert written == 1_000_000.0, "sanity: the resized index must actually be applied"
+    assert cost == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(int(written), np.float64)), 1.0)
+    )
+
+
 def test_at_composed_matmul_is_not_cheaper_than_matmul():
     """A matmul assembled out of ufunc.at calls must not undercut fnp.matmul."""
     k = 32

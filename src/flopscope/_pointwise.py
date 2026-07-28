@@ -1352,10 +1352,16 @@ def _canon_entry(entry):
     Boolean arrays are snapshotted because their cost depends on their
     VALUES (``count_nonzero``), so a caller could otherwise mutate the mask
     between costing and writing. Integer arrays are not snapshotted: their
-    cost depends only on ``.size``, which cannot change while we hold a
-    reference. We only ever freeze copies WE made -- ``_np.asarray`` can
-    hand back the caller's own array, and freezing that would leave a
-    participant's array permanently read-only.
+    cost depends only on ``.size``. ``.size`` is NOT immutable while we hold
+    a reference -- ``ndarray.resize(n, refcheck=False)`` mutates it in place
+    on the very object this function hands back (by identity, not a copy).
+    This is only safe because the call site (``_counted_ufunc_at``) counts
+    touched cells as the LAST step before the deduct, after every bit of
+    participant-triggering resolution has already run, so there is no window
+    left for a resize to land in between the count and the write. We only
+    ever freeze copies WE made -- ``_np.asarray`` can hand back the caller's
+    own array, and freezing that would leave a participant's array
+    permanently read-only.
     """
     if entry is None or entry is Ellipsis:
         return entry
@@ -1502,14 +1508,14 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     budget = require_budget()
     # ``indices`` can be many things: int, list of ints, ndarray, slice,
     # Ellipsis, or a tuple thereof (for multi-axis fancy indexing).
-    # ``ufunc.at`` accepts all of these. Only convert to ndarray when
-    # it's already array-like; let scalars / slices / Ellipsis through
-    # unchanged so numpy's own semantics apply.
-    # Resolve the index ONCE. Everything downstream -- the cost and the write
-    # itself -- must use ``canonical``; re-reading ``indices`` below would let
-    # the billed index and the written index differ.
+    # ``ufunc.at`` accepts all of these. ``_canonical_index`` resolves every
+    # entry -- via ``_canon_entry`` -- into a form safe to both cost and
+    # execute with (bool/int arrays snapshotted-or-view-cast, scalars
+    # normalized through ``__index__``, slices normalized). Resolve the
+    # index ONCE. Everything downstream -- the cost and the write itself --
+    # must use ``canonical``; re-reading ``indices`` below would let the
+    # billed index and the written index differ.
     canonical = _canonical_index(indices)
-    n_ops = _ufunc_at_touched_cells(a, canonical)
     # Strip any flopscope-typed positional values too.
     stripped_args = tuple(
         _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
@@ -1545,6 +1551,18 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         )
     else:
         billing_dtypes = ()
+    # Count touched cells LAST, immediately before the deduct -- after every
+    # step above that can run participant code (in particular the
+    # ``_np.asarray(vals)`` fallback just above, which can invoke a
+    # participant's ``__array__``). ``canonical``'s integer index arrays are
+    # held by reference, not snapshotted (see ``_canon_entry``), so
+    # participant code that resizes one in place
+    # (``ndarray.resize(refcheck=False)``) between an earlier count and the
+    # write below would let the bill and the applications actually performed
+    # diverge. Counting here, with nothing left between it and the write but
+    # ``budget.deduct`` itself (pure bookkeeping -- see ``_charge_op``),
+    # closes that window without paying for a defensive copy on every call.
+    n_ops = _ufunc_at_touched_cells(a, canonical)
     with budget.deduct(
         f"{ufunc.__name__}.at",
         flop_cost=n_ops,
@@ -1567,9 +1585,6 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             *stripped_args,
             **kwargs,
         )
-    # ``ufunc.at`` mutates ``a`` in place; record it so any symmetry tag
-    # describing this buffer is invalidated (see flopscope._write_epoch).
-    note_write(a)
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
 
 
