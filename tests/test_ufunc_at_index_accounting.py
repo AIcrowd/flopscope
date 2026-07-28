@@ -31,7 +31,14 @@ INDEX_FORMS = [
     ((6,), [0, 0, 0, 0], "repeated list"),
     ((6,), np.zeros(1000, np.intp), "heavy repeat"),
     ((6,), range(3), "range"),
-    ((6,), memoryview(np.array([1, 2, 3], np.intp)), "memoryview"),
+    (
+        (6,),
+        # memoryview() over an ndarray is runtime-supported (ndarray implements
+        # the buffer protocol); numpy's stubs don't declare __buffer__, so the
+        # stub is narrower than the implementation here.
+        memoryview(np.array([1, 2, 3], np.intp)),  # pyright: ignore[reportArgumentType]
+        "memoryview",
+    ),
     ((6,), np.array([], np.intp), "empty ndarray"),
     ((6,), [], "empty list"),
     ((6,), slice(None), "full slice"),
@@ -85,7 +92,10 @@ def test_canonical_index_preserves_write(shape, indices, label):
     raw = np.zeros(shape, np.float64)
     canon_target = np.zeros(shape, np.float64)
     np.add.at(raw, indices, 1.0)
-    np.add.at(canon_target, _canonical_index(indices), 1.0)
+    # slices, memoryviews, etc. are runtime-supported index forms that
+    # numpy's stubs type more narrowly than the implementation accepts.
+    canon = _canonical_index(indices)
+    np.add.at(canon_target, canon, 1.0)  # pyright: ignore[reportArgumentType]
     np.testing.assert_array_equal(raw, canon_target)
 
 
@@ -164,7 +174,14 @@ def test_stateful_slice_index_bills_what_it_writes():
             return 1 if self.calls == 1 else n
 
     dst = fnp.asarray(np.zeros(n, np.float64))
-    cost = billed(lambda: np.add.at(dst, slice(0, Shifting()), 1.0))
+    idx = slice(0, Shifting())
+
+    def do_at():
+        # a slice stop with a stateful __index__ is runtime-supported; numpy's
+        # stubs type slice indices narrower than the implementation accepts.
+        np.add.at(dst, idx, 1.0)  # pyright: ignore[reportArgumentType]
+
+    cost = billed(do_at)
     written = int((np.asarray(dst) != 0).sum())
     assert cost == billed(
         lambda: fnp.add(fnp.asarray(np.zeros(written, np.float64)), 1.0)

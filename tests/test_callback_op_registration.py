@@ -49,6 +49,10 @@ def test_client_registry_data_is_in_sync():
         / "_registry_data.py"
     )
     spec = importlib.util.spec_from_file_location("_registry_data", path)
+    # spec_from_file_location is typed as returning ModuleSpec | None, but for
+    # a file path that exists on disk it always resolves to a real spec with a
+    # loader; assert the runtime invariant instead of relaxing the null checks.
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert set(module.LOCAL_CALLBACK_OPS) == set(flopscope.remote_unsupported_ops())
