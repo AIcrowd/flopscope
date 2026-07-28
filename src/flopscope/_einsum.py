@@ -767,21 +767,40 @@ def einsum(
         # in numpy and -56 if the contraction runs in int8 first, and
         # `bool x bool` into any numeric destination counts the matches
         # (3) where a bool contraction only ors them (1).
-        exec_operands = operands
-        if compute_dtype is not None and any(
+        needs_promotion = compute_dtype is not None and any(
             a.dtype != compute_dtype for a in operand_arrays
-        ):
-            exec_operands = [
-                _to_base_ndarray(a).astype(compute_dtype, copy=False)
-                for a in operand_arrays
-            ]
-        if path_info.steps:
-            result = _execute_pairwise(path_info, list(exec_operands))
+        )
+        if needs_promotion:
+            # Hand the cast to numpy's iterator rather than casting the
+            # operands ourselves. ``astype`` materializes a LOGICAL shape: a
+            # broadcast view has O(1) storage but O(numel) logical size, so
+            # promoting operands up front turned
+            # ``einsum("ij->", broadcast_to(f32(1), (100000, 100000)),
+            # out=empty((), f64))`` -- a 4-byte view into a scalar -- into an
+            # ~80GB allocation. Measured at (4000, 4000): 128MB against
+            # numpy's 0.1MB. ``dtype=`` casts inside the iterator, per element,
+            # so strided and broadcast operands stay unmaterialized.
+            #
+            # This takes the direct route even when a pairwise path was
+            # planned. The path was chosen and billed already, and the
+            # pairwise stepper has no way to thread a compute dtype through
+            # its intermediates; a promoting contraction is the narrow case,
+            # and not allocating its operands matters more than the step
+            # kernel it would have used.
+            result = _call_numpy(
+                _np.einsum,
+                canonical_subscripts,
+                *[_to_base_ndarray(o) for o in operands],
+                dtype=compute_dtype,
+                casting=requested_casting,
+            )
+        elif path_info.steps:
+            result = _execute_pairwise(path_info, list(operands))
         else:
             result = _call_numpy(
                 _np.einsum,
                 canonical_subscripts,
-                *[_to_base_ndarray(o) for o in exec_operands],
+                *[_to_base_ndarray(o) for o in operands],
             )
 
     if out is not None:

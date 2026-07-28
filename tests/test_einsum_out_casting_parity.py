@@ -462,3 +462,40 @@ def test_parity_holds_for_every_optimize_setting(optimize):
             optimize=optimize,
         )
     assert np.array_equal(np.asarray(result), np.full((4, 4), 16.0))
+
+
+def test_a_promoting_contraction_does_not_materialize_its_operands():
+    """Casting operands ourselves materializes their LOGICAL shape.
+
+    A broadcast view has O(1) storage and O(numel) logical size, so promoting
+    operands up front turned a 4-byte view into an allocation the size of the
+    contraction. Handing the cast to numpy's iterator via ``dtype=`` keeps
+    strided and broadcast operands unmaterialized, which is what numpy itself
+    does. Measured at (4000, 4000): 128MB before, 0.1MB after.
+
+    The assertion is deliberately loose -- RSS is noisy and the point is the
+    order of magnitude, not a byte count. A regression here reallocates the
+    full logical array and blows straight past it.
+    """
+    import resource
+
+    def rss_mb():
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
+
+    view = np.broadcast_to(np.float32(1.0), (4000, 4000))
+    logical_mb = view.nbytes / 1e6
+    assert logical_mb > 50, "test bug: the view is too small to detect a blowup"
+
+    with f.BudgetContext(flop_budget=10**14, quiet=True):
+        operand = fnp.asarray(view)
+        dest = np.empty((), np.float64)
+        before = rss_mb()
+        fnp.einsum("ij->", operand, out=dest)
+        grew_mb = rss_mb() - before
+
+    assert float(dest) == 16000000.0
+    assert grew_mb < logical_mb / 2, (
+        f"promoting contraction grew RSS by {grew_mb:.1f}MB for a broadcast "
+        f"view of {logical_mb:.1f}MB logical size -- the operands are being "
+        f"materialized instead of cast inside numpy's iterator"
+    )
