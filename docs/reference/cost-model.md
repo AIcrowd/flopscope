@@ -1316,13 +1316,18 @@ because they perform per-bit/index work or I/O beyond pure relocation:
 | `copyto` | `numel(dst)` (or popcount(`where`) when masked) | DECLARED: priced per element written, unconditionally — same-dtype or not (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
 | `packbits` | `numel(input)` (weight 1.0) | DECLARED: per-bit test+shift; value-test per element | `_array_ops.py` |
 | `unpackbits` | `numel(output)` (weight 1.0) | DECLARED: unpacks 8 bits per input byte; proportional to output | `_array_ops.py` |
-| `mask_indices` | `2k` (weight 1.0, `k` = selected pairs; numel of the returned index arrays) | DECLARED: dtype-neutral index-array output | `_array_ops.py` |
+| `mask_indices` | `numel(mask)` (weight 1.0, priced at the mask's own dtype) | DECLARED: scans the array `mask_func` produces, matching the `nonzero`/`flatnonzero`/`argwhere`/`count_nonzero` convention of billing `numel(input)`; the returned index arrays are not charged | `_array_ops.py` |
 | `getitem` (`arr[key]`) | basic indexing (int/slice/newaxis/Ellipsis, or a tuple thereof): `0` (view); advanced (fancy/boolean) indexing: `4·numel(output)` + `numel(mask)` per boolean-mask part (weight 1.0) | DECLARED: fancy gather billed at the `take` rate; boolean-mask parts additionally scan like `compress` | `_ndarray.py` |
 
 `getitem` is the one op in this table with no module-level `fnp.<name>` call form — it
 bills `FlopscopeArray.__getitem__`, i.e. `arr[key]` syntax, not a function call. See
 [the unifying philosophy](#the-unifying-philosophy--every-byte-written-is-metered) for
 the basic-vs-advanced-indexing distinction this formula rests on.
+
+`mask_indices` prices only the mask that `mask_func` produces, not the index arrays it
+returns, so — unlike the dtype-neutral [index generators](#index-generators) below —
+its charge scales with the mask's dtype. `triu_indices`/`tril_indices` are separate ops
+with their own dtype-neutral formula and are unaffected by this.
 
 ---
 

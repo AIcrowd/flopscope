@@ -4907,7 +4907,7 @@
       "free": false,
       "module": "numpy",
       "name": "mask_indices",
-      "notes": "Return indices of mask for n x n array. Cost: numel of the returned index arrays (= 2*k); dtype-neutral.",
+      "notes": "Return indices of mask for n x n array. Cost: numel of the scanned mask (numel(input), as for nonzero).",
       "numpy_ref": "np.mask_indices",
       "slug": "mask_indices",
       "status": "supported",
