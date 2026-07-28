@@ -52,6 +52,26 @@ def test_mask_indices_scales_with_the_probe_not_the_output():
     assert large > small
 
 
+def test_mask_indices_floors_at_the_probe_when_mask_func_captures_it():
+    """``mask_func`` receives numpy's internal ``ones((n, n), int)`` probe as
+    an argument -- it can capture that reference and return something much
+    smaller, but the probe was still allocated and handed over. The bill must
+    not drop below what scanning that probe would honestly cost, matching
+    what ``fnp.nonzero`` bills on the same probe array directly.
+    """
+    n = 200
+    captured: dict = {}
+
+    def harvest(m, k):
+        captured["probe"] = m
+        return m[:1, :1]
+
+    via_mask = billed(lambda: fnp.mask_indices(n, harvest))
+    via_probe_floor = billed(lambda: fnp.nonzero(fnp.asarray(np.ones((n, n), int))))
+    assert captured["probe"].shape == (n, n), "sanity: mask_func saw the full probe"
+    assert via_mask == via_probe_floor
+
+
 def test_tri_indices_helpers_are_unchanged():
     """These do not route through the counted mask_indices wrapper, so
     repricing mask_indices must not move them. Pinned to the measured
