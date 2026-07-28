@@ -1275,6 +1275,47 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
+def _resolve_reduceat_axis(axis, ndim: int) -> int | None:
+    """Resolve ``axis`` to the concrete axis ``ufunc.reduceat`` will reduce
+    along, closely enough to bill every form real numpy accepts without
+    duplicating its C-level axis parser.
+
+    Real ``ufunc.reduceat`` accepts:
+
+    - a bare integer -- anything ``operator.index`` accepts, EXCEPT
+      ``bool``/``np.bool_``: numpy's own axis parser rejects both with
+      ``TypeError: an integer is required``, even though ``bool.__index__``
+      would otherwise happily return 0 or 1;
+    - that same integer wrapped in a length-1 tuple, which numpy unwraps
+      before resolving (``axis=(0,)`` behaves exactly like ``axis=0``) --
+      any OTHER tuple length raises ``ValueError: reduceat does not allow
+      multiple axes``;
+    - ``axis=None`` meaning axis 0, but ONLY when ``a`` is 1-D -- numpy
+      raises on ``axis=None`` for both ``ndim > 1`` (``reduceat does not
+      allow multiple axes``) and ``ndim == 0`` (``cannot reduceat on a
+      scalar``).
+
+    Anything else (wrong tuple length, non-integer axis, an out-of-range
+    integer) returns ``None``. The caller floors the cost to the minimum
+    rather than guessing for an axis numpy is about to reject; the real
+    call below still sees the original, untouched ``axis`` and raises its
+    own error independently.
+    """
+    if isinstance(axis, tuple):
+        if len(axis) != 1:
+            return None
+        (axis,) = axis
+    if axis is None:
+        return 0 if ndim == 1 else None
+    if isinstance(axis, (bool, _np.bool_)):
+        return None
+    try:
+        axis = _operator.index(axis)
+    except TypeError:
+        return None
+    return axis if -ndim <= axis < ndim else None
+
+
 def _reduceat_applications_per_lane(indices, n: int) -> int:
     """Honest per-lane application count for ``ufunc.reduceat(a, indices)``.
 
@@ -1291,19 +1332,24 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     backwards, so the true application count is bounded by the INDEX
     VALUES, not by the array's own size.
 
-    A 1-D index array on a valid in-range ``n`` is the only combination
-    ``ufunc.reduceat`` itself accepts (it rejects a scalar/>=2-D index
-    array, and an out-of-range or ``None`` axis resolves to ``n == 0``
-    upstream); anything else returns 0 rather than mis-index the shape math
-    below. The real call still sees the untouched snapshot and original
-    ``axis``, so numpy raises its own error for these -- this floor never
-    masks a rejection, it just declines to guess a cost for an input the
-    call is about to refuse anyway.
+    ``n`` is already 0 whenever ``_resolve_reduceat_axis`` couldn't pin the
+    axis down (see its docstring for exactly which forms that covers) --
+    handled below by the plain ``n == 0`` check, same as an empty index
+    list. The remaining guard is on the index VALUES themselves: real
+    ``ufunc.reduceat`` requires every index in ``[0, n)`` and raises
+    ``IndexError`` otherwise -- including for negative indices, which
+    (unlike plain array indexing) it does NOT wrap around. An index outside
+    that range would make ``ends - idx64`` below swing arbitrarily far
+    below zero (a huge, unbounded phantom segment length) for a call that
+    real numpy is about to reject anyway, so any out-of-range index floors
+    the whole lane to 0 rather than billing that phantom length.
     """
     k = indices.shape[0] if indices.ndim == 1 else 0
     if k == 0 or n == 0:
         return 0
     idx64 = indices.astype(_np.int64)
+    if bool(_np.any((idx64 < 0) | (idx64 >= n))):
+        return 0
     ends = _np.empty(k, dtype=_np.int64)
     ends[:-1] = idx64[1:]
     ends[-1] = n  # the final segment always runs to the axis end
@@ -1358,14 +1404,15 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     else:
         indices_snapshot = _np.array(indices, dtype=_np.intp, copy=True)
     indices_snapshot.flags.writeable = False
-    # An out-of-range or ``None`` axis is left for the real call below to
+    # Resolve ``axis`` through the same accept/reject boundary real
+    # ``ufunc.reduceat`` uses (see ``_resolve_reduceat_axis`` for exactly
+    # which forms that covers, including ``axis=None`` on a 1-D array,
+    # which numpy fully resolves to axis 0 rather than rejecting). Any form
+    # that function can't pin down is left for the real call below to
     # reject; treating it as ``n = 0`` here just declines to guess a cost
     # for an input that's about to be refused anyway.
-    n = (
-        a.shape[axis]
-        if axis is not None and a.ndim > 0 and -a.ndim <= axis < a.ndim
-        else 0
-    )
+    resolved_axis = _resolve_reduceat_axis(axis, a.ndim)
+    n = a.shape[resolved_axis] if resolved_axis is not None else 0
     applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
     lanes = a.size // n if n else 0
     cost = _builtins.max(lanes * applications_per_lane, 1)

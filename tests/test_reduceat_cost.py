@@ -34,6 +34,22 @@ def billed(fn) -> int:
         return ctx.flops_used - before
 
 
+def billed_raising(fn, exc_type) -> int:
+    """Like :func:`billed`, but for a call expected to raise ``exc_type``.
+
+    The deduct commits before the wrapped real call runs (flopscope never
+    refunds), so the flops delta is still meaningful even though ``fn()``
+    itself raises.
+    """
+    with flopscope.BudgetContext(flop_budget=10**16, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(exc_type):
+                fn()
+        return ctx.flops_used - before
+
+
 def application_count_oracle(n_axis: int, indices) -> int:
     """Honest per-lane application count, from NumPy's documented semantics.
 
@@ -142,39 +158,172 @@ def test_reduceat_whole_axis_single_segment_matches_reduce(shape, axis):
     assert reduceat_cost == reduce_cost
 
 
-def test_a_array_protocol_index_resize_does_not_shrink_the_bill():
-    """``a``'s ``__array__`` runs before flopscope ever looks at
-    ``indices`` -- ``a`` has to be resolved into a concrete array before
-    ``indices`` can be interpreted against its shape at all. A participant
-    who closes over the SAME ``indices`` object from inside ``a.__array__``
-    and resizes it there (``ndarray.resize(..., refcheck=False)``) changes
-    what flopscope's later snapshot describes. The bill must track
-    whatever ``indices`` looks like when the snapshot is actually taken --
-    the exact state the real ``ufunc.reduceat`` call then executes against
-    -- not whatever it looked like when the caller first built it.
+def test_indices_array_protocol_second_read_does_not_escape_the_snapshot():
+    """A more direct TOCTOU probe than the ``a``-mutates-``idx`` case
+    above: here ``indices`` ITSELF is an arbitrary array-like exposing
+    ``__array__`` (not a plain ndarray), and that method returns a
+    DIFFERENT, larger array if it is ever invoked a second time.
 
-    Here ``indices`` starts as ``n`` singleton segments (near-zero real
-    work) and is shrunk, from inside ``a.__array__``, down to a single
-    index spanning the whole axis -- the maximally expensive shape for this
-    ``n``. The bill must reflect the expensive, POST-mutation shape, not
-    the cheap one the caller originally constructed.
+    Flopscope's own converter (``_np.array(indices, dtype=intp,
+    copy=True)``) is documented as the ONLY read of ``indices`` -- both the
+    cost math and the real ``ufunc.reduceat`` call must run against that
+    one snapshot. An implementation that instead costs off one read but
+    hands the ORIGINAL ``indices`` object (rather than the snapshot) to the
+    real call -- letting numpy re-invoke ``__array__`` itself from inside
+    ``ufunc.reduceat`` -- would silently execute against a second,
+    different array than the one it billed for.
+
+    The first call returns a single index spanning the whole axis (the
+    maximally expensive shape for this ``n``); a second call, if it ever
+    happened, would return ``n`` singleton segments (a larger array, but
+    near-zero cost). Both the read count and the bill must reflect only
+    the first (and, per the single-read discipline, only) call.
     """
     n = 4000
-    idx = np.arange(n, dtype=np.intp)
+    calls = 0
 
-    class A:
+    class Indices:
         def __array__(self, dtype=None, copy=None):
-            idx.resize(1, refcheck=False)
-            return np.full(n, 2, dtype=np.int64)
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return np.array([0], dtype=np.intp)  # whole-axis single segment
+            return np.arange(n, dtype=np.intp)  # n singletons: a larger, cheap array
 
-    # ``out=`` is a FlopscopeArray purely to route the call through
-    # flopscope's ``__array_ufunc__`` override -- neither ``A()`` nor the
-    # plain ``idx`` ndarray carries the protocol on its own.
-    out = fnp.asarray(np.zeros(1, dtype=np.int64))
-    cost = billed(lambda: np.subtract.reduceat(A(), idx, out=out))
+    a = fnp.asarray(np.full(n, 2, dtype=np.int64))
+    cost = billed(lambda: np.subtract.reduceat(a, Indices()))
 
-    honest_a = fnp.asarray(np.full(n, 2, dtype=np.int64))
-    honest = billed(lambda: np.subtract.reduce(honest_a))
+    honest = billed(
+        lambda: np.subtract.reduce(fnp.asarray(np.full(n, 2, dtype=np.int64)))
+    )
 
-    assert idx.shape == (1,), "sanity: the resize inside __array__ must have landed"
-    assert cost == honest, "the bill must track the resized (expensive) index array"
+    assert calls == 1, "sanity: array-like indices must be read exactly once"
+    assert cost == honest, "the bill must reflect the single read actually executed"
+
+
+def test_reduceat_axis_none_on_1d_matches_axis_zero():
+    """Real ``ufunc.reduceat`` accepts ``axis=None`` on a 1-D array and
+    treats it as axis 0 -- it performs the full reduction, not a no-op.
+    Use a size where a dropped (near-floor) bill would be unmistakable
+    against the honest one.
+    """
+    n = 1_000_000
+    dtype = np.int64
+    none_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(n, 2, dtype=dtype)),
+            [0],
+            axis=None,  # type: ignore[arg-type]
+        )
+    )
+    zero_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(n, 2, dtype=dtype)), [0], axis=0
+        )
+    )
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    assert none_cost == zero_cost
+    assert none_cost > floor_cost
+
+
+def test_reduceat_axis_none_on_2d_matches_numpy_rejection():
+    """``axis=None`` is only valid for reduceat on a 1-D array; real numpy
+    rejects it on higher-rank input (``reduceat does not allow multiple
+    axes``). flopscope must not invent a cost for an axis the real call is
+    about to refuse -- it must raise the same error numpy raises directly,
+    not silently bill and succeed.
+    """
+    a_raw = np.full((4, 5), 2, dtype=np.int64)
+    with pytest.raises(ValueError):
+        np.add.reduceat(a_raw, [0], axis=None)  # type: ignore[arg-type]  # confirms raw numpy's own behavior
+
+    billed_raising(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(a_raw.copy()),
+            [0],
+            axis=None,  # type: ignore[arg-type]
+        ),
+        ValueError,
+    )
+
+
+def test_reduceat_out_of_range_indices_do_not_inflate_the_bill():
+    """Real ``ufunc.reduceat`` requires every index in ``[0, n)`` -- it
+    rejects negative indices outright (no Python-style wraparound) as well
+    as indices ``>= n``. flopscope cannot guess a segment length for an
+    index the real call is about to refuse, so an out-of-range index, in
+    EITHER direction, must floor to the minimum bill rather than inflate
+    it from the (potentially huge) phantom segment length the raw index
+    arithmetic would otherwise produce.
+    """
+    n = 10
+    dtype = np.int64
+    a_raw = np.full(n, 2, dtype=dtype)
+
+    # Confirm numpy's own accept/reject boundary before pinning flopscope
+    # to it.
+    with pytest.raises(IndexError):
+        np.subtract.reduceat(a_raw, [-(10**9)])
+    with pytest.raises(IndexError):
+        np.subtract.reduceat(a_raw, [n])
+
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+
+    huge_negative_cost = billed_raising(
+        lambda: np.subtract.reduceat(fnp.asarray(a_raw.copy()), [-(10**9)]),
+        IndexError,
+    )
+    positive_oob_cost = billed_raising(
+        lambda: np.subtract.reduceat(fnp.asarray(a_raw.copy()), [n]),
+        IndexError,
+    )
+
+    assert huge_negative_cost == floor_cost
+    assert positive_oob_cost == floor_cost
+
+
+def test_reduceat_axis_as_length_one_tuple_matches_bare_axis():
+    """Real ``ufunc.reduceat`` accepts a length-1 ``axis`` tuple and
+    unwraps it to the contained integer (``axis=(0,)`` behaves exactly
+    like ``axis=0``); flopscope must bill it the same way rather than
+    crashing on the tuple/int comparison or falling through to the floor.
+    """
+    shape = (1000,)
+    dtype = np.int64
+    tuple_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(shape, 2, dtype=dtype)),
+            [0, 3],
+            axis=(0,),  # type: ignore[arg-type]
+        )
+    )
+    bare_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(shape, 2, dtype=dtype)), [0, 3], axis=0
+        )
+    )
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    assert tuple_cost == bare_cost
+    assert tuple_cost > floor_cost
+
+
+def test_reduceat_negative_axis_on_multidim_bills_correctly():
+    """A negative ``axis`` (Python-style, counting from the end) on a
+    multi-dimensional array must resolve to the same axis -- and bill the
+    same -- as its positive equivalent.
+    """
+    shape = (6, 4)
+    dtype = np.int64
+    neg_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(shape, 2, dtype=dtype)), [0, 2], axis=-1
+        )
+    )
+    pos_cost = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full(shape, 2, dtype=dtype)), [0, 2], axis=1
+        )
+    )
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    assert neg_cost == pos_cost
+    assert neg_cost > floor_cost
