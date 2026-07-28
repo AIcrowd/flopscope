@@ -114,6 +114,64 @@ def test_non_integer_array_index_raises_indexerror():
         _canonical_index(np.array([1.5, 2.5]))
 
 
+class _LyingDtypeIndex(np.ndarray):
+    """An ndarray subclass whose ``.dtype`` PROPERTY claims ``intp`` no
+    matter what the real underlying buffer is. numpy's own C-level index
+    parser reads the true descriptor regardless of what this property
+    reports, so classifying an index off ``.dtype`` here (rather than the
+    real buffer) would accept -- and silently truncate -- a float-backed
+    index real numpy rejects outright.
+    """
+
+    @property
+    def dtype(self):
+        return np.dtype(np.intp)
+
+
+def test_lying_dtype_float_index_matches_raw_numpy_rejection():
+    """A ``.dtype``-lying subclass over a FLOAT buffer must be rejected with
+    the exact exception type (and, here, class of message) raw numpy raises
+    for the equivalent honest float index -- not silently truncated into an
+    accepted integer index.
+    """
+    honest_float_index = np.array([0.0, 1.0, 2.0])
+    lying = honest_float_index.view(_LyingDtypeIndex)
+    assert lying.dtype == np.dtype(np.intp), "sanity: the property really does lie"
+
+    dst = np.zeros(5)
+    with pytest.raises(IndexError) as raw_exc_info:
+        np.add.at(dst, honest_float_index, 1.0)
+
+    with pytest.raises(type(raw_exc_info.value)):
+        _canonical_index(lying)
+
+
+def test_lying_dtype_narrow_int_index_does_not_truncate_values():
+    """An integer-backed subclass reporting a NARROWER dtype than its real
+    buffer must not have its real (wide) index values truncated by the
+    lying property -- that would touch different cells than the caller's
+    actual data implies. 300 overflows int8 but is a valid value at the
+    real (int64) dtype.
+    """
+
+    class _LyingNarrowInt(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    real_index = np.array([300], dtype=np.int64)
+    lying = real_index.view(_LyingNarrowInt)
+
+    canon = _canon_entry(lying)
+    assert isinstance(canon, np.ndarray)
+    assert canon.dtype == np.dtype(np.int64), (
+        "the canonical dtype must be the real buffer's, not the lying int8 claim"
+    )
+    assert int(canon[0]) == 300, (
+        "the real (wide) value must survive, not get truncated via the lie"
+    )
+
+
 def test_canonical_index_does_not_freeze_caller_array():
     """We must never make a participant's own array read-only."""
     caller = np.array([0, 1, 2], np.intp)
@@ -141,6 +199,23 @@ def test_canon_entry_snapshots_integer_index_array(dtype):
     assert result.flags.writeable is False
     assert result.dtype == dtype, "the copy must not coerce the index dtype"
     np.testing.assert_array_equal(result, original)
+
+
+def test_canon_entry_honest_ndarray_subclass_index_still_works():
+    """A plain ndarray subclass that does NOT override ``.dtype`` -- i.e.
+    reports its real dtype honestly -- must canonicalize exactly like a
+    bare ndarray of the same dtype: subclassing itself is legitimate, only
+    lying about ``.dtype`` is the problem this module guards against.
+    """
+
+    class _HonestIndexSubclass(np.ndarray):
+        pass
+
+    original = np.array([0, 1, 2], np.int32).view(_HonestIndexSubclass)
+    result = _canon_entry(original)
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.int32
+    np.testing.assert_array_equal(result, np.array([0, 1, 2], np.int32))
 
 
 def billed(fn) -> int:
@@ -432,6 +507,46 @@ def test_values_ndarray_subclass_cannot_lie_about_its_own_dtype():
         "the bill must reflect the TRUE dtype numpy computes at, not the "
         "cheap one the subclass's .dtype property reports"
     )
+
+
+def test_at_destination_ndarray_subclass_cannot_lie_about_its_own_dtype():
+    """Same exposure as the ``vals`` test above, but for ``a`` -- the
+    in-place destination -- itself: dispatch to ``.at`` happens as soon as
+    ``a`` is flopscope-aware, but nothing stops ``a`` from ALSO being a
+    foreign ndarray subclass whose ``.dtype`` property lies (e.g. reached
+    via ``np.add.at(foreign_array, idx, fnp_array)`` dispatching off the
+    ``values`` operand). ``_counted_ufunc_at`` reads ``a.dtype`` directly
+    for the billing rate, so it must be exercised beneath numpy's own
+    ufunc-method dispatch (which would otherwise mask the lie the same way
+    the C-level execution does).
+    """
+    from flopscope._pointwise import _counted_ufunc_at
+
+    load_weights()
+    n = 2_000_000
+
+    class LiesAboutDtype(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    idx = np.arange(n)
+    lying_dst = np.zeros(n, dtype=np.float64).view(LiesAboutDtype)
+    vals = np.ones(n, dtype=np.int8)
+
+    cost = billed(lambda: _counted_ufunc_at(np.subtract, lying_dst, idx, vals))
+    honest_float64 = billed(
+        lambda: _counted_ufunc_at(np.subtract, np.zeros(n, dtype=np.float64), idx, vals)
+    )
+    honest_int8 = billed(
+        lambda: _counted_ufunc_at(np.subtract, np.zeros(n, dtype=np.int8), idx, vals)
+    )
+
+    assert cost == honest_float64, (
+        "the bill must reflect the TRUE dtype numpy computes at, not the "
+        "cheap one the subclass's .dtype property reports"
+    )
+    assert cost > honest_int8, "sanity: float64 is the genuinely pricier dtype here"
 
 
 def test_at_composed_matmul_is_not_cheaper_than_matmul():

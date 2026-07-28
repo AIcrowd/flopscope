@@ -541,3 +541,160 @@ def test_reduceat_list_axis_is_never_normalized_into_a_tuple_and_executed(axis):
         type(raw_exc_info.value),
     )
     assert cost == 0
+
+
+class _LyingDtypeIndex(np.ndarray):
+    """An ndarray subclass whose ``.dtype`` PROPERTY claims ``intp`` no
+    matter what the real underlying buffer is. numpy's own C-level index
+    parser reads the true descriptor regardless of what this property
+    reports, so classifying an index off ``.dtype`` here (rather than the
+    real buffer) would accept -- and silently truncate -- a float-backed
+    index real numpy rejects outright.
+    """
+
+    @property
+    def dtype(self):
+        return np.dtype(np.intp)
+
+
+class _HonestIndexSubclass(np.ndarray):
+    """A plain ndarray subclass that does NOT override ``.dtype`` -- legitimate
+    subclassing must keep working exactly like a bare ndarray index.
+    """
+
+
+def test_reduceat_lying_dtype_float_index_matches_raw_numpy_rejection():
+    """A ``.dtype``-lying subclass over a FLOAT buffer must be rejected with
+    the exact exception type raw numpy raises for the equivalent honest
+    float index -- not silently truncated into an accepted integer index.
+    """
+    a_raw = np.ones((5, 2))
+    honest_float_index = np.array([0.0, 1.0])
+    lying = honest_float_index.view(_LyingDtypeIndex)
+    assert lying.dtype == np.dtype(np.intp), "sanity: the property really does lie"
+
+    with pytest.raises(Exception) as raw_exc_info:
+        np.add.reduceat(a_raw, honest_float_index)
+
+    billed_raising(
+        lambda: np.add.reduceat(fnp.asarray(a_raw.copy()), lying),
+        type(raw_exc_info.value),
+    )
+
+
+def test_reduceat_lying_dtype_narrow_int_index_does_not_truncate_values():
+    """An integer-backed subclass reporting a NARROWER dtype than its real
+    buffer must not have its real (wide) index values truncated by the
+    lying property -- that would touch different cells than the caller's
+    actual data implies. Use an index value that overflows int8 but is a
+    valid axis position at the real (wider) dtype.
+    """
+
+    class _LyingNarrowInt(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    n = 300
+    a_raw = np.arange(n, dtype=np.int64)
+    real_index = np.array([200], dtype=np.int64)  # 200 overflows int8
+    lying = real_index.view(_LyingNarrowInt)
+
+    raw_result = np.add.reduceat(a_raw, real_index)
+    cost = billed(lambda: np.add.reduceat(fnp.asarray(a_raw.copy()), lying))
+    honest_cost = billed(lambda: np.add.reduceat(fnp.asarray(a_raw.copy()), real_index))
+    assert cost == honest_cost, (
+        "the bill must reflect the real (wide) index, not a truncated one"
+    )
+    assert raw_result is not None  # sanity: raw numpy accepts the real (wide) index
+
+
+def test_reduceat_honest_ndarray_subclass_index_still_works():
+    """A plain ndarray subclass that reports its REAL dtype honestly must
+    keep working exactly like a bare ndarray index, and bill identically --
+    subclassing is legitimate, only lying about ``.dtype`` is the problem.
+    """
+    a_raw = np.full((5, 2), 2, dtype=np.int64)
+    honest = np.array([0, 1], dtype=np.int32).view(_HonestIndexSubclass)
+
+    raw_result = np.add.reduceat(a_raw, honest)
+    cost = billed(lambda: np.add.reduceat(fnp.asarray(a_raw.copy()), honest))
+    honest_plain_cost = billed(
+        lambda: np.add.reduceat(
+            fnp.asarray(a_raw.copy()), np.array([0, 1], dtype=np.int32)
+        )
+    )
+    assert cost == honest_plain_cost
+    assert raw_result is not None
+
+
+class _LyingDtypeOperand(np.ndarray):
+    """An ndarray subclass whose ``.dtype`` property claims ``int8`` no
+    matter what the real underlying buffer is -- used to probe the ``a`` and
+    ``out=`` operands (not the index), which are exposed to the same
+    property-override trick whenever the OTHER operand is what triggers
+    flopscope's dispatch.
+    """
+
+    @property
+    def dtype(self):
+        return np.dtype(np.int8)
+
+
+def test_reduceat_lying_dtype_a_operand_bills_the_real_dtype():
+    """``a`` itself (not just ``indices``) can be a foreign lying subclass --
+    dispatch happens as soon as EITHER ``a`` or ``out=`` is flopscope-aware.
+    The bill must reflect the REAL buffer dtype numpy computes at, not the
+    cheap one a lying ``.dtype`` property reports. Uses ``subtract`` so
+    there is no sum-accumulator widening (which would put int8 and float64
+    at the same rate and mask the divergence).
+    """
+    load_weights()
+    n = 4000
+    real_float64 = np.ones(n, dtype=np.float64).view(_LyingDtypeOperand)
+    assert real_float64.dtype == np.dtype(np.int8), "sanity: the property lies"
+
+    from flopscope._pointwise import _counted_ufunc_reduceat
+
+    lying_cost = billed(lambda: _counted_ufunc_reduceat(np.subtract, real_float64, [0]))
+    honest_float64_cost = billed(
+        lambda: _counted_ufunc_reduceat(np.subtract, np.ones(n, dtype=np.float64), [0])
+    )
+    honest_int8_cost = billed(
+        lambda: _counted_ufunc_reduceat(np.subtract, np.ones(n, dtype=np.int8), [0])
+    )
+    assert lying_cost == honest_float64_cost
+    assert lying_cost > honest_int8_cost
+
+
+def test_reduceat_lying_dtype_out_operand_bills_the_real_dtype():
+    """Same exposure as the ``a`` operand test above, but for ``out=``: its
+    dtype participates in the billing rate (via ``store_billing_dtypes``)
+    and must be read off the real buffer, not a Python-level override.
+    Uses ``subtract`` (rather than ``add``/``multiply``) so there is no
+    sum-accumulator widening on ``a`` to dominate the rate and mask the
+    ``out=`` divergence.
+    """
+    load_weights()
+    n = 2000
+    a = np.full(n, 2, dtype=np.int8)
+    lying_out = np.zeros(1, dtype=np.float64).view(_LyingDtypeOperand)
+    assert lying_out.dtype == np.dtype(np.int8), "sanity: the property lies"
+
+    from flopscope._pointwise import _counted_ufunc_reduceat
+
+    lying_cost = billed(
+        lambda: _counted_ufunc_reduceat(np.subtract, a, [0], out=lying_out)
+    )
+    honest_int8_cost = billed(
+        lambda: _counted_ufunc_reduceat(
+            np.subtract, a, [0], out=np.zeros(1, dtype=np.int8)
+        )
+    )
+    honest_float64_cost = billed(
+        lambda: _counted_ufunc_reduceat(
+            np.subtract, a, [0], out=np.zeros(1, dtype=np.float64)
+        )
+    )
+    assert lying_cost == honest_float64_cost
+    assert lying_cost > honest_int8_cost

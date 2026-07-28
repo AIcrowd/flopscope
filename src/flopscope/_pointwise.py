@@ -1162,7 +1162,13 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
             b_sym_lifted = remap_group_axes(b_sym, axis_map)
         out_sym = direct_product_groups(a_sym, b_sym_lifted)
         cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
+    # Same lying-subclass exposure as ``a``/``b`` above, but for ``out=``:
+    # its dtype participates in the billing rate (``store_billing_dtypes``
+    # below) and must be read off the real buffer, not a Python-level
+    # override.
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    if isinstance(out_stripped, _np.ndarray):
+        out_stripped = _np.asarray(out_stripped)
     # An explicit dtype= forces the loop numpy actually runs (both
     # directions), the same as the plain pointwise factories -- it replaces
     # the operand-promoted default rather than discounting it. A bool
@@ -1185,8 +1191,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
                 _ufunc_loop_dtype(ufunc, a.dtype, b.dtype), a.dtype, b.dtype
             ),
         )
-    if isinstance(out, _np.ndarray):
-        billing_dtypes += store_billing_dtypes(out)
+    if isinstance(out_stripped, _np.ndarray):
+        billing_dtypes += store_billing_dtypes(out_stripped)
     with budget.deduct(
         f"{ufunc.__name__}.outer",
         flop_cost=cost,
@@ -1275,7 +1281,25 @@ def _counted_ufunc_reduce_generic(
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+    # Symmetry tags live on the ORIGINAL flopscope instance -- read them
+    # BEFORE the stripping below, which discards that subclass along with
+    # everything else.
     sym = _symmetry_of(a)
+    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
+    # to this fallback as soon as EITHER ``a`` or ``out`` is flopscope-aware
+    # (e.g. ``ufunc.reduce(foreign_array, out=fnp.zeros(...))``), so a bare
+    # ``isinstance(a, ndarray)`` check above leaves a non-flopscope operand
+    # untouched. Such a subclass can override ``.dtype``/``.shape``/``.ndim``
+    # as Python properties that report a narrower/cheaper shape or kind than
+    # the real buffer -- numpy's own ufunc dispatch reads the true
+    # descriptor at the C level regardless of what those properties report
+    # (see ``_counted_ufunc_outer``), so billing off ``a`` directly would let
+    # a lying subclass under-report what numpy actually computes. Always
+    # route through ``_np.asarray`` (stripping any flopscope wrapper first,
+    # to avoid recursing back through our own protocol handlers) -- a no-op
+    # VIEW, same buffer, for an operand that is already a genuine plain
+    # ndarray.
+    a = _np.asarray(_to_base_ndarray(a))
     # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
     # same plain value (not the caller's original ``axis``) is what both
     # the cost below AND the real call further down use.
@@ -1286,7 +1310,15 @@ def _counted_ufunc_reduce_generic(
         if sym is not None
         else None
     )
+    # Same lying-subclass exposure as ``a`` above, but for ``out=``: its
+    # dtype participates in the billing floor (``out_dtype=`` below) and
+    # must be read off the real buffer, not a Python-level override. Only a
+    # bare ndarray gets this treatment -- a tuple ``out`` (a multi-output
+    # ufunc form ``.reduce`` never actually supports) is left as
+    # ``_to_base_ndarray`` already handled it, matching prior behavior.
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    if isinstance(out_stripped, _np.ndarray):
+        out_stripped = _np.asarray(out_stripped)
     # The reduce/accumulate loop runs at the ufunc's own resolved loop dtype
     # (true_divide(int32) -> float64, subtract(int32) -> int32, logical_* ->
     # bool). add/multiply's extra integer widening never matters here: they
@@ -1297,7 +1329,9 @@ def _counted_ufunc_reduce_generic(
         reduction_billing_dtype(
             a.dtype,
             explicit_dtype=explicit_dtype,
-            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            out_dtype=out_stripped.dtype
+            if isinstance(out_stripped, _np.ndarray)
+            else None,
             default_dtype=default_dtype,
         ),
     )
@@ -1337,7 +1371,24 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+    # Symmetry tags live on the ORIGINAL flopscope instance -- read them
+    # BEFORE the stripping below, which discards that subclass along with
+    # everything else.
     sym = _symmetry_of(a)
+    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
+    # to this fallback as soon as EITHER ``a`` or ``out`` is flopscope-aware,
+    # so a bare ``isinstance(a, ndarray)`` check above leaves a non-flopscope
+    # operand untouched. Such a subclass can override
+    # ``.dtype``/``.shape``/``.ndim`` as Python properties that report a
+    # narrower/cheaper shape or kind than the real buffer -- numpy's own
+    # ufunc dispatch reads the true descriptor at the C level regardless of
+    # what those properties report (see ``_counted_ufunc_outer``), so
+    # billing off ``a`` directly would let a lying subclass under-report
+    # what numpy actually computes. Always route through ``_np.asarray``
+    # (stripping any flopscope wrapper first, to avoid recursing back
+    # through our own protocol handlers) -- a no-op VIEW, same buffer, for
+    # an operand that is already a genuine plain ndarray.
+    a = _np.asarray(_to_base_ndarray(a))
     # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
     # same plain value (not the caller's original ``axis``) is what both
     # the cost below AND the real call further down use.
@@ -1348,7 +1399,12 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         if sym is not None
         else None
     )
+    # Same lying-subclass exposure as ``a`` above, but for ``out=``: its
+    # dtype participates in the billing floor (``out_dtype=`` below) and
+    # must be read off the real buffer, not a Python-level override.
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    if isinstance(out_stripped, _np.ndarray):
+        out_stripped = _np.asarray(out_stripped)
     # Same loop resolution as the generic reduce path above: the accumulate
     # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
     # -> float64, subtract(int32) -> int32).
@@ -1358,7 +1414,9 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         reduction_billing_dtype(
             a.dtype,
             explicit_dtype=explicit_dtype,
-            out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
+            out_dtype=out_stripped.dtype
+            if isinstance(out_stripped, _np.ndarray)
+            else None,
             default_dtype=default_dtype,
         ),
     )
@@ -1519,7 +1577,27 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
+    # to this wrapper as soon as EITHER ``a`` or ``out`` is flopscope-aware,
+    # so a bare ``isinstance(a, ndarray)`` check above leaves a non-flopscope
+    # operand untouched. Such a subclass can override
+    # ``.dtype``/``.shape``/``.ndim``/``.size`` as Python properties that
+    # report a narrower/cheaper shape or kind than the real buffer -- numpy's
+    # own ufunc dispatch reads the true descriptor at the C level regardless
+    # of what those properties report (see ``_counted_ufunc_outer``), so
+    # billing off ``a`` directly (used below for ``n``, ``lanes``, and the
+    # billing dtype) would let a lying subclass under-report what numpy
+    # actually computes. Always route through ``_np.asarray`` (stripping any
+    # flopscope wrapper first, to avoid recursing back through our own
+    # protocol handlers) -- a no-op VIEW, same buffer, for an operand that is
+    # already a genuine plain ndarray.
+    a = _np.asarray(_to_base_ndarray(a))
+    # Same lying-subclass exposure as ``a`` above, but for ``out=``: its
+    # dtype participates in the billing rate (``store_billing_dtypes`` below)
+    # and must be read off the real buffer, not a Python-level override.
     out_stripped = _to_base_ndarray(out) if out is not None else None
+    if isinstance(out_stripped, _np.ndarray):
+        out_stripped = _np.asarray(out_stripped)
     # Snapshot ``indices`` into ONE owned, frozen copy -- the cost formula
     # below reads the index VALUES (not just ``.size``), which opens a
     # time-of-check/time-of-use gap a live view can't close: numpy re-reads
@@ -1541,7 +1619,18 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # stays intp instead of the float64 ``np.asarray([])`` would infer
     # (which ``ufunc.reduceat`` would then reject).
     if isinstance(indices, _np.ndarray):
-        indices_base = _to_base_ndarray(indices)
+        # ``_np.asarray`` -- not just ``_to_base_ndarray``, which only strips
+        # flopscope's own wrapper types -- BEFORE reading ``.dtype``: an
+        # arbitrary OTHER ndarray subclass can override ``.dtype`` as a
+        # Python property that reports a narrower/cheaper kind than its real
+        # buffer (e.g. claiming ``intp`` over an actual float64 buffer).
+        # numpy's own C-level dispatch reads the true underlying descriptor
+        # regardless of what that property claims, so classifying off the
+        # property here would accept (and silently truncate) a float-backed
+        # index real numpy rejects outright. ``_np.asarray`` always returns a
+        # genuine, subclass-free view (a no-op view for an already-plain
+        # buffer -- no extra copy), so its ``.dtype`` cannot lie.
+        indices_base = _np.asarray(_to_base_ndarray(indices))
         indices_snapshot = _np.array(indices_base, dtype=indices_base.dtype, copy=True)
     else:
         indices_snapshot = _np.array(indices, dtype=_np.intp, copy=True)
@@ -1582,8 +1671,8 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
             default_dtype=default_dtype,
         ),
     )
-    if isinstance(out, _np.ndarray):
-        billing_dtypes += store_billing_dtypes(out)
+    if isinstance(out_stripped, _np.ndarray):
+        billing_dtypes += store_billing_dtypes(out_stripped)
     with budget.deduct(
         f"{ufunc.__name__}.reduceat",
         flop_cost=cost,
@@ -1647,7 +1736,17 @@ def _canon_entry(entry):
     if isinstance(entry, (bool, _np.bool_)) and not isinstance(entry, _np.ndarray):
         return _np.bool_(entry)
     if isinstance(entry, _np.ndarray):
-        base = _to_base_ndarray(entry)
+        # ``_np.asarray`` -- not just ``_to_base_ndarray`` -- BEFORE reading
+        # ``.dtype``: an arbitrary OTHER ndarray subclass can override
+        # ``.dtype`` as a Python property, reporting an accepted integer (or
+        # boolean) kind while the real buffer underneath is float -- numpy's
+        # own C-level index parser reads the true descriptor regardless of
+        # what that property claims, so classifying off the property here
+        # would accept (and silently truncate) a float-backed index real
+        # numpy rejects outright. ``_np.asarray`` always returns a genuine,
+        # subclass-free view (a no-op view for an already-plain buffer -- no
+        # extra copy), so its ``.dtype`` cannot lie.
+        base = _np.asarray(_to_base_ndarray(entry))
         if base.dtype == _np.bool_:
             snapshot = _np.array(base, dtype=bool, copy=True)
             snapshot.flags.writeable = False
@@ -1783,6 +1882,22 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             f"np.{ufunc.__name__}.at(...)."
         )
     budget = require_budget()
+    # ``a`` (the in-place destination) can already be a foreign ndarray
+    # subclass here: numpy dispatches to this wrapper as soon as ``a`` is
+    # flopscope-aware, but nothing stops a caller-supplied subclass from
+    # ALSO overriding ``.dtype``/``.shape`` as Python properties -- numpy's
+    # own ufunc dispatch reads the true descriptor at the C level regardless
+    # of what those properties report (the same exposure ``_resolve_at_operand``
+    # below closes for the ``values`` operand), so billing off ``a`` directly
+    # (its dtype and shape are both read further down) would let a lying
+    # subclass under-report what numpy actually computes and writes. Always
+    # route through ``_np.asarray`` (stripping any flopscope wrapper first,
+    # to avoid recursing back through our own protocol handlers) -- a no-op
+    # VIEW, same buffer, for an operand that is already a genuine plain
+    # ndarray, so the in-place mutation below still lands in the caller's
+    # own buffer.
+    if isinstance(a, _np.ndarray):
+        a = _np.asarray(_to_base_ndarray(a))
     # ``indices`` can be many things: int, list of ints, ndarray, slice,
     # Ellipsis, or a tuple thereof (for multi-axis fancy indexing).
     # ``ufunc.at`` accepts all of these. ``_canonical_index`` resolves every
