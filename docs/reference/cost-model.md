@@ -600,6 +600,15 @@ to sum, so both bill 0 even when `z` is complex128; a same-shape *non-empty* com
 matmul still bills its exact contraction total (see [Contraction is billed
 exactly](#complex-arithmetic-from-first-principles)).
 
+Zero *arithmetic* is not zero *work* once a destination is named. `einsum` is the one
+contraction that does not forward `out=` to NumPy — NumPy writes its own buffer and the
+wrapper then copies that buffer into the caller's — so `einsum(subs, …, out=dest)` bills
+its contraction total **plus** a `copyto` of `numel(dest)`, at the same price
+`fnp.copyto(dest, result)` charges for the identical write. The step-2 rule applies to it
+like any other materializing copy; without the charge, `einsum('ij->ji', z, out=dest)`
+would be a full transpose of any size for nothing. The viewing form is unaffected: with no
+destination NumPy returns a view, nothing is written, and 0 stays correct.
+
 **Guaranteed coverage.** `tests/test_compute_dtype_conformance.py` probes every charged
 registry op with a discriminating int32 input (or records why it is exempt) and asserts
 the billed rate is at least the rate of both the NEP-50-promoted input dtype and numpy's
