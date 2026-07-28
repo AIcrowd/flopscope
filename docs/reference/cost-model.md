@@ -1332,7 +1332,7 @@ because they perform per-bit/index work or I/O beyond pure relocation:
 | `copyto` | `numel(dst)` (or popcount(`where`) when masked) | DECLARED: priced per element written, unconditionally — same-dtype or not (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
 | `packbits` | `numel(input)` (weight 1.0) | DECLARED: per-bit test+shift; value-test per element | `_array_ops.py` |
 | `unpackbits` | `numel(output)` (weight 1.0) | DECLARED: unpacks 8 bits per input byte; proportional to output | `_array_ops.py` |
-| `mask_indices` | `numel(mask)` (weight 1.0, priced at the mask's own dtype) | DECLARED: scans the array `mask_func` produces, matching the `nonzero`/`flatnonzero`/`argwhere`/`count_nonzero` convention of billing `numel(input)`; the returned index arrays are not charged | `_array_ops.py` |
+| `mask_indices` | `max(numel(mask), n²)` (weight 1.0, priced at the mask's own dtype) | DECLARED: scans the array `mask_func` produces, matching the `nonzero`/`flatnonzero`/`argwhere`/`count_nonzero` convention of billing `numel(input)`; floored at n² (the numel of the `ones((n, n), int)` probe `mask_func` receives as an argument, and can capture) so a `mask_func` that returns something smaller cannot buy a cheaper scan; the returned index arrays are not charged | `_array_ops.py` |
 | `getitem` (`arr[key]`) | basic indexing (int/slice/newaxis/Ellipsis, or a tuple thereof): `0` (view); advanced (fancy/boolean) indexing: `4·numel(output)` + `numel(mask)` per boolean-mask part (weight 1.0) | DECLARED: fancy gather billed at the `take` rate; boolean-mask parts additionally scan like `compress` | `_ndarray.py` |
 
 `getitem` is the one op in this table with no module-level `fnp.<name>` call form — it
@@ -1342,8 +1342,11 @@ the basic-vs-advanced-indexing distinction this formula rests on.
 
 `mask_indices` prices only the mask that `mask_func` produces, not the index arrays it
 returns, so — unlike the dtype-neutral [index generators](#index-generators) below —
-its charge scales with the mask's dtype. `triu_indices`/`tril_indices` are separate ops
-with their own dtype-neutral formula and are unaffected by this.
+its charge scales with the mask's dtype. The charge is also floored at n² (int dtype):
+`mask_func` receives numpy's internal `ones((n, n), int)` probe as an argument, so it
+can capture that reference and return an arbitrarily small result while still having
+had the full probe handed to it. `triu_indices`/`tril_indices` are separate ops with
+their own dtype-neutral formula and are unaffected by this.
 
 ---
 
@@ -1494,6 +1497,8 @@ result the wrapper materializes (numpy runs the callback itself).
 | `apply_along_axis` | `numel(output)` | 1.0 | `_counting_ops.py` |
 | `apply_over_axes` | `numel(output)` | 1.0 | `_counting_ops.py` |
 | `fromfunction` | `numel(output)` | 1.0 | `_array_ops.py` |
+| `fromiter` | `numel(output)` | 1.0 | `_array_ops.py` |
+| `mask_indices` | `max(numel(mask), n²)` | 1.0 | `_array_ops.py` |
 | `piecewise` | `numel(input) × len(condlist)` | 1.0 | `_counting_ops.py` |
 
 `apply_along_axis` was price-cut from weight 4.0 to 1.0 (the wrapper's own
