@@ -789,3 +789,70 @@ def test_reduceat_resizing_dtype_bills_the_post_resize_array():
         lambda: _counted_ufunc_reduceat(np.add, np.full(n, 1.0), [0], dtype=np.float64)
     )
     assert cost == honest
+
+
+# ----- stale billing snapshot: ``out=``'s billing view captured too early -----
+
+
+class _OwningFloat32(np.ndarray):
+    """A plain ndarray subclass that OWNS its data, built at float32 -- the
+    width the reproduction below needs so that widening to float64 in
+    place (``obj.dtype = np.float64``) is a legal same-byte-count
+    reinterpretation (numpy requires the last axis's byte count to be
+    divisible by the new itemsize).
+    """
+
+    def __new__(cls, n):
+        obj = super().__new__(cls, (n,), dtype=np.float32)
+        obj[...] = 0.0
+        return obj
+
+
+def test_reduceat_out_view_captured_before_indices_resolves_bills_the_post_widen_store():
+    """Regression pin for the confirmed stale-``out=``-billing-view defect:
+    ``out``'s billing view used to be captured BEFORE ``indices`` was
+    resolved (on the reasoning that ``out`` has no shape/dtype dependency
+    on ``a`` or ``indices`` -- true, but irrelevant: the exposure is
+    participant code reachable from ANY later resolution step, not a data
+    dependency). Resolving a non-ndarray ``indices`` invokes ``__array__``,
+    participant code, which here widens ``out`` from float32 to float64 IN
+    PLACE (a legitimate reinterpretation for an array that owns its data).
+    The bill must reflect the float64 store ``ufunc.reduceat`` actually
+    writes into, not the float32 rate that existed before ``indices`` was
+    ever touched.
+
+    Uses production dtype rates (``load_weights()``) rather than this
+    module's unit-rate ``billed()`` default -- float32 and float64 bill
+    identically under unit rates, which would hide exactly the divergence
+    this test exists to catch.
+    """
+    load_weights()
+    a = fnp.asarray(np.ones(8, np.float32))
+    out = _OwningFloat32(4)  # 16 bytes -> widens to 2 x float64
+
+    class Idx:
+        def __array__(self, dtype=None, copy=None):
+            # widen AFTER a naive meter would have viewed `out`
+            out.dtype = np.float64  # pyright: ignore[reportAttributeAccessIssue]
+            return np.array([0, 1], np.intp)
+
+    cost = billed(lambda: np.add.reduceat(a, Idx(), out=out))
+    assert out.dtype == np.float64, "sanity: the widen actually ran"
+
+    honest_float32 = billed(
+        lambda: np.add.reduceat(
+            fnp.asarray(np.ones(8, np.float32)), [0, 1], out=np.zeros(2, np.float32)
+        )
+    )
+    honest_float64 = billed(
+        lambda: np.add.reduceat(
+            fnp.asarray(np.ones(8, np.float32)), [0, 1], out=np.zeros(2, np.float64)
+        )
+    )
+    assert honest_float64 == 2 * honest_float32, (
+        "sanity: the widened store really is twice the honest price"
+    )
+    assert cost == honest_float64, (
+        "the bill must reflect the post-widen store, not a snapshot taken "
+        "before indices resolved"
+    )

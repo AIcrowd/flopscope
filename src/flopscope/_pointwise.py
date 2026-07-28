@@ -1196,19 +1196,31 @@ def _refresh_ufunc_data_operand(x, cached: tuple):
     """Re-read the ``(billing_view, forward_obj)`` pair for ``x`` after a
     LATER resolution step that might have mutated it in place.
 
-    The sole caller is :func:`_counted_ufunc_reduceat`: ``axis`` resolution
-    there (``_resolve_reduceat_axis``) genuinely needs ``x``'s ndim before
-    it can even decide which accepted ``axis`` form applies (unlike
-    :func:`_resolve_generic_reduce_axis`, whose reduce/accumulate siblings
-    need no such read and so can resolve ``axis`` before touching ``a`` at
-    all -- see its docstring). That first, structurally-necessary read of
-    ``x`` happens BEFORE axis is resolved, and resolving axis runs
-    participant code (``operator.index``) that -- per the confirmed
-    reproduction this whole module's reordering guards against -- can
-    mutate ``x`` in place via an owning ndarray subclass's ``resize(n,
-    refcheck=False)``. This function re-derives the billing view
-    afterwards so cost is computed from what numpy will actually touch,
-    not from the pre-mutation snapshot.
+    Two callers, both for the same underlying reason -- a structurally
+    necessary first read of ``x`` has to happen before some OTHER
+    participant-controlled argument can be resolved, and resolving that
+    other argument can mutate ``x`` in place:
+
+    - :func:`_counted_ufunc_reduceat`: ``axis`` resolution there
+      (``_resolve_reduceat_axis``) genuinely needs ``x``'s ndim before it
+      can even decide which accepted ``axis`` form applies (unlike
+      :func:`_resolve_generic_reduce_axis`, whose reduce/accumulate
+      siblings need no such read and so can resolve ``axis`` before
+      touching ``a`` at all -- see its docstring). That first read of
+      ``x`` happens BEFORE axis is resolved, and resolving axis runs
+      participant code (``operator.index``) that -- per the confirmed
+      reproduction this whole module's reordering guards against -- can
+      mutate ``x`` in place via an owning ndarray subclass's
+      ``resize(n, refcheck=False)``.
+    - :func:`_counted_ufunc_outer`: ``a``'s billing view has to be read
+      before ``b`` can even be resolved (the wrapper takes two positional
+      data operands, not one), and resolving ``b`` runs the same kind of
+      participant code (an ``__array__`` call) that can mutate ``a`` the
+      same way, from inside the caller's own closure for ``b``.
+
+    This function re-derives the billing view afterwards so cost is
+    computed from what numpy will actually touch, not from the
+    pre-mutation snapshot.
 
     Only an already-``ndarray`` operand can have been mutated this way in
     the first place -- ``resize`` is an ``ndarray`` method, so a
@@ -1290,6 +1302,23 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # ``__array__`` only ever gets called once total.
     a_view, a_fwd = _resolve_ufunc_data_operand(a)
     b_view, b_fwd = _resolve_ufunc_data_operand(b)
+    # ``b``'s resolution just above runs participant code (an ``__array__``
+    # call, for a duck ``b``) that -- per the confirmed reproduction this
+    # whole module's reordering guards against -- can mutate ``a`` in place
+    # via an owning ndarray subclass's ``resize(n, refcheck=False)``, called
+    # from inside the very closure the caller constructed for ``b``.
+    # ``a_view``, captured ABOVE this line (before ``b`` was ever touched),
+    # would otherwise be billed from a stale, pre-mutation snapshot while
+    # the real call below forwards ``a_fwd`` -- the SAME (already-mutated)
+    # object, not a copy -- to numpy. Refresh it now that ``b`` has been
+    # read, mirroring the treatment ``_counted_ufunc_reduceat`` gives ``a``
+    # after ``axis`` resolves. See ``_refresh_ufunc_data_operand`` for why
+    # this cannot double-invoke a stateful ``__array__`` duck: only an
+    # already-``ndarray`` ``a`` can have been mutated this way in the first
+    # place, and re-deriving ITS billing view is a second, free
+    # ``_np.asarray`` VIEW read, never a second protocol call. A non-ndarray
+    # ``a`` is returned via the cache unchanged.
+    a_view, a_fwd = _refresh_ufunc_data_operand(a, (a_view, a_fwd))
     output_shape = tuple(a_view.shape) + tuple(b_view.shape)
     dense = _builtins.max(a_view.size * b_view.size, 1)
     # The cost-model branch below enumerates |output_symmetry| group
@@ -1776,15 +1805,6 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # anything off ``a``, so it moves all the way up here rather than
     # needing a refresh afterwards.
     explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
-    # Same lying-subclass exposure as ``a`` below, but for ``out=``: its
-    # dtype participates in the billing rate (``store_billing_dtypes`` below)
-    # and must be read off the real buffer, not a Python-level override.
-    # ``out_view`` is billing-only; the real call further down forwards the
-    # caller's original ``out`` object instead. ``out`` has no shape/dtype
-    # dependency on ``a``, so this can run before ``a`` is touched too.
-    out_view = _to_base_ndarray(out) if out is not None else None
-    if isinstance(out_view, _np.ndarray):
-        out_view = _np.asarray(out_view)
     # Snapshot ``indices`` into ONE owned, frozen copy -- the cost formula
     # below reads the index VALUES (not just ``.size``), which opens a
     # time-of-check/time-of-use gap a live view can't close: numpy re-reads
@@ -1881,6 +1901,30 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
     lanes = a_view.size // n if n else 0
     cost = _builtins.max(lanes * applications_per_lane, 1)
+    # ``out=``'s billing view is captured here -- LAST, after every other
+    # participant-controlled argument (``dtype=``, ``indices`` via
+    # ``indices_snapshot``, and ``axis`` via ``resolved_axis``/the
+    # ``a_view`` refresh above) has already fully resolved. Each of those
+    # resolutions runs participant code (a ``.dtype`` property,
+    # ``__array__``, ``__index__``) that -- per the confirmed reproduction
+    # this whole module's reordering guards against -- can mutate ``out`` in
+    # place (e.g. an owning ndarray subclass widening its own dtype as a
+    # side effect of ``indices`` being converted). A previous version of
+    # this function captured ``out``'s billing view FIRST, before any of
+    # that ran, on the reasoning that ``out`` has no shape/dtype dependency
+    # on ``a`` -- true, but irrelevant: the mutation isn't ``a`` depending on
+    # ``out``, it's participant code reachable from ANY later resolution
+    # step reaching into ``out`` and changing it out from under an
+    # already-taken snapshot. Capturing it only now, mirroring the
+    # treatment ``a`` already gets above, is what makes it reflect whatever
+    # numpy is actually about to write into. ``_normalize_out`` already
+    # restricts ``out`` to ``None`` or a genuine ``ndarray``, so
+    # ``_resolve_ufunc_data_operand`` here can only ever take its ndarray
+    # branch: a fresh, no-op ``_np.asarray`` view, never a second
+    # ``__array__``/``__array_ufunc__`` call.
+    out_view, out_fwd = (
+        _resolve_ufunc_data_operand(out) if out is not None else (None, None)
+    )
     # This default path (no explicit dtype=) shares the operand-width
     # behavior of the generic reduce/accumulate paths: reduceat runs the
     # ufunc's own resolved loop dtype by default (true_divide(int32) ->
@@ -1924,7 +1968,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
             a_fwd,
             indices_snapshot,
             axis=resolved_axis,
-            out=_to_base_ndarray(out) if out is not None else None,
+            out=out_fwd,
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=None)

@@ -811,6 +811,39 @@ def test_np_multiply_outer_resizing_dtype_bills_the_post_resize_array():
     assert bc.flops_used == honest_bc.flops_used
 
 
+def test_np_multiply_outer_b_resolution_resizing_a_bills_the_post_resize_array():
+    """Regression pin for the confirmed stale-``a``-billing-view defect in
+    ``outer``: ``a``'s billing view used to be captured BEFORE ``b`` was
+    resolved. ``outer`` takes two data operands, not one, so resolving the
+    SECOND one is itself participant code (an ``__array__`` call, for a
+    duck ``b``) that can reach back and mutate the first -- the caller
+    controls the closure ``b.__array__`` runs in and can bind it to the
+    very ``a`` object passed alongside it. The bill must reflect the array
+    ``outer`` actually multiplies against, not the tiny pre-resize
+    snapshot taken before ``b`` was ever touched.
+    """
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingB:
+        def __array__(self, dtype=None, copy=None):
+            a.resize(n, refcheck=False)
+            return np.ones(4, dtype=np.float64)
+
+    out = fnp.zeros((n, 4))
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.multiply.outer(a, _ResizingB(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(
+            fnp.asarray(np.full(n, 1.0)),
+            fnp.asarray(np.ones(4)),
+            out=fnp.zeros((n, 4)),
+        )
+    assert bc.flops_used == honest_bc.flops_used
+
+
 # ``ufunc.at`` has no ``out=`` slot, so (unlike outer/reduce/accumulate/
 # reduceat) numpy dispatches to flopscope's wrapper only when ``a`` ITSELF
 # is flopscope-aware -- there is no other operand to hang dispatch off of.
