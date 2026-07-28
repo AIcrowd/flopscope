@@ -1098,19 +1098,37 @@ def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
     return resolved
 
 
+def _implements_array_ufunc(x) -> bool:
+    """Does ``type(x)`` define NumPy's ufunc-dispatch protocol (NEP 13)?
+
+    Checked on the TYPE, matching how numpy itself looks this up for
+    protocol dispatch (an instance attribute would not count). Excludes the
+    ``__array_ufunc__ = None`` opt-out spelling on purpose: that spelling
+    means "this type refuses to be a ufunc operand at all" -- numpy raises
+    ``TypeError`` for it immediately, at the C level, without ever calling
+    either ``__array_ufunc__`` or ``__array__`` -- so it carries none of the
+    "protocol runs instead of ``__array__``" guarantee the three-way rule in
+    :func:`_resolve_ufunc_data_operand` relies on. Such an object falls
+    through to the plain array-like branch instead, exactly as it did before
+    this rule existed.
+    """
+    return getattr(type(x), "__array_ufunc__", None) is not None
+
+
 def _resolve_ufunc_data_operand(x):
     """Bill-and-forward pair for a ufunc-method data operand.
 
-    Used by :func:`_counted_ufunc_outer` for ``a``/``b``/``out`` -- the one
-    generic ufunc-method path whose real numpy call forwards a data operand
-    that is not already known to be an owned, freshly-made array (unlike
-    ``reduce``/``accumulate``/``reduceat``, which materialize a non-ndarray
-    ``a`` once, up front, before any billing read; and ``at``'s ``values``,
-    which has its own copy of this same logic in ``_resolve_at_operand``
-    because it additionally must not force a bare Python scalar through
-    ``_np.asarray`` for the *billing* read the way this helper does).
+    Used by :func:`_counted_ufunc_outer` for ``a``/``b``/``out``, and by
+    :func:`_counted_ufunc_reduce_generic` / :func:`_counted_ufunc_accumulate_generic`
+    / :func:`_counted_ufunc_reduceat` for ``a`` -- every generic ufunc-method
+    path whose ``a``/``b`` position can legitimately carry an operand that is
+    not already known to be an owned, freshly-made array. (``at``'s
+    ``values`` keeps its own copy, ``_resolve_at_operand``, because it
+    additionally must not force a bare Python scalar through ``_np.asarray``
+    for the *billing* read the way this helper does -- see that function's
+    docstring -- but mirrors this same three-way rule.)
 
-    Two operand kinds have opposite requirements:
+    Three operand kinds, three different requirements:
 
     - Already an ``ndarray`` (including a flopscope subclass, or a foreign
       one like ``np.ma.MaskedArray``): forward the ORIGINAL object to numpy
@@ -1122,20 +1140,39 @@ def _resolve_ufunc_data_operand(x):
       misreport what numpy actually computes. Reading ``.shape``/``.dtype``
       off an ndarray never invokes ``__array__``, so there is no
       double-resolution risk to guard against here.
-    - NOT an ndarray (a duck type implementing only ``__array__``, or a
-      list/tuple/other sequence): materialize it EXACTLY ONCE via
-      ``_np.asarray``, and use that SAME materialized array as both the
-      billing view and the forwarded object. There is no legitimate
-      subclass semantics to lose here -- it was never an ndarray subclass
-      -- and using one materialization for both closes a hole where a
-      stateful ``__array__`` (one that returns a bigger array on its
-      second call than its first) would otherwise be billed against the
-      small first result while numpy, receiving the ORIGINAL unresolved
+    - NOT an ndarray, but its type implements ``__array_ufunc__``
+      (:func:`_implements_array_ufunc`): forward the ORIGINAL object.
+      NumPy's own dispatch (NEP 13) hands a ufunc call to THAT protocol
+      instead of independently reconverting the operand through
+      ``__array__`` -- confirmed directly: a duck object exposing both a
+      stateful ``__array__`` and an ``__array_ufunc__`` that returns
+      ``NotImplemented`` sees its ``__array_ufunc__`` invoked by the real
+      call below, and its ``__array__`` is never touched by that call at
+      all. So forwarding the original here does NOT reopen the
+      stateful-``__array__`` double-materialization hole the next branch
+      exists to close -- there is no second, independent resolution for a
+      stateful callback to race. Materializing this operand instead (the
+      prior, two-way behaviour) would bypass the protocol entirely and let
+      flopscope silently compute from ``__array__`` where plain numpy would
+      have dispatched to ``__array_ufunc__`` (and very possibly raised).
+      Billing still needs a shape/dtype to size the cost, so it reads them
+      off a single ``_np.asarray(x)`` view -- ONE call, same accounting as
+      the ndarray branch above, and never a second one, since the real call
+      below never touches ``__array__`` on this object.
+    - Anything else (a duck type implementing only ``__array__``, a
+      list/tuple/other sequence, or a type with ``__array_ufunc__ = None``):
+      materialize it EXACTLY ONCE via ``_np.asarray``, and use that SAME
+      materialized array as both the billing view and the forwarded object.
+      There is no legitimate subclass semantics to lose here -- it was never
+      an ndarray subclass -- and using one materialization for both closes a
+      hole where a stateful ``__array__`` (one that returns a bigger array
+      on its second call than its first) would otherwise be billed against
+      the small first result while numpy, receiving the ORIGINAL unresolved
       object, independently re-resolved it a second time and executed the
       larger one.
 
     A bare Python scalar (``bool``/``int``/``float``/``complex``, not a
-    numpy scalar) is a special case of the second bullet: it carries no
+    numpy scalar) is a special case of the third bullet: it carries no
     mutable state for ``_np.asarray`` to observe differently across two
     reads, but forwarding the MATERIALIZED 0-d array instead of the scalar
     itself would turn a NEP 50 weak scalar into a strong-typed operand and
@@ -1147,6 +1184,8 @@ def _resolve_ufunc_data_operand(x):
     if isinstance(x, _np.ndarray):
         stripped = _to_base_ndarray(x)
         return _np.asarray(stripped), stripped
+    if _implements_array_ufunc(x):
+        return _np.asarray(x), x
     if isinstance(x, (bool, int, float, complex)) and not isinstance(x, _np.generic):
         return _np.asarray(x), x
     resolved = _np.asarray(x)
@@ -1189,16 +1228,20 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # much larger one on a second, independent call (what numpy would
     # execute) if the original, unresolved object were forwarded to numpy
     # below while a separately-materialized copy was billed here.
-    # ``_resolve_ufunc_data_operand`` closes both gaps in one place: for an
-    # already-ndarray operand it bills from a stripped ``_np.asarray`` view
-    # (immune to a lying property) while forwarding the caller's ORIGINAL
-    # object below, so a legitimate foreign subclass (``np.ma.MaskedArray``,
-    # a units array, anything with meaningful
-    # ``__array_ufunc__``/``__array_wrap__`` behaviour) still reaches numpy
-    # and keeps its semantics (e.g. the mask); for anything else it
-    # materializes via ``_np.asarray`` EXACTLY ONCE and bills from AND
-    # forwards that same materialized array, so a stateful ``__array__``
-    # only ever gets called once total.
+    # ``_resolve_ufunc_data_operand`` closes both gaps -- plus a third --
+    # in one place: for an already-ndarray operand it bills from a stripped
+    # ``_np.asarray`` view (immune to a lying property) while forwarding the
+    # caller's ORIGINAL object below, so a legitimate foreign subclass
+    # (``np.ma.MaskedArray``, a units array, anything with meaningful
+    # ``__array_wrap__`` behaviour) still reaches numpy and keeps its
+    # semantics (e.g. the mask); for a non-ndarray operand whose TYPE
+    # implements ``__array_ufunc__`` it likewise forwards the ORIGINAL, so
+    # numpy's own dispatch protocol decides what happens (and can raise
+    # exactly as it would without flopscope in the loop) instead of
+    # flopscope silently computing from ``__array__`` on its behalf; for
+    # anything else it materializes via ``_np.asarray`` EXACTLY ONCE and
+    # bills from AND forwards that same materialized array, so a stateful
+    # ``__array__`` only ever gets called once total.
     a_view, a_fwd = _resolve_ufunc_data_operand(a)
     b_view, b_fwd = _resolve_ufunc_data_operand(b)
     output_shape = tuple(a_view.shape) + tuple(b_view.shape)
@@ -1352,30 +1395,27 @@ def _counted_ufunc_reduce_generic(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
-    if not isinstance(a, _np.ndarray):
-        a = _np.asarray(a)
     # Symmetry tags live on the ORIGINAL flopscope instance -- read them
-    # BEFORE the stripping below, which discards that subclass along with
-    # everything else.
+    # BEFORE ``_resolve_ufunc_data_operand``'s stripping, which discards that
+    # subclass along with everything else.
     sym = _symmetry_of(a)
-    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
-    # to this fallback as soon as EITHER ``a`` or ``out`` is flopscope-aware
-    # (e.g. ``ufunc.reduce(foreign_array, out=fnp.zeros(...))``), so a bare
-    # ``isinstance(a, ndarray)`` check above leaves a non-flopscope operand
-    # untouched. Such a subclass can override ``.dtype``/``.shape``/``.ndim``
-    # as Python properties that report a narrower/cheaper shape or kind than
-    # the real buffer -- numpy's own ufunc dispatch reads the true
-    # descriptor at the C level regardless of what those properties report
-    # (see ``_counted_ufunc_outer``), so billing off ``a`` directly would let
-    # a lying subclass under-report what numpy actually computes. Read the
-    # billing shape/dtype off a SEPARATE ``_np.asarray`` view (stripping any
-    # flopscope wrapper first, to avoid recursing back through our own
-    # protocol handlers) -- a no-op VIEW, same buffer, for an operand that is
-    # already a genuine plain ndarray. ``a`` itself stays bound to the
-    # caller's original object -- see ``_counted_ufunc_outer`` for why a
-    # legitimate foreign subclass (e.g. ``np.ma.MaskedArray``) must still
-    # reach numpy below.
-    a_view = _np.asarray(_to_base_ndarray(a))
+    # ``a`` can already be a foreign ndarray subclass, a non-ndarray duck
+    # array, or a bare sequence here: numpy dispatches to this fallback as
+    # soon as EITHER ``a`` or ``out`` is flopscope-aware (e.g.
+    # ``ufunc.reduce(foreign_array, out=fnp.zeros(...))``), so a bare
+    # ``isinstance(a, ndarray)`` check would leave a non-flopscope operand
+    # untouched. ``_resolve_ufunc_data_operand`` is what makes every one of
+    # those cases safe: an ndarray subclass overriding
+    # ``.dtype``/``.shape``/``.ndim`` as Python properties cannot misreport
+    # the billing view (a genuine ``_np.asarray`` read -- numpy's own ufunc
+    # dispatch reads the true descriptor at the C level regardless of what
+    # those properties report, see ``_counted_ufunc_outer``), a legitimate
+    # foreign subclass (e.g. ``np.ma.MaskedArray``) still reaches numpy below
+    # with its semantics intact, and a non-ndarray operand whose type
+    # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
+    # materialized, so numpy's own dispatch protocol decides what happens
+    # instead of flopscope silently consuming ``__array__`` on its behalf.
+    a_view, a_fwd = _resolve_ufunc_data_operand(a)
     # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
     # same plain value (not the caller's original ``axis``) is what both
     # the cost below AND the real call further down use.
@@ -1420,7 +1460,7 @@ def _counted_ufunc_reduce_generic(
     ):
         result = _call_numpy(
             ufunc.reduce,
-            _to_base_ndarray(a),
+            a_fwd,
             axis=axis,
             out=_to_base_ndarray(out) if out is not None else None,
             keepdims=keepdims,
@@ -1445,29 +1485,26 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
-    if not isinstance(a, _np.ndarray):
-        a = _np.asarray(a)
     # Symmetry tags live on the ORIGINAL flopscope instance -- read them
-    # BEFORE the stripping below, which discards that subclass along with
-    # everything else.
+    # BEFORE ``_resolve_ufunc_data_operand``'s stripping, which discards that
+    # subclass along with everything else.
     sym = _symmetry_of(a)
-    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
-    # to this fallback as soon as EITHER ``a`` or ``out`` is flopscope-aware,
-    # so a bare ``isinstance(a, ndarray)`` check above leaves a non-flopscope
-    # operand untouched. Such a subclass can override
-    # ``.dtype``/``.shape``/``.ndim`` as Python properties that report a
-    # narrower/cheaper shape or kind than the real buffer -- numpy's own
-    # ufunc dispatch reads the true descriptor at the C level regardless of
-    # what those properties report (see ``_counted_ufunc_outer``), so
-    # billing off ``a`` directly would let a lying subclass under-report
-    # what numpy actually computes. Read the billing shape/dtype off a
-    # SEPARATE ``_np.asarray`` view (stripping any flopscope wrapper first,
-    # to avoid recursing back through our own protocol handlers) -- a no-op
-    # VIEW, same buffer, for an operand that is already a genuine plain
-    # ndarray. ``a`` itself stays bound to the caller's original object --
-    # see ``_counted_ufunc_outer`` for why a legitimate foreign subclass
-    # (e.g. ``np.ma.MaskedArray``) must still reach numpy below.
-    a_view = _np.asarray(_to_base_ndarray(a))
+    # ``a`` can already be a foreign ndarray subclass, a non-ndarray duck
+    # array, or a bare sequence here: numpy dispatches to this fallback as
+    # soon as EITHER ``a`` or ``out`` is flopscope-aware, so a bare
+    # ``isinstance(a, ndarray)`` check would leave a non-flopscope operand
+    # untouched. ``_resolve_ufunc_data_operand`` is what makes every one of
+    # those cases safe: an ndarray subclass overriding
+    # ``.dtype``/``.shape``/``.ndim`` as Python properties cannot misreport
+    # the billing view (a genuine ``_np.asarray`` read -- numpy's own ufunc
+    # dispatch reads the true descriptor at the C level regardless of what
+    # those properties report, see ``_counted_ufunc_outer``), a legitimate
+    # foreign subclass (e.g. ``np.ma.MaskedArray``) still reaches numpy below
+    # with its semantics intact, and a non-ndarray operand whose type
+    # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
+    # materialized, so numpy's own dispatch protocol decides what happens
+    # instead of flopscope silently consuming ``__array__`` on its behalf.
+    a_view, a_fwd = _resolve_ufunc_data_operand(a)
     # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
     # same plain value (not the caller's original ``axis``) is what both
     # the cost below AND the real call further down use.
@@ -1508,7 +1545,7 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     ):
         result = _call_numpy(
             ufunc.accumulate,
-            _to_base_ndarray(a),
+            a_fwd,
             axis=axis,
             out=_to_base_ndarray(out) if out is not None else None,
             **kwargs,
@@ -1654,26 +1691,23 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
-    if not isinstance(a, _np.ndarray):
-        a = _np.asarray(a)
-    # ``a`` can already be a foreign ndarray subclass here: numpy dispatches
-    # to this wrapper as soon as EITHER ``a`` or ``out`` is flopscope-aware,
-    # so a bare ``isinstance(a, ndarray)`` check above leaves a non-flopscope
-    # operand untouched. Such a subclass can override
-    # ``.dtype``/``.shape``/``.ndim``/``.size`` as Python properties that
-    # report a narrower/cheaper shape or kind than the real buffer -- numpy's
-    # own ufunc dispatch reads the true descriptor at the C level regardless
-    # of what those properties report (see ``_counted_ufunc_outer``), so
-    # billing off ``a`` directly (used below for ``n``, ``lanes``, and the
-    # billing dtype) would let a lying subclass under-report what numpy
-    # actually computes. Read the billing shape/dtype/size off a SEPARATE
-    # ``_np.asarray`` view (stripping any flopscope wrapper first, to avoid
-    # recursing back through our own protocol handlers) -- a no-op VIEW,
-    # same buffer, for an operand that is already a genuine plain ndarray.
-    # ``a`` itself stays bound to the caller's original object -- see
-    # ``_counted_ufunc_outer`` for why a legitimate foreign subclass (e.g.
-    # ``np.ma.MaskedArray``) must still reach numpy below.
-    a_view = _np.asarray(_to_base_ndarray(a))
+    # ``a`` can already be a foreign ndarray subclass, a non-ndarray duck
+    # array, or a bare sequence here: numpy dispatches to this wrapper as
+    # soon as EITHER ``a`` or ``out`` is flopscope-aware, so a bare
+    # ``isinstance(a, ndarray)`` check would leave a non-flopscope operand
+    # untouched. ``_resolve_ufunc_data_operand`` is what makes every one of
+    # those cases safe: an ndarray subclass overriding
+    # ``.dtype``/``.shape``/``.ndim``/``.size`` as Python properties cannot
+    # misreport the billing view -- used below for ``n``, ``lanes``, and the
+    # billing dtype -- (a genuine ``_np.asarray`` read -- numpy's own ufunc
+    # dispatch reads the true descriptor at the C level regardless of what
+    # those properties report, see ``_counted_ufunc_outer``), a legitimate
+    # foreign subclass (e.g. ``np.ma.MaskedArray``) still reaches numpy below
+    # with its semantics intact, and a non-ndarray operand whose type
+    # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
+    # materialized, so numpy's own dispatch protocol decides what happens
+    # instead of flopscope silently consuming ``__array__`` on its behalf.
+    a_view, a_fwd = _resolve_ufunc_data_operand(a)
     # Same lying-subclass exposure as ``a`` above, but for ``out=``: its
     # dtype participates in the billing rate (``store_billing_dtypes`` below)
     # and must be read off the real buffer, not a Python-level override.
@@ -1773,7 +1807,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         # original ``axis`` object left to guard here.
         result = _call_numpy(
             ufunc.reduceat,
-            _to_base_ndarray(a),
+            a_fwd,
             indices_snapshot,
             axis=resolved_axis,
             out=_to_base_ndarray(out) if out is not None else None,
@@ -1997,32 +2031,60 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     canonical = _canonical_index(indices)
 
     # Resolve the ``values``/``vals`` positional operand (``args[0]``, if
-    # present) through the array protocol AT MOST ONCE. A plain Python
-    # scalar (bool/int/float/complex, not a numpy scalar) is left alone --
-    # NEP 50 weak typing must still see the bare type. An object that's
-    # already an ndarray yields TWO things: ``forward`` -- the caller's
-    # original object, stripped only of a flopscope wrapper, which is what
-    # ``ufunc.at`` actually gets called with below, so a legitimate foreign
-    # subclass (e.g. ``np.ma.MaskedArray``) keeps its semantics -- and
-    # ``billing`` -- a SEPARATE, genuine ``np.ndarray`` view for reading
-    # ``.dtype``: that Python-level attribute is overridable on an arbitrary
-    # OTHER ndarray subclass, and numpy's own ufunc dispatch reads the TRUE
-    # underlying descriptor at the C level regardless of what it reports --
-    # a subclass instance can report a cheap dtype to whatever reads
-    # ``v.dtype`` here while numpy computes at its real (pricier) one.
+    # present) through the array protocol AT MOST ONCE. Mirrors the
+    # three-way rule in :func:`_resolve_ufunc_data_operand` -- see that
+    # function's docstring for the full reasoning -- with one narrower
+    # exception: a plain Python scalar (bool/int/float/complex, not a numpy
+    # scalar) is left alone for BOTH forward and billing, not materialized
+    # even once, because ``ufunc.at``'s billing dtype resolution below reads
+    # ``type(vals)`` to preserve NEP 50 weak typing against ``a``'s dtype;
+    # ``_resolve_ufunc_data_operand`` cannot make that same trade (its
+    # ``outer`` caller needs an actual 0-d array's ``.shape`` for the output
+    # size, which a bare scalar doesn't carry on its own). This function
+    # returns ``(forward, billing)`` -- reversed from
+    # ``_resolve_ufunc_data_operand``'s ``(billing_view, forward_obj)`` --
+    # matching this call site's pre-existing tuple order.
+    #
+    # An object that's already an ndarray yields TWO things: ``forward`` --
+    # the caller's original object, stripped only of a flopscope wrapper,
+    # which is what ``ufunc.at`` actually gets called with below, so a
+    # legitimate foreign subclass (e.g. ``np.ma.MaskedArray``) keeps its
+    # semantics -- and ``billing`` -- a SEPARATE, genuine ``np.ndarray`` view
+    # for reading ``.dtype``: that Python-level attribute is overridable on
+    # an arbitrary OTHER ndarray subclass, and numpy's own ufunc dispatch
+    # reads the TRUE underlying descriptor at the C level regardless of what
+    # it reports -- a subclass instance can report a cheap dtype to whatever
+    # reads ``v.dtype`` here while numpy computes at its real (pricier) one.
     # ``_np.asarray`` always returns a genuine ``np.ndarray`` (a no-op VIEW,
     # same buffer, for an already-plain ndarray -- see the parity tests this
-    # guards), so its ``.dtype`` cannot lie. Anything else (e.g. something
-    # exposing only ``__array__``) is materialized via ``_np.asarray`` ONCE
-    # right here and used as both ``forward`` and ``billing`` -- there is no
-    # legitimate subclass to preserve for a non-ndarray input, and
-    # re-deriving it a second time (once for billing, once inside numpy's
-    # own conversion) would let a participant report a cheap dtype to us
-    # while handing numpy something pricier.
+    # guards), so its ``.dtype`` cannot lie.
+    #
+    # A non-ndarray whose TYPE implements ``__array_ufunc__`` is forwarded
+    # ORIGINAL: numpy's own dispatch (NEP 13) hands the call to THAT
+    # protocol instead of independently reconverting the operand through
+    # ``__array__`` a second time (confirmed directly -- see
+    # ``_resolve_ufunc_data_operand``), so billing from a single
+    # ``_np.asarray(v)`` view here does not reopen the
+    # stateful-``__array__`` double-materialization hole the next branch
+    # exists to close. Forwarding the ORIGINAL rather than a materialized
+    # copy is what lets ``Duck().__array_ufunc__`` fire on ``ufunc.at`` (and
+    # very possibly raise ``TypeError``, matching plain numpy) instead of
+    # flopscope silently computing from ``__array__`` behind the protocol's
+    # back.
+    #
+    # Anything else (e.g. something exposing only ``__array__``) is
+    # materialized via ``_np.asarray`` ONCE right here and used as both
+    # ``forward`` and ``billing`` -- there is no legitimate subclass to
+    # preserve for a non-ndarray input, and re-deriving it a second time
+    # (once for billing, once inside numpy's own conversion) would let a
+    # participant report a cheap dtype to us while handing numpy something
+    # pricier.
     def _resolve_at_operand(v):
         if isinstance(v, _np.ndarray):
             forward = _to_base_ndarray(v)
             return forward, _np.asarray(forward)
+        if _implements_array_ufunc(v):
+            return v, _np.asarray(v)
         if isinstance(v, (bool, int, float, complex)) and not isinstance(
             v, _np.generic
         ):

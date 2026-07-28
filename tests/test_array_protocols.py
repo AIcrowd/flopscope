@@ -583,6 +583,72 @@ def test_np_multiply_outer_stateful_array_like_operand_resolved_once():
     assert bc.flops_used == honest_bc.flops_used
 
 
+class _ProtocolDuck:
+    """A non-ndarray duck type implementing BOTH a stateful ``__array__``
+    AND ``__array_ufunc__`` (NEP 13), the latter unconditionally returning
+    ``NotImplemented``.
+
+    Regression pin for the three-way refinement to
+    :func:`_resolve_ufunc_data_operand` (and its ``_resolve_at_operand`` /
+    reduce / accumulate / reduceat siblings): the prior two-way rule
+    materialized ANY non-ndarray operand via ``__array__`` before
+    forwarding it -- including one whose type implements
+    ``__array_ufunc__`` -- which silently bypassed numpy's own dispatch
+    protocol. flopscope would then compute from the materialized array
+    where plain numpy hands the operation to ``__array_ufunc__`` instead
+    (and, for a duck like this one whose override always declines, raises
+    ``TypeError``). The fix forwards the ORIGINAL object so that protocol
+    runs -- and, critically, does so WITHOUT re-invoking ``__array__`` a
+    second time: billing reads shape/dtype via a single ``_np.asarray``
+    view, and the real (forwarded) call never touches ``__array__`` at all
+    because numpy dispatches it to ``__array_ufunc__`` instead.
+    """
+
+    def __init__(self):
+        self.array_calls = 0
+        self.ufunc_calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.array_calls += 1
+        return np.ones(3, dtype=np.float64)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.ufunc_calls += 1
+        return NotImplemented
+
+
+@pytest.mark.parametrize(
+    "op_name,call",
+    [
+        ("outer.b", lambda a, duck: np.add.outer(a, duck)),
+        ("outer.a", lambda a, duck: np.add.outer(duck, a)),
+        ("reduce.a", lambda a, duck: np.subtract.reduce(duck, out=a, axis=None)),
+        ("accumulate.a", lambda a, duck: np.subtract.accumulate(duck, out=a)),
+        ("reduceat.a", lambda a, duck: np.add.reduceat(duck, [0, 1], out=a, axis=0)),
+        ("at.values", lambda a, duck: np.add.at(a, [0, 1, 2], duck)),
+    ],
+)
+def test_duck_array_ufunc_protocol_fires_matching_raw_numpy(op_name, call):
+    """A non-ndarray operand whose TYPE implements ``__array_ufunc__`` must
+    have that protocol actually invoked by the real numpy call below --
+    exactly as it would be with flopscope out of the loop entirely --
+    rather than being silently materialized through ``__array__`` and
+    computed from that instead. ``_ProtocolDuck.__array_ufunc__`` always
+    declines (returns ``NotImplemented``), so a correctly-dispatched call
+    raises ``TypeError``, matching what raw numpy does for this duck.
+    """
+    duck = _ProtocolDuck()
+    a = fnp.array([0.0, 0.0, 0.0])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.raises(TypeError):
+            call(a, duck)
+    assert duck.ufunc_calls >= 1, (
+        f"{op_name}: Duck's __array_ufunc__ never fired -- the operand was "
+        "materialized through __array__ and numpy's dispatch protocol was "
+        "bypassed"
+    )
+
+
 @pytest.mark.parametrize(
     "op_name,make_other,call",
     [
