@@ -212,6 +212,21 @@ def _resolve_out_compute_dtype(
         ``TypeError`` subclass and numpy surfaces it the same way.
     """
     op_dtype = _np.result_type(*operand_dtypes, out_dtype)
+    # The rule governs the INPUT cast too, not only the store. Under 'safe'
+    # and 'same_kind' this is implied -- an operand always casts into a
+    # promotion that includes it -- which is why it only shows up under the
+    # strict kinds: `bool x bool` into an int8 destination promotes to int8,
+    # and int8 stores into int8 under any rule, but numpy still refuses the
+    # call under 'equiv'/'no' because the bool OPERANDS do not cast to int8
+    # under those. Checking only the store made flopscope looser than numpy
+    # in 856 measured cells, all of them here.
+    for operand_dtype in operand_dtypes:
+        if not _np.can_cast(operand_dtype, op_dtype, casting=casting):
+            raise TypeError(
+                f"Iterator operand required copying or buffering, but "
+                f"neither copying nor buffering was enabled, according to "
+                f"the rule '{casting}'"
+            )
     if not _np.can_cast(op_dtype, out_dtype, casting=casting):
         # numpy's nditer wording, verbatim: the destination is operand number
         # `n_operands` in the iterator (0-based, after the inputs). `!r` and
@@ -724,11 +739,18 @@ def einsum(
     out_dtype = (
         getattr(_to_base_ndarray(out), "dtype", None) if out is not None else None
     )
+    # The caller's own ``casting=`` governs, exactly as it does in numpy.
+    # Hardcoding "safe" here would refuse the whole point of passing
+    # ``casting="unsafe"`` -- and would report "the rule 'safe'" while doing
+    # it -- making flopscope stricter than numpy on a call numpy accepts,
+    # which is the regression this change exists to avoid.
+    requested_casting = kwargs.get("casting", "safe")
     if out_dtype is not None:
         compute_dtype = _resolve_out_compute_dtype(
             tuple(a.dtype for a in operand_arrays),
             out_dtype,
             len(operand_arrays),
+            casting=requested_casting,
         )
 
     with budget.deduct(
@@ -778,7 +800,7 @@ def einsum(
         _np.copyto(
             _to_base_ndarray(out),
             _np.asarray(result),
-            casting="safe" if compute_dtype is not None else "unsafe",
+            casting=requested_casting if compute_dtype is not None else "unsafe",
         )
         # Internal copy, so _call_numpy's hook never sees it: record the write
         # or a tag on out's buffer (or on an alias of it) would survive.
