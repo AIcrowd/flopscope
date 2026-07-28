@@ -11,6 +11,7 @@ import numpy as np
 
 import flopscope as flops
 from flopscope._perm_group import SymmetryGroup, _Permutation
+from flopscope_server import _array_store
 from flopscope_server._session import Session
 
 _HANDLE_RE = re.compile(r"^a\d+$")
@@ -58,6 +59,89 @@ def _allowed_rs_methods() -> frozenset:
 
 _ALLOWED_RS_METHODS = _allowed_rs_methods()
 
+# Capacity is enforced in two layers; this table is the first, not the only
+# one:
+#
+#   1. This table + the pre-dispatch gate in RequestHandler.handle() (below,
+#      around _prospective_handle_count). A best-effort OPTIMISATION: when an
+#      op's arity is listed here, a capacity refusal happens before dispatch,
+#      so nothing was computed or charged -- the refusal is free. flopscope
+#      charges FLOPs synchronously as part of running an op
+#      (BudgetContext.deduct charges before the numpy kernel is even invoked
+#      -- see flopscope._budget), so once dispatch begins the charge is
+#      permanent; this table exists to decide BEFORE that point. It is
+#      allowed to be incomplete -- ops with shape-dependent arity (e.g.
+#      nonzero, which returns one array per dimension) are intentionally not
+#      enumerated here.
+#   2. The exact handle count computed in _pack_result, from the actual
+#      result, before its first store. That layer is the GUARANTEE: it is
+#      table-independent and universal, so no operation -- listed here or
+#      not -- can ever strand a handle. It is not free (the op has already
+#      run and been charged by then), only leak-proof.
+#
+# Do not "complete" this table for more ops. Its job is to make the common
+# multi-handle ops free to refuse; the second layer is what makes refusal
+# safe for everything else. Values are a conservative upper bound on the
+# number of handles a single call can produce, keyed by dotted op name.
+_FIXED_MULTI_HANDLE_COUNTS: dict[str, int] = {
+    "linalg.eig": 2,
+    "linalg.eigh": 2,
+    "linalg.qr": 2,
+    "linalg.svd": 3,
+    "linalg.slogdet": 2,
+    "linalg.lstsq": 4,
+    "modf": 2,
+    "frexp": 2,
+    "divmod": 2,
+    "polydiv": 2,
+    "histogram": 2,
+    "histogram2d": 3,
+}
+
+# Ops that return one output array per array argument, i.e. arity equals the
+# number of array handles in the request rather than a fixed constant.
+_PER_ARG_MULTI_HANDLE_OPS = frozenset({"meshgrid", "broadcast_arrays", "ix_"})
+
+# Ops that mint no array handle whatever their arguments, so reserving an
+# array slot for them would refuse a request the server can in fact deliver.
+# `save`/`savez`/`savez_compressed` route to _handle_save, which bills egress
+# and returns None; the RNG constructors return a Generator/RandomState/
+# SeedSequence, which _pack_result puts in the connection's separate
+# generator store (Session.store_generator), never in the array store.
+#
+# Only ops whose zero-handle result is unconditional belong here. A reduction
+# like `sum` does not qualify even though `sum(V)` returns a msgpack-native
+# scalar and stores nothing: `sum(V, axis=0)` returns an array and does store
+# one, and which of the two a call is cannot be read off the op name. Those
+# stay on the conservative default of 1 -- refused free at full capacity,
+# never charged -- with the exact, table-independent gate in _pack_result as
+# the guarantee against a stranded handle.
+_ZERO_ARRAY_HANDLE_OPS = frozenset(
+    {
+        "save",
+        "savez",
+        "savez_compressed",
+        "random.default_rng",
+        "random.SeedSequence",
+        "random.RandomState",
+    }
+)
+
+
+def _prospective_handle_count(op: str, raw_args: list) -> int:
+    """Upper bound on array/scalar handles *op* could store, without dispatching it.
+
+    Used by the pre-dispatch capacity gate in :meth:`RequestHandler.handle`
+    so a capacity refusal never depends on having already run (and therefore
+    already charged) the operation. Defaults to 1 -- a single array or 0-d
+    scalar handle -- which covers every op not listed above.
+    """
+    if op in _ZERO_ARRAY_HANDLE_OPS:
+        return 0
+    if op in _PER_ARG_MULTI_HANDLE_OPS:
+        return max(len(raw_args), 1)
+    return _FIXED_MULTI_HANDLE_COUNTS.get(op, 1)
+
 
 def _make_serializable(obj):
     """Convert a nested structure to be msgpack-safe (no numpy types)."""
@@ -70,6 +154,33 @@ def _make_serializable(obj):
     if isinstance(obj, dict):
         return {k: _make_serializable(v) for k, v in obj.items()}
     return obj
+
+
+def _unresolvable_operand(value) -> str | None:
+    """Name the type of an operand the protocol can never turn into a value.
+
+    msgpack delivers only ``None``/bool/int/float/str/bytes/list/dict, and
+    :meth:`RequestHandler._resolve_arg` converts every dict shape the protocol
+    defines -- array handle, generator handle, symmetry group -- into the
+    object it names. A dict that survives resolution therefore names nothing:
+    NumPy can only coerce it to an ``object`` array, and ``object`` is not a
+    dtype the client can decode, so the response is undeliverable however the
+    kernel runs.
+
+    Refusing it here, before dispatch, keeps the refusal free. The alternative
+    is to run the kernel, charge the caller for it, and only discover at pack
+    time that nothing can be sent back -- a charge with no result, which is
+    the exact outcome this module exists to prevent. Returns the offending
+    type's name, or ``None`` if every operand is representable.
+    """
+    if isinstance(value, dict):
+        return type(value).__name__
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            found = _unresolvable_operand(item)
+            if found is not None:
+                return found
+    return None
 
 
 _MSGPACK_SCALARS = (type(None), bool, int, float, str, bytes)
@@ -96,6 +207,28 @@ def _is_msgpack_native(obj) -> bool:
 
 #: Maximum allowed array size in bytes (configurable via environment variable).
 MAX_ARRAY_BYTES = int(os.environ.get("FLOPSCOPE_MAX_ARRAY_BYTES", 100 * 1024 * 1024))
+
+#: Dtypes the client knows how to decode off the wire. Mirrors the client's
+#: own table; a handle minted with any other dtype would be unreadable, so a
+#: result carrying one is refused rather than stored.
+_CLIENT_DECODABLE_DTYPES: frozenset[str] = frozenset(
+    {
+        "bool",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
+        "float16",
+        "float32",
+        "float64",
+        "complex64",
+        "complex128",
+    }
+)
 
 
 class RequestHandler:
@@ -167,6 +300,27 @@ class RequestHandler:
                 return self._handle_free(request)
             if op == "budget_status":
                 return self._handle_budget_status()
+
+            # Capacity is checked before dispatch, on purpose: ArrayStore.put
+            # raises only at store time, which for every op below is after
+            # the op has already run and been charged. Refusing here instead
+            # means an over-capacity request costs the caller nothing. Some
+            # ops (linalg.eig/eigh/qr/svd, meshgrid, ...) can store more than
+            # one handle for a single call, so the gate reserves that many
+            # slots up front -- checking only for one free slot would let
+            # such a call pass, run, get charged, and then fail partway
+            # through storing its own result.
+            needed = _prospective_handle_count(op, request.get("args") or [])
+            if self._session.array_count + needed > _array_store.MAX_ARRAY_COUNT:
+                return {
+                    "status": "error",
+                    "error_type": "MemoryError",
+                    "message": (
+                        f"array store limit reached: "
+                        f"{_array_store.MAX_ARRAY_COUNT} arrays"
+                    ),
+                }
+
             if op == "create_from_data":
                 return self._handle_create_from_data(request)
             if op == "__getitem__":
@@ -290,6 +444,15 @@ class RequestHandler:
                 "status": "error",
                 "error_type": "ValueError",
                 "message": f"array too large: {len(data)} bytes exceeds {MAX_ARRAY_BYTES} byte limit",
+            }
+        if dtype not in _CLIENT_DECODABLE_DTYPES:
+            return {
+                "status": "error",
+                "error_type": "UnsupportedDtypeError",
+                "message": (
+                    f"dtype {dtype!r} is not supported; arrays must use a dtype "
+                    f"the client can decode"
+                ),
             }
         arr = np.frombuffer(data, dtype=dtype).reshape(shape).copy()
         handle = self._session.store_array(arr)
@@ -445,6 +608,18 @@ class RequestHandler:
         resolved_args = [self._resolve_arg(a) for a in raw_args]
         resolved_kwargs = {k: self._resolve_arg(v) for k, v in kwargs.items()}
 
+        for operand in (*resolved_args, *resolved_kwargs.values()):
+            bad_type = _unresolvable_operand(operand)
+            if bad_type is not None:
+                return {
+                    "status": "error",
+                    "error_type": "TypeError",
+                    "message": (
+                        f"{op}() received an argument of type {bad_type!r}, "
+                        f"which cannot be used as an array operand"
+                    ),
+                }
+
         result = self._run_kernel(func, *resolved_args, **resolved_kwargs)
 
         return self._pack_result(result)
@@ -563,18 +738,130 @@ class RequestHandler:
                     "error_type": "ValueError",
                     "message": f"result array too large: {result.nbytes} bytes exceeds {MAX_ARRAY_BYTES} byte limit",
                 }
+            dtype_str = str(result.dtype)
+            if dtype_str not in _CLIENT_DECODABLE_DTYPES:
+                return {
+                    "status": "error",
+                    "error_type": "UnsupportedReturnType",
+                    "message": (
+                        f"result dtype {dtype_str!r} cannot be delivered to the client"
+                    ),
+                }
             handle = self._session.store_array(result)
             meta = self._session.array_metadata(handle)
             return {"status": "ok", "result": meta, "budget": budget}
 
         if isinstance(result, (tuple, list)):
+            # Validate every element before storing anything: a later element
+            # failing the size or decodability check must not leave an
+            # earlier element's handle (array or 0-d scalar) stranded in the
+            # store. Refused means refused for the whole result, not a
+            # partial one.
+            for r in result:
+                if isinstance(r, np.ndarray) and r.nbytes > MAX_ARRAY_BYTES:
+                    return {
+                        "status": "error",
+                        "error_type": "ValueError",
+                        "message": (
+                            f"result array too large: {r.nbytes} bytes "
+                            f"exceeds {MAX_ARRAY_BYTES} byte limit"
+                        ),
+                    }
+
+            for r in result:
+                undecodable_dtype = None
+                if isinstance(r, np.generic) and not _is_msgpack_native(r.item()):
+                    undecodable_dtype = str(r.dtype)
+                elif isinstance(r, np.ndarray):
+                    undecodable_dtype = str(r.dtype)
+                if (
+                    undecodable_dtype is not None
+                    and undecodable_dtype not in _CLIENT_DECODABLE_DTYPES
+                ):
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result dtype {undecodable_dtype!r} cannot be "
+                            f"delivered to the client"
+                        ),
+                    }
+
+            # Any element that is neither a numpy array/scalar (checked
+            # above) nor msgpack-encodable by value -- including one buried
+            # inside a nested list/tuple -- would otherwise fall through to
+            # the storing loop below and only fail once msgpack.packb() runs
+            # on the assembled response, after earlier elements' handles have
+            # already been minted. Refused means refused for the whole
+            # result, so this must be checked before storing anything.
+            for r in result:
+                if isinstance(r, (np.ndarray, np.generic)):
+                    continue
+                if not _is_msgpack_native(_make_serializable(r)):
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result element of type {type(r).__name__!r} "
+                            f"cannot be encoded for delivery to the client"
+                        ),
+                    }
+
+            # Second capacity layer, table-independent and exact: the
+            # pre-dispatch gate in RequestHandler.handle() (see
+            # _prospective_handle_count) is a best-effort table of known
+            # multi-handle ops, so a refusal there is free -- the op never
+            # ran. But an op with shape-dependent arity (e.g. nonzero, which
+            # returns one array per dimension) can strand a handle if it is
+            # missing from that table: with one free slot, the loop below
+            # would store its first element, then hit MemoryError storing
+            # its second, leaving the first stranded with no id ever
+            # delivered to the caller to free it.
+            #
+            # By this point in _pack_result the result already exists, so
+            # the number of handles it will actually store is known exactly
+            # -- no table, no guessing. Refusing here closes that gap
+            # universally, for every op, regardless of whether anyone
+            # remembered to list it. The trade-off: the op has already run
+            # and been charged (see the module comment above
+            # _FIXED_MULTI_HANDLE_COUNTS), so unlike the pre-dispatch gate,
+            # this refusal is NOT free for an op the table doesn't cover --
+            # it only guarantees nothing is stranded, and stores nothing
+            # itself.
+            handles_needed = sum(
+                1
+                for r in result
+                if isinstance(r, np.ndarray)
+                or (isinstance(r, np.generic) and not _is_msgpack_native(r.item()))
+            )
+            if (
+                self._session.array_count + handles_needed
+                > _array_store.MAX_ARRAY_COUNT
+            ):
+                return {
+                    "status": "error",
+                    "error_type": "MemoryError",
+                    "message": (
+                        f"array store limit reached: "
+                        f"{_array_store.MAX_ARRAY_COUNT} arrays"
+                    ),
+                }
+
             items = []
             for r in result:
                 if isinstance(r, np.ndarray):
                     handle = self._session.store_array(r)
                     items.append(self._session.array_metadata(handle))
                 elif isinstance(r, np.generic):
-                    items.append({"value": r.item(), "dtype": str(r.dtype)})
+                    item = r.item()
+                    if not _is_msgpack_native(item):
+                        # Not encodable by value, but decodability was already
+                        # confirmed above. Deliver it the way a 0-d array
+                        # result is already delivered.
+                        handle = self._session.store_array(np.asarray(r))
+                        items.append(self._session.array_metadata(handle))
+                    else:
+                        items.append({"value": item, "dtype": str(r.dtype)})
                 elif isinstance(r, (int, float)):
                     dtype_str = "float64" if isinstance(r, float) else "int64"
                     items.append({"value": r, "dtype": dtype_str})
@@ -590,9 +877,27 @@ class RequestHandler:
         # Scalar or other value
         if isinstance(result, np.generic):
             dtype_str = str(result.dtype)
+            item = result.item()
+            if not _is_msgpack_native(item):
+                if dtype_str not in _CLIENT_DECODABLE_DTYPES:
+                    return {
+                        "status": "error",
+                        "error_type": "UnsupportedReturnType",
+                        "message": (
+                            f"result dtype {dtype_str!r} cannot be delivered "
+                            f"to the client"
+                        ),
+                    }
+                # Not encodable by value, but the dtype is one the client can
+                # decode. Deliver it the way a 0-d array result is already
+                # delivered, rather than failing after the caller has been
+                # charged for computing it.
+                handle = self._session.store_array(np.asarray(result))
+                meta = self._session.array_metadata(handle)
+                return {"status": "ok", "result": meta, "budget": budget}
             return {
                 "status": "ok",
-                "result": {"value": result.item(), "dtype": dtype_str},
+                "result": {"value": item, "dtype": dtype_str},
                 "budget": budget,
             }
         if isinstance(result, bool):
@@ -642,12 +947,16 @@ class RequestHandler:
         # conformance test (tests/test_registry_conformance.py) catches any op
         # whose return type lands here.
         serializable = _make_serializable(result)
-        if _is_msgpack_native(serializable):
-            return {"status": "ok", "result": {"value": serializable}, "budget": budget}
-        raise flops.UnsupportedReturnType(
-            f"{type(result).__name__} is not serializable across the "
-            f"client/server boundary"
-        )
+        if not _is_msgpack_native(serializable):
+            return {
+                "status": "error",
+                "error_type": "UnsupportedReturnType",
+                "message": (
+                    f"result of type {type(result).__name__!r} cannot be "
+                    f"encoded for delivery to the client"
+                ),
+            }
+        return {"status": "ok", "result": {"value": serializable}, "budget": budget}
 
 
 # ---------------------------------------------------------------------------

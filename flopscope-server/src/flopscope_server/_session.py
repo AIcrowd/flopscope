@@ -111,6 +111,16 @@ class Session:
         """Return the array for *handle*. Delegates to the connection store."""
         return self._conn.arrays.get(handle)
 
+    @property
+    def array_count(self) -> int:
+        """Number of arrays currently held in the array store.
+
+        Lets callers check remaining capacity before minting a new handle,
+        instead of discovering the store is full only once ``store_array``
+        raises ``MemoryError``.
+        """
+        return self._conn.arrays.count
+
     def array_metadata(self, handle: str) -> dict:
         """Return metadata dict for *handle*. Delegates to the connection store."""
         return self._conn.arrays.metadata(handle)
