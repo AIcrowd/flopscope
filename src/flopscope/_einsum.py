@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as _np
 
@@ -133,6 +133,106 @@ def einsum_cache_info():
     >>> rate = info.hits / max(total, 1)
     """
     return _path_cache.cache_info()
+
+
+@functools.cache
+def _einsum_supports_dtype(dtype) -> bool:
+    """Can ``np.einsum`` contract in ``dtype`` at all? Asked by asking numpy.
+
+    einsum has no inner loop for the string/bytes/void kinds. numpy surfaces
+    that badly -- ``np.einsum("ij,jk->ik", f64, f64, out=np.empty(..., "U64"))``
+    raises ``SystemError("<built-in function c_einsum> returned a result with
+    an exception set")`` whose ``__cause__`` is the real refusal,
+    ``TypeError("invalid data type for einsum")``. The refusal is the part
+    worth reproducing; the SystemError wrapper is a numpy reporting bug.
+
+    A one-element contraction is the cheapest way to have numpy answer for
+    itself rather than us keeping a hand-written list of dtype kinds in sync
+    with it, and the answer is cached per dtype so it costs one tiny numpy
+    call per distinct dtype per process. ``zeros`` and not ``empty``:
+    uninitialised object cells are ``None``, and ``None * None`` would raise
+    ``TypeError`` and misreport object -- which einsum does support -- as
+    unsupported.
+    """
+    probe = _np.zeros(1, dtype=dtype)
+    try:
+        _np.einsum("i,i->i", probe, probe)
+    except TypeError:
+        return False
+    return True
+
+
+_CastingKind = Literal["no", "equiv", "safe", "same_kind", "unsafe"]
+
+
+def _resolve_out_compute_dtype(
+    operand_dtypes: tuple,
+    out_dtype,
+    n_operands: int,
+    casting: _CastingKind = "safe",
+):
+    """Reproduce numpy's ``einsum(..., out=)`` casting decision exactly.
+
+    numpy does not contract in the operands' own promoted dtype and then cast
+    the answer into ``out``. It resolves ONE computation dtype for the whole
+    iterator with the destination participating in the promotion, and refuses
+    the call unless that dtype casts into the destination under ``casting``::
+
+        op_dtype = np.result_type(*operand_dtypes, out.dtype)
+        accept  iff np.can_cast(op_dtype, out.dtype, casting)
+
+    Both halves matter, and getting either wrong is a shipped bug:
+
+    * Dropping the check is what this function fixes. ``copyto(...,
+      casting="unsafe")`` let two float64 operands land in an int64
+      destination (numpy raises ``TypeError``) and let a complex result be
+      truncated into a float64 one with nothing but a ``ComplexWarning``.
+    * Dropping ``out.dtype`` from the promotion is what killed a previous
+      attempt at this fix: it computed ``result_type(*operand_dtypes)`` and
+      asked whether THAT cast into the destination, which refused 138 calls
+      plain numpy accepts. ``np.result_type`` is a lattice minimum, not a
+      left-fold, so ``result_type(int8, uint8)`` is ``int16`` while
+      ``result_type(int8, uint8, float16)`` is ``float16`` -- float16 holds
+      every int8 and every uint8 exactly, so it is a legal common type and
+      the lattice picks it. Being stricter than numpy is a regression, not a
+      conservative choice.
+
+    Returns the resolved computation dtype, which the caller must contract in
+    -- ``int8 x int8 -> int16`` destination yields 300 in numpy, not the -56
+    an int8 contraction would overflow to.
+
+    Raises
+    ------
+    TypeError
+        With numpy's own wording, when the computation dtype cannot cast into
+        the destination. Raised before any FLOP is charged.
+    numpy.exceptions.DTypePromotionError
+        Propagated unwrapped from ``np.result_type`` when no common dtype
+        exists at all (a ``datetime64`` destination, say); it is a
+        ``TypeError`` subclass and numpy surfaces it the same way.
+    """
+    op_dtype = _np.result_type(*operand_dtypes, out_dtype)
+    if not _np.can_cast(op_dtype, out_dtype, casting=casting):
+        # numpy's nditer wording, verbatim: the destination is operand number
+        # `n_operands` in the iterator (0-based, after the inputs). `!r` and
+        # not `dtype('{...}')` because repr is what numpy formats with, and
+        # str disagrees with it on exactly the dtypes where it matters --
+        # `str(np.dtype('S32'))` is '|S32' but numpy's message says 'S32',
+        # and object prints as 'object' rather than numpy's 'O'.
+        raise TypeError(
+            f"Iterator requested dtype could not be cast from "
+            f"{op_dtype!r} to {out_dtype!r}, the operand "
+            f"{n_operands} dtype, according to the rule '{casting}'"
+        )
+    if not _einsum_supports_dtype(op_dtype):
+        # numpy's own refusal reason, taken from the `__cause__` it loses on
+        # the way out. Checked AFTER the cast rule because that is numpy's
+        # order: a `U32` destination fails the cast (op_dtype `U64` does not
+        # fit) while a `U64` one gets all the way to the missing inner loop.
+        # Zero-cost either way -- the alternative is billing a contraction
+        # that then dies inside numpy, and nothing here is ever refunded.
+        raise TypeError("invalid data type for einsum")
+    return op_dtype
 
 
 def _execute_pairwise(path_info, operands: list):
@@ -616,6 +716,21 @@ def einsum(
     resolved = resolve_billing_dtype(billing_dtypes)
     complex_override = contraction_complex_override(accumulation_cost, resolved)
 
+    # Settle the destination's dtype question BEFORE the deduct below, because
+    # a refusal has to cost nothing: flops_used never decreases and nothing is
+    # ever refunded, so a call numpy would have rejected outright must not be
+    # able to bill a contraction on its way to raising.
+    compute_dtype = None
+    out_dtype = (
+        getattr(_to_base_ndarray(out), "dtype", None) if out is not None else None
+    )
+    if out_dtype is not None:
+        compute_dtype = _resolve_out_compute_dtype(
+            tuple(a.dtype for a in operand_arrays),
+            out_dtype,
+            len(operand_arrays),
+        )
+
     with budget.deduct(
         "einsum",
         flop_cost=accumulation_cost.total,
@@ -624,13 +739,27 @@ def einsum(
         dtypes=billing_dtypes,
         complex_factor_override=complex_override,
     ):
+        # Contract in the dtype numpy would have contracted in. Casting the
+        # ANSWER into `out` is not the same operation as computing in the
+        # destination's dtype: `int8 x int8` into an int16 destination is 300
+        # in numpy and -56 if the contraction runs in int8 first, and
+        # `bool x bool` into any numeric destination counts the matches
+        # (3) where a bool contraction only ors them (1).
+        exec_operands = operands
+        if compute_dtype is not None and any(
+            a.dtype != compute_dtype for a in operand_arrays
+        ):
+            exec_operands = [
+                _to_base_ndarray(a).astype(compute_dtype, copy=False)
+                for a in operand_arrays
+            ]
         if path_info.steps:
-            result = _execute_pairwise(path_info, list(operands))
+            result = _execute_pairwise(path_info, list(exec_operands))
         else:
             result = _call_numpy(
                 _np.einsum,
                 canonical_subscripts,
-                *[_to_base_ndarray(o) for o in operands],
+                *[_to_base_ndarray(o) for o in exec_operands],
             )
 
     if out is not None:
@@ -641,7 +770,16 @@ def einsum(
         # contents. Guarding the argument stops a container getting here, but
         # taking the materialising call out is what makes the whole class of
         # silent mis-write structurally impossible rather than merely gated.
-        _np.copyto(_to_base_ndarray(out), _np.asarray(result), casting="unsafe")
+        # ``safe`` once the dtype has been resolved above -- the contraction
+        # already ran in a dtype that casts into the destination, so this copy
+        # is a narrowing-free store and numpy will say so if it ever is not.
+        # ``unsafe`` here is the original defect: it silently truncated
+        # float->int and dropped imaginary parts on complex->float.
+        _np.copyto(
+            _to_base_ndarray(out),
+            _np.asarray(result),
+            casting="safe" if compute_dtype is not None else "unsafe",
+        )
         # Internal copy, so _call_numpy's hook never sees it: record the write
         # or a tag on out's buffer (or on an alias of it) would survive.
         note_write(out)

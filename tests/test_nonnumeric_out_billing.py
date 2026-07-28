@@ -11,6 +11,12 @@ compute in the operands' dtypes and only then store into ``out``, so the
 arithmetic stays native-speed while the stored kind drags the resolved billing
 dtype down -- dropping both the dtype rate and the complex factor. These tests
 pin that ``out=`` can only widen the bill, never launder it.
+
+For ``einsum`` specifically, the str/bytes destinations are no longer billed
+honestly -- they are refused, for free, because plain numpy refuses them too.
+See ``test_einsum_out_casting_parity.py``; the pin here is that the refusal
+costs nothing, since an unbillable refusal is what keeps it from becoming its
+own exploit.
 """
 
 import numpy as np
@@ -41,23 +47,44 @@ def _real_pair(n=N):
     return rng.random((n, n)), rng.random((n, n))
 
 
-@pytest.mark.parametrize("out_dtype", ["object", "U64", "S64", "U32", "S16"])
-def test_einsum_nonnumeric_out_does_not_discount_complex(out_dtype):
+def test_einsum_nonnumeric_out_does_not_discount_complex():
     load_weights()
     a, b = _complex_pair()
     honest = _billed(lambda: fnp.einsum("ij,jk->ik", a, b))
-    out = np.empty((N, N), dtype=out_dtype)
+    out = np.empty((N, N), dtype=object)
     laundered = _billed(lambda: fnp.einsum("ij,jk->ik", a, b, out=out))
     assert laundered == honest
 
 
-@pytest.mark.parametrize("out_dtype", ["object", "U64", "S64"])
-def test_einsum_nonnumeric_out_does_not_discount_float64(out_dtype):
+def test_einsum_nonnumeric_out_does_not_discount_float64():
     load_weights()
     a, b = _real_pair()
     honest = _billed(lambda: fnp.einsum("ij,jk->ik", a, b))
-    out = np.empty((N, N), dtype=out_dtype)
+    out = np.empty((N, N), dtype=object)
     assert _billed(lambda: fnp.einsum("ij,jk->ik", a, b, out=out)) == honest
+
+
+@pytest.mark.parametrize("out_dtype", ["U64", "S64", "U32", "S16"])
+@pytest.mark.parametrize("pair", ["complex", "real"])
+def test_einsum_string_out_is_refused_for_free(out_dtype, pair):
+    """The str/bytes destinations used to be the sharpest form of this launder:
+    they reached the contraction, billed at the neutral rate, and then stored
+    a *rendering* of the answer. numpy has never allowed it -- einsum has no
+    string inner loop -- so the destination-casting parity fix now refuses
+    them outright, which is a stronger pin than "bills the honest rate".
+
+    Refusal must cost nothing. There are no refunds, so an op that raises
+    after billing would be a free way to burn a rival's budget, and an op that
+    raises after billing *its own* cost would still charge for arithmetic the
+    caller never received.
+    """
+    load_weights()
+    a, b = _complex_pair() if pair == "complex" else _real_pair()
+    out = np.empty((N, N), dtype=out_dtype)
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as budget:
+        with pytest.raises(TypeError):
+            fnp.einsum("ij,jk->ik", a, b, out=out)
+        assert budget.flops_used == 0
 
 
 def test_contraction_helper_nonnumeric_out_does_not_discount():
