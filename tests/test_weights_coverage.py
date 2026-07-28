@@ -344,3 +344,28 @@ class TestDocsWeightCoverage:
                 for name, (expected, actual) in sorted(mismatched.items())[:20]
             )
         )
+
+
+class TestUfuncMethodWeightCoverage:
+    """Synthesized ufunc-method names are not REGISTRY rows, so the registry-walking
+    coverage tests above cannot see them. Cover them explicitly."""
+
+    def test_reachable_ufunc_methods_resolve_to_a_base_weight(self):
+        import numpy as np
+
+        from flopscope._weights import _UFUNC_METHOD_SUFFIXES, get_weight
+
+        offenders = []
+        for name in dir(np):
+            ufunc = getattr(np, name)
+            if not isinstance(ufunc, np.ufunc):
+                continue
+            base = get_weight(ufunc.__name__)
+            if base == 1.0:
+                continue  # neutral either way; nothing to desync
+            for suffix in _UFUNC_METHOD_SUFFIXES:
+                if get_weight(ufunc.__name__ + suffix) != base:
+                    offenders.append(ufunc.__name__ + suffix)
+        assert not offenders, (
+            f"ufunc-method names not inheriting their base weight: {sorted(offenders)}"
+        )

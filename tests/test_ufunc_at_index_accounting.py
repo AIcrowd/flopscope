@@ -8,6 +8,8 @@ numbers, so these tests keep their value as the cost model evolves.
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -192,3 +194,68 @@ def test_at_write_through_alias_voids_symmetry_tag():
         np.arange(1, 33).astype(z.dtype),
     )
     assert epoch_of(z) != before, "the write must advance the buffer epoch"
+
+
+@pytest.mark.parametrize(
+    "name,invoke",
+    [
+        ("mask_indices", lambda cb: fnp.mask_indices(4, cb)),
+        ("fromfunction", lambda cb: fnp.fromfunction(cb, (4, 4))),
+        (
+            "apply_along_axis",
+            lambda cb: fnp.apply_along_axis(
+                cb, 0, fnp.asarray(np.zeros((4, 4), np.float32))
+            ),
+        ),
+    ],
+)
+def test_callback_wall_time_books_to_residual(name, invoke):
+    """Participant callback time must not land in the free overhead bucket."""
+    flopscope.configure(callback_warnings=False)
+    sleep_s = 0.20
+
+    def callback(*args, **kwargs):
+        time.sleep(sleep_s)
+        if name == "mask_indices":
+            return np.zeros((4, 4), bool)
+        if name == "apply_along_axis":
+            return np.float32(0.0)
+        return (
+            np.zeros(np.shape(args[0]), np.float32)
+            if args
+            else np.zeros((4, 4), np.float32)
+        )
+
+    try:
+        with flopscope.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+            invoke(callback)
+    finally:
+        flopscope.configure(callback_warnings=True)
+    summary = ctx.summary_dict()
+    residual = float(summary.get("residual_wall_time_s") or 0.0)
+    assert residual >= 0.8 * sleep_s, (
+        f"{name}: callback slept {sleep_s}s but only {residual:.3f}s booked to residual"
+    )
+
+
+def test_at_composed_matmul_is_not_cheaper_than_matmul():
+    """A matmul assembled out of ufunc.at calls must not undercut fnp.matmul."""
+    k = 32
+    X = fnp.asarray(np.random.randn(k, k).astype(np.float32))
+    W = fnp.asarray(np.random.randn(k, k).astype(np.float32))
+    honest = billed(lambda: fnp.matmul(X, W))
+    one = np.array([0], np.intp)
+
+    def at_route():
+        D = fnp.asarray(np.zeros((1, k, k, k), np.float32))
+        np.add.at(D, one, W[None, None, :, :])
+        np.multiply.at(D, one, X[None, :, :, None])
+        V = D[0]
+        m = k
+        while m > 1:
+            h = m // 2
+            np.add.at(V[:, :h, :][None], one, V[:, h : 2 * h, :][None])
+            V = V[:, :h, :]
+            m = h
+
+    assert billed(at_route) >= honest
