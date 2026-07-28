@@ -1192,6 +1192,42 @@ def _resolve_ufunc_data_operand(x):
     return resolved, resolved
 
 
+def _refresh_ufunc_data_operand(x, cached: tuple):
+    """Re-read the ``(billing_view, forward_obj)`` pair for ``x`` after a
+    LATER resolution step that might have mutated it in place.
+
+    The sole caller is :func:`_counted_ufunc_reduceat`: ``axis`` resolution
+    there (``_resolve_reduceat_axis``) genuinely needs ``x``'s ndim before
+    it can even decide which accepted ``axis`` form applies (unlike
+    :func:`_resolve_generic_reduce_axis`, whose reduce/accumulate siblings
+    need no such read and so can resolve ``axis`` before touching ``a`` at
+    all -- see its docstring). That first, structurally-necessary read of
+    ``x`` happens BEFORE axis is resolved, and resolving axis runs
+    participant code (``operator.index``) that -- per the confirmed
+    reproduction this whole module's reordering guards against -- can
+    mutate ``x`` in place via an owning ndarray subclass's ``resize(n,
+    refcheck=False)``. This function re-derives the billing view
+    afterwards so cost is computed from what numpy will actually touch,
+    not from the pre-mutation snapshot.
+
+    Only an already-``ndarray`` operand can have been mutated this way in
+    the first place -- ``resize`` is an ``ndarray`` method, so a
+    non-ndarray duck has nothing for it to exploit. Re-deriving that
+    operand's billing view is a second ``_np.asarray`` VIEW read, never a
+    second ``__array__``/``__array_ufunc__`` call (see
+    :func:`_resolve_ufunc_data_operand`'s ndarray branch), so refreshing it
+    costs nothing extra and cannot double-materialize a stateful duck. A
+    non-ndarray operand is returned via ``cached`` UNCHANGED -- reusing the
+    honest, single-materialization result from the first call rather than
+    touching its protocol a second time, which is exactly the guarantee
+    ``_resolve_ufunc_data_operand`` exists to give a stateful ``__array__``
+    duck.
+    """
+    if isinstance(x, _np.ndarray):
+        return _resolve_ufunc_data_operand(x)
+    return cached
+
+
 @_counted_wrapper
 def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     """Cost-tracked ``ufunc.outer(a, b)`` for any binary ufunc.
@@ -1208,6 +1244,16 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
+    # Resolved here, BEFORE ``a``/``b`` are read for billing below, not
+    # down where it is USED. ``np.dtype()`` accepts any object exposing a
+    # ``.dtype`` attribute, and that attribute can be a Python property --
+    # one that, as a side effect of returning a valid dtype, mutates ``a``
+    # or ``b`` in place (e.g. an owning ndarray subclass calling
+    # ``resize(n, refcheck=False)``, the confirmed reproduction this
+    # module's reordering guards against). Resolving it before either
+    # operand's billing view exists closes that window structurally: there
+    # is no stale pre-mutation snapshot left for it to race against.
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     # Symmetry tags live on the ORIGINAL ``SymmetricTensor`` instances --
     # read them BEFORE the stripping below, which (deliberately) discards
     # that subclass along with everything else.
@@ -1289,8 +1335,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # dtype= is excluded: it names the output of a value-testing loop
     # (comparison/logical), which still reads full-width operands, so it
     # falls through to the default path below instead of billing the
-    # (lighter) bool rate.
-    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
+    # (lighter) bool rate. (``explicit_dtype`` itself was already resolved
+    # above, before ``a``/``b``; this just decides how to use it.)
     if explicit_dtype is not None and explicit_dtype.kind != "b":
         billing_dtypes: tuple = (explicit_dtype,)
     else:
@@ -1326,7 +1372,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
-def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | None:
+def _resolve_generic_reduce_axis(axis) -> int | tuple[int, ...] | None:
     """Resolve ``axis`` for the generic ``ufunc.reduce``/``ufunc.accumulate``
     fallback paths -- the SOLE resolution of ``axis``, authoritative for
     both the bill and the real call below.
@@ -1363,6 +1409,16 @@ def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | Non
     billed for the first read while flopscope's own cost math forwarded
     the ORIGINAL object to numpy, which resolved it again independently
     and executed along whatever the second read produced.
+
+    Deliberately takes no ``ndim`` -- unlike ``_resolve_reduceat_axis``,
+    this resolver never range-checks against it (that's the "range checks
+    ... run natively, downstream" deferral described above), so it has no
+    structural need to read anything off ``a`` before resolving ``axis``.
+    That makes it callable BEFORE ``a`` is touched at all: a caller-
+    supplied ``axis`` exposing ``__index__`` that mutates ``a`` in place
+    (e.g. an owning ndarray subclass calling ``a.resize(n,
+    refcheck=False)``) can only run here, before ``a``'s billing view is
+    ever read, so there is no stale-shape snapshot for it to race against.
     """
     if axis is None:
         return None
@@ -1395,6 +1451,19 @@ def _counted_ufunc_reduce_generic(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
+    # Resolved here, BEFORE ``a`` is read for billing below -- see
+    # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
+    # early (it never needs anything off ``a``). A caller-supplied ``axis``
+    # exposing a stateful ``__index__`` can only mutate ``a`` here, before
+    # any billing view of ``a`` exists, closing the confirmed
+    # stale-billing-snapshot reproduction structurally rather than via a
+    # refresh.
+    axis = _resolve_generic_reduce_axis(axis)
+    # Same reasoning as ``axis`` above, and for the same reason: ``dtype=``
+    # is participant-controlled (``np.dtype()`` honours an arbitrary
+    # object's ``.dtype`` PROPERTY, which can mutate ``a`` as a side
+    # effect), so it is resolved before ``a``'s billing view exists too.
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     # Symmetry tags live on the ORIGINAL flopscope instance -- read them
     # BEFORE ``_resolve_ufunc_data_operand``'s stripping, which discards that
     # subclass along with everything else.
@@ -1415,11 +1484,10 @@ def _counted_ufunc_reduce_generic(
     # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
     # materialized, so numpy's own dispatch protocol decides what happens
     # instead of flopscope silently consuming ``__array__`` on its behalf.
+    # This is the ONLY read of ``a``'s billing view -- it happens LAST,
+    # after ``axis`` and ``dtype=`` have both already been resolved above,
+    # so it reflects whatever either of them may have mutated ``a`` into.
     a_view, a_fwd = _resolve_ufunc_data_operand(a)
-    # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
-    # same plain value (not the caller's original ``axis``) is what both
-    # the cost below AND the real call further down use.
-    axis = _resolve_generic_reduce_axis(axis, a_view.ndim)
     cost = reduction_cost(a_view.shape, axis=axis, symmetry=sym)
     out_sym = (
         reduce_group(sym, ndim=a_view.ndim, axis=axis, keepdims=keepdims)
@@ -1442,7 +1510,6 @@ def _counted_ufunc_reduce_generic(
     # bool). add/multiply's extra integer widening never matters here: they
     # are routed to sum/prod, not this generic path.
     default_dtype = _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
-    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
@@ -1485,6 +1552,19 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
+    # Resolved here, BEFORE ``a`` is read for billing below -- see
+    # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
+    # early (it never needs anything off ``a``). A caller-supplied ``axis``
+    # exposing a stateful ``__index__`` can only mutate ``a`` here, before
+    # any billing view of ``a`` exists, closing the confirmed
+    # stale-billing-snapshot reproduction structurally rather than via a
+    # refresh.
+    axis = _resolve_generic_reduce_axis(axis)
+    # Same reasoning as ``axis`` above, and for the same reason: ``dtype=``
+    # is participant-controlled (``np.dtype()`` honours an arbitrary
+    # object's ``.dtype`` PROPERTY, which can mutate ``a`` as a side
+    # effect), so it is resolved before ``a``'s billing view exists too.
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     # Symmetry tags live on the ORIGINAL flopscope instance -- read them
     # BEFORE ``_resolve_ufunc_data_operand``'s stripping, which discards that
     # subclass along with everything else.
@@ -1504,11 +1584,10 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
     # materialized, so numpy's own dispatch protocol decides what happens
     # instead of flopscope silently consuming ``__array__`` on its behalf.
+    # This is the ONLY read of ``a``'s billing view -- it happens LAST,
+    # after ``axis`` and ``dtype=`` have both already been resolved above,
+    # so it reflects whatever either of them may have mutated ``a`` into.
     a_view, a_fwd = _resolve_ufunc_data_operand(a)
-    # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
-    # same plain value (not the caller's original ``axis``) is what both
-    # the cost below AND the real call further down use.
-    axis = _resolve_generic_reduce_axis(axis, a_view.ndim)
     cost = reduction_cost(a_view.shape, axis=axis, symmetry=sym)
     out_sym = (
         reduce_group(sym, ndim=a_view.ndim, axis=axis, keepdims=True)
@@ -1527,7 +1606,6 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
     # -> float64, subtract(int32) -> int32).
     default_dtype = _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
-    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
@@ -1691,28 +1769,19 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
-    # ``a`` can already be a foreign ndarray subclass, a non-ndarray duck
-    # array, or a bare sequence here: numpy dispatches to this wrapper as
-    # soon as EITHER ``a`` or ``out`` is flopscope-aware, so a bare
-    # ``isinstance(a, ndarray)`` check would leave a non-flopscope operand
-    # untouched. ``_resolve_ufunc_data_operand`` is what makes every one of
-    # those cases safe: an ndarray subclass overriding
-    # ``.dtype``/``.shape``/``.ndim``/``.size`` as Python properties cannot
-    # misreport the billing view -- used below for ``n``, ``lanes``, and the
-    # billing dtype -- (a genuine ``_np.asarray`` read -- numpy's own ufunc
-    # dispatch reads the true descriptor at the C level regardless of what
-    # those properties report, see ``_counted_ufunc_outer``), a legitimate
-    # foreign subclass (e.g. ``np.ma.MaskedArray``) still reaches numpy below
-    # with its semantics intact, and a non-ndarray operand whose type
-    # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
-    # materialized, so numpy's own dispatch protocol decides what happens
-    # instead of flopscope silently consuming ``__array__`` on its behalf.
-    a_view, a_fwd = _resolve_ufunc_data_operand(a)
-    # Same lying-subclass exposure as ``a`` above, but for ``out=``: its
+    # Resolved here, BEFORE ``a`` is read for billing below, for the same
+    # reason as ``_counted_ufunc_reduce_generic``: ``np.dtype()`` honours an
+    # arbitrary object's ``.dtype`` PROPERTY, which can mutate ``a`` as a
+    # side effect. Unlike ``axis`` below, dtype= resolution never needs
+    # anything off ``a``, so it moves all the way up here rather than
+    # needing a refresh afterwards.
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
+    # Same lying-subclass exposure as ``a`` below, but for ``out=``: its
     # dtype participates in the billing rate (``store_billing_dtypes`` below)
     # and must be read off the real buffer, not a Python-level override.
     # ``out_view`` is billing-only; the real call further down forwards the
-    # caller's original ``out`` object instead.
+    # caller's original ``out`` object instead. ``out`` has no shape/dtype
+    # dependency on ``a``, so this can run before ``a`` is touched too.
     out_view = _to_base_ndarray(out) if out is not None else None
     if isinstance(out_view, _np.ndarray):
         out_view = _np.asarray(out_view)
@@ -1725,7 +1794,9 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # in ``ufunc.at``). Only an owned copy, unreachable from the caller,
     # closes it. This same snapshot is what gets costed AND what gets
     # handed to ``ufunc.reduceat`` below -- ``indices`` itself must not be
-    # read again after this point.
+    # read again after this point. This resolution has no dependency on
+    # ``a`` either, so -- like ``dtype=`` and ``out=`` above -- it runs
+    # before ``a`` is touched.
     #
     # An already-ndarray ``indices`` keeps its own dtype: numpy's ndarray
     # path only safe-casts (an int32 array widens fine; a float64 array
@@ -1753,6 +1824,30 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     else:
         indices_snapshot = _np.array(indices, dtype=_np.intp, copy=True)
     indices_snapshot.flags.writeable = False
+    # ``a`` can already be a foreign ndarray subclass, a non-ndarray duck
+    # array, or a bare sequence here: numpy dispatches to this wrapper as
+    # soon as EITHER ``a`` or ``out`` is flopscope-aware, so a bare
+    # ``isinstance(a, ndarray)`` check would leave a non-flopscope operand
+    # untouched. ``_resolve_ufunc_data_operand`` is what makes every one of
+    # those cases safe: an ndarray subclass overriding
+    # ``.dtype``/``.shape``/``.ndim``/``.size`` as Python properties cannot
+    # misreport the billing view -- used below for ``n``, ``lanes``, and the
+    # billing dtype -- (a genuine ``_np.asarray`` read -- numpy's own ufunc
+    # dispatch reads the true descriptor at the C level regardless of what
+    # those properties report, see ``_counted_ufunc_outer``), a legitimate
+    # foreign subclass (e.g. ``np.ma.MaskedArray``) still reaches numpy below
+    # with its semantics intact, and a non-ndarray operand whose type
+    # implements ``__array_ufunc__`` is forwarded ORIGINAL rather than
+    # materialized, so numpy's own dispatch protocol decides what happens
+    # instead of flopscope silently consuming ``__array__`` on its behalf.
+    #
+    # This FIRST read exists only to hand ``_resolve_reduceat_axis`` an
+    # ndim: unlike the generic reduce/accumulate resolver, real
+    # ``ufunc.reduceat`` accepts ``axis=None`` only on a 1-D array and
+    # range-checks the resolved axis against ndim, so the resolver
+    # genuinely needs SOME ndim before it can decide which accepted form
+    # applies. It is NOT the billing read.
+    a_view, a_fwd = _resolve_ufunc_data_operand(a)
     # Resolve ``axis`` through the same accept/reject boundary real
     # ``ufunc.reduceat`` uses (see ``_resolve_reduceat_axis`` for exactly
     # which forms that covers, including ``axis=None`` on a 1-D array,
@@ -1761,7 +1856,27 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # raises HERE, before any budget is deducted, instead of falling
     # through to the real call below with the caller's original object
     # (which numpy would then resolve a second time, possibly differently).
+    # ``operator.index`` inside it is participant code and (per the
+    # confirmed reproduction this whole module's reordering guards
+    # against) can mutate ``a`` in place via an owning ndarray subclass's
+    # ``resize(n, refcheck=False)`` -- which is exactly why the billing
+    # view is refreshed immediately below rather than trusted as-is.
     resolved_axis = _resolve_reduceat_axis(axis, a_view.ndim)
+    # THE billing read: re-derived now that ``axis`` (the last remaining
+    # participant-controlled argument) has fully resolved, so it reflects
+    # whatever that resolution may have mutated ``a`` into. See
+    # ``_refresh_ufunc_data_operand`` for why this cannot double-invoke a
+    # stateful ``__array__`` duck.
+    a_view, a_fwd = _refresh_ufunc_data_operand(a, (a_view, a_fwd))
+    # ``resolved_axis`` was validated against the ndim read BEFORE the
+    # refresh; if axis resolution's own mutation also changed ``a``'s
+    # ndim, that bound may no longer hold. Re-check it against the FRESH
+    # ndim -- never via a second ``_resolve_reduceat_axis``/``operator.index``
+    # call, which would invoke the caller's ``__index__`` a second time --
+    # before any cost is computed from it, so an axis invalidated by the
+    # mutation it caused is refused rather than silently indexed with.
+    if not (-a_view.ndim <= resolved_axis < a_view.ndim):
+        raise _AxisError(resolved_axis, a_view.ndim)
     n = a_view.shape[resolved_axis]
     applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
     lanes = a_view.size // n if n else 0
@@ -1781,7 +1896,6 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         if ufunc.__name__ in ("add", "multiply")
         else _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
     )
-    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
@@ -2000,25 +2114,6 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             f"np.{ufunc.__name__}.at(...)."
         )
     budget = require_budget()
-    # ``a`` (the in-place destination) can already be a foreign ndarray
-    # subclass here: numpy dispatches to this wrapper as soon as ``a`` is
-    # flopscope-aware, but nothing stops a caller-supplied subclass from
-    # ALSO overriding ``.dtype``/``.shape`` as Python properties -- numpy's
-    # own ufunc dispatch reads the true descriptor at the C level regardless
-    # of what those properties report (the same exposure ``_resolve_at_operand``
-    # below closes for the ``values`` operand), so billing off ``a`` directly
-    # (its dtype and shape are both read further down) would let a lying
-    # subclass under-report what numpy actually computes and writes. Read the
-    # billing dtype/shape off a SEPARATE ``_np.asarray`` view (stripping any
-    # flopscope wrapper first, to avoid recursing back through our own
-    # protocol handlers) -- a no-op VIEW, same buffer, for an operand that is
-    # already a genuine plain ndarray. ``a`` itself stays bound to the
-    # caller's original object -- see ``_counted_ufunc_outer`` for why a
-    # legitimate foreign subclass (e.g. ``np.ma.MaskedArray``) must still
-    # reach numpy below, so the in-place mutation keeps its subclass
-    # semantics (not just its raw buffer) rather than silently degrading to
-    # a plain ndarray write.
-    a_view = _np.asarray(_to_base_ndarray(a)) if isinstance(a, _np.ndarray) else a
     # ``indices`` can be many things: int, list of ints, ndarray, slice,
     # Ellipsis, or a tuple thereof (for multi-axis fancy indexing).
     # ``ufunc.at`` accepts all of these. ``_canonical_index`` resolves every
@@ -2095,6 +2190,37 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     resolved_args = tuple(_resolve_at_operand(v) for v in args)
     forward_args = tuple(forward for forward, _billing in resolved_args)
     billing_args = tuple(billing for _forward, billing in resolved_args)
+    # ``a`` (the in-place destination) is read for billing LAST, only now
+    # that both ``indices`` (``canonical``, above) and ``values``
+    # (``resolved_args``, just above) have been fully resolved -- both of
+    # those resolutions run participant code (``__index__`` inside
+    # ``_canon_entry``, ``__array__`` inside ``_resolve_at_operand``), and
+    # (per the confirmed reproduction this whole module's reordering
+    # guards against) that code can mutate ``a`` in place via an owning
+    # ndarray subclass's ``resize(n, refcheck=False)``. Reading ``a``'s
+    # billing view only now is what makes it reflect whatever numpy is
+    # actually about to touch below, rather than a pre-mutation snapshot
+    # taken before either resolution ran.
+    #
+    # ``a`` can already be a foreign ndarray subclass here: numpy
+    # dispatches to this wrapper as soon as ``a`` is flopscope-aware, but
+    # nothing stops a caller-supplied subclass from ALSO overriding
+    # ``.dtype``/``.shape`` as Python properties -- numpy's own ufunc
+    # dispatch reads the true descriptor at the C level regardless of what
+    # those properties report (the same exposure ``_resolve_at_operand``
+    # above closes for the ``values`` operand), so billing off ``a``
+    # directly (its dtype and shape are both read further down) would let
+    # a lying subclass under-report what numpy actually computes and
+    # writes. Read the billing dtype/shape off a SEPARATE ``_np.asarray``
+    # view (stripping any flopscope wrapper first, to avoid recursing back
+    # through our own protocol handlers) -- a no-op VIEW, same buffer, for
+    # an operand that is already a genuine plain ndarray. ``a`` itself
+    # stays bound to the caller's original object -- see
+    # ``_counted_ufunc_outer`` for why a legitimate foreign subclass (e.g.
+    # ``np.ma.MaskedArray``) must still reach numpy below, so the in-place
+    # mutation keeps its subclass semantics (not just its raw buffer)
+    # rather than silently degrading to a plain ndarray write.
+    a_view = _np.asarray(_to_base_ndarray(a)) if isinstance(a, _np.ndarray) else a
     # Same loop resolution as the other generic ufunc-method paths:
     # ``ufunc.at`` applies the ufunc's own resolved loop and casts the
     # result back in place with unsafe casting, so a float-only loop runs

@@ -698,3 +698,94 @@ def test_reduceat_lying_dtype_out_operand_bills_the_real_dtype():
     )
     assert lying_cost == honest_float64_cost
     assert lying_cost > honest_int8_cost
+
+
+# ----- stale billing snapshot: participant-controlled resolution (axis=,
+# dtype=) mutating ``a`` in place AFTER its billing view was already read -----
+
+
+class _OwningFloat64(np.ndarray):
+    """A plain ndarray subclass that OWNS its data (is not a view of
+    something else), constructed the same way ``np.empty``/``np.zeros``
+    would build one. That ownership is exactly what makes
+    ``resize(n, refcheck=False)`` a legitimate in-place grow rather than a
+    ``ValueError`` -- any array a caller builds directly, not a slice or
+    view of something else, has it.
+    """
+
+    def __new__(cls, n, fill=1.0):
+        obj = super().__new__(cls, (n,), dtype=np.float64)
+        obj[...] = fill
+        return obj
+
+
+class _ResizingAxis:
+    """An ``axis=`` object whose ``__index__`` -- before returning a valid
+    axis -- resizes ``a`` in place via an OWNING ndarray subclass's
+    ``resize(n, refcheck=False)``.
+    """
+
+    def __init__(self, a, new_size, axis=0):
+        self._a = a
+        self._new_size = new_size
+        self._axis = axis
+
+    def __index__(self):
+        self._a.resize(self._new_size, refcheck=False)
+        return self._axis
+
+
+def test_reduceat_resizing_axis_bills_the_post_resize_array():
+    """Regression pin for the confirmed stale-billing-snapshot defect:
+    ``a``'s billing view used to be captured BEFORE ``axis=`` was
+    resolved. Resolving ``axis`` invokes ``__index__``, participant code,
+    which here grows ``a`` from 4 elements to ``n`` in place -- a
+    legitimate operation for an array that owns its data. The bill must
+    reflect the ``n``-element array ``ufunc.reduceat`` actually reduces,
+    not the 4-element array that existed before ``axis`` was resolved.
+    ``out=`` is a flopscope array so dispatch reaches flopscope's wrapper
+    even though ``a`` itself is a foreign (non-flopscope) subclass, mirroring
+    how a real caller would trigger this path.
+    """
+    n = 1_000_000
+    a = _OwningFloat64(4)
+    axis = _ResizingAxis(a, n)
+
+    cost = billed(lambda: np.add.reduceat(a, [0], axis=axis, out=fnp.zeros((1,))))
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest = billed(lambda: np.add.reduceat(fnp.asarray(np.full(n, 1.0)), [0]))
+    assert cost == honest, (
+        "the bill must match the post-resize array numpy actually reduced, "
+        "not a snapshot taken before axis resolution ran"
+    )
+
+
+def test_reduceat_resizing_dtype_bills_the_post_resize_array():
+    """Same defect, a different participant-controlled vector: a ``dtype=``
+    object whose ``.dtype`` PROPERTY -- which ``np.dtype()`` honours --
+    resizes ``a`` as a side effect of reporting a valid dtype, instead of
+    ``axis=``'s ``__index__``. Calls the wrapper directly (like the
+    lying-dtype tests above) so the attack is exercised even though ``a``
+    itself never becomes flopscope-aware.
+    """
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingDtype:
+        @property
+        def dtype(self):
+            a.resize(n, refcheck=False)
+            return np.dtype(np.float64)
+
+    from flopscope._pointwise import _counted_ufunc_reduceat
+
+    cost = billed(
+        lambda: _counted_ufunc_reduceat(np.add, a, [0], dtype=_ResizingDtype())
+    )
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest = billed(
+        lambda: _counted_ufunc_reduceat(np.add, np.full(n, 1.0), [0], dtype=np.float64)
+    )
+    assert cost == honest

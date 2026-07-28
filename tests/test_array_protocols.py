@@ -716,6 +716,162 @@ def test_np_add_at_preserves_masked_array_values_operand():
     np.testing.assert_array_equal(np.asarray(dst), [3.0, 3.0, 0.0])
 
 
+# ----- stale billing snapshot: ``a``'s shape/size/dtype must be read for
+# billing AFTER every participant-controlled protocol resolution (axis=,
+# dtype=, the index/values operands) has run, not before -- because that
+# resolution can run arbitrary code, and an OWNING ndarray subclass's
+# ``resize(n, refcheck=False)`` lets it grow ``a`` in place. See
+# ``tests/test_reduceat_cost.py`` for the ``reduceat`` pin (including the
+# original confirmed reproduction); the cases here cover the other four
+# generic ufunc-method paths that share the same ordering discipline.
+
+
+class _OwningFloat64(np.ndarray):
+    """A plain ndarray subclass that OWNS its data (is not a view of
+    something else) -- the same shape ``np.empty``/``np.zeros`` builds.
+    That ownership is what makes ``resize(n, refcheck=False)`` a legitimate
+    in-place grow rather than a ``ValueError``.
+    """
+
+    def __new__(cls, n, fill=1.0):
+        obj = super().__new__(cls, (n,), dtype=np.float64)
+        obj[...] = fill
+        return obj
+
+
+def test_np_subtract_reduce_resizing_axis_bills_the_post_resize_array():
+    """``axis=``'s ``__index__`` grows ``a`` in place before returning a
+    valid axis. ``out=`` is a flopscope array so dispatch reaches
+    flopscope's wrapper even though ``a`` itself is a foreign subclass."""
+    n = 1_000_000
+
+    class _ResizingAxis:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    a = _OwningFloat64(4)
+    out = fnp.array(0.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.subtract.reduce(a, axis=_ResizingAxis(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.subtract.reduce(fnp.asarray(np.full(n, 1.0)), axis=0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_subtract_accumulate_resizing_axis_bills_the_post_resize_array():
+    """Same defect as the ``reduce`` case above, for ``accumulate``."""
+    n = 1_000_000
+
+    class _ResizingAxis:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    a = _OwningFloat64(4)
+    out = fnp.zeros(n)
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.subtract.accumulate(a, axis=_ResizingAxis(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.subtract.accumulate(fnp.asarray(np.full(n, 1.0)), axis=0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_multiply_outer_resizing_dtype_bills_the_post_resize_array():
+    """A ``dtype=`` object whose ``.dtype`` PROPERTY -- which ``np.dtype()``
+    honours -- resizes ``a`` in place as a side effect of reporting a
+    valid dtype."""
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingDtype:
+        @property
+        def dtype(self):
+            a.resize(n, refcheck=False)
+            return np.dtype(np.float64)
+
+    # ``b`` and the honest comparison's operands are built OUTSIDE the
+    # measured contexts below -- see
+    # ``test_np_multiply_outer_stateful_array_like_operand_resolved_once``
+    # above for why: array construction itself is billable, and folding it
+    # into either measured window would leak into the comparison.
+    b = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.multiply.outer(a, b, dtype=_ResizingDtype())
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = fnp.asarray(np.full(n, 1.0))
+    honest_b = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(honest_a, honest_b, dtype=np.float64)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+# ``ufunc.at`` has no ``out=`` slot, so (unlike outer/reduce/accumulate/
+# reduceat) numpy dispatches to flopscope's wrapper only when ``a`` ITSELF
+# is flopscope-aware -- there is no other operand to hang dispatch off of.
+# flopscope arrays are deliberately immutable (``resize`` raises
+# ``ValueError`` on one -- see ``flopscope-immutability-intent``), so a
+# foreign, resize-capable ``a`` can never reach ``_counted_ufunc_at``
+# through the public ``np.add.at(...)`` surface at all. The two cases below
+# call the wrapper directly instead -- the same pattern
+# ``test_reduceat_lying_dtype_a_operand_bills_the_real_dtype`` in
+# ``tests/test_reduceat_cost.py`` uses for the same underlying reason (a
+# foreign, non-flopscope ``a`` with nothing to trigger dispatch) -- so the
+# ordering fix is still exercised even though this specific vector is not
+# independently reachable from outside the package.
+
+
+def test_np_add_at_resizing_index_bills_the_post_resize_array():
+    """``ufunc.at``'s index entry can itself expose ``__index__`` and, via
+    that, resize ``a`` in place before the real write runs."""
+    from flopscope._pointwise import _counted_ufunc_at
+
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingIndex:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        _counted_ufunc_at(np.add, a, _ResizingIndex(), 1.0)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = np.full(n, 1.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        _counted_ufunc_at(np.add, honest_a, 0, 1.0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_add_at_resizing_values_bills_the_post_resize_array():
+    """Same defect, via the ``values`` operand's ``__array__`` instead of
+    the index: resizes ``a`` in place as a side effect of materializing."""
+    from flopscope._pointwise import _counted_ufunc_at
+
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingValues:
+        def __array__(self, dtype=None, copy=None):
+            a.resize(n, refcheck=False)
+            return np.ones(n)
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        _counted_ufunc_at(np.add, a, slice(None), _ResizingValues())
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = np.full(n, 1.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        _counted_ufunc_at(np.add, honest_a, slice(None), np.ones(n))
+    assert bc.flops_used == honest_bc.flops_used
+
+
 # ----- Multi-output ufuncs route through __array_ufunc__ -----
 
 
