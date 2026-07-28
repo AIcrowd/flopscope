@@ -534,6 +534,55 @@ def test_np_multiply_outer_a_masked_b_flopscope_preserves_mask():
     np.testing.assert_array_equal(result.mask, [[True] * 3, [False] * 3])
 
 
+class _StatefulArrayLike:
+    """A pure ``__array__`` duck type -- NOT an ndarray subclass -- whose
+    ``__array__`` returns a DIFFERENT (larger) array on its second call
+    than its first.
+
+    Regression pin: ``outer``'s billing view used to be built from one
+    ``_np.asarray(x)`` call while the caller's original, unresolved ``x``
+    was separately forwarded to the real ``ufunc.outer`` -- which performs
+    its OWN ``np.asarray`` conversion internally. For an operand backed by
+    a live view (e.g. an already-materialized ndarray) those two
+    conversions agree. For a stateful duck type like this one they don't:
+    the small first-call array got billed while numpy actually computed
+    over the large second-call array, undercharging the real work.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.calls += 1
+        size = 2 if self.calls == 1 else 3000
+        return np.ones(size, dtype=np.float64)
+
+
+def test_np_multiply_outer_stateful_array_like_operand_resolved_once():
+    """``__array__`` must be invoked EXACTLY ONCE for a non-ndarray operand,
+    and the bill must match the honest cost of the shape numpy actually
+    computes over -- not a smaller shape returned by an earlier, discarded
+    call.
+    """
+    # Operands are created OUTSIDE the measured budget contexts below so
+    # that array-construction cost doesn't leak into the comparison -- only
+    # the ``outer`` call itself is being measured.
+    a = fnp.array([1.0, 1.0, 1.0, 1.0])
+    grow = _StatefulArrayLike()
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        result = np.multiply.outer(a, grow)
+
+    assert grow.calls == 1
+    assert result.shape == (4, 2)
+
+    a_honest = fnp.array([1.0, 1.0, 1.0, 1.0])
+    b_honest = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(a_honest, b_honest)
+
+    assert bc.flops_used == honest_bc.flops_used
+
+
 @pytest.mark.parametrize(
     "op_name,make_other,call",
     [
