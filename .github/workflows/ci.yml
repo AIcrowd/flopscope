@@ -268,7 +268,13 @@ jobs:
     # never fail the build). A single `uv sync --all-extras` gives the root
     # venv pyzmq/msgpack for both the client (test process) and the server
     # subprocess (the fixture falls back to the root venv in CI).
-    if: needs.detect-impact.outputs.run_numpy_compat == 'true'
+    # Also admit a manual dispatch. `detect-impact` only sets its output on a
+    # dispatch when the NumPy-compat input is ticked, so without this clause the
+    # whole job is skipped and the full parity sweep advertised as runnable
+    # on demand never actually runs.
+    if: >-
+      needs.detect-impact.outputs.run_numpy_compat == 'true' ||
+      github.event_name == 'workflow_dispatch'
     needs: [detect-impact]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -292,6 +298,22 @@ jobs:
 
       - name: "Client-parity measurement (non-blocking): numpy's own suite vs the client"
         run: make test-client-parity-measure
+
+      - name: "Parity GATE: fast client/in-process differential"
+        run: make test-parity-fast
+
+      # Reports on pull requests so a divergence is seen and triaged BEFORE it
+      # can turn the release gate below red on main. Non-blocking here on
+      # purpose: the sweep takes about five minutes and runs concurrently with
+      # the rest of the job matrix, so it costs no serialised PR latency.
+      - name: "Parity full sweep (report-only on pull requests)"
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: make test-parity-full
+
+      - name: "Parity full sweep (release gate; blocks push to main)"
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: make test-parity-full
 
   client-server-sync:
     runs-on: ubuntu-latest
