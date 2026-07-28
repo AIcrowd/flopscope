@@ -151,8 +151,13 @@ class FlopscopeServer:
 
         try:
             if result.get("status") == "error":
+                # Carry the handler's budget through. A failing operation can
+                # still have been billed -- the kernel charges, then packing
+                # the result finds it undeliverable -- and re-encoding without
+                # the budget is what left the client's cached flops_used
+                # sitting at its pre-charge value.
                 response_bytes = encode_error_response(
-                    result["error_type"], result["message"]
+                    result["error_type"], result["message"], result.get("budget")
                 )
             elif "data" in result:
                 # fetch / fetch_slice -- use raw response packing

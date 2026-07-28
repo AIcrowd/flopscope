@@ -185,7 +185,9 @@ def encode_response(result: Any, budget: int, comms_overhead_ns: int) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def encode_error_response(error_type: str, message: str) -> bytes:
+def encode_error_response(
+    error_type: str, message: str, budget: dict | None = None
+) -> bytes:
     """Encode an error response.
 
     Parameters
@@ -194,17 +196,25 @@ def encode_error_response(error_type: str, message: str) -> bytes:
         Name of the exception class (e.g. ``"InvalidRequestError"``).
     message:
         Human-readable error description.
+    budget:
+        The session's budget as it stands, when there is one. An operation is
+        billed by the kernel that runs it and only then found to be
+        undeliverable, so a failure can still have cost the caller FLOPs; the
+        client folds this into the ``flops_used`` its callers read. Omitted for
+        failures raised before any session exists, such as a malformed request.
 
     Returns
     -------
     bytes
         msgpack-encoded response dict with ``status="error"``.
     """
-    payload = {
+    payload: dict[str, object] = {
         "status": "error",
         "error_type": error_type,
         "message": message,
     }
+    if budget is not None:
+        payload["budget"] = budget
     return msgpack.packb(payload, use_bin_type=True)
 
 

@@ -132,7 +132,29 @@ class RequestHandler:
         """Dispatch *request* and return a response dict.
 
         The ``request["op"]`` field determines which handler is invoked.
+
+        Error responses leave here carrying the session's budget. An operation
+        can be billed and then fail -- the kernel runs and charges, then
+        packing its result discovers the result cannot be delivered -- and the
+        client folds the ``budget`` of every response into the cached
+        ``flops_used`` its callers read. An error response that omitted the
+        budget would leave a caller that caught the exception reading a value
+        from before the charge, and deciding what to run next on that basis.
+        Attaching it in one place, rather than at each of the individual error
+        returns, is what keeps a later error path from forgetting to.
         """
+        response = self._dispatch(request)
+        if response.get("status") == "error" and "budget" not in response:
+            try:
+                response["budget"] = self._session.budget_status()
+            except Exception:
+                # Reporting the budget is a courtesy on this path; it must
+                # never replace a real error with an internal one.
+                pass
+        return response
+
+    def _dispatch(self, request: dict) -> dict:
+        """Route *request* to its handler. See :meth:`handle`."""
         self._kernel_ns = 0
         try:
             op = request["op"]
