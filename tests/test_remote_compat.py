@@ -17,7 +17,7 @@ _CALLBACK_OPS = frozenset(
 )
 
 
-def test_remote_unsupported_ops_returns_frozenset_of_callback_ops():
+def test_remote_unsupported_ops_returns_frozenset():
     ops = flops.remote_unsupported_ops()
     assert isinstance(ops, frozenset)
 
