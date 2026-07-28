@@ -136,16 +136,28 @@ def test_matmul_matrix_matches_numpy_cell_by_cell(out_dtype):
         _assert_agrees("ij,jk->ik", (da, db), out_dtype, shapes, (N, N))
 
 
-def test_matrix_accept_count_is_the_measured_one():
-    """A blunt tripwire on the size of the accept set. 1154 of 4096 is what
-    numpy 2.0.2 through 2.4.2 all accept; a fix that drifts either way should
-    have to change this number deliberately rather than quietly."""
-    accepted = 0
+def test_matrix_accept_count_tracks_numpys_own():
+    """A tripwire on the SIZE of the accept set, measured against numpy rather
+    than frozen.
+
+    A literal count cannot work here: the accept set is numpy-version
+    dependent -- 1154 on numpy 2.2 against 1069 on 2.3 -- so a frozen number
+    passes on the machine it was measured on and fails the matrix. Asking
+    numpy for its own count on the same cells keeps the tripwire (a fix that
+    drifts either way still has to be deliberate) without pinning a constant
+    that only holds for one numpy.
+
+    The cell-by-cell tests above are the real assertion; this catches a
+    wholesale collapse, e.g. a guard that starts refusing everything and
+    still agrees per-cell because the comparison itself broke."""
+    accepted = expected = 0
     for da, db in itertools.product(MATRIX_DTYPES, repeat=2):
         for dout in MATRIX_DTYPES:
-            _, got = _compare("ij,jk->ik", (da, db), dout, ((N, N), (N, N)), (N, N))
+            want, got = _compare("ij,jk->ik", (da, db), dout, ((N, N), (N, N)), (N, N))
+            expected += want[0] == "ok"
             accepted += got[0] == "ok"
-    assert accepted == 1154
+    assert expected > 0, "test bug: numpy accepted nothing, the matrix is broken"
+    assert accepted == expected
 
 
 # --- other subscripts and arities -----------------------------------------
