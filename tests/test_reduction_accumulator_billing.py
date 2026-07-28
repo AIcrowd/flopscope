@@ -140,7 +140,8 @@ def test_narrower_out_does_not_discount_float_power_reduce():
     a = _arr(np.float32)
     dst = fnp.zeros(N, dtype=np.float32)
     bare = _billed(lambda: np.float_power.reduce(a, axis=0))
-    assert bare == REDUCE_COST * 2  # float64 loop -> rate 2.0
+    # float64 loop -> rate 2.0 * float_power weight 16.0
+    assert bare == REDUCE_COST * 2 * 16
     assert _billed(lambda: np.float_power.reduce(a, axis=0, out=dst)) == bare
 
 
@@ -251,7 +252,7 @@ def test_power_reduce_sibling_is_unmoved_by_out():
     a = _arr(np.float32)
     dst = fnp.zeros(N, dtype=np.float32)
     bare = _billed(lambda: np.power.reduce(a, axis=0))
-    assert bare == REDUCE_COST
+    assert bare == REDUCE_COST * 16  # float32 loop -> rate 1.0 * power weight 16.0
     assert _billed(lambda: np.power.reduce(a, axis=0, out=dst)) == bare
 
 
@@ -374,3 +375,374 @@ def test_a_complex_destination_never_lowers_the_bill(op, expect_ratio):
         f"real one -- the complex factor was dropped"
     )
     assert complex_cost == real_cost * expect_ratio
+
+
+# ---------------------------------------------------------------------------
+# dtype= must be resolved through the array/dtype protocol exactly once, with
+# that SAME resolved value used for both the billing rate and the real numpy
+# call -- across every generic ufunc-method path that accepts it.
+# ---------------------------------------------------------------------------
+
+
+def _stateful_dtype_object():
+    """A dtype-like object (``np.dtype()`` honours a ``.dtype`` property)
+    that reports float32 on its first read and float64 on every read after
+    that. Returns the object and a zero-arg getter for how many times its
+    property has been read.
+    """
+    calls = [0]
+
+    class StatefulDtype:
+        @property
+        def dtype(self):
+            calls[0] += 1
+            return np.dtype(np.float32) if calls[0] == 1 else np.dtype(np.float64)
+
+    return StatefulDtype(), (lambda: calls[0])
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_outer():
+    """``ufunc.outer(..., dtype=)`` must resolve a dtype-like object exactly
+    once: the resolved dtype sets the billing rate AND is what the real
+    call runs with. Reading it once for billing and then handing the
+    original object to numpy -- which resolves it again independently --
+    would let a property reporting a cheap dtype on the first read and a
+    pricier one afterward bill the cheap rate while numpy actually ran the
+    pricier loop.
+    """
+    load_weights()
+    a_raw = np.full((2000, 2), 2, dtype=np.int32)
+    b_raw = np.full((2,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=sd
+        )
+    )
+    honest_f32 = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=np.float32
+        )
+    )
+    honest_f64 = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=np.float64
+        )
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_generic_reduce():
+    """Same protocol-resolution guarantee as above, for the generic
+    ``ufunc.reduce`` fallback (``subtract`` is not in
+    ``FlopscopeArray._REDUCE_TO_WHEST``, so it takes this path).
+    """
+    load_weights()
+    a_raw = np.full((2_000_000,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=sd))
+    honest_f32 = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=np.float32)
+    )
+    honest_f64 = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=np.float64)
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_generic_accumulate():
+    """Same protocol-resolution guarantee as above, for the generic
+    ``ufunc.accumulate`` fallback.
+    """
+    load_weights()
+    a_raw = np.full((2_000_000,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=sd))
+    honest_f32 = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=np.float32)
+    )
+    honest_f64 = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=np.float64)
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+# ---------------------------------------------------------------------------
+# ``axis=`` must be resolved through the array/index protocol exactly once,
+# for the generic ``ufunc.reduce``/``ufunc.accumulate`` fallbacks -- the same
+# guarantee ``ufunc.reduceat`` already has, closing the same class of gap: a
+# stateful ``axis`` object read once for billing and a second time by the
+# real numpy call (which forwarding the caller's original object allowed)
+# could report a cheap axis on the first read and an expensive one on the
+# second, so the bill would reflect an axis numpy never actually reduced
+# along.
+# ---------------------------------------------------------------------------
+
+
+def test_axis_array_protocol_is_resolved_once_for_generic_reduce():
+    calls = [0]
+
+    class FlakyAxis:
+        def __index__(self):
+            calls[0] += 1
+            return 1 if calls[0] == 1 else 0
+
+    shape = (200_000, 2)
+    a = fnp.asarray(np.full(shape, 2.0))
+    cost = _billed(lambda: np.subtract.reduce(a, axis=FlakyAxis()))
+
+    honest_cheap = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(np.full(shape, 2.0)), axis=1)
+    )
+    honest_expensive = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(np.full(shape, 2.0)), axis=0)
+    )
+
+    assert calls[0] == 1, "sanity: axis must be resolved exactly once"
+    assert cost == honest_cheap, "the bill must match the single read actually used"
+    assert cost < honest_expensive, (
+        "sanity: axis 0 is the genuinely expensive axis for this shape"
+    )
+
+
+def test_axis_array_protocol_is_resolved_once_for_generic_accumulate():
+    calls = [0]
+
+    class FlakyAxis:
+        def __index__(self):
+            calls[0] += 1
+            return 1 if calls[0] == 1 else 0
+
+    shape = (200_000, 2)
+    a = fnp.asarray(np.full(shape, 2.0))
+    cost = _billed(lambda: np.subtract.accumulate(a, axis=FlakyAxis()))
+
+    honest_cheap = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(np.full(shape, 2.0)), axis=1)
+    )
+    honest_expensive = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(np.full(shape, 2.0)), axis=0)
+    )
+
+    assert calls[0] == 1, "sanity: axis must be resolved exactly once"
+    assert cost == honest_cheap, "the bill must match the single read actually used"
+    assert cost < honest_expensive, (
+        "sanity: axis 0 is the genuinely expensive axis for this shape"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ``ufunc.outer`` dispatches as soon as EITHER operand is flopscope-aware, so
+# the OTHER operand can be an arbitrary ndarray subclass. It must not be able
+# to lie about its own dtype: numpy's ufunc dispatch reads the true
+# underlying descriptor at the C level regardless of a Python-level
+# ``.dtype`` property override.
+# ---------------------------------------------------------------------------
+
+
+def test_outer_operand_ndarray_subclass_cannot_lie_about_its_own_dtype():
+    load_weights()
+    n = 2000
+
+    class LiesAboutDtype(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    a_real = np.full((n,), 1 + 2j, dtype=np.complex128).view(LiesAboutDtype)
+    b = fnp.asarray(np.full((n,), 2, dtype=np.int8))
+
+    cost = _billed(lambda: np.add.outer(a_real, b))
+    honest = _billed(
+        lambda: np.add.outer(
+            np.full((n,), 1 + 2j, dtype=np.complex128),
+            fnp.asarray(np.full((n,), 2, dtype=np.int8)),
+        )
+    )
+
+    assert cost == honest, (
+        "the bill must reflect the TRUE dtype numpy computes at, not the "
+        "cheap one the subclass's .dtype property reports"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ``axis=`` accept/reject boundary for the generic ``ufunc.reduce`` /
+# ``ufunc.accumulate`` fallbacks must match RAW numpy's exactly. In
+# particular, a LIST axis must never be silently normalized into a tuple and
+# executed: real numpy accepts only a bare int or a tuple of ints for
+# ``axis=`` and rejects every list outright (regardless of length or
+# content), with ``TypeError: 'list' object cannot be interpreted as an
+# integer``. ``logical_xor`` is not in ``_REDUCE_TO_WHEST`` /
+# ``_ACCUMULATE_TO_WHEST``, so it exercises the generic fallback path
+# (``_resolve_generic_reduce_axis``) rather than a specialized one.
+# ---------------------------------------------------------------------------
+
+
+class _IndexOnce:
+    """A caller-supplied axis exposing ``__index__``, resolving to 1."""
+
+    def __index__(self):
+        return 1
+
+
+# (label, axis, resolved-before-cost) -- "resolved-before-cost" marks the
+# forms `_resolve_generic_reduce_axis` itself rejects (list and bool axes),
+# for which a refused call must cost exactly nothing. The remaining forms
+# real numpy accepts either method (int, negative int, tuple1, np.int64,
+# 0-d int array, __index__ object) plus the two forms only `.reduce` accepts
+# (None, a multi-axis tuple) are exercised separately below.
+_REJECTED_BEFORE_COST = [
+    pytest.param([1], id="single-elem-list"),
+    pytest.param([0, 1], id="multi-elem-list"),
+    pytest.param([[0], [1]], id="nested-list"),
+    pytest.param(True, id="bool-scalar"),
+    pytest.param(np.bool_(False), id="np-bool-scalar"),
+]
+
+_ACCEPTED_BY_BOTH = [
+    pytest.param(1, id="int-pos"),
+    pytest.param(-1, id="int-neg"),
+    pytest.param((1,), id="one-tuple"),
+    pytest.param(np.int64(1), id="np-int64"),
+    pytest.param(np.array(1), id="0d-int-array"),
+    pytest.param(_IndexOnce(), id="index-protocol-object"),
+]
+
+
+def _make_bool_array(shape):
+    rng = np.random.default_rng(3)
+    return rng.integers(0, 2, size=shape).astype(bool)
+
+
+@pytest.mark.parametrize("axis", _ACCEPTED_BY_BOTH)
+def test_generic_reduce_accepts_every_form_raw_numpy_accepts(axis):
+    """Every form real numpy accepts for ``.reduce`` must still be accepted
+    by flopscope, and billed (not floored at zero)."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.reduce(a_raw, axis=axis)  # sanity: numpy accepts it
+    cost = _billed(lambda: np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis))
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", [None, (0, 1)], ids=["none", "two-tuple"])
+def test_generic_reduce_accepts_multi_axis_forms(axis):
+    """``.reduce`` (unlike ``.accumulate``) allows reducing more than one
+    axis at once, via either ``axis=None`` or a multi-element tuple."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.reduce(a_raw, axis=axis)  # type: ignore[arg-type]
+    cost = _billed(
+        lambda: np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+    )
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", _REJECTED_BEFORE_COST)
+def test_generic_reduce_rejects_the_same_forms_raw_numpy_rejects(axis):
+    """A LIST (any length/content) or a ``bool``/``np.bool_`` axis must be
+    refused with the SAME exception type raw numpy raises, and must cost
+    NOTHING -- flopscope's own axis resolver rejects these before any cost
+    is computed, so the real numpy call (and the deduct) must never run.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.reduce(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(type(raw_exc_info.value)):
+                np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+        assert ctx.flops_used == before, "a refused axis form must cost nothing"
+
+
+@pytest.mark.parametrize("axis", _ACCEPTED_BY_BOTH)
+def test_generic_accumulate_accepts_every_form_raw_numpy_accepts(axis):
+    """Every form real numpy accepts for ``.accumulate`` must still be
+    accepted by flopscope, and billed (not floored at zero)."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.accumulate(a_raw, axis=axis)  # sanity check
+    cost = _billed(
+        lambda: np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)
+    )
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", _REJECTED_BEFORE_COST)
+def test_generic_accumulate_rejects_the_same_forms_raw_numpy_rejects(axis):
+    """Same guarantee as the ``.reduce`` case above, for ``.accumulate``:
+    a LIST or ``bool``/``np.bool_`` axis is refused with the exact
+    exception type raw numpy raises, at zero cost.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.accumulate(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(type(raw_exc_info.value)):
+                np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+        assert ctx.flops_used == before, "a refused axis form must cost nothing"
+
+
+@pytest.mark.parametrize("axis", [None, (0, 1)], ids=["none-multi-axis", "two-tuple"])
+def test_generic_accumulate_rejects_multi_axis_forms_raw_numpy_rejects(axis):
+    """``.accumulate`` (unlike ``.reduce``) refuses to accumulate over more
+    than one axis, whether spelled as ``axis=None`` on an ndim>1 array or a
+    multi-element tuple -- flopscope must raise the same exception type raw
+    numpy raises for both.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.accumulate(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with pytest.raises(type(raw_exc_info.value)):
+            np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+
+
+def test_generic_reduce_list_axis_is_never_normalized_into_a_tuple_and_executed():
+    """The confirmed regression this module guards against: a LIST axis
+    must not be silently converted into a tuple and executed -- it must be
+    refused, matching raw numpy's own ``TypeError``, before any budget is
+    deducted.
+    """
+    a_raw = _make_bool_array((3, 4))
+    with pytest.raises(TypeError):
+        np.logical_xor.reduce(a_raw, axis=[0, 1])  # sanity: raw numpy rejects this
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(TypeError):
+                np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=[0, 1])
+        assert ctx.flops_used == before

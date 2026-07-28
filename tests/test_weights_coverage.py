@@ -344,3 +344,54 @@ class TestDocsWeightCoverage:
                 for name, (expected, actual) in sorted(mismatched.items())[:20]
             )
         )
+
+
+class TestUfuncMethodWeightCoverage:
+    """Synthesized ufunc-method names are not REGISTRY rows, so the registry-walking
+    coverage tests above cannot see them. Cover them explicitly."""
+
+    # Deliberately written out by hand rather than imported from
+    # ``flopscope._weights._UFUNC_METHOD_SUFFIXES`` (the module under test). If this
+    # test enumerated candidate op names using the imported constant, a bug that
+    # silently *shrinks* that constant (e.g. dropping ".at") would shrink the set of
+    # names this test checks in lockstep -- the check would keep "passing" while the
+    # real fallback it's supposed to guard quietly stopped covering a method. These
+    # are the five generic methods every NumPy ufunc exposes (``np.add.reduce`` etc.)
+    # and the list is stable upstream.
+    EXPECTED_UFUNC_METHOD_SUFFIXES = (
+        ".reduce",
+        ".accumulate",
+        ".reduceat",
+        ".outer",
+        ".at",
+    )
+
+    def test_suffix_constant_matches_hardcoded_expectation(self):
+        """The module's suffix list must equal the hardcoded ground truth above.
+
+        This is what actually catches a dropped or renamed suffix -- without it,
+        the coverage test below would silently enumerate fewer names and stay green.
+        """
+        from flopscope._weights import _UFUNC_METHOD_SUFFIXES
+
+        assert set(_UFUNC_METHOD_SUFFIXES) == set(self.EXPECTED_UFUNC_METHOD_SUFFIXES)
+
+    def test_reachable_ufunc_methods_resolve_to_a_base_weight(self):
+        import numpy as np
+
+        from flopscope._weights import get_weight
+
+        offenders = []
+        for name in dir(np):
+            ufunc = getattr(np, name)
+            if not isinstance(ufunc, np.ufunc):
+                continue
+            base = get_weight(ufunc.__name__)
+            if base == 1.0:
+                continue  # neutral either way; nothing to desync
+            for suffix in self.EXPECTED_UFUNC_METHOD_SUFFIXES:
+                if get_weight(ufunc.__name__ + suffix) != base:
+                    offenders.append(ufunc.__name__ + suffix)
+        assert not offenders, (
+            f"ufunc-method names not inheriting their base weight: {sorted(offenders)}"
+        )

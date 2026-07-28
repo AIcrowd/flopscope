@@ -11,6 +11,7 @@ Translated against post-PR-#51 unified SymmetryGroup API.
 from __future__ import annotations
 
 import numpy as np
+import numpy.ma as ma
 import pytest
 
 import flopscope as flops
@@ -456,6 +457,452 @@ def test_np_add_at_on_symmetric_tensor_refuses():
         S = flops.symmetrize(fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=sym)
         with pytest.raises(ValueError, match="symmetry"):
             np.add.at(S, ([0],), 1.0)
+
+
+# ----- ufunc.outer / .reduce / .accumulate / .reduceat / .at must forward a
+# foreign operand's ORIGINAL object to numpy, not a subclass-stripped view.
+#
+# The billing hardening in these wrappers reads a/b/out=/values off a
+# ``_np.asarray(...)`` view so a lying ``.dtype``/``.shape`` property can't
+# under-report the bill -- but that view must stay LOCAL to the billing
+# math. Forwarding it (instead of the caller's real object) to the actual
+# numpy call silently drops a legitimate foreign ndarray subclass's
+# semantics -- a mask, a unit system, anything hanging off
+# ``__array_ufunc__``/``__array_wrap__`` -- even though only the bill
+# needed the honest read.
+
+
+class _TrackingArray(np.ndarray):
+    """ndarray subclass with a genuine ``__array_ufunc__`` override.
+
+    Records every ufunc dispatch it wins, then delegates to the real
+    computation so the call still succeeds normally. Its own
+    ``__array_ufunc__`` can only fire a second time (from inside
+    flopscope's wrapper, which calls the raw ufunc directly) if flopscope
+    handed numpy this exact object -- a stripped, subclass-free
+    ``np.ndarray`` view could never trigger it.
+    """
+
+    calls: list[tuple[str, str]] = []
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        _TrackingArray.calls.append((ufunc.__name__, method))
+
+        def _strip(x):
+            if isinstance(x, _TrackingArray):
+                return x.view(np.ndarray)
+            if isinstance(x, tuple):
+                return tuple(_strip(e) for e in x)
+            return x
+
+        inputs = tuple(_strip(i) for i in inputs)
+        if kwargs.get("out") is not None:
+            kwargs["out"] = _strip(kwargs["out"])
+        return getattr(ufunc, method)(*inputs, **kwargs)
+
+
+def _tracking(data):
+    return np.asarray(data, dtype=np.float64).view(_TrackingArray)
+
+
+def test_np_multiply_outer_preserves_masked_array_operand():
+    """Regression pin: ``outer``'s ``b`` operand used to be reassigned to
+    a ``_np.asarray``-stripped view and THAT stripped view (not the
+    caller's ``b``) was what reached ``ufunc.outer`` -- so a
+    ``np.ma.MaskedArray`` silently lost its mask and came back as a plain
+    ``FlopscopeArray`` with the masked element computed as ordinary data.
+    """
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        a = fnp.array([1.0, 2.0, 3.0])
+        masked = ma.MaskedArray([10.0, 20.0], mask=[False, True])
+        result = np.multiply.outer(a, masked)
+    assert isinstance(result, ma.MaskedArray)
+    np.testing.assert_array_equal(result.mask, [[False, True]] * 3)
+    np.testing.assert_array_equal(
+        np.asarray(result), [[10.0, 20.0], [20.0, 40.0], [30.0, 60.0]]
+    )
+
+
+def test_np_multiply_outer_a_masked_b_flopscope_preserves_mask():
+    """Same guarantee with the masked operand in the ``a`` slot instead --
+    ``outer`` strips both operands, so both directions must be covered."""
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        masked = ma.MaskedArray([1.0, 2.0], mask=[True, False])
+        b = fnp.array([10.0, 20.0, 30.0])
+        result = np.multiply.outer(masked, b)
+    assert isinstance(result, ma.MaskedArray)
+    np.testing.assert_array_equal(result.mask, [[True] * 3, [False] * 3])
+
+
+class _StatefulArrayLike:
+    """A pure ``__array__`` duck type -- NOT an ndarray subclass -- whose
+    ``__array__`` returns a DIFFERENT (larger) array on its second call
+    than its first.
+
+    Regression pin: ``outer``'s billing view used to be built from one
+    ``_np.asarray(x)`` call while the caller's original, unresolved ``x``
+    was separately forwarded to the real ``ufunc.outer`` -- which performs
+    its OWN ``np.asarray`` conversion internally. For an operand backed by
+    a live view (e.g. an already-materialized ndarray) those two
+    conversions agree. For a stateful duck type like this one they don't:
+    the small first-call array got billed while numpy actually computed
+    over the large second-call array, undercharging the real work.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.calls += 1
+        size = 2 if self.calls == 1 else 3000
+        return np.ones(size, dtype=np.float64)
+
+
+def test_np_multiply_outer_stateful_array_like_operand_resolved_once():
+    """``__array__`` must be invoked EXACTLY ONCE for a non-ndarray operand,
+    and the bill must match the honest cost of the shape numpy actually
+    computes over -- not a smaller shape returned by an earlier, discarded
+    call.
+    """
+    # Operands are created OUTSIDE the measured budget contexts below so
+    # that array-construction cost doesn't leak into the comparison -- only
+    # the ``outer`` call itself is being measured.
+    a = fnp.array([1.0, 1.0, 1.0, 1.0])
+    grow = _StatefulArrayLike()
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        result = np.multiply.outer(a, grow)
+
+    assert grow.calls == 1
+    assert result.shape == (4, 2)
+
+    a_honest = fnp.array([1.0, 1.0, 1.0, 1.0])
+    b_honest = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(a_honest, b_honest)
+
+    assert bc.flops_used == honest_bc.flops_used
+
+
+class _ProtocolDuck:
+    """A non-ndarray duck type implementing BOTH a stateful ``__array__``
+    AND ``__array_ufunc__`` (NEP 13), the latter unconditionally returning
+    ``NotImplemented``.
+
+    Regression pin for the three-way refinement to
+    :func:`_resolve_ufunc_data_operand` (and its ``_resolve_at_operand`` /
+    reduce / accumulate / reduceat siblings): the prior two-way rule
+    materialized ANY non-ndarray operand via ``__array__`` before
+    forwarding it -- including one whose type implements
+    ``__array_ufunc__`` -- which silently bypassed numpy's own dispatch
+    protocol. flopscope would then compute from the materialized array
+    where plain numpy hands the operation to ``__array_ufunc__`` instead
+    (and, for a duck like this one whose override always declines, raises
+    ``TypeError``). The fix forwards the ORIGINAL object so that protocol
+    runs -- and, critically, does so WITHOUT re-invoking ``__array__`` a
+    second time: billing reads shape/dtype via a single ``_np.asarray``
+    view, and the real (forwarded) call never touches ``__array__`` at all
+    because numpy dispatches it to ``__array_ufunc__`` instead.
+    """
+
+    def __init__(self):
+        self.array_calls = 0
+        self.ufunc_calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.array_calls += 1
+        return np.ones(3, dtype=np.float64)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.ufunc_calls += 1
+        return NotImplemented
+
+
+@pytest.mark.parametrize(
+    "op_name,call",
+    [
+        ("outer.b", lambda a, duck: np.add.outer(a, duck)),
+        ("outer.a", lambda a, duck: np.add.outer(duck, a)),
+        ("reduce.a", lambda a, duck: np.subtract.reduce(duck, out=a, axis=None)),
+        ("accumulate.a", lambda a, duck: np.subtract.accumulate(duck, out=a)),
+        ("reduceat.a", lambda a, duck: np.add.reduceat(duck, [0, 1], out=a, axis=0)),
+        ("at.values", lambda a, duck: np.add.at(a, [0, 1, 2], duck)),
+    ],
+)
+def test_duck_array_ufunc_protocol_fires_matching_raw_numpy(op_name, call):
+    """A non-ndarray operand whose TYPE implements ``__array_ufunc__`` must
+    have that protocol actually invoked by the real numpy call below --
+    exactly as it would be with flopscope out of the loop entirely --
+    rather than being silently materialized through ``__array__`` and
+    computed from that instead. ``_ProtocolDuck.__array_ufunc__`` always
+    declines (returns ``NotImplemented``), so a correctly-dispatched call
+    raises ``TypeError``, matching what raw numpy does for this duck.
+    """
+    duck = _ProtocolDuck()
+    a = fnp.array([0.0, 0.0, 0.0])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.raises(TypeError):
+            call(a, duck)
+    assert duck.ufunc_calls >= 1, (
+        f"{op_name}: Duck's __array_ufunc__ never fired -- the operand was "
+        "materialized through __array__ and numpy's dispatch protocol was "
+        "bypassed"
+    )
+
+
+@pytest.mark.parametrize(
+    "op_name,make_other,call",
+    [
+        (
+            "outer.b",
+            lambda: _tracking([10.0, 20.0]),
+            lambda a, o: np.multiply.outer(a, o),
+        ),
+        (
+            "reduce.out",
+            lambda: _tracking(0.0),
+            lambda a, o: np.subtract.reduce(a, out=o),
+        ),
+        (
+            "accumulate.out",
+            lambda: _tracking([0.0, 0.0, 0.0, 0.0]),
+            lambda a, o: np.subtract.accumulate(a, out=o),
+        ),
+        (
+            "reduceat.out",
+            lambda: _tracking([0.0, 0.0]),
+            lambda a, o: np.add.reduceat(a, [0, 2], out=o),
+        ),
+    ],
+)
+def test_ufunc_method_forwards_original_foreign_operand(op_name, make_other, call):
+    """A foreign ndarray subclass passed as the non-flopscope operand
+    (``outer``'s ``b``, or ``out=`` for the reduce/accumulate/reduceat
+    family) must reach numpy as ITSELF. Proven by its own
+    ``__array_ufunc__`` firing a second time when flopscope's wrapper
+    calls the raw ufunc -- a stripped, subclass-free view could never
+    trigger it, which is exactly the bug this pins against.
+    """
+    _TrackingArray.calls.clear()
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        a = fnp.array([4.0, 3.0, 2.0, 1.0])
+        other = make_other()
+        call(a, other)
+    assert _TrackingArray.calls, (
+        f"{op_name}: the foreign operand's own __array_ufunc__ never fired -- "
+        "it reached numpy as a stripped plain ndarray instead of itself"
+    )
+
+
+def test_np_add_at_forwards_original_foreign_values_operand():
+    """Same guarantee as above, for ``ufunc.at``'s ``values`` operand."""
+    _TrackingArray.calls.clear()
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        dst = fnp.array([0.0, 0.0, 0.0])
+        np.add.at(dst, [0, 0, 1], _tracking([1.0, 2.0, 3.0]))
+    assert _TrackingArray.calls, (
+        "ufunc.at: values' own __array_ufunc__ never fired -- it reached "
+        "numpy as a stripped plain ndarray instead of itself"
+    )
+    np.testing.assert_array_equal(np.asarray(dst), [3.0, 3.0, 0.0])
+
+
+def test_np_add_at_preserves_masked_array_values_operand():
+    """``ufunc.at``'s ``values`` operand keeps its mask-array identity
+    through the call, mirroring the ``outer`` guarantee above."""
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        dst = fnp.array([0.0, 0.0, 0.0])
+        masked_values = ma.MaskedArray([1.0, 2.0, 3.0], mask=[False, True, False])
+        np.add.at(dst, [0, 0, 1], masked_values)
+    np.testing.assert_array_equal(np.asarray(dst), [3.0, 3.0, 0.0])
+
+
+# ----- stale billing snapshot: ``a``'s shape/size/dtype must be read for
+# billing AFTER every participant-controlled protocol resolution (axis=,
+# dtype=, the index/values operands) has run, not before -- because that
+# resolution can run arbitrary code, and an OWNING ndarray subclass's
+# ``resize(n, refcheck=False)`` lets it grow ``a`` in place. See
+# ``tests/test_reduceat_cost.py`` for the ``reduceat`` pin (including the
+# original confirmed reproduction); the cases here cover the other four
+# generic ufunc-method paths that share the same ordering discipline.
+
+
+class _OwningFloat64(np.ndarray):
+    """A plain ndarray subclass that OWNS its data (is not a view of
+    something else) -- the same shape ``np.empty``/``np.zeros`` builds.
+    That ownership is what makes ``resize(n, refcheck=False)`` a legitimate
+    in-place grow rather than a ``ValueError``.
+    """
+
+    def __new__(cls, n, fill=1.0):
+        obj = super().__new__(cls, (n,), dtype=np.float64)
+        obj[...] = fill
+        return obj
+
+
+def test_np_subtract_reduce_resizing_axis_bills_the_post_resize_array():
+    """``axis=``'s ``__index__`` grows ``a`` in place before returning a
+    valid axis. ``out=`` is a flopscope array so dispatch reaches
+    flopscope's wrapper even though ``a`` itself is a foreign subclass."""
+    n = 1_000_000
+
+    class _ResizingAxis:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    a = _OwningFloat64(4)
+    out = fnp.array(0.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.subtract.reduce(a, axis=_ResizingAxis(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.subtract.reduce(fnp.asarray(np.full(n, 1.0)), axis=0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_subtract_accumulate_resizing_axis_bills_the_post_resize_array():
+    """Same defect as the ``reduce`` case above, for ``accumulate``."""
+    n = 1_000_000
+
+    class _ResizingAxis:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    a = _OwningFloat64(4)
+    out = fnp.zeros(n)
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.subtract.accumulate(a, axis=_ResizingAxis(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.subtract.accumulate(fnp.asarray(np.full(n, 1.0)), axis=0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_multiply_outer_resizing_dtype_bills_the_post_resize_array():
+    """A ``dtype=`` object whose ``.dtype`` PROPERTY -- which ``np.dtype()``
+    honours -- resizes ``a`` in place as a side effect of reporting a
+    valid dtype."""
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingDtype:
+        @property
+        def dtype(self):
+            a.resize(n, refcheck=False)
+            return np.dtype(np.float64)
+
+    # ``b`` and the honest comparison's operands are built OUTSIDE the
+    # measured contexts below -- see
+    # ``test_np_multiply_outer_stateful_array_like_operand_resolved_once``
+    # above for why: array construction itself is billable, and folding it
+    # into either measured window would leak into the comparison.
+    b = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.multiply.outer(a, b, dtype=_ResizingDtype())
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = fnp.asarray(np.full(n, 1.0))
+    honest_b = fnp.array([1.0, 1.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(honest_a, honest_b, dtype=np.float64)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_multiply_outer_b_resolution_resizing_a_bills_the_post_resize_array():
+    """Regression pin for the confirmed stale-``a``-billing-view defect in
+    ``outer``: ``a``'s billing view used to be captured BEFORE ``b`` was
+    resolved. ``outer`` takes two data operands, not one, so resolving the
+    SECOND one is itself participant code (an ``__array__`` call, for a
+    duck ``b``) that can reach back and mutate the first -- the caller
+    controls the closure ``b.__array__`` runs in and can bind it to the
+    very ``a`` object passed alongside it. The bill must reflect the array
+    ``outer`` actually multiplies against, not the tiny pre-resize
+    snapshot taken before ``b`` was ever touched.
+    """
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingB:
+        def __array__(self, dtype=None, copy=None):
+            a.resize(n, refcheck=False)
+            return np.ones(4, dtype=np.float64)
+
+    out = fnp.zeros((n, 4))
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        np.multiply.outer(a, _ResizingB(), out=out)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        np.multiply.outer(
+            fnp.asarray(np.full(n, 1.0)),
+            fnp.asarray(np.ones(4)),
+            out=fnp.zeros((n, 4)),
+        )
+    assert bc.flops_used == honest_bc.flops_used
+
+
+# ``ufunc.at`` has no ``out=`` slot, so (unlike outer/reduce/accumulate/
+# reduceat) numpy dispatches to flopscope's wrapper only when ``a`` ITSELF
+# is flopscope-aware -- there is no other operand to hang dispatch off of.
+# flopscope arrays are deliberately immutable (``resize`` raises
+# ``ValueError`` on one -- see ``flopscope-immutability-intent``), so a
+# foreign, resize-capable ``a`` can never reach ``_counted_ufunc_at``
+# through the public ``np.add.at(...)`` surface at all. The two cases below
+# call the wrapper directly instead -- the same pattern
+# ``test_reduceat_lying_dtype_a_operand_bills_the_real_dtype`` in
+# ``tests/test_reduceat_cost.py`` uses for the same underlying reason (a
+# foreign, non-flopscope ``a`` with nothing to trigger dispatch) -- so the
+# ordering fix is still exercised even though this specific vector is not
+# independently reachable from outside the package.
+
+
+def test_np_add_at_resizing_index_bills_the_post_resize_array():
+    """``ufunc.at``'s index entry can itself expose ``__index__`` and, via
+    that, resize ``a`` in place before the real write runs."""
+    from flopscope._pointwise import _counted_ufunc_at
+
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingIndex:
+        def __index__(self):
+            a.resize(n, refcheck=False)
+            return 0
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        _counted_ufunc_at(np.add, a, _ResizingIndex(), 1.0)
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = np.full(n, 1.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        _counted_ufunc_at(np.add, honest_a, 0, 1.0)
+    assert bc.flops_used == honest_bc.flops_used
+
+
+def test_np_add_at_resizing_values_bills_the_post_resize_array():
+    """Same defect, via the ``values`` operand's ``__array__`` instead of
+    the index: resizes ``a`` in place as a side effect of materializing."""
+    from flopscope._pointwise import _counted_ufunc_at
+
+    n = 1_000_000
+    a = _OwningFloat64(4)
+
+    class _ResizingValues:
+        def __array__(self, dtype=None, copy=None):
+            a.resize(n, refcheck=False)
+            return np.ones(n)
+
+    with flops.BudgetContext(flop_budget=int(1e10)) as bc:
+        _counted_ufunc_at(np.add, a, slice(None), _ResizingValues())
+    assert a.size == n, "sanity: the resize actually ran"
+
+    honest_a = np.full(n, 1.0)
+    with flops.BudgetContext(flop_budget=int(1e10)) as honest_bc:
+        _counted_ufunc_at(np.add, honest_a, slice(None), np.ones(n))
+    assert bc.flops_used == honest_bc.flops_used
 
 
 # ----- Multi-output ufuncs route through __array_ufunc__ -----

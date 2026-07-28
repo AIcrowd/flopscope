@@ -491,10 +491,18 @@ same way `sum` does — a batched diagonal sum is still a sum — and the generi
 `ufunc.reduce` / `accumulate` / `reduceat` paths resolve their accumulator through the
 identical rule: `np.add.reduce` is the same machinery `sum` runs on, so
 `np.add.reduce(int32_arr, dtype=int32)` bills exactly like `sum(int32_arr, dtype=int32)`.
-`reduceat`'s default accumulator widens the same way, regardless of the segment
-indices: a 1000-element `int32` input bills `np.add.reduceat` at the int64 rate
-(1000 × 2.0 = **2000**), while `np.subtract.reduceat` on the same input has no such
-accumulator and keeps the int32 loop (**1000**). `ufunc.outer` is not itself an
+
+`reduceat`'s base cost follows numpy's own per-segment semantics rather than a flat
+per-element charge: for segment `i`, `indices[i] < indices[i+1]` reduces the elements
+between them (a length-`L` segment costs `L-1` applications, the same `n-1` convention
+`reduce` uses), while a non-monotonic pair (`indices[i] >= indices[i+1]`) is a plain
+element copy with no arithmetic — the segment costs 0. The final segment always runs to
+the end of the axis. That per-segment count is then billed at the accumulator dtype,
+which widens the same way `reduce` does regardless of where the segment boundaries fall:
+applied as a single whole-axis segment (`indices=[0]`) to a 1000-element `int32` input,
+that's one `L=1000` segment, 999 applications — `np.add.reduceat` bills at the int64 rate
+(999 × 2.0 = **1998**), while `np.subtract.reduceat` on the same input has no such
+accumulator and keeps the int32 loop (999 × 1.0 = **999**). `ufunc.outer` is not itself an
 accumulating reduction, but an explicit `dtype=` on it resolves through the same
 request-is-the-loop rule: the dtype names the loop numpy actually runs, not a discount,
 so `np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over
@@ -1332,13 +1340,21 @@ because they perform per-bit/index work or I/O beyond pure relocation:
 | `copyto` | `numel(dst)` (or popcount(`where`) when masked) | DECLARED: priced per element written, unconditionally — same-dtype or not (see [§Boundary ops](#boundary-ops-free-behavior--a-value-computing-path)) | `_array_ops.py` |
 | `packbits` | `numel(input)` (weight 1.0) | DECLARED: per-bit test+shift; value-test per element | `_array_ops.py` |
 | `unpackbits` | `numel(output)` (weight 1.0) | DECLARED: unpacks 8 bits per input byte; proportional to output | `_array_ops.py` |
-| `mask_indices` | `2k` (weight 1.0, `k` = selected pairs; numel of the returned index arrays) | DECLARED: dtype-neutral index-array output | `_array_ops.py` |
+| `mask_indices` | `max(numel(mask), n²)` (weight 1.0, priced at the mask's own dtype) | DECLARED: scans the array `mask_func` produces, matching the `nonzero`/`flatnonzero`/`argwhere`/`count_nonzero` convention of billing `numel(input)`; floored at n² (the numel of the `ones((n, n), int)` probe `mask_func` receives as an argument, and can capture) so a `mask_func` that returns something smaller cannot buy a cheaper scan; the returned index arrays are not charged | `_array_ops.py` |
 | `getitem` (`arr[key]`) | basic indexing (int/slice/newaxis/Ellipsis, or a tuple thereof): `0` (view); advanced (fancy/boolean) indexing: `4·numel(output)` + `numel(mask)` per boolean-mask part (weight 1.0) | DECLARED: fancy gather billed at the `take` rate; boolean-mask parts additionally scan like `compress` | `_ndarray.py` |
 
 `getitem` is the one op in this table with no module-level `fnp.<name>` call form — it
 bills `FlopscopeArray.__getitem__`, i.e. `arr[key]` syntax, not a function call. See
 [the unifying philosophy](#the-unifying-philosophy--every-byte-written-is-metered) for
 the basic-vs-advanced-indexing distinction this formula rests on.
+
+`mask_indices` prices only the mask that `mask_func` produces, not the index arrays it
+returns, so — unlike the dtype-neutral [index generators](#index-generators) below —
+its charge scales with the mask's dtype. The charge is also floored at n² (int dtype):
+`mask_func` receives numpy's internal `ones((n, n), int)` probe as an argument, so it
+can capture that reference and return an arbitrarily small result while still having
+had the full probe handed to it. `triu_indices`/`tril_indices` are separate ops with
+their own dtype-neutral formula and are unaffected by this.
 
 ---
 
@@ -1489,6 +1505,8 @@ result the wrapper materializes (numpy runs the callback itself).
 | `apply_along_axis` | `numel(output)` | 1.0 | `_counting_ops.py` |
 | `apply_over_axes` | `numel(output)` | 1.0 | `_counting_ops.py` |
 | `fromfunction` | `numel(output)` | 1.0 | `_array_ops.py` |
+| `fromiter` | `numel(output)` | 1.0 | `_array_ops.py` |
+| `mask_indices` | `max(numel(mask), n²)` | 1.0 | `_array_ops.py` |
 | `piecewise` | `numel(input) × len(condlist)` | 1.0 | `_counting_ops.py` |
 
 `apply_along_axis` was price-cut from weight 4.0 to 1.0 (the wrapper's own

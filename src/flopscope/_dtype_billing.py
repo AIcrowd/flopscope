@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import numpy as _np
 
-from flopscope._weights import get_dtype_rate
+from flopscope._weights import _UFUNC_METHOD_SUFFIXES, get_dtype_rate
 from flopscope.errors import UnsupportedDtypeError
 
 
@@ -460,11 +460,6 @@ def linalg_billing_dtypes(*dtypes) -> tuple:
             return (_np.dtype(_np.complex128),)
         return (_np.dtype(_np.float64),)
     return (linalg_compute_dtype(_np.result_type(*dts)),)
-
-
-# Generic ufunc method names are "<ufunc>.<method>"; their per-element
-# arithmetic is the base ufunc's, so they inherit its complex factor.
-_UFUNC_METHOD_SUFFIXES = (".reduce", ".accumulate", ".reduceat", ".outer", ".at")
 
 
 def complex_factor_for(op_name: str, resolved: _np.dtype) -> float:

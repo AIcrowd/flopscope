@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect as _inspect
 import math as _math
+import operator as _operator
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
@@ -2932,55 +2933,141 @@ attach_docstring(ix_, _np.ix_, "free", "0 FLOPs")
 def mask_indices(*args, **kwargs):
     """Return indices to access main or off-diagonal of array.
 
-    Cost: numel of the returned index arrays (= ``2*k``, where *k* is the
-    number of selected index pairs) at weight 1.0, dtype-neutral. ``numpy``
-    runs ``mask_func`` internally on its own plain (non-flopscope) probe
-    matrix: a plain-numpy callable (e.g. ``np.triu``) runs unbilled, while an
-    fnp callable (e.g. ``fnp.triu``) bills its own cost separately through
-    its own wrapper, on top of this op's own ``2*k``.
+    Cost: numel of the mask that ``mask_func`` produces (the array numpy's
+    own ``nonzero(a != 0)`` scans internally), matching the nonzero /
+    flatnonzero / argwhere / count_nonzero convention of billing
+    numel(input), priced at the mask's own dtype -- floored at n*n, the
+    numel of the ``ones((n, n), int)`` probe ``mask_func`` receives as an
+    argument, so a ``mask_func`` that captures the probe and returns
+    something smaller cannot buy a cheaper scan than that probe's own
+    allocation would cost. The index arrays this op returns are not charged
+    for -- exactly as ``nonzero`` does not charge for the indices it
+    returns. ``numpy`` runs ``mask_func`` internally on its own plain
+    (non-flopscope) probe matrix: a plain-numpy callable (e.g. ``np.triu``)
+    runs unbilled, while an fnp callable (e.g. ``fnp.triu``) bills its own
+    cost separately through its own wrapper, on top of this op's mask-scan
+    cost.
 
     numpy's ``mask_indices`` body ends with a bare top-level ``nonzero(a != 0)``
     on ``a = mask_func(m, k)``. An fnp ``mask_func`` returns a FlopscopeArray,
     which would leak into that internal ``nonzero`` and trip the wrapper-depth
     guard. We coerce the mask_func's return value to a base ndarray before
-    numpy continues -- the fnp mask_func still runs and bills its own cost; only
-    its result is stripped so numpy's own ``nonzero`` sees a plain array.
+    numpy continues, capturing its size/shape/dtype for billing along the
+    way -- the fnp mask_func still runs and bills its own cost; only its
+    result is stripped so numpy's own ``nonzero`` sees a plain array.
     """
+    _warn_remote_callback("mask_indices")
     budget = require_budget()
+
+    # numpy calls ``nonzero`` on whatever mask_func returns, so that array is
+    # what this op scans. Capture its size/dtype here -- the wrapper already
+    # intercepts the return value, so this costs no extra numpy work.
+    scanned: dict[str, Any] = {}
 
     def _strip_mask_func(fn: Any) -> Any:
         if not callable(fn):
             return fn
 
         def _wrapped(*a: Any, **kw: Any) -> Any:
-            return _to_base_ndarray(fn(*a, **kw))
+            out = _to_base_ndarray(fn(*a, **kw))
+            mask = _np.asarray(out)
+            scanned["size"] = int(mask.size)
+            scanned["shape"] = mask.shape
+            scanned["dtype"] = mask.dtype
+            # Return ``mask``, NOT ``out``: numpy's own body immediately
+            # does ``a != 0`` on whatever this callback returns, then
+            # ``nonzero()``s the result -- that comparison is where the
+            # scan actually happens. ``_to_base_ndarray`` only strips
+            # flopscope's own array subclasses; an arbitrary OTHER ndarray
+            # subclass (or non-ndarray) passes through untouched, so
+            # ``out`` can carry an overridden ``__ne__``/``__eq__`` (or any
+            # other dunder numpy's comparison dispatches through) that
+            # returns something completely unrelated to what we measured
+            # above. ``np.asarray`` always returns a genuine, subclass-free
+            # ``np.ndarray`` (a no-op *view* when ``out`` is already a
+            # plain, correctly-typed ndarray -- see the parity tests this
+            # guards), so forwarding ``mask`` instead guarantees the object
+            # numpy's comparison runs against is *exactly* the array whose
+            # ``.size`` we just billed -- no dunder of the caller's
+            # original ``out`` can run again afterward.
+            return mask
 
         return _wrapped
 
     # numpy signature: mask_indices(n, mask_func, k=0) -- mask_func is the 2nd
     # positional arg or the `mask_func=` keyword.
     args = list(args)
+    # Resolve ``n`` through the integer-index protocol EXACTLY ONCE, before
+    # numpy ever sees it, and substitute the plain resolved int back into
+    # ``args``/``kwargs``. numpy's own body builds the probe via
+    # ``ones((n, n), int)``, which resolves ``n`` through ``__index__``; the
+    # billing floor below used to re-read ``n`` a SECOND time via ``int(n)``
+    # -- a different protocol -- after numpy had already run. A caller-
+    # supplied ``n`` exposing both could report one size to numpy's probe
+    # (built and handed to ``mask_func``, so it's exposed either way) and a
+    # smaller one to the floor. Resolving once here and handing numpy the
+    # same plain int both times it reads the shape closes that gap.
+    if len(args) >= 1:
+        args[0] = _operator.index(args[0])
+    elif "n" in kwargs:
+        kwargs["n"] = _operator.index(kwargs["n"])
+    # ``n`` not being supplied at all (neither positionally nor by keyword)
+    # is left alone here -- the real call below raises numpy's own
+    # ``TypeError`` for the missing required argument.
     if len(args) >= 2:
         args[1] = _strip_mask_func(args[1])
     elif "mask_func" in kwargs:
         kwargs["mask_func"] = _strip_mask_func(kwargs["mask_func"])
-    result = _np.mask_indices(*args, **kwargs)
-    cost = max(sum(int(r.size) for r in result), 1)
+    # ``mask_func`` is participant code: route it through ``_call_user_code`` so
+    # its runtime books to residual, exactly as ``fromfunction`` / ``fromiter`` /
+    # ``apply_along_axis`` / ``apply_over_axes`` / ``piecewise`` already do.
+    # Calling ``_np.mask_indices`` bare left the callback's entire wall time in
+    # ``flopscope_overhead_time_s``, which is excluded from effective compute --
+    # i.e. arbitrary user computation ran free of charge on both axes.
+    result = _call_user_code(budget, _np.mask_indices, *args, **kwargs)
+    # numpy's body is ``m = ones((n, n), int); a = mask_func(m, k); return
+    # nonzero(a != 0)`` -- ``mask_func`` receives ``m`` AS AN ARGUMENT, so it
+    # can capture that reference and return something arbitrarily small (or
+    # unrelated) while still having had the full probe handed to it. The
+    # scanned size ``mask_func``'s return value reports is therefore only a
+    # ceiling on what got returned, never a floor on what got allocated and
+    # exposed -- floor the bill at the probe's own numel (n*n) so capturing
+    # it and returning a token-sized result cannot buy a cheaper scan than
+    # `fnp.ones((n, n), int)` itself would cost. ``n`` here is the SAME
+    # resolved int substituted into ``args``/``kwargs`` above -- not a fresh
+    # read of the caller's original object.
+    n = args[0] if args else kwargs["n"]
+    probe_size = scanned.get("size", n * n)
+    if probe_size >= n * n:
+        shapes: tuple = (scanned.get("shape", (n, n)),)
+        dtypes: tuple = (scanned.get("dtype", _np.dtype(int)),)
+    else:
+        shapes = ((n, n),)
+        dtypes = (_np.dtype(int),)
+    cost = max(probe_size, n * n, 1)
     with budget.deduct(
-        # dtype-neutral (dtypes=()): index bookkeeping, same convention as
-        # the tri*_indices family.
+        # Priced as a full value scan of the mask numpy calls ``nonzero`` on,
+        # matching the nonzero/flatnonzero/argwhere/count_nonzero convention of
+        # billing numel(input), floored at the internal ``ones((n, n), int)``
+        # probe's own numel -- that probe is handed to ``mask_func`` as an
+        # argument, so it is exposed to (and harvestable by) participant code
+        # even though it is never itself returned. The ``a != 0`` compare is
+        # not charged on top (``nonzero(a != 0)`` is semantically
+        # ``nonzero(a)``). The index arrays this op returns are not charged
+        # either -- exactly as ``nonzero`` itself does not charge for the
+        # indices it returns.
         "mask_indices",
         flop_cost=cost,
         subscripts=None,
-        shapes=(),
-        dtypes=(),
+        shapes=shapes,
+        dtypes=dtypes,
     ):
         pass  # numpy call already executed above
     return result
 
 
 attach_docstring(
-    mask_indices, _np.mask_indices, "counted_custom", "numel(output) FLOPs"
+    mask_indices, _np.mask_indices, "counted_custom", "max(numel(mask), n*n) FLOPs"
 )
 
 

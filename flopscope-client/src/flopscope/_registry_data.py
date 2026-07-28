@@ -630,6 +630,7 @@ LOCAL_CALLBACK_OPS: frozenset[str] = frozenset(
         "apply_over_axes",
         "fromfunction",
         "fromiter",
+        "mask_indices",
         "piecewise",
     }
 )

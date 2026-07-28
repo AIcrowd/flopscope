@@ -1237,7 +1237,7 @@ def test_outer_float_only_binary_bills_float64_and_int_stays_int():
             warnings.simplefilter("ignore", UserWarning)
             np.add.outer(a, a)
         billed_add = b.flops_used - before
-    assert billed_hypot == 200  # 10*10 dense numel * float64 rate 2.0
+    assert billed_hypot == 3200  # 10*10 dense numel * f64 rate 2.0 * hypot weight 16.0
     assert billed_add == 100  # 10*10 dense numel * int32 rate 1.0 (unaffected)
 
 
@@ -1247,11 +1247,14 @@ def test_reduceat_float_only_binary_bills_float64_and_add_widens_too():
     # like reduce/sum -- runs add through numpy's integer-widening
     # accumulator, so an int32 input still bills int64 (see the dedicated
     # add/subtract accumulator pins below for that story in isolation).
+    # arr is the 100-element np.arange(1, 101); indices=[0, 10] cuts two
+    # segments: [0,10) length 10 -> 9 applications, [10,100) length 90 ->
+    # 89 applications; 9 + 89 = 98 applications * f64/int64 rate 2.0 = 196.
     assert (
         _generic_ufunc_method_billed(lambda a: np.true_divide.reduceat(a, [0, 10]))
-        == 200
+        == 196
     )
-    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 200
+    assert _generic_ufunc_method_billed(lambda a: np.add.reduceat(a, [0, 10])) == 196
 
 
 def _i64_method_billed(method_call) -> tuple[int, str | None]:
@@ -1293,7 +1296,8 @@ def test_reduceat_bool_loop_floors_at_input_rate():
 def test_outer_float_widening_survives_the_floor():
     # The floor is a MAX, so float-widening cases (float64 rate 2.0 >= int64
     # rate 2.0, and strictly > narrower int rates) are never lowered by it.
-    assert _i64_method_billed(lambda a: np.hypot.outer(a, a)) == (200, "float64")
+    # 10*10 dense numel * f64 rate 2.0 * hypot weight 16.0
+    assert _i64_method_billed(lambda a: np.hypot.outer(a, a)) == (3200, "float64")
 
 
 def test_reduceat_float_widening_survives_the_floor():
@@ -1335,24 +1339,29 @@ def test_reduceat_add_multiply_use_sum_accumulator_dtype():
     # integer-widening accumulator by default, regardless of the segment
     # indices: an int32 input bills int64. subtract has no such accumulator
     # and keeps its native int32 loop -- the contrast pin.
-    assert _reduceat_billed(lambda a: np.add.reduceat(a, [0])) == 2000
-    assert _reduceat_billed(lambda a: np.subtract.reduceat(a, [0])) == 1000
+    # n=1000, indices=[0] is a single whole-axis segment: length 1000 ->
+    # 999 applications. add widens to int64 (rate 2.0): 999 * 2.0 = 1998.
+    # subtract keeps the native int32 loop (rate 1.0): 999 * 1.0 = 999.
+    assert _reduceat_billed(lambda a: np.add.reduceat(a, [0])) == 1998
+    assert _reduceat_billed(lambda a: np.subtract.reduceat(a, [0])) == 999
 
 
 def test_reduceat_explicit_dtype_is_the_accumulator_not_a_discount():
     # An explicit dtype= on reduceat IS the accumulator numpy runs -- billed
     # exactly as requested, wider or narrower, mirroring reduce/sum.
+    # Same 999-application whole-axis segment as above (n=1000, indices=[0]);
+    # only the billed rate changes with the explicit accumulator dtype=.
     assert (
         _reduceat_billed(
             lambda a: np.add.reduceat(a, [0], dtype=np.float64), dtype=np.float32
         )
-        == 2000
+        == 1998  # 999 applications * float64 rate 2.0
     )
     assert (
         _reduceat_billed(
             lambda a: np.subtract.reduceat(a, [0], dtype=np.float32), dtype=np.float64
         )
-        == 1000
+        == 999  # 999 applications * float32 rate 1.0
     )
 
 
@@ -1433,7 +1442,7 @@ def test_ufunc_at_float_only_bills_loop_dtype():
     vals = np.ones(1000, dtype=np.int32)
     assert _ufunc_at_billed(
         lambda a: np.exp.at(a, slice(None))  # pyright: ignore[reportArgumentType]
-    ) == (2000, "float64")
+    ) == (32000, "float64")  # 1000 elems * f64 rate 2.0 * exp weight 16.0
     assert _ufunc_at_billed(
         lambda a: np.true_divide.at(a, slice(None), vals)  # pyright: ignore[reportArgumentType]
     ) == (2000, "float64")

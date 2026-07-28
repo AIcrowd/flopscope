@@ -505,15 +505,22 @@ def test_index_generators_bill_their_outputs():
         )
         == 50
     )
-    # np.triu as mask_func: plain-numpy callable, NOT billed -> isolates mask_indices' own 2k
-    assert billed(lambda: fnp.mask_indices(8, np.triu)) == 2 * 36
+    # np.triu as mask_func: plain-numpy callable, NOT billed -> isolates
+    # mask_indices' own cost, which is the scanned n x n mask (the numpy
+    # ``nonzero`` convention): numel(mask) = n*n, priced at the mask's own
+    # (int) dtype rate. The returned index count plays no part.
+    n = 8
+    int_rate = 2 if np.dtype(int).itemsize == 8 else 1  # int64 -> 2.0, int32 -> 1.0
+    # n*n * int_rate = 8*8 * 2 = 128 (int64) / 64 (int32)
+    mask_indices_cost = n * n * int_rate
+    assert billed(lambda: fnp.mask_indices(n, np.triu)) == mask_indices_cost
     # fnp.triu as mask_func: see test_mask_indices_fnp_mask_func_bills_on_top below.
     assert billed(lambda: fnp.broadcast_shapes((4, 6), (6,))) == 3
 
 
 def test_mask_indices_fnp_mask_func_bills_on_top():
-    """An fnp-wrapped mask_func (e.g. fnp.triu) now bills its own cost on top
-    of mask_indices' own 2*k, per this op's docstring -- it no longer raises.
+    """An fnp-wrapped mask_func (e.g. fnp.triu) bills its own cost on top of
+    mask_indices' own scan cost, per this op's docstring -- it no longer raises.
 
     numpy's ``mask_indices`` body runs ``a = mask_func(m, k)`` (m = an (n,n)
     int matrix) then ``nonzero(a != 0)``. Previously an fnp mask_func returned
@@ -523,17 +530,23 @@ def test_mask_indices_fnp_mask_func_bills_on_top():
     the fnp mask_func still bills its own cost.
 
     n=8, triu at offset 0 -> k = 8*9/2 = 36 selected pairs:
-      - mask_indices' own cost: 2*k = 72 (dtype-neutral index bookkeeping)
+      - mask_indices' own cost: the scanned (n, n) mask, i.e. numel(mask) =
+        n*n = 64 elements at the mask's int dtype rate (int64 -> 2.0 on
+        Linux/mac, int32 -> 1.0 on Windows) -- the numpy ``nonzero``
+        convention; the returned index count plays no part.
       - fnp.triu on numpy's internal ``ones((n,n), int)``: kept upper triangle
-        = 36 elements at that int dtype's rate (int64 -> 2.0 on Linux/mac,
-        int32 -> 1.0 on Windows)
-      total = 72 + (36 * int_rate)  ->  144 where default int is int64.
+        = 36 elements at that same int dtype's rate
+      total = 64 * int_rate + 36 * int_rate = 100 * int_rate -> 200 where
+      default int is int64.
     """
-    k = 8 * 9 // 2  # 36
+    n, k = 8, 8 * 9 // 2  # 36
     # numpy builds ones((n,n), int); triu bills 36 kept elements at that rate.
     int_rate = 2 if np.dtype(int).itemsize == 8 else 1  # int64 -> 2.0, int32 -> 1.0
-    expected = 2 * k + k * int_rate  # mask_indices 2k + triu's own kept-triangle
-    assert billed(lambda: fnp.mask_indices(8, fnp.triu)) == expected
+    # n*n * int_rate = 8*8 * 2 = 128 (int64) / 64 (int32)
+    mask_indices_cost = n * n * int_rate
+    triu_own_cost = k * int_rate  # triu's own kept-triangle
+    expected = mask_indices_cost + triu_own_cost
+    assert billed(lambda: fnp.mask_indices(n, fnp.triu)) == expected
 
 
 def test_np_nonzero_top_level_routes_to_fnp():
