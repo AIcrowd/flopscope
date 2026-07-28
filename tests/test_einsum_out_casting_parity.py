@@ -464,38 +464,90 @@ def test_parity_holds_for_every_optimize_setting(optimize):
     assert np.array_equal(np.asarray(result), np.full((4, 4), 16.0))
 
 
-def test_a_promoting_contraction_does_not_materialize_its_operands():
-    """Casting operands ourselves materializes their LOGICAL shape.
+def test_a_promoting_contraction_does_not_materialize_its_operands(monkeypatch):
+    """Casting an operand materializes its LOGICAL shape.
 
     A broadcast view has O(1) storage and O(numel) logical size, so promoting
-    operands up front turned a 4-byte view into an allocation the size of the
-    contraction. Handing the cast to numpy's iterator via ``dtype=`` keeps
-    strided and broadcast operands unmaterialized, which is what numpy itself
-    does. Measured at (4000, 4000): 128MB before, 0.1MB after.
+    one turned a 4-byte view into an allocation the size of the contraction
+    (~80GB at 100000 square; measured 128MB against numpy's 0.1MB at 4000).
+    ``dtype=`` casts inside numpy's iterator, per element, so the view is
+    never materialized.
 
-    The assertion is deliberately loose -- RSS is noisy and the point is the
-    order of magnitude, not a byte count. A regression here reallocates the
-    full logical array and blows straight past it.
+    Asserted on the ARRAY numpy is handed rather than on process RSS. A
+    broadcast view carries a zero stride and a materialized copy does not, so
+    the distinction is exact and identical on every platform -- where
+    ``ru_maxrss`` is KiB on Linux and bytes on macOS, and an earlier version
+    of this test divided by 1e6 unconditionally, making a 128MB regression
+    read as 0.13 and pass the threshold on the very runners CI uses.
     """
-    import resource
+    calls = []
+    real_einsum = np.einsum
 
-    def rss_mb():
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
+    def spy(*args, **kwargs):
+        arrays = [a for a in args[1:] if isinstance(a, np.ndarray)]
+        calls.append((args[0], [a.strides for a in arrays], kwargs.get("dtype")))
+        return real_einsum(*args, **kwargs)
 
     view = np.broadcast_to(np.float32(1.0), (4000, 4000))
-    logical_mb = view.nbytes / 1e6
-    assert logical_mb > 50, "test bug: the view is too small to detect a blowup"
+    assert 0 in view.strides, "test bug: the fixture is not a broadcast view"
 
     with f.BudgetContext(flop_budget=10**14, quiet=True):
         operand = fnp.asarray(view)
         dest = np.empty((), np.float64)
-        before = rss_mb()
+        monkeypatch.setattr(np, "einsum", spy)
         fnp.einsum("ij->", operand, out=dest)
-        grew_mb = rss_mb() - before
 
     assert float(dest) == 16000000.0
-    assert grew_mb < logical_mb / 2, (
-        f"promoting contraction grew RSS by {grew_mb:.1f}MB for a broadcast "
-        f"view of {logical_mb:.1f}MB logical size -- the operands are being "
-        f"materialized instead of cast inside numpy's iterator"
+    # The contraction under test, not whichever call happened to come first:
+    # asarray and friends issue their own einsums, and keying on calls[0] is
+    # how the first version of this test looked at the wrong array entirely.
+    contraction = [c for c in calls if c[0] == "ij->"]
+    assert contraction, f"the contraction never reached numpy; saw {calls}"
+    _, strides, dtype_kwarg = contraction[0]
+    assert strides and 0 in strides[0], (
+        f"the operand handed to numpy has strides {strides} with no zero -- "
+        f"the broadcast view was materialized rather than cast in the iterator"
     )
+    assert dtype_kwarg is not None, (
+        "the promotion was not passed as dtype=, so numpy could not cast per element"
+    )
+
+
+def test_a_promoted_dense_contraction_still_follows_the_planned_path(monkeypatch):
+    """Avoiding materialization must not cost the plan.
+
+    Bypassing the pairwise stepper for every promoting contraction would swap
+    a planned O(N^3) chain for one direct O(N^5) call, and ignore an
+    explicitly supplied path. Only operands that actually expand when copied
+    take the direct route; dense ones keep their steps.
+    """
+    calls = []
+    real_einsum = np.einsum
+
+    def spy(*args, **kwargs):
+        calls.append(args[0])
+        return real_einsum(*args, **kwargs)
+
+    size = 24
+    rng = np.random.default_rng(0)
+    raw = [rng.random((size, size)).astype("float32") for _ in range(4)]
+    dest = np.zeros((size, size), np.float64)
+
+    with f.BudgetContext(flop_budget=10**14, quiet=True):
+        operands = [fnp.asarray(m) for m in raw]
+        monkeypatch.setattr(np, "einsum", spy)
+        fnp.einsum("ij,jk,kl,lm->im", *operands, out=dest, optimize=True)
+
+    # Following the plan means numpy is handed the individual STEPS and never
+    # the whole 4-operand subscript; bypassing it means exactly the opposite.
+    # Counting calls instead does not work -- asarray issues einsums of its
+    # own, and they inflate the count enough to hide the bypass.
+    assert "ij,jk,kl,lm->im" not in calls, (
+        f"the whole contraction went to numpy in one call ({calls}); the "
+        f"planned pairwise path was bypassed"
+    )
+    assert len(calls) >= 2, f"no pairwise steps reached numpy at all: {calls}"
+    expected = np.einsum(
+        "ij,jk,kl,lm->im", *raw, out=np.zeros((size, size), np.float64), optimize=True
+    )
+    np.testing.assert_allclose(dest, expected, rtol=1e-6)

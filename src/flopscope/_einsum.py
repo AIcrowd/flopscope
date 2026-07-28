@@ -250,6 +250,20 @@ def _resolve_out_compute_dtype(
     return op_dtype
 
 
+def _expands_when_materialized(array) -> bool:
+    """Would copying *array* cost far more than the memory it occupies?
+
+    True for a broadcast view (a zero stride repeats one element across a
+    whole axis) and for any view whose logical size dwarfs the buffer it
+    looks at. Casting such an operand allocates its logical shape, which is
+    unbounded relative to what the caller actually handed over.
+    """
+    if 0 in array.strides and array.size > 1:
+        return True
+    base = array.base
+    return base is not None and getattr(base, "nbytes", array.nbytes) * 4 < array.nbytes
+
+
 def _execute_pairwise(path_info, operands: list):
     """Execute pairwise contractions according to the optimized path."""
     ops = list(operands)
@@ -770,23 +784,23 @@ def einsum(
         needs_promotion = compute_dtype is not None and any(
             a.dtype != compute_dtype for a in operand_arrays
         )
-        if needs_promotion:
-            # Hand the cast to numpy's iterator rather than casting the
-            # operands ourselves. ``astype`` materializes a LOGICAL shape: a
-            # broadcast view has O(1) storage but O(numel) logical size, so
-            # promoting operands up front turned
-            # ``einsum("ij->", broadcast_to(f32(1), (100000, 100000)),
-            # out=empty((), f64))`` -- a 4-byte view into a scalar -- into an
-            # ~80GB allocation. Measured at (4000, 4000): 128MB against
-            # numpy's 0.1MB. ``dtype=`` casts inside the iterator, per element,
-            # so strided and broadcast operands stay unmaterialized.
-            #
-            # This takes the direct route even when a pairwise path was
-            # planned. The path was chosen and billed already, and the
-            # pairwise stepper has no way to thread a compute dtype through
-            # its intermediates; a promoting contraction is the narrow case,
-            # and not allocating its operands matters more than the step
-            # kernel it would have used.
+        # Casting an operand materializes its LOGICAL shape. That is fine for
+        # a dense array -- the copy is the same size as the original -- but
+        # ruinous for an operand whose logical size far exceeds its storage:
+        # a broadcast view has O(1) bytes and O(numel) logical size, so
+        # promoting one turned a 4-byte view into an allocation the size of
+        # the contraction (~80GB for a 100000^2 view; measured 128MB against
+        # numpy's 0.1MB at 4000^2).
+        expansive = needs_promotion and any(
+            _expands_when_materialized(_to_base_ndarray(a)) for a in operand_arrays
+        )
+        if expansive:
+            # ``dtype=`` casts inside numpy's iterator, per element, so the
+            # view is never materialized. This gives up the planned pairwise
+            # path for these operands, which is the right trade only BECAUSE
+            # they are the expansive ones -- the plan is not worth an
+            # allocation proportional to a logical shape. Dense operands keep
+            # their path below.
             result = _call_numpy(
                 _np.einsum,
                 canonical_subscripts,
@@ -794,14 +808,21 @@ def einsum(
                 dtype=compute_dtype,
                 casting=requested_casting,
             )
-        elif path_info.steps:
-            result = _execute_pairwise(path_info, list(operands))
         else:
-            result = _call_numpy(
-                _np.einsum,
-                canonical_subscripts,
-                *[_to_base_ndarray(o) for o in operands],
-            )
+            exec_operands = operands
+            if needs_promotion:
+                exec_operands = [
+                    _to_base_ndarray(a).astype(compute_dtype, copy=False)
+                    for a in operand_arrays
+                ]
+            if path_info.steps:
+                result = _execute_pairwise(path_info, list(exec_operands))
+            else:
+                result = _call_numpy(
+                    _np.einsum,
+                    canonical_subscripts,
+                    *[_to_base_ndarray(o) for o in exec_operands],
+                )
 
     if out is not None:
         _validate_result_symmetry(result, target_symmetry)
