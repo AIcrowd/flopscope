@@ -576,3 +576,173 @@ def test_outer_operand_ndarray_subclass_cannot_lie_about_its_own_dtype():
         "the bill must reflect the TRUE dtype numpy computes at, not the "
         "cheap one the subclass's .dtype property reports"
     )
+
+
+# ---------------------------------------------------------------------------
+# ``axis=`` accept/reject boundary for the generic ``ufunc.reduce`` /
+# ``ufunc.accumulate`` fallbacks must match RAW numpy's exactly. In
+# particular, a LIST axis must never be silently normalized into a tuple and
+# executed: real numpy accepts only a bare int or a tuple of ints for
+# ``axis=`` and rejects every list outright (regardless of length or
+# content), with ``TypeError: 'list' object cannot be interpreted as an
+# integer``. ``logical_xor`` is not in ``_REDUCE_TO_WHEST`` /
+# ``_ACCUMULATE_TO_WHEST``, so it exercises the generic fallback path
+# (``_resolve_generic_reduce_axis``) rather than a specialized one.
+# ---------------------------------------------------------------------------
+
+
+class _IndexOnce:
+    """A caller-supplied axis exposing ``__index__``, resolving to 1."""
+
+    def __index__(self):
+        return 1
+
+
+# (label, axis, resolved-before-cost) -- "resolved-before-cost" marks the
+# forms `_resolve_generic_reduce_axis` itself rejects (list and bool axes),
+# for which a refused call must cost exactly nothing. The remaining forms
+# real numpy accepts either method (int, negative int, tuple1, np.int64,
+# 0-d int array, __index__ object) plus the two forms only `.reduce` accepts
+# (None, a multi-axis tuple) are exercised separately below.
+_REJECTED_BEFORE_COST = [
+    pytest.param([1], id="single-elem-list"),
+    pytest.param([0, 1], id="multi-elem-list"),
+    pytest.param([[0], [1]], id="nested-list"),
+    pytest.param(True, id="bool-scalar"),
+    pytest.param(np.bool_(False), id="np-bool-scalar"),
+]
+
+_ACCEPTED_BY_BOTH = [
+    pytest.param(1, id="int-pos"),
+    pytest.param(-1, id="int-neg"),
+    pytest.param((1,), id="one-tuple"),
+    pytest.param(np.int64(1), id="np-int64"),
+    pytest.param(np.array(1), id="0d-int-array"),
+    pytest.param(_IndexOnce(), id="index-protocol-object"),
+]
+
+
+def _make_bool_array(shape):
+    rng = np.random.default_rng(3)
+    return rng.integers(0, 2, size=shape).astype(bool)
+
+
+@pytest.mark.parametrize("axis", _ACCEPTED_BY_BOTH)
+def test_generic_reduce_accepts_every_form_raw_numpy_accepts(axis):
+    """Every form real numpy accepts for ``.reduce`` must still be accepted
+    by flopscope, and billed (not floored at zero)."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.reduce(a_raw, axis=axis)  # sanity: numpy accepts it
+    cost = _billed(lambda: np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis))
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", [None, (0, 1)], ids=["none", "two-tuple"])
+def test_generic_reduce_accepts_multi_axis_forms(axis):
+    """``.reduce`` (unlike ``.accumulate``) allows reducing more than one
+    axis at once, via either ``axis=None`` or a multi-element tuple."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.reduce(a_raw, axis=axis)  # type: ignore[arg-type]
+    cost = _billed(
+        lambda: np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+    )
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", _REJECTED_BEFORE_COST)
+def test_generic_reduce_rejects_the_same_forms_raw_numpy_rejects(axis):
+    """A LIST (any length/content) or a ``bool``/``np.bool_`` axis must be
+    refused with the SAME exception type raw numpy raises, and must cost
+    NOTHING -- flopscope's own axis resolver rejects these before any cost
+    is computed, so the real numpy call (and the deduct) must never run.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.reduce(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(type(raw_exc_info.value)):
+                np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+        assert ctx.flops_used == before, "a refused axis form must cost nothing"
+
+
+@pytest.mark.parametrize("axis", _ACCEPTED_BY_BOTH)
+def test_generic_accumulate_accepts_every_form_raw_numpy_accepts(axis):
+    """Every form real numpy accepts for ``.accumulate`` must still be
+    accepted by flopscope, and billed (not floored at zero)."""
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    raw_result = np.logical_xor.accumulate(a_raw, axis=axis)  # sanity check
+    cost = _billed(
+        lambda: np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)
+    )
+    assert raw_result is not None
+    assert cost > 0
+
+
+@pytest.mark.parametrize("axis", _REJECTED_BEFORE_COST)
+def test_generic_accumulate_rejects_the_same_forms_raw_numpy_rejects(axis):
+    """Same guarantee as the ``.reduce`` case above, for ``.accumulate``:
+    a LIST or ``bool``/``np.bool_`` axis is refused with the exact
+    exception type raw numpy raises, at zero cost.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.accumulate(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(type(raw_exc_info.value)):
+                np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+        assert ctx.flops_used == before, "a refused axis form must cost nothing"
+
+
+@pytest.mark.parametrize("axis", [None, (0, 1)], ids=["none-multi-axis", "two-tuple"])
+def test_generic_accumulate_rejects_multi_axis_forms_raw_numpy_rejects(axis):
+    """``.accumulate`` (unlike ``.reduce``) refuses to accumulate over more
+    than one axis, whether spelled as ``axis=None`` on an ndim>1 array or a
+    multi-element tuple -- flopscope must raise the same exception type raw
+    numpy raises for both.
+    """
+    shape = (2, 3, 4)
+    a_raw = _make_bool_array(shape)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.logical_xor.accumulate(a_raw, axis=axis)  # type: ignore[arg-type]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with pytest.raises(type(raw_exc_info.value)):
+            np.logical_xor.accumulate(fnp.asarray(a_raw.copy()), axis=axis)  # type: ignore[arg-type]
+
+
+def test_generic_reduce_list_axis_is_never_normalized_into_a_tuple_and_executed():
+    """The confirmed regression this module guards against: a LIST axis
+    must not be silently converted into a tuple and executed -- it must be
+    refused, matching raw numpy's own ``TypeError``, before any budget is
+    deducted.
+    """
+    a_raw = _make_bool_array((3, 4))
+    with pytest.raises(TypeError):
+        np.logical_xor.reduce(a_raw, axis=[0, 1])  # sanity: raw numpy rejects this
+
+    load_weights()
+    with flops.BudgetContext(flop_budget=10**15, quiet=True) as ctx:
+        before = ctx.flops_used
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(TypeError):
+                np.logical_xor.reduce(fnp.asarray(a_raw.copy()), axis=[0, 1])
+        assert ctx.flops_used == before

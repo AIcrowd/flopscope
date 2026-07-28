@@ -468,6 +468,16 @@ def test_axis_that_fails_resolution_first_and_succeeds_second_cannot_buy_a_free_
         pytest.param(lambda: (0, 1), 2, False, id="two-tuple-rejected"),
         pytest.param(lambda: True, 2, False, id="bool-axis-rejected"),
         pytest.param(lambda: 5, 2, False, id="out-of-range-rejected"),
+        pytest.param(lambda: np.int64(0), 2, True, id="np-int64-ok"),
+        pytest.param(lambda: np.array(0), 2, True, id="0d-int-array-ok"),
+        # A LIST axis: real ``ufunc.reduceat`` accepts only a bare int or a
+        # length-1 tuple, never a list -- regardless of length or content
+        # (even a single in-range int). This must raise the same
+        # ``TypeError`` raw numpy raises, not be silently normalized into
+        # a tuple and executed.
+        pytest.param(lambda: [0], 2, False, id="single-elem-list-rejected"),
+        pytest.param(lambda: [0, 1], 2, False, id="multi-elem-list-rejected"),
+        pytest.param(lambda: [[0], [1]], 2, False, id="nested-list-rejected"),
     ],
 )
 def test_flopscope_accept_reject_boundary_matches_raw_numpy(make_axis, ndim, expect_ok):
@@ -494,7 +504,7 @@ def test_flopscope_accept_reject_boundary_matches_raw_numpy(make_axis, ndim, exp
     else:
         with pytest.raises(Exception) as raw_exc_info:
             np.subtract.reduceat(a_raw, [0], axis=axis)  # type: ignore[arg-type]
-        billed_raising(
+        cost = billed_raising(
             lambda: np.subtract.reduceat(
                 fnp.asarray(a_raw.copy()),
                 [0],
@@ -502,3 +512,32 @@ def test_flopscope_accept_reject_boundary_matches_raw_numpy(make_axis, ndim, exp
             ),
             type(raw_exc_info.value),
         )
+        assert cost == 0, "a refused axis form must never reach the real numpy call"
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [[0], [0, 1], [[0], [1]]],
+    ids=["single-elem", "multi-elem", "nested"],
+)
+def test_reduceat_list_axis_is_never_normalized_into_a_tuple_and_executed(axis):
+    """A LIST axis must not be silently converted to a tuple and executed:
+    real ``ufunc.reduceat`` rejects every list form outright (regardless of
+    length or content), so flopscope must reject it too, with the exact
+    same exception type raw numpy raises, and without ever reaching the
+    real reduceat call (which is what would happen if a list were quietly
+    normalized into an accepted tuple).
+    """
+    a_raw = np.full((6, 4), 2, dtype=np.int64)
+    with pytest.raises(Exception) as raw_exc_info:
+        np.subtract.reduceat(a_raw, [0], axis=axis)  # type: ignore[arg-type]
+
+    cost = billed_raising(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(a_raw.copy()),
+            [0],
+            axis=axis,  # type: ignore[arg-type]
+        ),
+        type(raw_exc_info.value),
+    )
+    assert cost == 0

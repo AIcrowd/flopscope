@@ -220,3 +220,58 @@ def test_fnp_mask_func_is_unaffected_by_forwarding_the_measured_array():
     scan_only = billed(lambda: fnp.mask_indices(n, np.triu))
     triu_cost_alone = billed(lambda: fnp.triu(fnp.asarray(np.ones((n, n), int))))
     assert with_fnp_mask_func == scan_only + triu_cost_alone
+
+
+# --------------------------------------------------------------------------
+# A ``mask_func`` returning a plain (non-ndarray) sequence, e.g. a list, is a
+# form raw numpy actually REJECTS: ``mask_indices``'s body does
+# ``nonzero(mask_func(m, k) != 0)``, and comparing a bare Python list to an
+# int produces a 0-d bool (``[1, 0, 1] != 0`` is just ``True``), which
+# ``nonzero`` then refuses. flopscope instead converts whatever `mask_func`
+# returns to a real ndarray via ``np.asarray`` before handing it back to
+# numpy's own body -- succeeding where raw numpy raises.
+#
+# This is a disclosed NumPy-compatibility gap, deliberately NOT tightened to
+# match numpy: the SAME unconditional ``np.asarray`` conversion is what
+# closes a strictly worse hole (see
+# ``test_mask_func_ne_override_cannot_smuggle_a_bigger_scan_past_the_bill``
+# above) -- forwarding a caller's ORIGINAL return value (list, ndarray
+# subclass, or otherwise) to numpy's internal ``!= 0`` would let a hostile
+# ``__ne__``/``__eq__`` override run arbitrary, unbilled work. Only
+# forwarding the ALREADY-MEASURED, subclass-free array closes that for every
+# return type uniformly, and it does so without invoking `list`'s own
+# comparison operator at all (`np.asarray` iterates, it never compares).
+#
+# The two tests below confirm this widening is billing-neutral: the floor
+# (`max(numel(mask), n*n)`) still applies, so a `mask_func` that returns a
+# list can never buy a cheaper scan than an equivalent ndarray return would.
+# --------------------------------------------------------------------------
+
+
+def test_list_returning_mask_func_succeeds_where_raw_numpy_raises():
+    """Documents the disclosed compat gap: raw numpy's ``nonzero(a != 0)``
+    on a bare Python list yields a 0-d bool and raises; flopscope converts
+    the list to a real array first and succeeds instead.
+    """
+    n = 3
+    with pytest.raises(ValueError):
+        np.mask_indices(n, lambda m, k: [1, 0, 1])  # type: ignore[arg-type]
+
+    # flopscope succeeds -- this is the documented, deliberate divergence.
+    result = fnp.mask_indices(n, lambda m, k: [1, 0, 1])
+    assert result is not None
+
+
+def test_list_returning_mask_func_is_never_cheaper_than_the_honest_floor():
+    """The list-vs-ndarray divergence above must never let a participant
+    buy a cheaper bill than an honest (ndarray-returning) ``mask_func``
+    would cost for the same values -- the ``max(numel(mask), n*n)`` floor
+    applies uniformly regardless of what type ``mask_func`` returns.
+    """
+    n = 5
+    values = [1, 0, 1, 0, 1]
+    via_list = billed(lambda: fnp.mask_indices(n, lambda m, k: values))
+    via_array = billed(lambda: fnp.mask_indices(n, lambda m, k: np.array(values)))
+    floor = billed(lambda: fnp.mask_indices(n, lambda m, k: np.zeros((0,), bool)))
+    assert via_list == via_array
+    assert via_list >= floor

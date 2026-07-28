@@ -1211,11 +1211,22 @@ def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | Non
 
     ``None`` passes through unchanged (numpy's own "reduce every axis" /
     "accumulate does not allow this" semantics apply downstream, in the
-    real call). A bare axis or each element of a tuple/list of axes is
-    read through ``operator.index`` EXACTLY ONCE and returned as a plain
+    real call). A bare axis or each element of a TUPLE of axes is read
+    through ``operator.index`` EXACTLY ONCE and returned as a plain
     ``int`` -- ``bool``/``np.bool_`` are rejected first, matching numpy's
     own ``TypeError: an integer is required`` (``bool`` implements
     ``__index__`` but numpy's axis parser special-cases it out).
+
+    A LIST is deliberately not given the tuple's element-by-element
+    treatment: real ``ufunc.reduce``/``ufunc.accumulate`` accept only a
+    bare integer or a tuple of integers for ``axis`` and reject a list
+    outright (``TypeError: 'list' object cannot be interpreted as an
+    integer``) -- regardless of what it contains, even a single in-range
+    int. A list falls through to the same ``operator.index`` call the
+    bare-axis case uses below, which raises that exact message for a
+    list (lists have no ``__index__``) without ever inspecting its
+    elements, matching numpy's own accept/reject boundary instead of
+    silently normalizing a form numpy itself refuses.
 
     This function does not itself replicate every numpy-side semantic
     rule (duplicate axes, an ufunc that is not "reorderable" restricting
@@ -1224,7 +1235,7 @@ def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | Non
     own call, exactly as before. What changes is that they now run
     against the PLAIN, already-resolved value returned here rather than
     the caller's original object: a caller-supplied axis exposing
-    ``__index__`` (or, for a tuple/list, each element's) that behaves
+    ``__index__`` (or, for a tuple, each element's) that behaves
     differently across two invocations -- succeeding with one axis on a
     first read and a different one on a second -- could previously be
     billed for the first read while flopscope's own cost math forwarded
@@ -1233,7 +1244,7 @@ def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | Non
     """
     if axis is None:
         return None
-    if isinstance(axis, (tuple, list)):
+    if isinstance(axis, tuple):
         resolved = []
         for entry in axis:
             if isinstance(entry, (bool, _np.bool_)):
