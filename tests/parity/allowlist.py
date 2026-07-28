@@ -1924,6 +1924,35 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-3",
     ),
     Entry(
+        case_id="grid/savez*::*",
+        dimension="flops",
+        category=Category.ACCEPTED_DIVERGENCE,
+        reason=(
+            "In-process `numpy.savez` validates its arguments only after the op has"
+            " been charged, so the grid pattern's bad call bills 176 and then raises"
+            " TypeError. The server refuses the same call before dispatch and charges"
+            " nothing. Charging for a call that produces no result is the worse of the"
+            " two behaviours, so the client staying at zero here is deliberate -- the"
+            " same refuse-before-charging rule the server applies everywhere else."
+        ),
+        issue="INTERNAL-P3-refuse-before-charging",
+    ),
+    Entry(
+        case_id="grid/savez*::*",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "Both backends reject the grid pattern's bad `savez` call, but not with"
+            " the same class: in-process numpy raises `TypeError` (bases Exception,"
+            " BaseException) from its own argument validation, while the server's"
+            " refusal surfaces as a `LookupError` subclass (bases LookupError,"
+            " Exception, BaseException). Refusing is right; refusing under a"
+            " different base-class chain is not, and code catching `TypeError` sees"
+            " only one of them."
+        ),
+        issue="INTERNAL-P5-family-3",
+    ),
+    Entry(
         case_id="grid/savez::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -2820,18 +2849,6 @@ ENTRIES: tuple[Entry, ...] = (
             "`corrcoef` returns a genuine computed scalar (or `None`) in-process for"
             " this pattern; the client wraps it in a `RemoteScalar` proxy (reporting a"
             " dtype where in-process there is none) instead of unwrapping it to the"
-            " equivalent bare value, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-5",
-    ),
-    Entry(
-        case_id="grid/ptp::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`ptp` returns a genuine computed scalar (or `None`) in-process for this"
-            " pattern; the client wraps it in a `RemoteScalar` proxy (reporting a dtype"
-            " where in-process there is none) instead of unwrapping it to the"
             " equivalent bare value, so pytype disagrees."
         ),
         issue="INTERNAL-P2-family-5",
