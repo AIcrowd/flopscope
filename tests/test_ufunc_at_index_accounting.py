@@ -16,6 +16,7 @@ import pytest
 import flopscope
 import flopscope.numpy as fnp
 from flopscope._pointwise import _canon_entry, _canonical_index, _ufunc_at_touched_cells
+from flopscope._weights import load_weights
 
 
 def oracle(shape, indices) -> int:
@@ -303,18 +304,21 @@ def test_values_array_protocol_resize_of_index_does_not_shrink_the_bill():
     )
 
 
-def test_values_array_protocol_resize_on_numpys_own_reread_does_not_shrink_the_bill():
-    """``ufunc.at`` re-reads the index buffer a SECOND time -- from inside
-    numpy's own C implementation -- after ``vals.__array__`` has already run
-    once here for billing-dtype resolution. A ``values.__array__`` that
-    stays quiet on that first call and only resizes the index on this
-    second, numpy-internal call is not caught by counting touched cells
-    late (after the first ``__array__`` call): the count would still be
-    taken from whatever buffer the index array currently describes, and
-    that buffer keeps changing after the count is taken. Only handing
-    numpy an owned, frozen copy -- decoupled from the participant's live
-    array from the moment of canonicalization -- closes this: the resize
-    changes neither the count nor what actually gets applied.
+def test_values_array_protocol_is_resolved_at_most_once():
+    """``vals`` (the ``ufunc.at`` ``values`` operand) is resolved through the
+    array protocol AT MOST ONCE. flopscope used to read ``vals.__array__``
+    once here for billing-dtype resolution and then hand numpy the
+    caller's live, unresolved object, which let numpy's own ``ufunc.at``
+    implementation independently re-derive ``vals`` a second time --
+    opening the same billed-vs-applied gap the frozen index snapshot
+    below closes for indices (a ``vals.__array__`` reporting one dtype on
+    its first call and a pricier one on numpy's own second call would
+    bill the cheap one while numpy actually computed the pricier loop).
+    flopscope now resolves ``vals`` exactly once and hands numpy that SAME
+    resolved array, so there is no second, independent read left for
+    numpy to perform. The resize below (fired on every call ``vals``
+    gets, including this single one) still can't touch the index snapshot
+    already frozen at canonicalization time.
     """
     n = 500_000
     idx = np.zeros(1, np.intp)
@@ -325,21 +329,65 @@ def test_values_array_protocol_resize_on_numpys_own_reread_does_not_shrink_the_b
 
         def __array__(self, dtype=None, copy=None):
             self.calls += 1
-            if self.calls >= 2:
-                idx.resize(n, refcheck=False)
+            idx.resize(n, refcheck=False)
             return np.ones(1, np.float64)
 
     dst = fnp.asarray(np.zeros(4, np.float64))
     vals = Vals()
     cost = billed(lambda: np.add.at(dst, idx, vals))
     written = float(np.asarray(dst)[0])
-    assert vals.calls >= 2, "sanity: numpy must re-resolve vals on its own"
+    assert vals.calls == 1, (
+        "flopscope must resolve vals exactly once and hand numpy that same "
+        "resolved array -- numpy re-deriving vals on its own would let it "
+        "see a different value than what was billed"
+    )
     assert written == 1.0, (
         "the frozen snapshot taken at canonicalization must be applied, "
-        "not the index resized during numpy's own re-resolution of vals"
+        "not the index resized during vals resolution"
     )
     assert cost == billed(
         lambda: fnp.add(fnp.asarray(np.zeros(int(written), np.float64)), 1.0)
+    )
+
+
+def test_values_dtype_array_protocol_is_resolved_once():
+    """The ``vals`` operand's DTYPE, not just its identity, must come from a
+    single resolution shared by the billing rate and the real call.
+    ``vals.__array__`` returning a cheap dtype on its (only) call and numpy
+    then independently re-deriving a pricier one from the caller's live
+    object would bill the cheap rate while the loop that actually ran was
+    the pricier one -- ``_resolve_at_operand`` materializes ``vals`` once,
+    up front, so numpy only ever sees that same resolved array.
+    """
+    load_weights()
+    n = 2_000_000
+    calls = [0]
+
+    class Vals:
+        def __array__(self, dtype=None, copy=None):
+            calls[0] += 1
+            cheap = np.ones(n, np.int8)
+            expensive = np.ones(n, np.float64)
+            return cheap if calls[0] == 1 else expensive
+
+    dst = fnp.asarray(np.ones(n, np.int8))
+    cost = billed(lambda: np.multiply.at(dst, np.arange(n), Vals()))
+
+    honest_int8 = billed(
+        lambda: np.multiply.at(
+            fnp.asarray(np.ones(n, np.int8)), np.arange(n), np.ones(n, np.int8)
+        )
+    )
+    honest_float64 = billed(
+        lambda: np.multiply.at(
+            fnp.asarray(np.ones(n, np.int8)), np.arange(n), np.ones(n, np.float64)
+        )
+    )
+
+    assert calls[0] == 1, "sanity: vals must be resolved exactly once"
+    assert cost == honest_int8, "the bill must match the single read actually used"
+    assert cost < honest_float64, (
+        "sanity: float64 is the genuinely pricier loop dtype here"
     )
 
 

@@ -21,6 +21,7 @@ import pytest
 
 import flopscope
 import flopscope.numpy as fnp
+from flopscope._weights import load_weights
 
 
 def billed(fn) -> int:
@@ -327,3 +328,98 @@ def test_reduceat_negative_axis_on_multidim_bills_correctly():
     floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
     assert neg_cost == pos_cost
     assert neg_cost > floor_cost
+
+
+def test_axis_array_protocol_second_read_does_not_escape_the_snapshot():
+    """A more direct TOCTOU probe than the ``indices`` case above: here
+    ``axis`` ITSELF is an arbitrary object exposing ``__index__``, and that
+    method returns a DIFFERENT axis if it is ever invoked a second time.
+
+    ``_resolve_reduceat_axis`` is documented as the ONLY read of ``axis`` --
+    both the cost math and the real ``ufunc.reduceat`` call must run against
+    that one resolved axis. An implementation that costs off one read but
+    hands the ORIGINAL ``axis`` object (rather than the resolved int) to the
+    real call -- letting numpy re-invoke ``__index__`` itself from inside
+    ``ufunc.reduceat`` -- would silently execute along a second, different
+    axis than the one it billed for.
+
+    The first call returns axis 1 (length 2, near-zero cost for this shape);
+    a second call, if it ever happened, would return axis 0 (length N, the
+    maximally expensive axis for this shape). Both the read count and the
+    bill must reflect only the first (and, per the single-read discipline,
+    only) call -- and the array must actually be reduced along the axis
+    that was billed for, not the other one.
+    """
+    N = 200_000
+    calls = 0
+
+    class Axis:
+        def __index__(self):
+            nonlocal calls
+            calls += 1
+            return 1 if calls == 1 else 0
+
+    a = fnp.asarray(np.full((N, 2), 2, dtype=np.int64))
+    cost = billed(lambda: np.subtract.reduceat(a, [1], axis=Axis()))
+
+    honest = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full((N, 2), 2, dtype=np.int64)), [1], axis=1
+        )
+    )
+    expensive = billed(
+        lambda: np.subtract.reduceat(
+            fnp.asarray(np.full((N, 2), 2, dtype=np.int64)), [1], axis=0
+        )
+    )
+
+    assert calls == 1, "sanity: axis must be resolved exactly once"
+    assert cost == honest, "the bill must reflect the single read actually executed"
+    assert cost < expensive, (
+        "sanity: axis 0 is the genuinely expensive axis for this shape"
+    )
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once():
+    """An explicit ``dtype=`` naming a dtype-like object (one exposing a
+    ``.dtype`` property, which ``np.dtype()`` honours) must be resolved
+    EXACTLY once, with that SAME resolved dtype used both for the billing
+    rate and for the real ``ufunc.reduceat`` call. Reading it once for
+    billing and then handing the original object to numpy -- which
+    resolves it again independently -- would let a property that reports a
+    cheap dtype on an early call and a pricier one later bill at the cheap
+    rate while numpy actually runs the pricier loop.
+
+    Uses production dtype rates (``load_weights()``) rather than this
+    module's unit-rate ``billed()`` default -- float32 and float64 bill
+    identically under unit rates, which would hide exactly the divergence
+    this test exists to catch.
+    """
+    load_weights()
+    N = 2_000_000
+    calls = 0
+
+    class StatefulDtype:
+        @property
+        def dtype(self):
+            nonlocal calls
+            calls += 1
+            return np.dtype(np.float32) if calls == 1 else np.dtype(np.float64)
+
+    a = fnp.asarray(np.full((N,), 2, dtype=np.int32))
+    cost = billed(lambda: np.add.reduceat(a, [0], dtype=StatefulDtype()))
+
+    honest_float32 = billed(
+        lambda: np.add.reduceat(
+            fnp.asarray(np.full((N,), 2, dtype=np.int32)), [0], dtype=np.float32
+        )
+    )
+    honest_float64 = billed(
+        lambda: np.add.reduceat(
+            fnp.asarray(np.full((N,), 2, dtype=np.int32)), [0], dtype=np.float64
+        )
+    )
+
+    assert calls == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_float32, "the bill must match the single read actually used"
+    assert cost < honest_float64, "sanity: float64 is the genuinely pricier dtype here"

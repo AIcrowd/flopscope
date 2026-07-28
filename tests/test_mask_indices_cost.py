@@ -79,3 +79,39 @@ def test_tri_indices_helpers_are_unchanged():
     for n in (10, 100):
         assert billed(lambda n=n: fnp.triu_indices(n)) == n * (n + 1)
         assert billed(lambda n=n: fnp.tril_indices(n)) == n * (n + 1)
+
+
+def test_n_array_protocol_second_read_does_not_shrink_the_floor():
+    """``n`` must be resolved through the integer-index protocol EXACTLY
+    ONCE, and that same resolved value must be what both numpy's own probe
+    (``ones((n, n), int)``) is built from AND what the billing floor
+    (``n*n``) uses.
+
+    numpy's internal body resolves ``n`` via ``__index__`` to build the
+    probe; the billing floor used to re-read ``n`` a SECOND time via
+    ``int(n)`` -- a DIFFERENT protocol -- after that call had already run.
+    An ``n`` that reports a large size to ``__index__`` (what numpy's probe
+    is actually built from, and what ``mask_func`` actually receives) and a
+    small one to ``__int__`` would let the floor fall far below the size of
+    the probe that was genuinely allocated and exposed to ``mask_func``.
+    """
+    real_n = 300
+    fake_n = 1
+
+    class N_:
+        def __index__(self):
+            return real_n
+
+        def __int__(self):
+            return fake_n
+
+    via_stateful = billed(
+        lambda: fnp.mask_indices(N_(), lambda m, k: np.asarray(m)[:1, :1])
+    )
+    via_plain_floor = billed(
+        lambda: fnp.mask_indices(real_n, lambda m, k: np.asarray(m)[:1, :1])
+    )
+    assert via_stateful == via_plain_floor
+    assert via_stateful > billed(
+        lambda: fnp.mask_indices(fake_n, lambda m, k: np.asarray(m)[:1, :1])
+    )

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect as _inspect
 import math as _math
+import operator as _operator
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
@@ -2980,6 +2981,23 @@ def mask_indices(*args, **kwargs):
     # numpy signature: mask_indices(n, mask_func, k=0) -- mask_func is the 2nd
     # positional arg or the `mask_func=` keyword.
     args = list(args)
+    # Resolve ``n`` through the integer-index protocol EXACTLY ONCE, before
+    # numpy ever sees it, and substitute the plain resolved int back into
+    # ``args``/``kwargs``. numpy's own body builds the probe via
+    # ``ones((n, n), int)``, which resolves ``n`` through ``__index__``; the
+    # billing floor below used to re-read ``n`` a SECOND time via ``int(n)``
+    # -- a different protocol -- after numpy had already run. A caller-
+    # supplied ``n`` exposing both could report one size to numpy's probe
+    # (built and handed to ``mask_func``, so it's exposed either way) and a
+    # smaller one to the floor. Resolving once here and handing numpy the
+    # same plain int both times it reads the shape closes that gap.
+    if len(args) >= 1:
+        args[0] = _operator.index(args[0])
+    elif "n" in kwargs:
+        kwargs["n"] = _operator.index(kwargs["n"])
+    # ``n`` not being supplied at all (neither positionally nor by keyword)
+    # is left alone here -- the real call below raises numpy's own
+    # ``TypeError`` for the missing required argument.
     if len(args) >= 2:
         args[1] = _strip_mask_func(args[1])
     elif "mask_func" in kwargs:
@@ -2999,8 +3017,10 @@ def mask_indices(*args, **kwargs):
     # ceiling on what got returned, never a floor on what got allocated and
     # exposed -- floor the bill at the probe's own numel (n*n) so capturing
     # it and returning a token-sized result cannot buy a cheaper scan than
-    # `fnp.ones((n, n), int)` itself would cost.
-    n = int(args[0] if args else kwargs["n"])
+    # `fnp.ones((n, n), int)` itself would cost. ``n`` here is the SAME
+    # resolved int substituted into ``args``/``kwargs`` above -- not a fresh
+    # read of the caller's original object.
+    n = args[0] if args else kwargs["n"]
     probe_size = scanned.get("size", n * n)
     if probe_size >= n * n:
         shapes: tuple = (scanned.get("shape", (n, n)),)

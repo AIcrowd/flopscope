@@ -1070,6 +1070,33 @@ def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
         return _np.result_type(*operand_dtypes)
 
 
+def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
+    """Resolve a ``dtype=`` kwarg to a concrete ``np.dtype`` exactly once.
+
+    Shared by the four generic ufunc-method paths below (``outer`` /
+    ``reduce`` / ``accumulate`` / ``reduceat``). ``kwargs["dtype"]`` (when
+    present) is read here to compute the billing dtype, AND is the same
+    object later forwarded to the real numpy call via ``**kwargs`` -- a
+    caller-supplied dtype-like object (e.g. one exposing a stateful
+    ``.dtype`` property, which ``np.dtype()`` honours) would otherwise get
+    independently re-resolved a second time inside numpy's own call,
+    letting it report a cheap dtype to us while handing numpy something
+    pricier. Overwriting ``kwargs["dtype"]`` in place with the resolved,
+    immutable ``np.dtype`` closes that gap: numpy then resolves the exact
+    same value we billed.
+
+    ``dtype=None`` (the default, meaning "no explicit dtype") is left
+    alone -- resolving it here would turn "use the family default" into an
+    explicit float64 request.
+    """
+    explicit = kwargs.get("dtype")
+    if explicit is None:
+        return None
+    resolved = _np.dtype(explicit)
+    kwargs["dtype"] = resolved
+    return resolved
+
+
 @_counted_wrapper
 def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     """Cost-tracked ``ufunc.outer(a, b)`` for any binary ufunc.
@@ -1128,9 +1155,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # (comparison/logical), which still reads full-width operands, so it
     # falls through to the default path below instead of billing the
     # (lighter) bool rate.
-    explicit_dtype = kwargs.get("dtype")
-    if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
-        billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
+    if explicit_dtype is not None and explicit_dtype.kind != "b":
+        billing_dtypes: tuple = (explicit_dtype,)
     else:
         # This default path shares the operand-width behavior of the
         # reduce/accumulate/reduceat/at siblings: a comparison/logical
@@ -1194,10 +1221,11 @@ def _counted_ufunc_reduce_generic(
     # bool). add/multiply's extra integer widening never matters here: they
     # are routed to sum/prod, not this generic path.
     default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
-            explicit_dtype=kwargs.get("dtype"),
+            explicit_dtype=explicit_dtype,
             out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
             default_dtype=default_dtype,
         ),
@@ -1250,10 +1278,11 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
     # -> float64, subtract(int32) -> int32).
     default_dtype = _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
-            explicit_dtype=kwargs.get("dtype"),
+            explicit_dtype=explicit_dtype,
             out_dtype=out.dtype if isinstance(out, _np.ndarray) else None,
             default_dtype=default_dtype,
         ),
@@ -1431,10 +1460,11 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         if ufunc.__name__ in ("add", "multiply")
         else _ufunc_loop_dtype(ufunc, a.dtype, a.dtype)
     )
+    explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a.dtype,
-            explicit_dtype=kwargs.get("dtype"),
+            explicit_dtype=explicit_dtype,
             default_dtype=default_dtype,
         ),
     )
@@ -1447,11 +1477,21 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
+        # ``resolved_axis`` is what the cost above was billed against --
+        # forward THAT to the real call, not the caller's original ``axis``
+        # object, so numpy can't re-resolve a different axis a second time
+        # (e.g. via a stateful ``__index__``) than the one we billed for.
+        # When ``_resolve_reduceat_axis`` couldn't pin ``axis`` down (see its
+        # docstring), ``resolved_axis`` is ``None`` and the cost above was
+        # already floored to 0 for exactly that reason -- fall back to the
+        # original, untouched ``axis`` so numpy still raises its own error
+        # (or handles a form our resolver is conservative about) rather than
+        # forcing an axis we never validated.
         result = _call_numpy(
             ufunc.reduceat,
             _to_base_ndarray(a),
             indices_snapshot,
-            axis=axis,
+            axis=resolved_axis if resolved_axis is not None else axis,
             out=out_stripped,
             **kwargs,
         )
@@ -1642,10 +1682,29 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # must use ``canonical``; re-reading ``indices`` below would let the
     # billed index and the written index differ.
     canonical = _canonical_index(indices)
-    # Strip any flopscope-typed positional values too.
-    stripped_args = tuple(
-        _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
-    )
+
+    # Resolve the ``values``/``vals`` positional operand (``args[0]``, if
+    # present) through the array protocol AT MOST ONCE. A plain Python
+    # scalar (bool/int/float/complex, not a numpy scalar) is left alone --
+    # NEP 50 weak typing must still see the bare type -- and an object
+    # that's already an ndarray is merely stripped of any flopscope
+    # wrapper. Anything else (e.g. something exposing only ``__array__``)
+    # is materialized via ``_np.asarray`` right here, and THIS SAME
+    # resolved array is what the billing dtype below reads AND what
+    # ``ufunc.at`` gets called with further down -- re-deriving it a
+    # second time (once for billing, once inside numpy's own conversion)
+    # would let a participant's ``__array__`` report a cheap dtype to us
+    # while handing numpy something pricier.
+    def _resolve_at_operand(v):
+        if isinstance(v, _np.ndarray):
+            return _to_base_ndarray(v)
+        if isinstance(v, (bool, int, float, complex)) and not isinstance(
+            v, _np.generic
+        ):
+            return v
+        return _np.asarray(v)
+
+    stripped_args = tuple(_resolve_at_operand(v) for v in args)
     # Same loop resolution as the other generic ufunc-method paths:
     # ``ufunc.at`` applies the ufunc's own resolved loop and casts the
     # result back in place with unsafe casting, so a float-only loop runs
@@ -1655,20 +1714,18 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # f64 rate). Binary ufuncs contribute their ``vals`` operand: NEP 50
     # weak Python scalars pass as their bare type (bool never widens a
     # loop, so it just repeats the array dtype via the nin-padding);
-    # everything else contributes its (coerced) array dtype.
+    # everything else contributes its (already-resolved) array dtype.
     if hasattr(a, "dtype"):
         operands: list = [a.dtype]
-        if args:
-            vals = args[0]
+        if stripped_args:
+            vals = stripped_args[0]
             if isinstance(vals, (bool, int, float, complex)) and not isinstance(
                 vals, _np.generic
             ):
                 if not isinstance(vals, bool):
                     operands.append(type(vals))
-            elif isinstance(vals, _np.ndarray):
-                operands.append(vals.dtype)
             else:
-                operands.append(_np.asarray(vals).dtype)
+                operands.append(vals.dtype)
         billing_dtypes: tuple = (
             reduction_billing_dtype(
                 a.dtype,

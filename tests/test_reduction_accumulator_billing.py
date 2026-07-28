@@ -375,3 +375,105 @@ def test_a_complex_destination_never_lowers_the_bill(op, expect_ratio):
         f"real one -- the complex factor was dropped"
     )
     assert complex_cost == real_cost * expect_ratio
+
+
+# ---------------------------------------------------------------------------
+# dtype= must be resolved through the array/dtype protocol exactly once, with
+# that SAME resolved value used for both the billing rate and the real numpy
+# call -- across every generic ufunc-method path that accepts it.
+# ---------------------------------------------------------------------------
+
+
+def _stateful_dtype_object():
+    """A dtype-like object (``np.dtype()`` honours a ``.dtype`` property)
+    that reports float32 on its first read and float64 on every read after
+    that. Returns the object and a zero-arg getter for how many times its
+    property has been read.
+    """
+    calls = [0]
+
+    class StatefulDtype:
+        @property
+        def dtype(self):
+            calls[0] += 1
+            return np.dtype(np.float32) if calls[0] == 1 else np.dtype(np.float64)
+
+    return StatefulDtype(), (lambda: calls[0])
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_outer():
+    """``ufunc.outer(..., dtype=)`` must resolve a dtype-like object exactly
+    once: the resolved dtype sets the billing rate AND is what the real
+    call runs with. Reading it once for billing and then handing the
+    original object to numpy -- which resolves it again independently --
+    would let a property reporting a cheap dtype on the first read and a
+    pricier one afterward bill the cheap rate while numpy actually ran the
+    pricier loop.
+    """
+    load_weights()
+    a_raw = np.full((2000, 2), 2, dtype=np.int32)
+    b_raw = np.full((2,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=sd
+        )
+    )
+    honest_f32 = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=np.float32
+        )
+    )
+    honest_f64 = _billed(
+        lambda: np.add.outer(
+            fnp.asarray(a_raw.copy()), fnp.asarray(b_raw.copy()), dtype=np.float64
+        )
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_generic_reduce():
+    """Same protocol-resolution guarantee as above, for the generic
+    ``ufunc.reduce`` fallback (``subtract`` is not in
+    ``FlopscopeArray._REDUCE_TO_WHEST``, so it takes this path).
+    """
+    load_weights()
+    a_raw = np.full((2_000_000,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=sd))
+    honest_f32 = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=np.float32)
+    )
+    honest_f64 = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(a_raw.copy()), dtype=np.float64)
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+def test_dtype_kwarg_array_protocol_is_resolved_once_for_generic_accumulate():
+    """Same protocol-resolution guarantee as above, for the generic
+    ``ufunc.accumulate`` fallback.
+    """
+    load_weights()
+    a_raw = np.full((2_000_000,), 2, dtype=np.int32)
+    sd, calls = _stateful_dtype_object()
+
+    cost = _billed(lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=sd))
+    honest_f32 = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=np.float32)
+    )
+    honest_f64 = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(a_raw.copy()), dtype=np.float64)
+    )
+
+    assert calls() == 1, "sanity: dtype= must be resolved exactly once"
+    assert cost == honest_f32, "the bill must match the single read actually used"
+    assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
