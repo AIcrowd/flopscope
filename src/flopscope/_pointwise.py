@@ -1349,19 +1349,24 @@ def _canon_entry(entry):
     mask that ADDS an axis); ``ndarray`` must be tested before ``__index__``
     (a 0-d integer array implements it).
 
-    Boolean arrays are snapshotted because their cost depends on their
-    VALUES (``count_nonzero``), so a caller could otherwise mutate the mask
-    between costing and writing. Integer arrays are not snapshotted: their
-    cost depends only on ``.size``. ``.size`` is NOT immutable while we hold
-    a reference -- ``ndarray.resize(n, refcheck=False)`` mutates it in place
-    on the very object this function hands back (by identity, not a copy).
-    This is only safe because the call site (``_counted_ufunc_at``) counts
-    touched cells as the LAST step before the deduct, after every bit of
-    participant-triggering resolution has already run, so there is no window
-    left for a resize to land in between the count and the write. We only
-    ever freeze copies WE made -- ``_np.asarray`` can hand back the caller's
-    own array, and freezing that would leave a participant's array
-    permanently read-only.
+    Both boolean masks and integer index arrays are snapshotted into an
+    owned, read-only copy. Boolean masks need it because their cost depends
+    on their VALUES (``count_nonzero``): a live view would let a caller
+    mutate the mask between costing and writing. Integer arrays need it for
+    a subtler reason: their cost depends only on ``.size``, and ``.size`` is
+    NOT immutable while anyone else holds a reference to the same buffer --
+    ``ndarray.resize(n, refcheck=False)`` mutates it in place on the array
+    it is called on. A read-only VIEW of that array is not enough either:
+    resizing the base still succeeds and leaves the view dangling over
+    reallocated memory. Only an owned copy, unreachable from the caller,
+    closes this. Ordering the count late (see ``_counted_ufunc_at``) is not
+    sufficient on its own: numpy re-reads the index buffer from inside
+    ``ufunc.at`` itself, AFTER invoking ``__array__`` on the ``values``
+    operand, so a participant's ``__array__`` callback can resize the index
+    on numpy's own internal re-read -- a step no amount of reordering in
+    this module runs before. We only ever freeze copies WE made --
+    ``_np.asarray`` can hand back the caller's own array, and freezing that
+    would leave a participant's array permanently read-only.
     """
     if entry is None or entry is Ellipsis:
         return entry
@@ -1383,7 +1388,9 @@ def _canon_entry(entry):
             raise IndexError(
                 "arrays used as indices must be of integer (or boolean) type"
             )
-        return base
+        snapshot = _np.array(base, dtype=base.dtype, copy=True)
+        snapshot.flags.writeable = False
+        return snapshot
     if hasattr(type(entry), "__index__"):
         return _operator.index(entry)
     arr = _np.asarray(entry)
@@ -1398,7 +1405,9 @@ def _canon_entry(entry):
         snapshot = _np.array(arr, dtype=bool, copy=True)
         snapshot.flags.writeable = False
         return snapshot
-    return arr
+    snapshot = _np.array(arr, dtype=arr.dtype, copy=True)
+    snapshot.flags.writeable = False
+    return snapshot
 
 
 def _canonical_index(indices):
@@ -1554,14 +1563,15 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # Count touched cells LAST, immediately before the deduct -- after every
     # step above that can run participant code (in particular the
     # ``_np.asarray(vals)`` fallback just above, which can invoke a
-    # participant's ``__array__``). ``canonical``'s integer index arrays are
-    # held by reference, not snapshotted (see ``_canon_entry``), so
-    # participant code that resizes one in place
-    # (``ndarray.resize(refcheck=False)``) between an earlier count and the
-    # write below would let the bill and the applications actually performed
-    # diverge. Counting here, with nothing left between it and the write but
-    # ``budget.deduct`` itself (pure bookkeeping -- see ``_charge_op``),
-    # closes that window without paying for a defensive copy on every call.
+    # participant's ``__array__``). ``canonical``'s integer (and boolean)
+    # index arrays are owned, read-only copies made by ``_canon_entry`` --
+    # not views into a participant's live buffer -- so nothing reachable
+    # from participant code, including numpy's OWN re-read of the index
+    # buffer from inside ``ufunc.at`` below, can change what this counts
+    # or what gets applied out from under it. Counting here anyway is
+    # defense in depth: it keeps the count adjacent to the write with
+    # nothing but ``budget.deduct`` itself (pure bookkeeping -- see
+    # ``_charge_op``) in between.
     n_ops = _ufunc_at_touched_cells(a, canonical)
     with budget.deduct(
         f"{ufunc.__name__}.at",

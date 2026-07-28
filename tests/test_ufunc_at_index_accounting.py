@@ -15,7 +15,7 @@ import pytest
 
 import flopscope
 import flopscope.numpy as fnp
-from flopscope._pointwise import _canonical_index, _ufunc_at_touched_cells
+from flopscope._pointwise import _canon_entry, _canonical_index, _ufunc_at_touched_cells
 
 
 def oracle(shape, indices) -> int:
@@ -122,6 +122,23 @@ def test_canonical_index_does_not_freeze_caller_array():
 
     _canonical_index(Holder())
     assert caller.flags.writeable is True
+
+
+@pytest.mark.parametrize("dtype", [np.intp, np.int32, np.uint16])
+def test_canon_entry_snapshots_integer_index_array(dtype):
+    """An integer ndarray index must canonicalize to an owned, read-only
+    copy -- not the caller's own array by identity. A live-identity result
+    would let the caller change what the array describes (e.g. via
+    ``ndarray.resize(refcheck=False)``) after canonicalization but before
+    the count and the write that are supposed to use this frozen form.
+    """
+    original = np.array([0, 1, 2], dtype)
+    result = _canon_entry(original)
+    assert isinstance(result, np.ndarray)
+    assert result is not original
+    assert result.flags.writeable is False
+    assert result.dtype == dtype, "the copy must not coerce the index dtype"
+    np.testing.assert_array_equal(result, original)
 
 
 def billed(fn) -> int:
@@ -257,13 +274,15 @@ def test_callback_wall_time_books_to_residual(name, invoke):
 
 def test_values_array_protocol_resize_of_index_does_not_shrink_the_bill():
     """The ``vals`` operand's ``__array__`` runs while resolving the billing
-    dtype, and ``_canon_entry`` hands an already-canonicalized integer index
-    array back BY IDENTITY (not a copy). If the touched-cell count were taken
-    before that resolution, participant code reachable from ``__array__``
-    could enlarge the index in place (``ndarray.resize(refcheck=False)``)
-    after the count but before the write, and the bill would reflect the
-    index's smaller pre-resize size instead of what ``ufunc.at`` actually
-    applies against.
+    dtype, and can be reached again later when numpy resolves ``vals`` a
+    second time inside its own ``ufunc.at`` execution. ``_canon_entry``
+    snapshots an integer index array into an owned, read-only copy taken
+    BEFORE either of those calls, so participant code reachable from
+    ``__array__`` that resizes the ORIGINAL index object in place
+    (``ndarray.resize(refcheck=False)``) -- on every call, as here -- changes
+    neither the count nor what actually gets applied: both stay pinned to
+    the frozen snapshot taken at canonicalization time, regardless of what
+    the participant does to their own array afterward.
     """
     idx = np.zeros(1, np.intp)
 
@@ -275,7 +294,50 @@ def test_values_array_protocol_resize_of_index_does_not_shrink_the_bill():
     dst = fnp.asarray(np.zeros(4, np.float64))
     cost = billed(lambda: np.add.at(dst, idx, Vals()))
     written = float(np.asarray(dst)[0])
-    assert written == 1_000_000.0, "sanity: the resized index must actually be applied"
+    assert written == 1.0, (
+        "the frozen snapshot taken at canonicalization must be applied, "
+        "not the index resized afterward"
+    )
+    assert cost == billed(
+        lambda: fnp.add(fnp.asarray(np.zeros(int(written), np.float64)), 1.0)
+    )
+
+
+def test_values_array_protocol_resize_on_numpys_own_reread_does_not_shrink_the_bill():
+    """``ufunc.at`` re-reads the index buffer a SECOND time -- from inside
+    numpy's own C implementation -- after ``vals.__array__`` has already run
+    once here for billing-dtype resolution. A ``values.__array__`` that
+    stays quiet on that first call and only resizes the index on this
+    second, numpy-internal call is not caught by counting touched cells
+    late (after the first ``__array__`` call): the count would still be
+    taken from whatever buffer the index array currently describes, and
+    that buffer keeps changing after the count is taken. Only handing
+    numpy an owned, frozen copy -- decoupled from the participant's live
+    array from the moment of canonicalization -- closes this: the resize
+    changes neither the count nor what actually gets applied.
+    """
+    n = 500_000
+    idx = np.zeros(1, np.intp)
+
+    class Vals:
+        def __init__(self):
+            self.calls = 0
+
+        def __array__(self, dtype=None, copy=None):
+            self.calls += 1
+            if self.calls >= 2:
+                idx.resize(n, refcheck=False)
+            return np.ones(1, np.float64)
+
+    dst = fnp.asarray(np.zeros(4, np.float64))
+    vals = Vals()
+    cost = billed(lambda: np.add.at(dst, idx, vals))
+    written = float(np.asarray(dst)[0])
+    assert vals.calls >= 2, "sanity: numpy must re-resolve vals on its own"
+    assert written == 1.0, (
+        "the frozen snapshot taken at canonicalization must be applied, "
+        "not the index resized during numpy's own re-resolution of vals"
+    )
     assert cost == billed(
         lambda: fnp.add(fnp.asarray(np.zeros(int(written), np.float64)), 1.0)
     )
