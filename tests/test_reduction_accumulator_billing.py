@@ -477,3 +477,102 @@ def test_dtype_kwarg_array_protocol_is_resolved_once_for_generic_accumulate():
     assert calls() == 1, "sanity: dtype= must be resolved exactly once"
     assert cost == honest_f32, "the bill must match the single read actually used"
     assert cost < honest_f64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+# ---------------------------------------------------------------------------
+# ``axis=`` must be resolved through the array/index protocol exactly once,
+# for the generic ``ufunc.reduce``/``ufunc.accumulate`` fallbacks -- the same
+# guarantee ``ufunc.reduceat`` already has, closing the same class of gap: a
+# stateful ``axis`` object read once for billing and a second time by the
+# real numpy call (which forwarding the caller's original object allowed)
+# could report a cheap axis on the first read and an expensive one on the
+# second, so the bill would reflect an axis numpy never actually reduced
+# along.
+# ---------------------------------------------------------------------------
+
+
+def test_axis_array_protocol_is_resolved_once_for_generic_reduce():
+    calls = [0]
+
+    class FlakyAxis:
+        def __index__(self):
+            calls[0] += 1
+            return 1 if calls[0] == 1 else 0
+
+    shape = (200_000, 2)
+    a = fnp.asarray(np.full(shape, 2.0))
+    cost = _billed(lambda: np.subtract.reduce(a, axis=FlakyAxis()))
+
+    honest_cheap = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(np.full(shape, 2.0)), axis=1)
+    )
+    honest_expensive = _billed(
+        lambda: np.subtract.reduce(fnp.asarray(np.full(shape, 2.0)), axis=0)
+    )
+
+    assert calls[0] == 1, "sanity: axis must be resolved exactly once"
+    assert cost == honest_cheap, "the bill must match the single read actually used"
+    assert cost < honest_expensive, (
+        "sanity: axis 0 is the genuinely expensive axis for this shape"
+    )
+
+
+def test_axis_array_protocol_is_resolved_once_for_generic_accumulate():
+    calls = [0]
+
+    class FlakyAxis:
+        def __index__(self):
+            calls[0] += 1
+            return 1 if calls[0] == 1 else 0
+
+    shape = (200_000, 2)
+    a = fnp.asarray(np.full(shape, 2.0))
+    cost = _billed(lambda: np.subtract.accumulate(a, axis=FlakyAxis()))
+
+    honest_cheap = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(np.full(shape, 2.0)), axis=1)
+    )
+    honest_expensive = _billed(
+        lambda: np.subtract.accumulate(fnp.asarray(np.full(shape, 2.0)), axis=0)
+    )
+
+    assert calls[0] == 1, "sanity: axis must be resolved exactly once"
+    assert cost == honest_cheap, "the bill must match the single read actually used"
+    assert cost < honest_expensive, (
+        "sanity: axis 0 is the genuinely expensive axis for this shape"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ``ufunc.outer`` dispatches as soon as EITHER operand is flopscope-aware, so
+# the OTHER operand can be an arbitrary ndarray subclass. It must not be able
+# to lie about its own dtype: numpy's ufunc dispatch reads the true
+# underlying descriptor at the C level regardless of a Python-level
+# ``.dtype`` property override.
+# ---------------------------------------------------------------------------
+
+
+def test_outer_operand_ndarray_subclass_cannot_lie_about_its_own_dtype():
+    load_weights()
+    n = 2000
+
+    class LiesAboutDtype(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    a_real = np.full((n,), 1 + 2j, dtype=np.complex128).view(LiesAboutDtype)
+    b = fnp.asarray(np.full((n,), 2, dtype=np.int8))
+
+    cost = _billed(lambda: np.add.outer(a_real, b))
+    honest = _billed(
+        lambda: np.add.outer(
+            np.full((n,), 1 + 2j, dtype=np.complex128),
+            fnp.asarray(np.full((n,), 2, dtype=np.int8)),
+        )
+    )
+
+    assert cost == honest, (
+        "the bill must reflect the TRUE dtype numpy computes at, not the "
+        "cheap one the subclass's .dtype property reports"
+    )

@@ -11,6 +11,7 @@ from math import prod as _math_prod
 from typing import Any
 
 import numpy as _np
+from numpy.exceptions import AxisError as _AxisError
 from numpy.typing import ArrayLike
 
 from flopscope._accumulation._cost import contraction_complex_override
@@ -1113,12 +1114,26 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
-    if not isinstance(a, _np.ndarray):
-        a = _np.asarray(a)
-    if not isinstance(b, _np.ndarray):
-        b = _np.asarray(b)
+    # Symmetry tags live on the ORIGINAL ``SymmetricTensor`` instances --
+    # read them BEFORE the stripping below, which (deliberately) discards
+    # that subclass along with everything else.
     a_sym = _symmetry_of(a)
     b_sym = _symmetry_of(b)
+    # ``outer`` is a binary op: numpy dispatches here as soon as EITHER
+    # operand is flopscope-aware, so the OTHER operand can be an arbitrary
+    # caller-supplied ndarray subclass -- one overriding ``.dtype`` as a
+    # Python property is not a hypothetical: numpy's own ufunc dispatch
+    # reads the true underlying descriptor at the C level regardless of
+    # what a subclass's ``.dtype`` reports, so a bare ``isinstance(a,
+    # ndarray)`` check (which leaves an already-ndarray operand
+    # untouched) would let that property lie to the billing dtype read
+    # below while numpy executes at the real, unspoofed rate. Always
+    # route through ``_np.asarray`` (stripping any flopscope wrapper
+    # first, to avoid recursing back through our own protocol handlers) --
+    # a no-op VIEW, same buffer, for an operand that is already a genuine
+    # plain ndarray.
+    a = _np.asarray(_to_base_ndarray(a))
+    b = _np.asarray(_to_base_ndarray(b))
     output_shape = tuple(a.shape) + tuple(b.shape)
     dense = _builtins.max(a.size * b.size, 1)
     # The cost-model branch below enumerates |output_symmetry| group
@@ -1189,6 +1204,47 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
+def _resolve_generic_reduce_axis(axis, ndim: int) -> int | tuple[int, ...] | None:
+    """Resolve ``axis`` for the generic ``ufunc.reduce``/``ufunc.accumulate``
+    fallback paths -- the SOLE resolution of ``axis``, authoritative for
+    both the bill and the real call below.
+
+    ``None`` passes through unchanged (numpy's own "reduce every axis" /
+    "accumulate does not allow this" semantics apply downstream, in the
+    real call). A bare axis or each element of a tuple/list of axes is
+    read through ``operator.index`` EXACTLY ONCE and returned as a plain
+    ``int`` -- ``bool``/``np.bool_`` are rejected first, matching numpy's
+    own ``TypeError: an integer is required`` (``bool`` implements
+    ``__index__`` but numpy's axis parser special-cases it out).
+
+    This function does not itself replicate every numpy-side semantic
+    rule (duplicate axes, an ufunc that is not "reorderable" restricting
+    reduce to a single axis, accumulate rejecting more than one axis,
+    range checks) -- those still run natively, downstream, inside numpy's
+    own call, exactly as before. What changes is that they now run
+    against the PLAIN, already-resolved value returned here rather than
+    the caller's original object: a caller-supplied axis exposing
+    ``__index__`` (or, for a tuple/list, each element's) that behaves
+    differently across two invocations -- succeeding with one axis on a
+    first read and a different one on a second -- could previously be
+    billed for the first read while flopscope's own cost math forwarded
+    the ORIGINAL object to numpy, which resolved it again independently
+    and executed along whatever the second read produced.
+    """
+    if axis is None:
+        return None
+    if isinstance(axis, (tuple, list)):
+        resolved = []
+        for entry in axis:
+            if isinstance(entry, (bool, _np.bool_)):
+                raise TypeError("an integer is required")
+            resolved.append(_operator.index(entry))
+        return tuple(resolved)
+    if isinstance(axis, (bool, _np.bool_)):
+        raise TypeError("an integer is required")
+    return _operator.index(axis)
+
+
 @_counted_wrapper
 def _counted_ufunc_reduce_generic(
     ufunc, a, *, axis=0, out=None, keepdims=False, **kwargs
@@ -1209,6 +1265,10 @@ def _counted_ufunc_reduce_generic(
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
+    # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
+    # same plain value (not the caller's original ``axis``) is what both
+    # the cost below AND the real call further down use.
+    axis = _resolve_generic_reduce_axis(axis, a.ndim)
     cost = reduction_cost(a.shape, axis=axis, symmetry=sym)
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -1267,6 +1327,10 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     sym = _symmetry_of(a)
+    # See ``_resolve_generic_reduce_axis`` -- resolved ONCE here, and this
+    # same plain value (not the caller's original ``axis``) is what both
+    # the cost below AND the real call further down use.
+    axis = _resolve_generic_reduce_axis(axis, a.ndim)
     cost = reduction_cost(a.shape, axis=axis, symmetry=sym)
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=True)
@@ -1304,10 +1368,22 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
-def _resolve_reduceat_axis(axis, ndim: int) -> int | None:
+def _resolve_reduceat_axis(axis, ndim: int) -> int:
     """Resolve ``axis`` to the concrete axis ``ufunc.reduceat`` will reduce
-    along, closely enough to bill every form real numpy accepts without
-    duplicating its C-level axis parser.
+    along -- the SOLE resolution of ``axis``, authoritative for both the
+    bill and the real call below.
+
+    A prior version of this function returned ``None`` for any axis it
+    could not pin down, floored the cost accordingly, and let the caller
+    forward the ORIGINAL ``axis`` object to numpy so numpy could resolve it
+    a second time and raise its own error. That is exactly the gap this
+    rewrite closes: an ``axis`` exposing ``__index__`` (or ``__len__``, for
+    the tuple-length check) that behaves differently across two calls --
+    raising or reporting an out-of-range value on the first, succeeding
+    with an in-range one on the second -- would be billed at the floor
+    while numpy silently executed the real, second-call axis. This
+    function now either returns a concrete, valid axis or raises directly
+    -- callers must never fall back to re-resolving ``axis`` themselves.
 
     Real ``ufunc.reduceat`` accepts:
 
@@ -1319,30 +1395,54 @@ def _resolve_reduceat_axis(axis, ndim: int) -> int | None:
       before resolving (``axis=(0,)`` behaves exactly like ``axis=0``) --
       any OTHER tuple length raises ``ValueError: reduceat does not allow
       multiple axes``;
-    - ``axis=None`` meaning axis 0, but ONLY when ``a`` is 1-D -- numpy
-      raises on ``axis=None`` for both ``ndim > 1`` (``reduceat does not
-      allow multiple axes``) and ``ndim == 0`` (``cannot reduceat on a
-      scalar``).
+    - ``axis=None`` meaning axis 0, but ONLY when ``a`` is 1-D, and ONLY
+      when ``None`` is the axis argument ITSELF -- a length-1 tuple
+      unwrapping to ``None`` (``axis=(None,)``) is NOT given this special
+      treatment by real numpy; it falls through to the generic integer
+      conversion below and raises ``TypeError`` same as any other
+      non-integer. ``axis=None`` (bare) raises on ``ndim > 1``
+      (``ValueError: reduceat does not allow multiple axes``) and on
+      ``ndim == 0`` (``TypeError: cannot reduceat on a scalar``).
+    - a 0-d array is never a valid target: a bare out-of-range/scalar axis
+      raises ``TypeError: cannot reduceat on a scalar``, while the SAME
+      axis wrapped in a 1-tuple raises ``AxisError`` instead -- a genuine
+      quirk of numpy's own C parser (the 0-d special case only fires for
+      an axis that arrived un-wrapped), reproduced here via ``was_tuple``.
 
-    Anything else (wrong tuple length, non-integer axis, an out-of-range
-    integer) returns ``None``. The caller floors the cost to the minimum
-    rather than guessing for an axis numpy is about to reject; the real
-    call below still sees the original, untouched ``axis`` and raises its
-    own error independently.
+    Anything outside those forms raises the same exception type and (where
+    practical) message real numpy raises for it, matching numpy's own
+    accept/reject boundary without ever handing the caller-supplied
+    ``axis`` object back to numpy for a second, independent resolution.
     """
-    if isinstance(axis, tuple):
+    was_tuple = isinstance(axis, tuple)
+    if was_tuple:
         if len(axis) != 1:
-            return None
+            raise ValueError("reduceat does not allow multiple axes")
         (axis,) = axis
-    if axis is None:
-        return 0 if ndim == 1 else None
+    if axis is None and not was_tuple:
+        if ndim == 1:
+            return 0
+        if ndim == 0:
+            raise TypeError("cannot reduceat on a scalar")
+        raise ValueError("reduceat does not allow multiple axes")
     if isinstance(axis, (bool, _np.bool_)):
-        return None
-    try:
-        axis = _operator.index(axis)
-    except TypeError:
-        return None
-    return axis if -ndim <= axis < ndim else None
+        raise TypeError("an integer is required")
+    # ``operator.index`` is the ONLY invocation of whatever protocol
+    # ``axis`` exposes -- its TypeError (for a non-integer type, or a
+    # custom ``__index__`` that raises) propagates verbatim rather than
+    # being caught and re-attempted, matching numpy's own message for the
+    # standard non-integer cases exactly (numpy's C parser calls the same
+    # ``PyNumber_Index`` machinery under the hood). ``axis`` CAN still be
+    # ``None`` here -- a length-1 tuple unwrapping to ``None`` deliberately
+    # skips the special-case branch above (see the docstring) and falls
+    # through to this generic conversion, where ``operator.index(None)``
+    # raises the same ``TypeError`` numpy itself raises for that form.
+    axis = _operator.index(axis)  # type: ignore[arg-type]
+    if ndim == 0 and not was_tuple:
+        raise TypeError("cannot reduceat on a scalar")
+    if not (-ndim <= axis < ndim):
+        raise _AxisError(axis, ndim)
+    return axis
 
 
 def _reduceat_applications_per_lane(indices, n: int) -> int:
@@ -1361,10 +1461,12 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     backwards, so the true application count is bounded by the INDEX
     VALUES, not by the array's own size.
 
-    ``n`` is already 0 whenever ``_resolve_reduceat_axis`` couldn't pin the
-    axis down (see its docstring for exactly which forms that covers) --
-    handled below by the plain ``n == 0`` check, same as an empty index
-    list. The remaining guard is on the index VALUES themselves: real
+    ``n`` is the resolved axis's length -- ``_resolve_reduceat_axis`` raises
+    directly (before this function is ever called) for any axis it cannot
+    pin down, so by the time ``n`` reaches here it is always the length of
+    a real, validated axis; ``n == 0`` only happens for a genuinely
+    zero-length axis, handled the same as an empty index list. The
+    remaining guard is on the index VALUES themselves: real
     ``ufunc.reduceat`` requires every index in ``[0, n)`` and raises
     ``IndexError`` otherwise -- including for negative indices, which
     (unlike plain array indexing) it does NOT wrap around. An index outside
@@ -1436,12 +1538,13 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # Resolve ``axis`` through the same accept/reject boundary real
     # ``ufunc.reduceat`` uses (see ``_resolve_reduceat_axis`` for exactly
     # which forms that covers, including ``axis=None`` on a 1-D array,
-    # which numpy fully resolves to axis 0 rather than rejecting). Any form
-    # that function can't pin down is left for the real call below to
-    # reject; treating it as ``n = 0`` here just declines to guess a cost
-    # for an input that's about to be refused anyway.
+    # which numpy fully resolves to axis 0 rather than rejecting). This is
+    # the ONLY resolution of ``axis`` -- a form the resolver can't pin down
+    # raises HERE, before any budget is deducted, instead of falling
+    # through to the real call below with the caller's original object
+    # (which numpy would then resolve a second time, possibly differently).
     resolved_axis = _resolve_reduceat_axis(axis, a.ndim)
-    n = a.shape[resolved_axis] if resolved_axis is not None else 0
+    n = a.shape[resolved_axis]
     applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
     lanes = a.size // n if n else 0
     cost = _builtins.max(lanes * applications_per_lane, 1)
@@ -1480,18 +1583,15 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         # ``resolved_axis`` is what the cost above was billed against --
         # forward THAT to the real call, not the caller's original ``axis``
         # object, so numpy can't re-resolve a different axis a second time
-        # (e.g. via a stateful ``__index__``) than the one we billed for.
-        # When ``_resolve_reduceat_axis`` couldn't pin ``axis`` down (see its
-        # docstring), ``resolved_axis`` is ``None`` and the cost above was
-        # already floored to 0 for exactly that reason -- fall back to the
-        # original, untouched ``axis`` so numpy still raises its own error
-        # (or handles a form our resolver is conservative about) rather than
-        # forcing an axis we never validated.
+        # (e.g. via a stateful ``__index__``) than the one we billed for. A
+        # form ``_resolve_reduceat_axis`` cannot pin down already raised,
+        # above, before reaching this point -- there is no fallback to the
+        # original ``axis`` object left to guard here.
         result = _call_numpy(
             ufunc.reduceat,
             _to_base_ndarray(a),
             indices_snapshot,
-            axis=resolved_axis if resolved_axis is not None else axis,
+            axis=resolved_axis,
             out=out_stripped,
             **kwargs,
         )
@@ -1687,17 +1787,25 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # present) through the array protocol AT MOST ONCE. A plain Python
     # scalar (bool/int/float/complex, not a numpy scalar) is left alone --
     # NEP 50 weak typing must still see the bare type -- and an object
-    # that's already an ndarray is merely stripped of any flopscope
-    # wrapper. Anything else (e.g. something exposing only ``__array__``)
-    # is materialized via ``_np.asarray`` right here, and THIS SAME
-    # resolved array is what the billing dtype below reads AND what
-    # ``ufunc.at`` gets called with further down -- re-deriving it a
-    # second time (once for billing, once inside numpy's own conversion)
-    # would let a participant's ``__array__`` report a cheap dtype to us
-    # while handing numpy something pricier.
+    # that's already an ndarray is stripped down to a genuine, subclass-free
+    # ``np.ndarray`` view, not just of any flopscope wrapper: ``.dtype`` is
+    # an overridable Python property on an arbitrary OTHER ndarray subclass,
+    # and numpy's own ufunc dispatch reads the TRUE underlying descriptor at
+    # the C level regardless of what a Python-level ``.dtype`` override
+    # reports -- a subclass instance can report a cheap dtype to whatever
+    # reads ``v.dtype`` here while numpy computes at its real (pricier) one.
+    # ``_np.asarray`` always returns a genuine ``np.ndarray`` (a no-op VIEW,
+    # same buffer, for an already-plain ndarray -- see the parity tests this
+    # guards), so its ``.dtype`` cannot lie. Anything else (e.g. something
+    # exposing only ``__array__``) is likewise materialized via
+    # ``_np.asarray`` right here, and THIS SAME resolved array is what the
+    # billing dtype below reads AND what ``ufunc.at`` gets called with
+    # further down -- re-deriving it a second time (once for billing, once
+    # inside numpy's own conversion) would let a participant report a cheap
+    # dtype to us while handing numpy something pricier.
     def _resolve_at_operand(v):
         if isinstance(v, _np.ndarray):
-            return _to_base_ndarray(v)
+            return _np.asarray(_to_base_ndarray(v))
         if isinstance(v, (bool, int, float, complex)) and not isinstance(
             v, _np.generic
         ):

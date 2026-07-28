@@ -2974,7 +2974,23 @@ def mask_indices(*args, **kwargs):
             scanned["size"] = int(mask.size)
             scanned["shape"] = mask.shape
             scanned["dtype"] = mask.dtype
-            return out
+            # Return ``mask``, NOT ``out``: numpy's own body immediately
+            # does ``a != 0`` on whatever this callback returns, then
+            # ``nonzero()``s the result -- that comparison is where the
+            # scan actually happens. ``_to_base_ndarray`` only strips
+            # flopscope's own array subclasses; an arbitrary OTHER ndarray
+            # subclass (or non-ndarray) passes through untouched, so
+            # ``out`` can carry an overridden ``__ne__``/``__eq__`` (or any
+            # other dunder numpy's comparison dispatches through) that
+            # returns something completely unrelated to what we measured
+            # above. ``np.asarray`` always returns a genuine, subclass-free
+            # ``np.ndarray`` (a no-op *view* when ``out`` is already a
+            # plain, correctly-typed ndarray -- see the parity tests this
+            # guards), so forwarding ``mask`` instead guarantees the object
+            # numpy's comparison runs against is *exactly* the array whose
+            # ``.size`` we just billed -- no dunder of the caller's
+            # original ``out`` can run again afterward.
+            return mask
 
         return _wrapped
 

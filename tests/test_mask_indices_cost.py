@@ -9,6 +9,7 @@ the returned index count instead made it an arbitrarily cheap substitute for
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import flopscope
 import flopscope.numpy as fnp
@@ -115,3 +116,107 @@ def test_n_array_protocol_second_read_does_not_shrink_the_floor():
     assert via_stateful > billed(
         lambda: fnp.mask_indices(fake_n, lambda m, k: np.asarray(m)[:1, :1])
     )
+
+
+def test_mask_func_ne_override_cannot_smuggle_a_bigger_scan_past_the_bill():
+    """``mask_func`` can return an arbitrary ``np.ndarray`` SUBCLASS, not
+    just a plain array. numpy's own body is ``nonzero(mask_func(m, k) !=
+    0)`` -- the scan happens through whatever ``!=`` the RETURNED object
+    implements, not through ``__array__``. A subclass whose ``__array__``
+    reports a tiny array (what this op used to measure) but whose ``__ne__``
+    returns something unrelated and far larger (what numpy's ``nonzero``
+    actually receives and scans) would let a tiny measured mask stand in
+    for a large executed one.
+
+    ``fnp.mask_indices`` must forward the SAME array it measured -- not the
+    caller's original ``mask_func`` return value -- so numpy's ``!= 0``
+    cannot run against a different, unmeasured object. With that fixed, the
+    override never runs at all: a plain, subclass-free array has no
+    ``__ne__`` to intercept, and both the bill and the returned indices
+    reflect the tiny, honestly-measured mask.
+    """
+    n = 4
+    big = 3000
+
+    class Sneaky(np.ndarray):
+        def __ne__(self, other):  # noqa: ARG002 -- must match ndarray's signature
+            return np.ones((big, big), bool)
+
+    tiny = np.zeros((1, 1), bool).view(Sneaky)
+
+    cost = billed(lambda: fnp.mask_indices(n, lambda m, k: tiny))
+    honest_floor = billed(lambda: fnp.mask_indices(n, lambda m, k: np.zeros((n, n))))
+
+    assert cost == honest_floor, (
+        "the bill must reflect the probe floor, not the tiny __array__ value "
+        "the subclass reports"
+    )
+
+    result = fnp.mask_indices(n, lambda m, k: tiny.view(Sneaky))
+    total_indices = sum(int(r.size) for r in result)
+    assert total_indices == 0, (
+        "the executed scan must run against the same (all-zero) array that "
+        "was billed, not the __ne__ override's unrelated big result"
+    )
+
+
+# --------------------------------------------------------------------------
+# Forwarding the measured array (instead of the caller's original return
+# value) must not change the bill for any of the ordinary, honest
+# ``mask_func`` return forms: an fnp mask_func, a plain numpy callable, a
+# bool mask, and an int mask. Each is billed identically whether the exact
+# same values arrive as a plain ``np.ndarray`` or wrapped in a harmless
+# (non-overriding) ``np.ndarray`` subclass -- proving the forwarding change
+# is a true no-op for values that don't try to smuggle a mismatched scan.
+# ``np.asarray`` on a plain ndarray is a no-op view, so this is exactly the
+# invariant the fix relies on.
+# --------------------------------------------------------------------------
+
+
+class _PlainSubclass(np.ndarray):
+    """An ``np.ndarray`` subclass with no overridden dunders -- forwarding
+    ``np.asarray(x)`` instead of ``x`` must be indistinguishable from
+    forwarding ``x`` itself for a subclass like this."""
+
+
+@pytest.mark.parametrize(
+    "make_mask",
+    [
+        pytest.param(lambda n: np.triu(np.ones((n, n), int)), id="int-triu"),
+        pytest.param(
+            lambda n: np.array([[True, False, True, False]] * n), id="bool-mask"
+        ),
+        pytest.param(lambda n: np.array([[1, 0, 2, 0]] * n), id="int-mask"),
+    ],
+)
+def test_honest_mask_forms_are_unaffected_by_forwarding_the_measured_array(make_mask):
+    n = 4
+    mask = make_mask(n)
+    plain = billed(lambda: fnp.mask_indices(n, lambda m, k: mask))
+    wrapped = billed(
+        lambda: fnp.mask_indices(n, lambda m, k: mask.view(_PlainSubclass))
+    )
+    assert plain == wrapped
+
+
+def test_plain_np_triu_mask_func_is_unaffected_by_forwarding_the_measured_array():
+    n = 4
+    assert billed(lambda: fnp.mask_indices(n, np.triu)) == billed(
+        lambda: fnp.mask_indices(n, lambda m, k: np.triu(m))
+    )
+
+
+def test_fnp_mask_func_is_unaffected_by_forwarding_the_measured_array():
+    """An fnp ``mask_func`` returns a ``FlopscopeArray`` -- already stripped
+    to a plain ndarray by ``_to_base_ndarray`` before this fix, so
+    ``np.asarray`` on it was already documented as a no-op view. It still
+    bills its own cost (the ``fnp.triu`` call itself) on top of the mask
+    scan, exactly as before.
+    """
+    n = 4
+    with_fnp_mask_func = billed(
+        lambda: fnp.mask_indices(n, lambda m, k: fnp.triu(m, k))
+    )
+    scan_only = billed(lambda: fnp.mask_indices(n, np.triu))
+    triu_cost_alone = billed(lambda: fnp.triu(fnp.asarray(np.ones((n, n), int))))
+    assert with_fnp_mask_func == scan_only + triu_cost_alone

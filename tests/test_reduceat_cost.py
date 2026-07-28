@@ -423,3 +423,82 @@ def test_dtype_kwarg_array_protocol_is_resolved_once():
     assert calls == 1, "sanity: dtype= must be resolved exactly once"
     assert cost == honest_float32, "the bill must match the single read actually used"
     assert cost < honest_float64, "sanity: float64 is the genuinely pricier dtype here"
+
+
+def test_axis_that_fails_resolution_first_and_succeeds_second_cannot_buy_a_free_scan():
+    """A caller-supplied ``axis`` whose ``__index__`` RAISES on its first
+    call and SUCCEEDS on a second must not be able to slip past
+    flopscope's own resolution (which floors the cost when it can't pin
+    ``axis`` down) only to have the real ``ufunc.reduceat`` call re-resolve
+    the SAME object a second time and execute successfully.
+
+    flopscope's own resolution is now authoritative: a form it cannot pin
+    down raises HERE, before any budget is deducted and before numpy is
+    ever called, using the very first (and only) read of ``axis`` -- so
+    there is no second call left for a stateful object to succeed on.
+    """
+    N = 1_000_000
+    calls = 0
+
+    class FlakyAxis:
+        def __index__(self):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise TypeError("boom on first call")
+            return 0
+
+    a = fnp.asarray(np.full(N, 2, dtype=np.int64))
+    cost = billed_raising(
+        lambda: np.subtract.reduceat(a, [0], axis=FlakyAxis()),  # type: ignore[arg-type]
+        TypeError,
+    )
+
+    assert calls == 1, "sanity: axis must be read exactly once, not retried"
+    assert cost == 0, "a form flopscope refuses must never reach the real numpy call"
+
+
+@pytest.mark.parametrize(
+    "make_axis,ndim,expect_ok",
+    [
+        pytest.param(lambda: None, 1, True, id="none-on-1d-ok"),
+        pytest.param(lambda: None, 2, False, id="none-on-2d-rejected"),
+        pytest.param(lambda: -1, 2, True, id="negative-axis-ok"),
+        pytest.param(lambda: (0,), 2, True, id="one-tuple-ok"),
+        pytest.param(lambda: (0, 1), 2, False, id="two-tuple-rejected"),
+        pytest.param(lambda: True, 2, False, id="bool-axis-rejected"),
+        pytest.param(lambda: 5, 2, False, id="out-of-range-rejected"),
+    ],
+)
+def test_flopscope_accept_reject_boundary_matches_raw_numpy(make_axis, ndim, expect_ok):
+    """Pin flopscope's own accept/reject boundary for ``axis`` against RAW
+    numpy's, for every form this module's other tests rely on plus the
+    forms that must keep being rejected: flopscope must neither refuse a
+    form numpy accepts nor silently accept one numpy refuses.
+    """
+    shape = (6,) if ndim == 1 else (6, 4)
+    axis = make_axis()
+    a_raw = np.full(shape, 2, dtype=np.int64)
+
+    if expect_ok:
+        raw_result = np.subtract.reduceat(a_raw, [0], axis=axis)  # type: ignore[arg-type]
+        fnp_cost = billed(
+            lambda: np.subtract.reduceat(
+                fnp.asarray(a_raw.copy()),
+                [0],
+                axis=axis,  # type: ignore[arg-type]
+            )
+        )
+        assert fnp_cost > 0
+        assert raw_result is not None  # sanity: raw numpy really did accept this form
+    else:
+        with pytest.raises(Exception) as raw_exc_info:
+            np.subtract.reduceat(a_raw, [0], axis=axis)  # type: ignore[arg-type]
+        billed_raising(
+            lambda: np.subtract.reduceat(
+                fnp.asarray(a_raw.copy()),
+                [0],
+                axis=axis,  # type: ignore[arg-type]
+            ),
+            type(raw_exc_info.value),
+        )

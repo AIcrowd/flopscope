@@ -9,6 +9,7 @@ numbers, so these tests keep their value as the cost model evolves.
 from __future__ import annotations
 
 import time
+import warnings
 
 import numpy as np
 import pytest
@@ -388,6 +389,48 @@ def test_values_dtype_array_protocol_is_resolved_once():
     assert cost == honest_int8, "the bill must match the single read actually used"
     assert cost < honest_float64, (
         "sanity: float64 is the genuinely pricier loop dtype here"
+    )
+
+
+def test_values_ndarray_subclass_cannot_lie_about_its_own_dtype():
+    """A ``vals`` operand that is ALREADY an ``np.ndarray`` (not merely
+    ``__array__``-duck-typed) takes a different path than the test above:
+    ``_resolve_at_operand`` used to just strip any flopscope wrapper and
+    otherwise leave it alone, so reading ``vals.dtype`` for billing ran
+    against the caller's own object. An arbitrary OTHER ndarray subclass
+    can override ``.dtype`` as a plain Python property -- numpy's own
+    ufunc dispatch reads the TRUE underlying descriptor at the C level
+    regardless of what that property reports, so a subclass instance can
+    report a cheap dtype to whatever reads ``.dtype`` in Python while
+    numpy computes at its real, pricier one.
+    """
+    load_weights()
+    n = 2_000_000
+
+    class LiesAboutDtype(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.int8)
+
+    dst = fnp.asarray(np.zeros(n, dtype=np.int8))
+    real_vals = np.full(n, 1 + 2j, dtype=np.complex128).view(LiesAboutDtype)
+    idx = np.arange(n)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # int8 destination truncates complex vals
+        cost = billed(lambda: np.add.at(dst, idx, real_vals))
+
+        honest = billed(
+            lambda: np.add.at(
+                fnp.asarray(np.zeros(n, dtype=np.int8)),
+                idx,
+                np.full(n, 1 + 2j, dtype=np.complex128),
+            )
+        )
+
+    assert cost == honest, (
+        "the bill must reflect the TRUE dtype numpy computes at, not the "
+        "cheap one the subclass's .dtype property reports"
     )
 
 
