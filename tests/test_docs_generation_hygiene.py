@@ -18,6 +18,44 @@ sys.modules[_spec.name] = gen
 _spec.loader.exec_module(gen)
 
 
+def test_parse_strips_leading_signature_line_from_summary():
+    """Generated summaries must not depend on which numpy generated them.
+
+    numpydoc only splits a leading signature off into ``Signature`` when a
+    blank line follows it. Some numpy builds format cython callables'
+    docstrings with the signature and the one-line summary run together in a
+    single block (``np.random.default_rng`` on numpy <= 2.2), which lands the
+    signature INSIDE the summary -- so ops.json flipped between
+    "default_rng(seed=None) Construct ..." and "Construct ..." depending on
+    the generating numpy. Both shapes must parse identically.
+    """
+    joined = (
+        "default_rng(seed=None)\n"
+        "Construct a new Generator with the default BitGenerator (PCG64).\n"
+        "\n"
+        "Parameters\n"
+        "----------\n"
+        "seed : int, optional\n"
+        "    The seed.\n"
+    )
+    parsed = gen.parse_numpy_docstring(joined)
+    assert parsed.summary == (
+        "Construct a new Generator with the default BitGenerator (PCG64)."
+    )
+    assert parsed.upstream_signature == "default_rng(seed=None)"
+
+    # numpy >= 2.3 formats the same docstring with a blank line after the
+    # signature; the parse must come out identical.
+    split = joined.replace("default_rng(seed=None)\n", "default_rng(seed=None)\n\n", 1)
+    parsed_split = gen.parse_numpy_docstring(split)
+    assert parsed_split.summary == parsed.summary
+    assert parsed_split.upstream_signature == parsed.upstream_signature
+
+    # An ordinary summary line must never be mistaken for a signature.
+    plain = gen.parse_numpy_docstring("Do the thing.\n\nMore detail.\n")
+    assert plain.summary == "Do the thing."
+
+
 def test_generated_output_paths_lists_live_write_set():
     paths = {str(p) for p in gen.generated_output_paths()}
     # The two directories the live generator actually writes.
