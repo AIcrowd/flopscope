@@ -1091,6 +1091,7 @@ def test_a_one_tuple_out_returns_the_destination_not_the_container(budget):
     assert result is ein_dest
 
 
+@pytest.mark.skipif(not hasattr(np, "matvec"), reason="requires numpy >= 2.2")
 def test_a_routed_binary_returns_the_destinations_shape_not_the_containers(budget):
     # matvec used to do `result = out` with out still the tuple, so the caller
     # got back something of shape (1, 256) instead of (256,).
@@ -1100,6 +1101,7 @@ def test_a_routed_binary_returns_the_destinations_shape_not_the_containers(budge
     assert result is dest
 
 
+@pytest.mark.skipif(not hasattr(np, "matvec"), reason="requires numpy >= 2.2")
 def test_a_none_holding_tuple_allocates_instead_of_destroying_the_answer(budget):
     # out=(None,) is numpy's "allocate this slot for me". The routed binaries
     # used to treat the tuple as the destination and hand back a shape-(1,)
@@ -1160,10 +1162,13 @@ def test_a_refused_out_form_costs_nothing_on_every_path(budget, form):
 
     cases = [
         ("multiply", lambda o: fnp.multiply(a2, b2, out=o), fnp.zeros(2)),
-        ("matvec", lambda o: fnp.matvec(eye, a2, out=o), fnp.zeros(2)),
         ("einsum", lambda o: fnp.einsum("i,i->i", a2, b2, out=o), fnp.zeros(2)),
         ("cumsum-positional", lambda o: fnp.cumsum(a2, None, None, o), fnp.zeros(2)),
     ]
+    if hasattr(np, "matvec"):
+        # numpy < 2.2: fnp.matvec raises UnsupportedFunctionError before any
+        # out= validation, so there is no refusal path to price there.
+        cases.insert(1, ("matvec", lambda o: fnp.matvec(eye, a2, out=o), fnp.zeros(2)))
     for name, call, dest in cases:
         bad = _bad_forms(dest)[form]
         before = budget.flops_used
@@ -1245,13 +1250,15 @@ def test_einsum_with_a_real_out_still_works(budget):
     assert result is dest, "out= must return the destination itself"
 
 
+@pytest.mark.skipif(not hasattr(np, "vecdot"), reason="requires numpy >= 2.1")
 def test_out_still_works_on_the_routed_binaries(budget):
     """vecdot/matvec/vecmat expose out= publicly; they must keep working."""
     eye = fnp.array([[1.0, 0.0], [0.0, 1.0]])
     v = fnp.array([3.0, 4.0])
 
-    dest = fnp.array([0.0, 0.0])
-    assert np.asarray(fnp.matvec(eye, v, out=dest)).tolist() == [3.0, 4.0]
+    if hasattr(np, "matvec"):  # matvec arrived in 2.2, vecdot in 2.1
+        dest = fnp.array([0.0, 0.0])
+        assert np.asarray(fnp.matvec(eye, v, out=dest)).tolist() == [3.0, 4.0]
 
     scalar_dest = fnp.array(0.0)
     assert float(np.asarray(fnp.vecdot(v, v, out=scalar_dest))) == 25.0

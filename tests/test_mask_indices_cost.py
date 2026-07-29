@@ -8,6 +8,8 @@ the returned index count instead made it an arbitrarily cheap substitute for
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -252,12 +254,21 @@ def test_list_returning_mask_func_succeeds_where_raw_numpy_raises():
     """Documents the disclosed compat gap: raw numpy's ``nonzero(a != 0)``
     on a bare Python list yields a 0-d bool and raises; flopscope converts
     the list to a real array first and succeeds instead.
+
+    The raise only exists on numpy >= 2.1: numpy 2.0 still accepts the 0-d
+    result of ``nonzero`` with a DeprecationWarning, so raw numpy succeeds
+    there too and there is no divergence to document on that version.
     """
     n = 3
-    with pytest.raises(ValueError):
-        np.mask_indices(n, lambda m, k: [1, 0, 1])  # type: ignore[arg-type]
+    if np.lib.NumpyVersion(np.__version__) >= "2.1.0":
+        with pytest.raises(ValueError):
+            np.mask_indices(n, lambda m, k: [1, 0, 1])  # type: ignore[arg-type]
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            np.mask_indices(n, lambda m, k: [1, 0, 1])  # type: ignore[arg-type]
 
-    # flopscope succeeds -- this is the documented, deliberate divergence.
+    # flopscope succeeds on every supported numpy.
     result = fnp.mask_indices(n, lambda m, k: [1, 0, 1])
     assert result is not None
 

@@ -29,6 +29,7 @@ import flopscope.stats as fstats
 from flopscope._dtype_billing import rate_for
 from flopscope._registry import REGISTRY
 from flopscope._weights import get_weight, load_weights, reset_weights
+from flopscope.errors import UnsupportedFunctionError
 
 # --- probe inputs: int32 (the discriminating dtype), built at module import,
 # --- outside any BudgetContext.
@@ -1161,7 +1162,14 @@ def test_billed_rate_covers_compute_dtype(op: str):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
-            result = PROBES[op]()
+            try:
+                result = PROBES[op]()
+            except UnsupportedFunctionError as e:
+                # Version-gated op absent from the RUNNING numpy (e.g. matvec
+                # before 2.2); the matrix cells whose numpy has it still sweep
+                # it, and the degradation contract itself is pinned by
+                # test_numpy_version_support.py.
+                pytest.skip(f"probe op unavailable on this numpy: {e}")
             records = [r for r in b.op_log if r.op_name == op]
     assert records, f"probe for {op!r} did not log an op record under that name"
     rec = records[-1]
@@ -1204,7 +1212,9 @@ def test_fixed_composites_do_not_overbill_f32():
         lambda: fnp.percentile(g, 50),
         lambda: fnp.nanpercentile(g, 50),
         lambda: fnp.trapezoid(g),
-        lambda: fnp.trapz(g),
+        # numpy 2.4 removed trapz; its wrapper then raises
+        # UnsupportedFunctionError (pinned by test_numpy_version_support).
+        *([lambda: fnp.trapz(g)] if hasattr(np, "trapz") else []),
         lambda: fnp.unwrap(g),
         lambda: fnp.histogram_bin_edges(g),
         lambda: fnp.angle(g),

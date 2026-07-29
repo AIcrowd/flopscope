@@ -27,11 +27,33 @@ around it.
 import json
 from pathlib import Path
 
+import numpy as np
+
 from tests.batch_scan import charged_ops, scan_all
 
 CLASSIFICATION = json.loads(
     (Path(__file__).parent / "data" / "batch_scan_classification.json").read_text()
 )
+
+
+def _version_limited_ops() -> dict[str, str]:
+    """Frozen-OK ops that cannot scale-test on the RUNNING numpy because the
+    backing function (or the batched form the scanner probes) does not exist
+    here. Detected empirically -- never from a version table -- so this
+    shrinks to {} on any numpy that has the capability, restoring full
+    enforcement there. The wrappers' own old-numpy contract
+    (UnsupportedFunctionError) is pinned by test_numpy_version_support.py."""
+    limited: dict[str, str] = {}
+    for op in ("matvec", "vecmat", "cumulative_sum", "cumulative_prod"):
+        if not hasattr(np, op):
+            limited[op] = f"np.{op} does not exist on numpy {np.__version__}"
+    try:
+        np.trim_zeros(np.zeros((2, 2)))
+    except ValueError:
+        limited["trim_zeros"] = (
+            f"trim_zeros is 1-D-only on numpy {np.__version__}; no batch form"
+        )
+    return limited
 
 
 def test_no_charged_op_underbills_batch_or_broadcast():
@@ -55,6 +77,7 @@ def test_no_ok_scales_op_silently_loses_scale_coverage():
     protection while the other two guard tests stay green."""
     results = scan_all()
     frozen_ok = {op for op, e in CLASSIFICATION.items() if e["class"] == "OK-SCALES"}
+    frozen_ok -= set(_version_limited_ops())
     regressed = {
         op: results.get(op, {}).get("verdict", "MISSING")
         for op in frozen_ok

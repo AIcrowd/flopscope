@@ -9,6 +9,7 @@ Plan-2 evidence pass; B.1 direct-solver constants are final.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import flopscope as f
 import flopscope.numpy as fnp
@@ -728,6 +729,10 @@ def test_clip_broadcast_output_shape():
     assert cost(lambda: fnp.clip(a, lo, hi)) == 500_000
 
 
+@pytest.mark.skipif(
+    np.lib.NumpyVersion(np.__version__) < "2.1.0",
+    reason="no-bound clip requires numpy >= 2.1",
+)
 def test_clip_no_bound_bills_numel_floor():
     # no-bound clip: materializing copy floor → numel
     v = fnp.asarray(np.random.rand(100))
@@ -786,7 +791,14 @@ def test_correlate_mode_int_and_case():
     # mode=0 == "valid", mode=2 == "full", "V" == "valid"
     assert cost(lambda: fnp.correlate(a, v, mode="valid")) == 199
     assert cost(lambda: fnp.correlate(a, v, mode="full")) == 19_801
-    assert cost(lambda: fnp.correlate(a, v, mode="V")) == 199
+    if np.lib.NumpyVersion(np.__version__) < "2.3.0":
+        assert cost(lambda: fnp.correlate(a, v, mode="V")) == 199
+    else:
+        # numpy 2.3 removed the legacy abbreviated/integer modes; the wrapper
+        # forwards the raw mode so numpy itself refuses it (parity).
+        with f.BudgetContext(flop_budget=10**18, quiet=True):
+            with pytest.raises(ValueError, match="valid"):
+                fnp.correlate(a, v, mode="V")
 
 
 def test_correlate_asymmetric_valid():

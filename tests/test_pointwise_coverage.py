@@ -790,6 +790,10 @@ class TestClipSymmetric:
             result = clip(st, 0.2, 0.8)
         assert isinstance(result, SymmetricTensor)
 
+    @pytest.mark.skipif(
+        numpy.lib.NumpyVersion(numpy.__version__) < "2.1.0",
+        reason="clip(min=/max=) keywords require numpy >= 2.1",
+    )
     def test_clip_with_keyword_args(self):
         """Exercise the min=/max= keyword path in clip()."""
         x = numpy.array([1.0, 5.0, 10.0])

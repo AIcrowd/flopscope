@@ -386,6 +386,9 @@ def test_nanquantile_numel(name, we):
     assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
 
 
+@pytest.mark.skipif(
+    not hasattr(numpy, "cumulative_sum"), reason="requires numpy >= 2.1"
+)
 @pytest.mark.parametrize("name", ["cumulative_sum", "cumulative_prod"])
 def test_cumulative_numel(name, we):
     # Updated for orbit-mapping cost model (PR #91 Task 7).

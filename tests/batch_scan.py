@@ -1309,6 +1309,20 @@ def recipe_vecdot(op):
     return [_bp("A:vecdot", op, (arr((4,)), arr((4,))), (arr((K, 4)), arr((K, 4))))]
 
 
+def recipe_clip(op):
+    # Positional bounds: the only clip form numpy 2.0 accepts (min=/max=
+    # keywords and the no-bound form are numpy >= 2.1), and valid on every
+    # later numpy -- so scale coverage holds across the whole support range.
+    return [
+        _bp(
+            "A:clip",
+            op,
+            (arr((6, 4)), 0.25, 0.75),
+            (arr((K, 6, 4)), 0.25, 0.75),
+        )
+    ]
+
+
 def recipe_bytes(bound_op):
     # bytes(n) output is a bytestring (numel oracle can't see it) -> explicit
     # honest = k: doubling n must double the bill.
@@ -1391,6 +1405,7 @@ RECIPES_FUNC = {
     "vecmat": recipe_vecmat,
     "vecdot": recipe_vecdot,
     "linalg.vecdot": recipe_vecdot,
+    "clip": recipe_clip,
 }
 
 # leaf method name -> recipe fn taking the BOUND callable (Generator/RandomState)
