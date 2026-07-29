@@ -2457,8 +2457,20 @@ def parse_numpy_docstring(raw_doc: str) -> ParsedDoc:
 
     doc = NumpyDocString(textwrap.dedent(raw_doc).strip("\n"))
 
-    summary = " ".join(part.strip() for part in doc["Summary"]).strip()
+    summary_lines = list(doc["Summary"])
     upstream_signature = str(doc["Signature"]).strip()
+    # numpydoc only splits a leading signature off into doc["Signature"] when
+    # a blank line follows it. Some numpy builds run the signature and the
+    # one-line summary together in a single block (np.random.default_rng on
+    # numpy <= 2.2), which lands the signature INSIDE the summary and makes
+    # generated summaries depend on which numpy generated them. Strip such a
+    # leading bare-signature line, keeping it as the upstream signature --
+    # exactly where numpydoc puts it when the blank line is present.
+    if summary_lines and re.fullmatch(r"[\w.]+\(.*\)", summary_lines[0].strip()):
+        stripped_signature = summary_lines.pop(0).strip()
+        if not upstream_signature:
+            upstream_signature = stripped_signature
+    summary = " ".join(part.strip() for part in summary_lines).strip()
 
     def parse_field_section(
         section_name: str, *, single_element_is_type: bool = False

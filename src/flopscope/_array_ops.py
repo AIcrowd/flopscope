@@ -1585,6 +1585,13 @@ attach_docstring(
 # Type / info helpers
 # ---------------------------------------------------------------------------
 
+# ``np.astype`` only grew its ``device=`` keyword in numpy 2.1; flopscope
+# supports numpy >=2.0. When numpy cannot accept the keyword, reproduce
+# numpy>=2.1's device handling (None/"cpu" pass, anything else ValueError,
+# raised inside the deduct block -- which charges on entry -- so behavior
+# and billing are identical across the supported range).
+_NP_ASTYPE_HAS_DEVICE = "device" in _inspect.signature(_np.astype).parameters
+
 
 @_counted_wrapper
 def astype(
@@ -1617,9 +1624,17 @@ def astype(
         shapes=(x_arr.shape,),
         dtypes=(_heavier_billing_dtype(x_arr.dtype, resolved_dtype),),
     ):
-        result = _call_numpy(
-            _np.astype, _to_base_ndarray(x), dtype, copy=copy, device=device
-        )
+        if _NP_ASTYPE_HAS_DEVICE:
+            result = _call_numpy(
+                _np.astype, _to_base_ndarray(x), dtype, copy=copy, device=device
+            )
+        else:
+            if device is not None and device != "cpu":
+                raise ValueError(
+                    'Device not understood. Only "cpu" is allowed, '
+                    f"but received: {device}"
+                )
+            result = _call_numpy(_np.astype, _to_base_ndarray(x), dtype, copy=copy)
     return result  # type: ignore[return-value]
 
 

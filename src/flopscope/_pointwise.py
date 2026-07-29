@@ -212,6 +212,22 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
         "tanh",
     }
 )
+# numpy < 2.1 has no integer loops for ceil/floor/trunc (nor fix, their
+# composite): integer input is promoted and computed in the size-mapped float
+# loop (int8 -> float16, ..., int32 -> float64), exactly like sin. numpy 2.1
+# added identity integer loops, making them integer-preserving. Membership is
+# probed from the running numpy -- never a version table -- so billing always
+# tracks what this backend actually computes.
+_UNARY_FLOAT_LOOP_OPS |= frozenset(
+    op_name
+    for op_name, fn in (
+        ("ceil", _np.ceil),
+        ("floor", _np.floor),
+        ("trunc", _np.trunc),
+        ("fix", _np.fix),
+    )
+    if fn(_np.ones(1, dtype=_np.int32)).dtype.kind == "f"
+)
 # Unary ops with NO size-mapped integer loop: numpy always computes them in
 # (at least) float64 for integer/bool input regardless of the input's own
 # width -- unlike the size-mapped _UNARY_FLOAT_LOOP_OPS family (i0(int8) ->

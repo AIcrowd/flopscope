@@ -22,6 +22,7 @@ import flopscope.numpy as fnp
 import flopscope.stats as fst
 from flopscope._flops import sort_cost
 from flopscope._registry import REGISTRY
+from flopscope.errors import UnsupportedFunctionError
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -895,7 +896,14 @@ def test_conformance():
     """Each OP_EXPECTATIONS entry: charged == documented formula."""
     failures = []
     for op, (fn, expected) in OP_EXPECTATIONS.items():
-        actual = _cost(fn)
+        try:
+            actual = _cost(fn)
+        except UnsupportedFunctionError:
+            # Op absent from the RUNNING numpy (added in a later numpy, or
+            # removed -- e.g. trapz on 2.4). The matrix cells whose numpy has
+            # the op still enforce its formula, and the degradation contract
+            # itself is pinned by test_numpy_version_support.py.
+            continue
         if actual != expected:
             failures.append(f"  {op}: got {actual}, expected {expected}")
     if failures:

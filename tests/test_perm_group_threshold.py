@@ -125,3 +125,44 @@ class TestDiminoBudgetExceededDoesNotEscape:
             w for w in caught if issubclass(w.category, CostFallbackWarning)
         ]
         assert len(cost_warnings) >= 1, "expected a CostFallbackWarning"
+
+
+class TestUnknownKindOversizedGroupDegradesToDense:
+    """The unique-element counter must degrade, never leak _DiminoBudgetExceeded.
+
+    ``fnp.full((2,)*9, 0)`` auto-infers the full S_9 exchange symmetry as a
+    RAW generator set (unknown kind): ``order()`` has no closed form there, so
+    ``burnside_unique_count`` enumerates and blows ``dimino_budget``. Before
+    the fix, the private ``_DiminoBudgetExceeded`` escaped through any billed
+    op on such a tensor -- numpy 2.4's ``TestCreationFuncs::test_full`` (the
+    first genuine 2.4 run of the borrowed suites) found exactly this.
+    """
+
+    def test_billing_on_oversized_inferred_symmetry_charges_dense(self):
+        import warnings
+
+        import flopscope.numpy as fnp
+        from flopscope.errors import CostFallbackWarning
+
+        with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
+            sym = fnp.full((2,) * 9, 0)
+            before = b.flops_used
+            with pytest.warns(CostFallbackWarning, match="dense"):
+                _ = sym == 0
+            assert b.flops_used - before == 512  # dense numel(2**9), no discount
+            # Unary ops route through the same counter; must also survive.
+            before = b.flops_used
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fnp.abs(sym)
+            assert b.flops_used - before == 512
+
+    def test_small_inferred_symmetry_keeps_the_discount(self):
+        import flopscope.numpy as fnp
+
+        with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
+            sym = fnp.full((2, 2, 2), 0)  # inferred S_3, |G| = 6: enumerable
+            before = b.flops_used
+            _ = sym == 0
+            # multiset count C(2+3-1, 3) = 4 unique elements, not dense 8
+            assert b.flops_used - before == 4

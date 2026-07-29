@@ -162,6 +162,14 @@ jobs:
     needs: [detect-impact]
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # `uv run` re-syncs the venv from uv.lock by default, silently reverting
+    # the "Pin NumPy" step back to the locked numpy -- which made every matrix
+    # cell test the same version. UV_NO_SYNC applies --no-sync to every
+    # `uv run` in this job; the explicit `uv sync` / `uv pip install` steps
+    # below are unaffected by it. The two assert steps fail the cell loudly
+    # if the pin is ever reverted again.
+    env:
+      UV_NO_SYNC: "1"
     strategy:
       fail-fast: true
       matrix:
@@ -192,17 +200,56 @@ jobs:
       - name: Pin NumPy ${{ matrix.numpy-version }}
         run: uv pip install 'numpy~=${{ matrix.numpy-version }}.0'
 
+      - name: Assert the venv numpy matches this matrix cell
+        env:
+          EXPECTED_NUMPY: ${{ matrix.numpy-version }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          import numpy
+
+          expected = os.environ["EXPECTED_NUMPY"]
+          actual = numpy.__version__
+          assert actual.startswith(expected + "."), (
+              f"matrix cell wants numpy {expected}.x but the venv has {actual}"
+              " -- something re-synced the environment from uv.lock"
+          )
+          print(f"numpy {actual} matches matrix cell {expected}")
+          PY
+
       - name: Generate API docs (untracked; tests validate them)
         run: uv run python scripts/generate_api_docs.py
 
       - name: Run tests with coverage
         run: uv run pytest --cov=flopscope --cov-fail-under=85
 
+      - name: Assert the pinned numpy survived the test run
+        if: always()
+        env:
+          EXPECTED_NUMPY: ${{ matrix.numpy-version }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          import numpy
+
+          expected = os.environ["EXPECTED_NUMPY"]
+          actual = numpy.__version__
+          assert actual.startswith(expected + "."), (
+              f"matrix cell wants numpy {expected}.x but the venv has {actual}"
+              " -- a test or step re-synced the environment mid-run"
+          )
+          print(f"numpy {actual} still matches matrix cell {expected}")
+          PY
+
   numpy-compat:
     if: needs.detect-impact.outputs.run_numpy_compat == 'true'
     needs: [detect-impact]
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    # Same guard as the `test` job: without UV_NO_SYNC every `uv run` below
+    # would re-sync from uv.lock and revert the "Pin NumPy" step.
+    env:
+      UV_NO_SYNC: "1"
     strategy:
       fail-fast: true
       matrix:
@@ -229,6 +276,23 @@ jobs:
 
       - name: Pin NumPy ${{ matrix.numpy-version }}
         run: uv pip install 'numpy~=${{ matrix.numpy-version }}.0'
+
+      - name: Assert the venv numpy matches this matrix cell
+        env:
+          EXPECTED_NUMPY: ${{ matrix.numpy-version }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          import numpy
+
+          expected = os.environ["EXPECTED_NUMPY"]
+          actual = numpy.__version__
+          assert actual.startswith(expected + "."), (
+              f"matrix cell wants numpy {expected}.x but the venv has {actual}"
+              " -- something re-synced the environment from uv.lock"
+          )
+          print(f"numpy {actual} matches matrix cell {expected}")
+          PY
 
       - name: Generate API docs (untracked; tests validate them)
         run: uv run python scripts/generate_api_docs.py
@@ -260,6 +324,24 @@ jobs:
 
       - name: "NumPy compat: random"
         run: uv run pytest tests/numpy_compat/ --pyargs numpy.random.tests.test_random -n auto -q
+
+      - name: Assert the pinned numpy survived the compat suites
+        if: always()
+        env:
+          EXPECTED_NUMPY: ${{ matrix.numpy-version }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          import numpy
+
+          expected = os.environ["EXPECTED_NUMPY"]
+          actual = numpy.__version__
+          assert actual.startswith(expected + "."), (
+              f"matrix cell wants numpy {expected}.x but the venv has {actual}"
+              " -- a test or step re-synced the environment mid-run"
+          )
+          print(f"numpy {actual} still matches matrix cell {expected}")
+          PY
 
   client-parity:
     # GATE: targeted participant-parity tests must be green (rc3+).

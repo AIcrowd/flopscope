@@ -760,6 +760,7 @@ def test_unravel_index():
     assert r == (1, 2)
 
 
+@pytest.mark.skipif(not hasattr(numpy, "unstack"), reason="requires numpy >= 2.1")
 def test_unstack():
     a = numpy.array([[1, 2], [3, 4], [5, 6]])
     parts = ops.unstack(a)

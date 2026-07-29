@@ -105,6 +105,7 @@ def test_matmul_returns_a_tagged_destination_itself():
         assert fnp.matmul(s, s, out=dest) is dest
 
 
+@pytest.mark.skipif(not hasattr(np, "vecdot"), reason="requires numpy >= 2.1")
 def test_sibling_contractions_also_return_their_destination():
     """The fix lives in the shared helper, so vecdot/matvec inherit it."""
     load_weights()
@@ -112,8 +113,9 @@ def test_sibling_contractions_also_return_their_destination():
     with f.BudgetContext(flop_budget=10**18, quiet=True):
         d1 = np.empty(N)
         assert fnp.vecdot(a, b, out=d1) is d1
-        d2 = np.empty(N)
-        assert fnp.matvec(a, np.ones(N), out=d2) is d2
+        if hasattr(np, "matvec"):  # matvec arrived in 2.2, vecdot in 2.1
+            d2 = np.empty(N)
+            assert fnp.matvec(a, np.ones(N), out=d2) is d2
 
 
 # --- billing: both directions --------------------------------------------

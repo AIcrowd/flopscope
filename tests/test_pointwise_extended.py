@@ -427,6 +427,9 @@ def test_nanvar():
     assert not numpy.isnan(result)
 
 
+@pytest.mark.skipif(
+    not hasattr(numpy, "cumulative_prod"), reason="requires numpy >= 2.1"
+)
 def test_cumulative_prod():
     x = numpy.array([1.0, 2.0, 3.0])
     with BudgetContext(flop_budget=10**6):
@@ -434,6 +437,9 @@ def test_cumulative_prod():
     assert result.shape == (3,)
 
 
+@pytest.mark.skipif(
+    not hasattr(numpy, "cumulative_sum"), reason="requires numpy >= 2.1"
+)
 def test_cumulative_sum():
     x = numpy.array([1.0, 2.0, 3.0])
     with BudgetContext(flop_budget=10**6):
