@@ -62,8 +62,11 @@ def test_guard_a_generation_leaves_git_clean():
     excludes summary). Every other generator output is gitignored, so regeneration
     must leave the rest of the tracked tree byte-clean.
     """
+    # Invoke the generator with THIS interpreter, never `uv run`: `uv run`
+    # re-syncs the venv from uv.lock mid-suite, silently reverting the CI
+    # matrix's pinned numpy (and any local pin) back to the locked version.
     subprocess.run(
-        ["uv", "run", "python", "scripts/generate_api_docs.py"], cwd=ROOT, check=True
+        [sys.executable, "scripts/generate_api_docs.py"], cwd=ROOT, check=True
     )
     dirty = [
         ln
