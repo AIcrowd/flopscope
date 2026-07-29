@@ -20,7 +20,6 @@ from flopscope._pointwise import (
 from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import normalize_symmetry_input, validate_symmetry_group
 from flopscope._validation import _normalize_out, maybe_check_nan_inf, require_budget
-from flopscope._write_epoch import note_write
 
 
 def _identity_pattern(operands):
@@ -832,19 +831,49 @@ def einsum(
         # contents. Guarding the argument stops a container getting here, but
         # taking the materialising call out is what makes the whole class of
         # silent mis-write structurally impossible rather than merely gated.
-        # ``safe`` once the dtype has been resolved above -- the contraction
-        # already ran in a dtype that casts into the destination, so this copy
-        # is a narrowing-free store and numpy will say so if it ever is not.
-        # ``unsafe`` here is the original defect: it silently truncated
-        # float->int and dropped imaginary parts on complex->float.
-        _np.copyto(
-            _to_base_ndarray(out),
-            _np.asarray(result),
-            casting=requested_casting if compute_dtype is not None else "unsafe",
-        )
-        # Internal copy, so _call_numpy's hook never sees it: record the write
-        # or a tag on out's buffer (or on an alias of it) would survive.
-        note_write(out)
+        dest = _to_base_ndarray(out)
+        source = _np.asarray(result)
+        # einsum is the one contraction that does not forward ``out=``, so by
+        # here numpy has already written the entire result into a buffer of its
+        # own and this copies that buffer into the caller's destination. That is
+        # a second full materialising pass over the data, not the destination
+        # numpy would have allocated anyway, and the cost model prices exactly
+        # that at one unit per element written (see docs/reference/cost-model.md,
+        # "every byte written is metered", decision-procedure step 2). Charging
+        # it as ``copyto``, with ``copyto``'s own cost and dtypes rather than the
+        # contraction's, makes ``einsum(out=d)`` cost precisely what ``einsum()``
+        # followed by ``fnp.copyto(d, result)`` costs -- including on complex
+        # operands, where a contraction's exact complex factor is not a copy's.
+        # Until this the pass was free, so ``einsum("ij->ji", src, out=dest)``
+        # materialised a full transpose of any size at no charge, which is the
+        # copy-chain laundering the write-metered model exists to close.
+        with budget.deduct(
+            "copyto",
+            flop_cost=dest.size,
+            subscripts=None,
+            shapes=(),
+            dtypes=(source.dtype, dest.dtype),
+        ):
+            # Through ``_call_numpy``, which is what puts the copy's wall time in
+            # backend rather than leaving it to the enclosing
+            # ``@_counted_wrapper``'s overhead remainder -- being outside the
+            # contraction's deduct never made it residual, because the wrapper
+            # bills its whole non-backend remainder to overhead. ``_call_numpy``
+            # also records the write itself, ``np.copyto`` being in
+            # ``_MUTATES_FIRST_ARG``, so a symmetry tag observing ``out``'s buffer
+            # (or an alias of it) is still voided -- that is what the hand-rolled
+            # ``note_write`` this replaces was for.
+            #
+            # The casting rule is the one settled in #168: ``safe`` once the
+            # dtype has been resolved above, because the contraction already ran
+            # in a dtype that casts into the destination, so this copy is a
+            # narrowing-free store and numpy will say so if it ever is not.
+            _call_numpy(
+                _np.copyto,
+                dest,
+                source,
+                casting=requested_casting if compute_dtype is not None else "unsafe",
+            )
         maybe_check_nan_inf(out, "einsum")
         return out
 

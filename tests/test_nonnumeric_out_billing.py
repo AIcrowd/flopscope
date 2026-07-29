@@ -47,13 +47,30 @@ def _real_pair(n=N):
     return rng.random((n, n)), rng.random((n, n))
 
 
+def _destination_write(out, src_dtype):
+    """What the einsum path's write into ``out`` is priced at on its own.
+
+    ``einsum`` is the one contraction that does not forward ``out=``, so it
+    copies numpy's result buffer into the destination by hand -- a second
+    materialising pass, charged as ``copyto`` at one unit per element written
+    (see tests/test_einsum_out_destination_billing.py). What THIS file pins is
+    the contraction's own rate, so the write is measured and subtracted rather
+    than assumed free: an assertion that just compared totals would move every
+    time the write's price did, and would go quiet about the rate it exists to
+    guard.
+    """
+    return _billed(
+        lambda: fnp.copyto(out, np.empty((N, N), dtype=src_dtype), casting="unsafe")
+    )
+
+
 def test_einsum_nonnumeric_out_does_not_discount_complex():
     load_weights()
     a, b = _complex_pair()
     honest = _billed(lambda: fnp.einsum("ij,jk->ik", a, b))
     out = np.empty((N, N), dtype=object)
     laundered = _billed(lambda: fnp.einsum("ij,jk->ik", a, b, out=out))
-    assert laundered == honest
+    assert laundered - _destination_write(out, a.dtype) == honest
 
 
 def test_einsum_nonnumeric_out_does_not_discount_float64():
@@ -61,7 +78,8 @@ def test_einsum_nonnumeric_out_does_not_discount_float64():
     a, b = _real_pair()
     honest = _billed(lambda: fnp.einsum("ij,jk->ik", a, b))
     out = np.empty((N, N), dtype=object)
-    assert _billed(lambda: fnp.einsum("ij,jk->ik", a, b, out=out)) == honest
+    laundered = _billed(lambda: fnp.einsum("ij,jk->ik", a, b, out=out))
+    assert laundered - _destination_write(out, a.dtype) == honest
 
 
 @pytest.mark.parametrize("out_dtype", ["U64", "S64", "U32", "S16"])
