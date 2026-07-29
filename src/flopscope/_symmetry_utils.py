@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import functools
 import math
+import warnings
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 
-from flopscope._perm_group import SymmetryGroup
-from flopscope.errors import SymmetryError
+from flopscope._config import get_setting as _get_setting
+from flopscope._perm_group import SymmetryGroup, _DiminoBudgetExceeded
+from flopscope.errors import CostFallbackWarning, SymmetryError
 
 
 def _normalize_axis_tuple(
@@ -103,10 +105,56 @@ def unique_elements_for_shape(
     group: SymmetryGroup | None,
     shape: tuple[int, ...],
 ) -> int:
-    """Return the number of unique tensor elements implied by symmetry."""
+    """Return the number of unique tensor elements implied by symmetry.
+
+    Degrades to the dense element count when the group cannot be enumerated
+    within ``dimino_budget``: unknown-kind groups (raw generators -- e.g. the
+    auto-inferred full-exchange symmetry of a constant array) have no closed
+    form for either the Burnside count or the ``__hash__`` canonicalization
+    that keying the cache requires, so both can raise
+    ``_DiminoBudgetExceeded`` mid-enumeration. Charging dense is the same
+    never-under-bill fallback the oversized-group guards in ``_pointwise``
+    use; leaking the private exception through whatever billed op asked for
+    the count is what numpy 2.4's ``TestCreationFuncs::test_full`` first
+    surfaced.
+    """
     if group is None:
         return math.prod(shape)
-    return _unique_elements_for_shape_cached(group, tuple(shape))
+    try:
+        return _unique_elements_for_shape_cached(group, tuple(shape))
+    except _DiminoBudgetExceeded:
+        _warn_dense_fallback_once(group.degree, tuple(shape))
+        return math.prod(shape)
+
+
+@functools.cache
+def _dense_fallback_seen(degree: int, shape: tuple[int, ...]) -> None:
+    return None
+
+
+def _warn_dense_fallback_once(degree: int, shape: tuple[int, ...]) -> None:
+    """Emit :class:`CostFallbackWarning` once per ``(degree, shape)``.
+
+    Mirrors ``_pointwise._warn_oversized_once``: the setting check stays
+    OUTSIDE the seen-cache so re-enabling ``symmetry_warnings`` later still
+    warns, and hot paths (compat suites doing thousands of ops on the same
+    inferred symmetry) do not flood the log. Keyed by degree, not the group
+    object -- hashing the group is exactly what can blow the budget.
+    """
+    if not _get_setting("symmetry_warnings"):
+        return
+    info_before = _dense_fallback_seen.cache_info()
+    _dense_fallback_seen(degree, shape)
+    if _dense_fallback_seen.cache_info().hits > info_before.hits:
+        return  # already warned for this (degree, shape) pair
+    budget = int(_get_setting("dimino_budget"))  # type: ignore[arg-type]
+    warnings.warn(
+        f"unique-element count for a degree-{degree} SymmetryGroup exceeded "
+        f"the enumeration budget ({budget}); charging the dense element "
+        "count. Suppress with flops.configure(symmetry_warnings=False).",
+        CostFallbackWarning,
+        stacklevel=3,
+    )
 
 
 @functools.cache
