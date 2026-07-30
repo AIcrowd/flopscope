@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.10.0 (2026-07-31)
+
+### BREAKING CHANGE
+
+- **einsum**: `out=` now follows the caller's casting rule, exactly as numpy does (#168).
+  Calls that previously succeeded by silently truncating — two float64 operands
+  contracted into an int64 destination, a complex result stored into a float64
+  destination — now raise `TypeError`, matching plain numpy. Accepted calls can also
+  change value: the contraction now runs in the dtype numpy contracts in, so
+  `einsum("ij,jk->ik", int8_a, int8_b, out=int16_dest)` returns the true 300 where it
+  previously returned the overflowed -56. Verified differentially against plain numpy
+  (8,640 casting-rule cells plus 20,992 default-rule cells, zero disagreements).
+
+### Billing impact
+
+- Billed FLOP totals change in both directions for `out=` and symmetry-tag patterns:
+  destination writes are now priced (einsum #169, fft #163, wider-buffer rates
+  #156/#159/#162), symmetry-tag discounts are voided when the tagged buffer is
+  rewritten (#157, #165), frexp and the argmin/argmax family no longer over-charge
+  (#165), and refused operations are uniformly free (#153, #165, #168). Graded totals
+  for submissions that relied on these patterns will differ from v0.9.1.
+
+### Feat
+
+- **matmul**: accept a destination, and settle the tagged-destination rule (#164)
+
+### Fix
+
+- **compat**: make the CI numpy matrix real and fix everything it hid (numpy 2.0-2.4) (#171)
+- **billing**: price einsum's destination write and put its wall in backend (#169)
+- **einsum**: cast inside numpy's iterator instead of materializing operands (#170)
+- **einsum**: apply the caller's casting rule to out=, as numpy does (#168)
+- **server**: stop charging for results the server cannot deliver (#153)
+- **client**: keep BudgetContext.flops_used live between operations (#155)
+- **server**: reject unbound method ops that segfault on dispatch (#154)
+- **billing**: meter ufunc.at, reduceat and mask_indices by their real work
+- **client**: scope the dispatch accumulator to flopscope's own code (#161)
+- **billing**: close the out= follow-ups left open by #156, #162 and #163 (#165)
+- **billing**: price the fft destination and stop returning buffers numpy never wrote (#163)
+- **billing**: unwrap a one-tuple out= and stop under-billing the destination (#156)
+- **billing**: stop a narrow out= discounting a wider accumulator (#162)
+- **billing**: stop a non-numeric out= from laundering the arithmetic's rate (#159)
+- **billing**: void symmetry tags when the buffer they describe is written (#157)
+
+### Perf
+
+- **einsum**: dispatch pairwise contraction steps through numpy's optimized path (#160)
+
 ## v0.9.1 (2026-07-23)
 
 ### Fix
