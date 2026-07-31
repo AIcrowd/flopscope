@@ -39,16 +39,46 @@ git checkout main && git pull origin main
 # 2. Preview the next version + changelog (no writes)
 uv run cz bump --dry-run
 
-# 3. Cut the release: bumps pyproject.toml versions across all three
-#    packages, prepends to CHANGELOG.md, creates the v<x.y.z> git tag.
-uv run cz bump
+# 3. Write the new version into every version location and prepend the
+#    CHANGELOG.md section — no commit or tag is created yet.
+uv run cz bump --files-only --changelog
 
-# 4. Push the commit + tag. Tag push triggers the PyPI publish workflow.
+# 4. Review the new CHANGELOG.md section; hand-edit it if the release
+#    needs callouts the generated bullet list can't express (e.g. a
+#    BREAKING CHANGE section). The publish workflow copies this section
+#    verbatim into the GitHub Release body.
+
+# 5. Refresh the three uv.lock files. Each lockfile records its own
+#    package's version, so all three are stale after every bump — and
+#    CI's check-lock job fails the push to main if they are.
+make relock
+
+# 6. Verify version lockstep and lockfile consistency before committing.
+make check-sync-versions && make check-lock
+
+# 7. Commit everything as the bump commit, then tag it (annotated, like
+#    every existing release tag).
+git add -A
+git commit -m "bump: version <old> → <new>"
+git tag -a v<new> -m "v<new>"
+
+# 8. Push the commit + tag. Tag push triggers the PyPI publish workflow.
 git push --follow-tags
 ```
 
-Pre-releases: `uv run cz bump --prerelease alpha` → produces tags like
-`v0.3.0a0`.
+Why not plain `uv run cz bump`? It commits and tags in one shot, *before*
+the lockfiles can be refreshed — so the bump commit ships stale `uv.lock`
+files and `check-lock` fails on main. If you ran it anyway: `make relock`,
+then stage the three lockfiles (`git add uv.lock flopscope-server/uv.lock
+flopscope-client/uv.lock`) — an unstaged `--amend` would silently exclude
+them — then `git commit --amend --no-edit`, and re-point the tag with
+`git tag -fa v<new> -m "v<new>"` before pushing.
+
+Pre-releases follow the same files-only flow with `--prerelease alpha`
+added in step 3 (`uv run cz bump --files-only --changelog --prerelease
+alpha`); the relock, verify, commit, and tag steps are identical, with
+the prerelease version to tag (e.g. `v0.3.0a0`) shown in the bump
+output.
 
 ## Multi-package lockstep
 
@@ -59,10 +89,11 @@ locations in one invocation via the `version_files` config in
 
 - All three `pyproject.toml` `[project].version` fields
 - All three `__version__` strings in package `__init__.py` files
-- The cross-package pin (`flopscope==X.Y.Z` in flopscope-server's
+- Both cross-package pins (`flopscope-server==X.Y.Z` in flopscope's
+  `server` extra, and `flopscope==X.Y.Z` in flopscope-server's
   `dependencies`)
 
-Before tagging, `check-sync-versions` asserts that all seven version
+Before tagging, `check-sync-versions` asserts that all eight version
 locations agree. Run locally:
 
 ```bash
@@ -181,8 +212,8 @@ GitHub Release.
 
 ### Publishing v\<X.Y.Z\> manually
 
-Assumes the bump commit + `vX.Y.Z` tag already exist on `main` (use
-`cz bump --increment <PATCH|MINOR>` as usual to produce them; the
+Assumes the bump commit + `vX.Y.Z` tag already exist on `main` (produce
+them with the [End-to-end flow](#end-to-end-flow) above as usual; the
 difference is only that the GH workflow won't run).
 
 1. Build all three packages from the tagged commit:
