@@ -69,11 +69,16 @@ git push --follow-tags
 Why not plain `uv run cz bump`? It commits and tags in one shot, *before*
 the lockfiles can be refreshed — so the bump commit ships stale `uv.lock`
 files and `check-lock` fails on main. If you ran it anyway: `make relock`,
-`git commit --amend --no-edit` the three lockfiles into the bump commit,
-and re-point the tag with `git tag -fa v<new> -m "v<new>"` before pushing.
+then stage the three lockfiles (`git add uv.lock flopscope-server/uv.lock
+flopscope-client/uv.lock`) — an unstaged `--amend` would silently exclude
+them — then `git commit --amend --no-edit`, and re-point the tag with
+`git tag -fa v<new> -m "v<new>"` before pushing.
 
-Pre-releases: `uv run cz bump --prerelease alpha` → produces tags like
-`v0.3.0a0`.
+Pre-releases follow the same files-only flow with `--prerelease alpha`
+added in step 3 (`uv run cz bump --files-only --changelog --prerelease
+alpha`); the relock, verify, commit, and tag steps are identical, with
+the prerelease version to tag (e.g. `v0.3.0a0`) shown in the bump
+output.
 
 ## Multi-package lockstep
 
