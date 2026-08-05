@@ -18,6 +18,8 @@ import builtins
 import struct
 from typing import Any
 
+import msgpack
+
 __version__ = "0.10.0"
 
 # ---------------------------------------------------------------------------
@@ -150,6 +152,10 @@ _MSGPACK_OK = (
     builtins.float,
     builtins.str,
     builtins.bytes,
+    builtins.bytearray,
+    builtins.memoryview,
+    msgpack.ExtType,
+    msgpack.Timestamp,
 )
 
 

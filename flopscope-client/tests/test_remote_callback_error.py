@@ -197,6 +197,23 @@ def test_serialization_diagnostic_does_not_execute_metaclass_name(monkeypatch):
     assert network_calls == 0
 
 
+@pytest.mark.parametrize("spec", [bytearray(b"dtype"), memoryview(b"dtype")])
+def test_proxy_preserves_msgpack_binary_buffer_forms(spec, monkeypatch):
+    class Encoded(Exception):
+        pass
+
+    encoded = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append((op_name, args, kwargs))
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    with pytest.raises(Encoded):
+        flopscope.zeros((1,), dtype=spec)
+    assert encoded == [("zeros", [[1]], {"dtype": spec})]
+
+
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
 def test_callback_op_raises_remote_callback_error(op):
     fn = getattr(flopscope, op)
