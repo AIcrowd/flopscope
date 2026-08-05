@@ -514,6 +514,12 @@ def _flatten_ufunc_out_slots(out) -> tuple:
     return (out,)
 
 
+def _preflight_ufunc_out_arity(out, nout: int) -> None:
+    """Match NumPy's tuple-arity error before inspecting ufunc participants."""
+    if isinstance(out, tuple) and len(out) != nout:
+        raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+
+
 def _call_ufunc_with_protocol_timing(
     op_name, fn, *args, protocol_operands=(), **kwargs
 ):
@@ -527,13 +533,20 @@ def _call_ufunc_with_protocol_timing(
 
 
 def _restore_foreign_ufunc_out_identity(result, out, stripped):
-    """Replace only raw callback results that are the stripped ``out`` buffers."""
+    """Map only NumPy's canonical stripped-``out`` result back to the caller."""
     if isinstance(result, _ForeignUfuncResult):
         value = result.value
         if (
-            isinstance(out, tuple)
+            type(value) is tuple
+            and isinstance(out, tuple)
             and isinstance(stripped, tuple)
-            and isinstance(value, tuple)
+            and len(value) == len(stripped)
+            and _builtins.all(
+                original is None or returned is stripped_value
+                for original, stripped_value, returned in zip(
+                    out, stripped, value, strict=True
+                )
+            )
         ):
             value = tuple(
                 original
@@ -763,6 +776,7 @@ def _counted_unary(np_func, op_name: str):
         # Ufuncs must reject an opt-out before inspecting out or billing. The
         # non-ufunc NumPy dispatch helpers materialize such operands instead.
         if is_ufunc:
+            _preflight_ufunc_out_arity(out, np_func.nout)
             _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
         symmetry = _symmetry_of(x)
@@ -842,6 +856,7 @@ def _free_unary(np_func, op_name: str):
         # Ufuncs must reject an opt-out before inspecting out or billing. The
         # non-ufunc NumPy dispatch helpers materialize such operands instead.
         if is_ufunc:
+            _preflight_ufunc_out_arity(out, np_func.nout)
             _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
         symmetry = _symmetry_of(x)
@@ -923,6 +938,7 @@ def _counted_unary_multi(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, nout)
         _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
         symmetry = _symmetry_of(x)
@@ -990,6 +1006,7 @@ def _counted_binary(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, np_func.nout)
         _preflight_ufunc_opt_out(x, y, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
         # Preserve original (possibly Python-scalar) values for the actual
@@ -1119,6 +1136,7 @@ def _counted_binary_multi(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, nout)
         _preflight_ufunc_opt_out(x, y, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
         # Preserve original (possibly Python-scalar) values for the actual
@@ -1458,6 +1476,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
     _preflight_ufunc_opt_out(a, b, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
     # Resolved here, BEFORE ``a``/``b`` are read for billing below, not
@@ -1691,6 +1710,7 @@ def _counted_ufunc_reduce_generic(
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
     _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below -- see
@@ -1802,6 +1822,7 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
     _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below -- see
@@ -2044,6 +2065,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
     _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below, for the same
@@ -2590,8 +2612,6 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             protocol_operands=(a, *forward_args),
             **kwargs,
         )
-    if isinstance(result, _ForeignUfuncResult):
-        return result.value
     # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
     # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
     # cannot list it either -- that set holds module-level function objects
@@ -2601,6 +2621,8 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # plain alias of a tagged buffer reaches it, which is exactly the case a
     # guard on tagged arrays cannot cover.
     note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
 
 

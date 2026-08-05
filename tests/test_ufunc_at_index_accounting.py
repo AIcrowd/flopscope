@@ -307,6 +307,43 @@ def test_at_write_through_alias_voids_symmetry_tag():
     assert epoch_of(z) != before, "the write must advance the buffer epoch"
 
 
+def test_foreign_ufunc_at_callback_records_successful_write():
+    """A foreign ``ufunc.at`` handler can mutate the target before returning."""
+    from flopscope._write_epoch import epoch_of
+
+    class MutatingDuck:
+        def __init__(self, result):
+            self.result = result
+            self.calls = 0
+
+        def __array__(self, dtype=None, copy=None):
+            return np.asarray([0.0], dtype=dtype)
+
+        def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+            assert (ufunc, method) == (np.add, "at")
+            self.calls += 1
+            inputs[0][0] += 7
+            return self.result
+
+    raw_result = object()
+    raw_target = np.zeros(2)
+    raw_duck = MutatingDuck(raw_result)
+    expected = np.add.at(raw_target, [0], raw_duck)
+
+    result = object()
+    target = fnp.zeros(2)
+    before = epoch_of(target)
+    duck = MutatingDuck(result)
+    with flopscope.BudgetContext(flop_budget=10**9):
+        actual = np.add.at(target, [0], duck)
+
+    assert expected is raw_result
+    assert actual is result
+    assert raw_duck.calls == duck.calls == 1
+    np.testing.assert_array_equal(target, raw_target)
+    assert epoch_of(target) != before
+
+
 @pytest.mark.parametrize(
     "name,invoke",
     [
