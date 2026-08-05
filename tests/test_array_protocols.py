@@ -197,6 +197,121 @@ def test_np_add_out_allows_matching_symmetric_out():
     assert bc.flops_used > 0
 
 
+def _negative_stride_symmetric_out(values):
+    """Build an explicit symmetric destination with observable non-C layout."""
+    backing = np.empty_like(values)
+    view = backing[::-1, ::-1]
+    view[...] = values
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        return flops.as_symmetric(view, symmetry=symmetry)
+
+
+def _call_nonforeign_symmetric_out(operation, value, out, *, tracked=False, **kwargs):
+    array_module = fnp if tracked else np
+    if operation == "unary":
+        return array_module.positive(value, out=out, **kwargs)
+    if operation == "binary":
+        return array_module.add(value, value, out=out, **kwargs)
+    raise AssertionError(f"unknown operation: {operation}")
+
+
+@pytest.mark.parametrize("operation", ["unary", "binary"])
+@pytest.mark.parametrize(
+    "where",
+    [
+        pytest.param(False, id="where-false"),
+        pytest.param(
+            np.array(
+                [
+                    [True, False, True],
+                    [False, True, False],
+                    [True, False, True],
+                ]
+            ),
+            id="partial-mask",
+        ),
+    ],
+)
+def test_nonforeign_symmetric_out_preserves_initialized_masked_values(
+    operation, where
+):
+    values = np.array(
+        [[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]]
+    )
+    initial = np.array(
+        [[101.0, 102.0, 103.0], [102.0, 104.0, 105.0], [103.0, 105.0, 106.0]]
+    )
+    expected = initial.copy()
+    _call_nonforeign_symmetric_out(operation, values, expected, where=where)
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        value = flops.as_symmetric(values.copy(), symmetry=symmetry)
+    out = _negative_stride_symmetric_out(initial)
+    original_strides = out.strides
+
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        returned = _call_nonforeign_symmetric_out(
+            operation, value, out, where=where, tracked=True
+        )
+
+    assert returned is out
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    assert out.strides == original_strides == (-24, -8)
+    assert out.flags.writeable
+
+
+@pytest.mark.parametrize("operation", ["unary", "binary"])
+def test_nonforeign_symmetric_out_uses_numpy_output_casting(operation):
+    values = np.array([[1.5, 2.5], [2.5, 4.5]])
+    raw_out = np.zeros((2, 2), dtype=np.int64)
+    with pytest.raises(TypeError) as raw_raised:
+        _call_nonforeign_symmetric_out(operation, values, raw_out)
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        value = flops.as_symmetric(values.copy(), symmetry=symmetry)
+    out = _negative_stride_symmetric_out(np.zeros((2, 2), dtype=np.int64))
+    before = np.asarray(out).copy()
+    original_strides = out.strides
+
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        with pytest.raises(type(raw_raised.value)) as raised:
+            _call_nonforeign_symmetric_out(operation, value, out, tracked=True)
+
+    assert str(raised.value) == str(raw_raised.value)
+    np.testing.assert_array_equal(np.asarray(out), before)
+    assert out.strides == original_strides == (-16, -8)
+    assert out.flags.writeable
+
+
+@pytest.mark.parametrize("operation", ["unary", "binary"])
+def test_nonforeign_symmetric_out_uses_numpy_readonly_error(operation):
+    values = np.array([[1.0, 2.0], [2.0, 4.0]])
+    raw_out = np.zeros((2, 2))
+    raw_out.flags.writeable = False
+    with pytest.raises(ValueError) as raw_raised:
+        _call_nonforeign_symmetric_out(operation, values, raw_out)
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        value = flops.as_symmetric(values.copy(), symmetry=symmetry)
+    out = _negative_stride_symmetric_out(np.zeros((2, 2)))
+    before = np.asarray(out).copy()
+    original_strides = out.strides
+    out.flags.writeable = False
+
+    with flops.BudgetContext(flop_budget=int(1e9)):
+        with pytest.raises(ValueError) as raised:
+            _call_nonforeign_symmetric_out(operation, value, out, tracked=True)
+
+    assert str(raised.value) == str(raw_raised.value)
+    np.testing.assert_array_equal(np.asarray(out), before)
+    assert out.strides == original_strides == (-16, -8)
+    assert not out.flags.writeable
+
+
 def test_np_transpose_of_whest_returns_whest():
     """Post-Stage-4: np.transpose dispatches via __array_function__ to
     me.transpose, which works on FlopscopeArray (zero-FLOP shape op)."""

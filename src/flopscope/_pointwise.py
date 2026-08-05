@@ -612,6 +612,38 @@ def _call_with_optional_out(
     return out
 
 
+def _symmetric_out_scratch(out: SymmetricTensor) -> _np.ndarray:
+    """Copy ``out`` into isolated storage while preserving its exact layout."""
+    source = _to_base_ndarray(out)
+    if source.size == 0:
+        min_offset = 0
+        storage_nbytes = 0
+    else:
+        byte_extents = tuple(
+            (dimension - 1) * stride
+            for dimension, stride in zip(source.shape, source.strides, strict=True)
+        )
+        min_offset = _builtins.sum(
+            _builtins.min(0, extent) for extent in byte_extents
+        )
+        max_offset = _builtins.sum(
+            _builtins.max(0, extent) for extent in byte_extents
+        )
+        storage_nbytes = max_offset - min_offset + source.dtype.itemsize
+    backing = _np.empty(storage_nbytes, dtype=_np.uint8)
+    scratch = _np.ndarray(
+        shape=source.shape,
+        dtype=source.dtype,
+        buffer=backing,
+        offset=-min_offset,
+        strides=source.strides,
+    )
+    _np.copyto(scratch, source, casting="no")
+    if not source.flags.writeable:
+        scratch.flags.writeable = False
+    return scratch
+
+
 def _logical_array_bytes(array: _np.ndarray) -> bytes:
     """Snapshot logical element bytes independent of strides and aliasing."""
     return array.tobytes(order="C")
@@ -861,7 +893,7 @@ def _counted_unary(np_func, op_name: str):
                 transaction = _snapshot_symmetric_out(out)
                 out_for_np = out
             elif isinstance(out, SymmetricTensor):
-                out_for_np = None
+                out_for_np = _symmetric_out_scratch(out)
             else:
                 out_for_np = out
             try:
@@ -1197,7 +1229,7 @@ def _counted_binary(np_func, op_name: str):
                 transaction = _snapshot_symmetric_out(out)
                 out_for_np = out
             elif isinstance(out, SymmetricTensor):
-                out_for_np = None
+                out_for_np = _symmetric_out_scratch(out)
             else:
                 out_for_np = out
             try:
