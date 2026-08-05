@@ -1,4 +1,5 @@
 import warnings
+from typing import Any
 
 import numpy as np
 import pytest
@@ -364,7 +365,7 @@ def test_forced_object_signature_is_refused_without_charge(keyword, spelling):
 
     left = fnp.asarray(np.array([1.0, 2.0]))
     right = fnp.asarray(np.array([2.0, 1.0]))
-    kwargs = {keyword: "OO->O", "casting": "unsafe"}
+    kwargs: dict[str, Any] = {keyword: "OO->O", "casting": "unsafe"}
 
     def call():
         if spelling == "direct":
