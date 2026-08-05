@@ -3214,6 +3214,8 @@ def _counted_mean(np_func, op_name: str):
             return _wrap_result(result, out=out, symmetry=new_symmetry)  # type: ignore[return-value]
         return _wrap_result(result, symmetry=new_symmetry)  # type: ignore[return-value]
 
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -3306,6 +3308,8 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
             return _wrap_result(result, out=out, symmetry=new_symmetry)  # type: ignore[return-value]
         return _wrap_result(result, symmetry=new_symmetry)  # type: ignore[return-value]
 
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 

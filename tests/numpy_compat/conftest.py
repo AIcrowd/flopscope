@@ -331,6 +331,14 @@ def pytest_collection_modifyitems(config, items):
 # read-only errors (e.g. "assignment destination is read-only").
 _IMMUTABLE_SENTINEL = "flopscope arrays are immutable"
 
+# Contiguous phrase present in every non-numeric-dtype-ban UnsupportedDtypeError
+# (src/flopscope/_dtype_billing.py:refuse_non_numeric_dtype). Names the specific
+# billing reason rather than a generic word like "object" or a dtype name, so
+# it cannot match an unrelated TypeError/collection failure and covers every
+# refused kind (object, string, bytes, structured/void, datetime64,
+# timedelta64) with one sentinel.
+_NONNUMERIC_DTYPE_BAN_SENTINEL = "flopscope meters only numeric dtypes"
+
 
 def _hit_immutability_guard(excinfo) -> bool:
     """True if the raised exception chain is flopscope's immutability guard."""
@@ -345,7 +353,13 @@ def _hit_immutability_guard(excinfo) -> bool:
 
 
 class _ImmutabilityXfailPlugin:
-    """Reclassify in-place-mutation failures as xfail (immutability is by design).
+    """Reclassify known-by-design failures as xfail/skip instead of failing CI.
+
+    Started as immutability-only (hence the name); its collection-report hook
+    (below) also reclassifies the non-numeric-dtype ban's
+    ``UnsupportedDtypeError`` -- same shape of problem, a whole borrowed
+    NumPy module failing to *collect* with no test item left to hang an
+    xfail marker on.
 
     Registered as a global plugin in :func:`pytest_configure` rather than left as
     a bare conftest hook so it also fires for the ``--pyargs`` NumPy tests: a
@@ -381,13 +395,31 @@ class _ImmutabilityXfailPlugin:
         # Convert that specific collection failure into a module-level skip
         # (same by-design rationale as the runtime hook). The skip is loud in
         # ``-rs`` output, so the coverage trade-off stays visible.
+        #
+        # A second, distinct case hits the identical shape: a NumPy test
+        # module can build a non-numeric-dtype array (and so raise the ban's
+        # ``UnsupportedDtypeError``) at class-body (import) time, before
+        # pytest ever collects an individual test item. Same fix: match the
+        # ban's sentinel and reclassify the collection failure as a skip.
         outcome = yield
         report = outcome.get_result()
-        if report.outcome == "failed" and _IMMUTABLE_SENTINEL in str(report.longrepr):
+        if report.outcome != "failed":
+            return
+        longrepr = str(report.longrepr)
+        if _IMMUTABLE_SENTINEL in longrepr:
             report.outcome = "skipped"
             report.longrepr = (
                 str(getattr(collector, "path", collector.nodeid)),
                 None,
                 "Skipped: flopscope arrays are immutable (#immutable-arrays); "
                 "this NumPy test module mutates an array at import time",
+            )
+        elif _NONNUMERIC_DTYPE_BAN_SENTINEL in longrepr:
+            report.outcome = "skipped"
+            report.longrepr = (
+                str(getattr(collector, "path", collector.nodeid)),
+                None,
+                "Skipped: flopscope refuses non-numeric dtype (see "
+                "tests/test_object_dtype_ban.py); this NumPy test module "
+                "builds a non-numeric-dtype array at import time",
             )

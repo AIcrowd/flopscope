@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 
 import numpy as _np
 
-from flopscope._budget import _counted_wrapper
+from flopscope._budget import _counted_wrapper, refuse_non_numeric_source
 from flopscope._ndarray import _asflopscope, _to_base_ndarray
 from flopscope._registry import REGISTRY
 from flopscope._validation import require_budget
@@ -65,6 +65,17 @@ def _make_counted_method(
             )
         else:
             call_args = args
+            # A genuine sampler casts every distribution parameter
+            # (loc/scale/lam/a/b/...) to float64 itself, below, running any
+            # object payload's __float__ per element with nothing billed for
+            # it. Probe each one first; a probe never casts. Movement
+            # methods relocate values without casting them, so they are not
+            # in this branch at all.
+            for _v in call_args:
+                refuse_non_numeric_source(op_name, _v)
+            for _k, _v in kwargs.items():
+                if _k != "dtype":
+                    refuse_non_numeric_source(op_name, _v)
         # numpy is called directly here rather than through _call_numpy, so the
         # write hook there does not see these destinations.
         out = kwargs.get("out")

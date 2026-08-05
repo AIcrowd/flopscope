@@ -346,10 +346,39 @@ future type numpy or an extension package might introduce) has no defined rate, 
 billing **raises `UnsupportedDtypeError` before charging any FLOPs** rather than
 guessing — a numeric dtype cannot slip through unpriced; supporting a new one is a
 deliberate one-line policy addition to the table. *Non-numeric* dtypes (`object`,
-`str_`, `bytes_`, `datetime64`, `timedelta64`, structured/void) are not floating-point
-arithmetic — no precision packing is possible through them — so they bill at the
-neutral rate `1.0`, preserving plain-numpy behavior for non-numeric arrays; their wall
-time is covered by the residual-time penalty.
+`str_`, `bytes_`, `datetime64`, `timedelta64`, structured/void, object-free or not)
+are refused outright rather than priced at any rate — see the note directly below.
+
+> **Non-numeric dtypes are not supported.** flopscope bills only the numeric
+> kinds — bool, signed/unsigned integer, float, complex (`dtype.kind in
+> "biufc"`) — a NUMERIC ALLOWLIST rather than a denylist of the non-numeric
+> kinds, so a dtype kind flopscope has never seen (a future numpy or
+> extension-package type) is refused by default instead of silently priced.
+> Two distinct dtype families fall outside it. `object` (and any
+> structured/void dtype embedding an object field — this subsumes the
+> `numpy.dtype.hasobject` check) can hold unbounded per-element computation
+> that no rate expresses. `str_`/`bytes_`/`datetime64`/`timedelta64`/
+> structured-void — object-free included — are bounded, but their real
+> per-element cost is not the fixed unit a flat rate would have to assume: a
+> wide string or record does more work than a narrow one, and
+> datetime64/timedelta64 are integers underneath, at whatever the platform's
+> integer rate is, not a dtype-blind flat one. Both are refused the same
+> way, whenever the dtype reaches a counted operation as an operand (an
+> ndarray, or a Python sequence NumPy would coerce into one), an explicit
+> `dtype=`, a fill value or distribution parameter about to be cast the same
+> way, or an `out=` destination — flopscope raises `UnsupportedDtypeError`
+> instead of billing it, including flopscope's own conversion ops
+> (`array`/`asarray`/`astype`/`fromiter`/`require`/`full`/`full_like`) and
+> every random sampler, which refuse non-numeric input rather than convert
+> or relocate it. One exception: a zero-itemsize dtype (an empty structured
+> spec, or a zero-length string/bytes dtype) is let through regardless of
+> kind — zero bytes per element cannot embed an object field or carry any
+> itemsize-dependent cost, and NumPy's own internals allocate one as a
+> zero-byte shape-computation placeholder. To work with mixed, ragged, or
+> non-numeric data, convert with plain NumPy *before* it reaches flopscope —
+> `clean = np.array(x, dtype=np.float64)`, **not** `fnp.array(...)`, since
+> flopscope's own conversion ops refuse non-numeric input too — or hold it
+> in a Python list of numeric arrays and process each one separately.
 
 ### Complex arithmetic from first principles
 
@@ -455,6 +484,16 @@ Worked consequences:
   by **kind**: NumPy accepts any integer or boolean buffer at any width and refuses every
   float and complex one, and that refusal is decided before the reduction runs, so it
   costs `0`.
+- **A non-numeric destination is refused, not priced.** A `str_`/`bytes_`/`datetime64`/
+  `timedelta64`/structured-void `out=` — object-free included — describes where the
+  result is stored, not the loop that produced it, and its real per-element cost is not
+  the fixed unit a flat rate would have to assume. Rather than dropping it from the
+  resolution and letting the call bill at the operands' own rate (which would launder a
+  wide or width-mismatched destination down to whatever the arithmetic already costs),
+  it is kept in the resolution precisely so it is refused —
+  `add(i64_arr, i64_arr, out=m8_arr, casting='unsafe')` raises `UnsupportedDtypeError`
+  rather than billing `10` or `20`. An `object`-carrying destination is refused the same
+  way (see [Dtype and precision](#the-billing-unit-and-rate-table)).
 - **Casting/converting bills like `copy`.** `astype` and `asarray` bill `numel(input)`
   at the heavier of source/destination rate — via `heavier_billing_dtype`, not
   `result_type`, which would over-promote a cross-kind cast such as `float32 → int32`
@@ -692,6 +731,7 @@ each backed by a CI-enforced test you can open and read:
 | **Faithful cost** | each `flop_cost` is the real standard-algorithm op count, with every shape/algorithm constant inside `flop_cost` | per-op evidence in [§Cost by family](#cost-by-family); `test_cost_constant_unification.py`, `test_cost_formula_vs_code.py` |
 | **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0, 1, or 4; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
+| **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a zero-itemsize dtype is the one exception, since it carries no data either way | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1. Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
@@ -1109,8 +1149,10 @@ Weight tiers:
 resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output
 dtype's** rate — `standard_normal(dtype=float64)` bills `2×` the float32 draw. The
 data-movement random ops (`shuffle`, `permutation`, `choice`, `Generator.permuted`) permute
-caller-supplied values of any dtype and are billed dtype-neutrally — their cost counts
-the selection work, which is width-independent — so complex input does not raise.
+caller-supplied values of any *numeric* dtype and are billed dtype-neutrally — their cost
+counts the selection work, which is width-independent — so complex input does not raise. A
+non-numeric pool (object included) is refused by the dtype ban before the selection work
+ever runs, see [Dtype and precision](#the-billing-unit-and-rate-table).
 
 Source: `src/flopscope/numpy/random/_cost_formulas.py`.
 
@@ -1442,8 +1484,12 @@ generators](#index-generators) table, billed `numel(output)` and dtype-neutral.)
 **Complex dtypes**: `pad` bills factor 2 on every mode, including the movement modes —
 they now write the same `numel(output)` base as every other mode. The charged
 `trim_zeros` bills factor 2 too (value scan / reduction). `copyto` resolves its billed
-dtype the general way — `np.result_type` over its source and destination operands —
-see [Which dtype prices a call](#which-dtype-prices-a-call).
+dtype from its source operand together with its destination via the `out=` doctrine
+(`store_billing_dtypes`), not a bare `np.result_type` over both — see [Which dtype
+prices a call](#which-dtype-prices-a-call): a numeric destination joins the resolution
+and can only widen the bill, same-dtype or not; a non-numeric destination (`str_`,
+`bytes_`, `datetime64`, `timedelta64`, structured/void, object-free included) is refused
+outright rather than priced, the same as an `object`-carrying one.
 
 ---
 

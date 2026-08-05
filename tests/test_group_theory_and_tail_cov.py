@@ -107,15 +107,21 @@ def test_average_returned_matches_numpy(budget):
     assert float(cnt_n) == pytest.approx(float(ref_cnt_n))
 
 
-def test_fromregex_matches_numpy_and_bills(budget):
+def test_fromregex_structured_dtype_is_refused(budget):
+    """numpy.fromregex requires a STRUCTURED dtype -- each regex capture
+    group maps to a struct field, so its output is always kind 'V', whether
+    or not the fields themselves are numeric. Structured/void is outside the
+    numeric allowlist unconditionally, so every real fromregex call is now
+    refused before it can bill anything; there is no non-structured
+    substitute that preserves the original "matches numpy and bills" point."""
+    from flopscope.errors import UnsupportedDtypeError
+
     pattern = r"(\w) (\d+)"
     dtype = [("key", "U1"), ("value", np.int64)]
     before = budget.flops_used
-    got = fnp.fromregex(io.StringIO("a 1\nb 22\nc 333\n"), pattern, dtype)
-    assert budget.flops_used > before
-    expected = np.fromregex(io.StringIO("a 1\nb 22\nc 333\n"), pattern, dtype)
-    np.testing.assert_array_equal(np.asarray(got), expected)
-    assert got["value"].tolist() == [1, 22, 333]
+    with pytest.raises(UnsupportedDtypeError):
+        fnp.fromregex(io.StringIO("a 1\nb 22\nc 333\n"), pattern, dtype)
+    assert budget.flops_used == before
 
 
 # Plain-list inputs across the bilinear/quantile families: every op must

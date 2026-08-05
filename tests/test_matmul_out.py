@@ -14,13 +14,14 @@ and then also uses ``arena`` should not be holding two objects of different
 types over one buffer.
 
 Probes here run in both directions on purpose. A rate probe built only from a
-neutral store (an object destination, which ``store_billing_dtypes`` is
-*designed* to ignore) cannot tell a correct implementation from one that never
+widening destination cannot tell a correct implementation from one that never
 folds the destination at all -- that blindness is exactly how a 2x fft
 under-bill survived an earlier sweep. So a wide destination must raise the
-bill, and a neutral one must leave it alone. Content is asserted separately
-from cost for the same reason: a destination that is billed correctly and
-never written is invisible to any cost assertion.
+bill, and a non-numeric one must be refused outright rather than silently
+laundering it to the neutral rate (``store_billing_dtypes``'s doctrine).
+Content is asserted separately from cost for the same reason: a destination
+that is billed correctly and never written is invisible to any cost
+assertion.
 """
 
 from typing import Any
@@ -139,13 +140,23 @@ def test_a_wider_destination_raises_the_bill():
     assert wide > bare
 
 
-def test_a_neutral_destination_does_not_lower_the_bill():
-    """The downward direction: a non-numeric store must not launder the rate."""
+def test_a_non_numeric_destination_is_refused():
+    """The downward direction: a non-numeric store must not launder the rate.
+
+    numpy accepts a float64 matmul result written into a str destination (it
+    renders the value as text), and str used to keep the same neutral rate
+    1.0 that store_billing_dtypes was designed to ignore -- discounting the
+    bill. Now every non-numeric out=, str included, is refused outright
+    before that rate check would even run (see test_object_dtype_ban.py),
+    which closes the discount categorically rather than repricing it."""
+    from flopscope.errors import UnsupportedDtypeError
+
     load_weights()
     a, b = _pair(np.float64)
-    bare = _billed(lambda: fnp.matmul(a, b))
-    neutral = _billed(lambda: fnp.matmul(a, b, out=np.empty((N, N), dtype=object)))  # pyright: ignore[reportArgumentType, reportCallIssue]
-    assert neutral == bare
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as budget:
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.matmul(a, b, out=np.empty((N, N), dtype="U32"))  # pyright: ignore[reportArgumentType, reportCallIssue]
+        assert budget.flops_used == 0
 
 
 # --- inherited from _normalize_out ---------------------------------------

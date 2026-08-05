@@ -160,9 +160,12 @@ the remote (client/server) backend. Five callback-taking ops —
 callback can't be sent over the wire. Calling them in-process now emits a
 `RemoteCallbackWarning`; enumerate the set with
 `flopscope.remote_unsupported_ops()`. Precompute these results or avoid the ops
-in submitted code. Likewise, passing a non-serializable argument (a generator,
-lambda, or custom object) to any op raises `RemoteSerializationError` remotely —
-pass materialized arrays or built-ins instead.
+in submitted code. Passing a generator, lambda, dict, or other non-array
+object where an array is expected now fails the same way in-process and
+remotely: NumPy coerces it to an `object`-dtype array and flopscope raises
+`UnsupportedDtypeError` before anything is sent over the wire, because an
+object cell can hold unbounded computation the cost model cannot price. Pass
+materialized numeric arrays or built-in scalars instead.
 
 ## Immutable arrays
 

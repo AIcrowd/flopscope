@@ -1809,14 +1809,14 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes, or object dtype).",
+        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes).",
     },
     "in1d": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
         "max_numpy": "2.4",
-        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes, or object dtype). Removed in numpy 2.4; use `isin` instead.",
+        "notes": "Set membership; cost = (n+m)*ceil(log2(n+m)) (sort path) or max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers (m < 10*n**0.145 with non-integer dtypes). Removed in numpy 2.4; use `isin` instead.",
     },
     "select": {
         "category": "counted_custom",

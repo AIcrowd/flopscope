@@ -66,21 +66,29 @@ def test_resolved_dtype_recorded():
         assert b._op_log[-1].resolved_dtype == "float64"
 
 
-def test_non_numeric_dtype_bills_neutral_rate():
-    # object/str/datetime are not floating-point arithmetic: they bill at the
-    # neutral rate 1.0 (numpy-compat requires them functional; no precision
-    # exploit is possible through non-numeric kinds).
+def test_non_numeric_dtype_is_refused_not_billed():
+    # str/bytes/datetime/timedelta/structured are not floating-point
+    # arithmetic, so no precision-packing exploit is possible through them --
+    # but their real per-element cost still isn't the fixed unit a flat rate
+    # would have to assume (itemsize-blind for str/bytes/void; the wrong rate
+    # for datetime64/timedelta64, which are integers underneath). Every
+    # non-numeric dtype -- object included -- is refused outright by
+    # refuse_non_numeric_dtype rather than billed at any rate; see
+    # test_object_dtype_ban.py for the ban's own dedicated coverage.
+    from flopscope.errors import UnsupportedDtypeError
+
     load_weights()
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
-        with b.deduct(
-            "multiply",
-            flop_cost=10,
-            subscripts=None,
-            shapes=(),
-            dtypes=(np.dtype("object"),),
-        ):
-            pass
-        assert b.flops_used == 10  # rate 1.0, factor 1.0
+        with pytest.raises(UnsupportedDtypeError):
+            with b.deduct(
+                "multiply",
+                flop_cost=10,
+                subscripts=None,
+                shapes=(),
+                dtypes=(np.dtype("U8"),),
+            ):
+                pass
+        assert b.flops_used == 0
 
 
 @pytest.mark.skipif(
@@ -768,14 +776,20 @@ def test_real_imag_still_return_correct_components():
     assert np.array_equal(np.asarray(i), [4.0, -2.0])
 
 
-def test_mixed_unpromotable_operands_bill_without_raising():
-    # numpy's logical ufuncs accept any dtype mix (no common promotion); the
-    # billing path must not raise where numpy succeeds. Bills at the heaviest
-    # individual operand rate (float64 -> 2.0).
+def test_mixed_unpromotable_operand_is_refused():
+    # numpy's logical ufuncs accept any dtype mix (no common promotion), and
+    # the billing path's own DTypePromotionError fallback (bill at the
+    # heaviest individual operand's rate) used to let a timedelta64 operand
+    # through at its own neutral rate 1.0, then fold in float64 at 2.0 --
+    # numpy succeeds here, so flopscope used to have to as well. Now a
+    # timedelta64 operand is refused outright -- even earlier than the
+    # logical_and call itself, at the fnp.asarray construction step -- the
+    # same as any other non-numeric operand.
+    from flopscope.errors import UnsupportedDtypeError
+
     load_weights()
-    td = fnp.asarray(np.array([1, 2], dtype="timedelta64[s]"))
-    fl = fnp.asarray(np.ones(2, dtype=np.float64))
-    assert _cost(lambda: np.logical_and(td, fl)) == 4  # 2 elems * rate 2.0
+    with pytest.raises(UnsupportedDtypeError):
+        fnp.asarray(np.array([1, 2], dtype="timedelta64[s]"))
 
 
 def test_random_movement_ops_are_dtype_neutral_and_run_on_complex():

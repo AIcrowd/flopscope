@@ -550,15 +550,9 @@ PROBES.update(
     }
 )
 
-# ---------------------------------------------------------------------------
-# isnat — despite its registry category ("blacklisted"), this is a real,
-# reachable, charged comparison-tier op (see its own note: "Un-blacklisted:
-# comparison tier"). Non-numeric (datetime64) dtypes bill the neutral rate
-# 1.0 (_NON_NUMERIC_KINDS), which the int32-rate floor (1.0) already covers.
-# ---------------------------------------------------------------------------
-PROBES["isnat"] = lambda: fnp.isnat(
-    np.array(["2020-01-01", "NaT"], dtype="datetime64[D]")
-)
+# isnat moved to SKIPPED below: its entire valid-input domain (datetime64/
+# timedelta64) is now refused by the numeric-allowlist dtype ban, so it can
+# never log a probe record to conform.
 
 # ---------------------------------------------------------------------------
 # astype/asarray (Option B billing fix: both now weight 1.0 in
@@ -1006,6 +1000,12 @@ SKIPPED["einsum_path"] = (
     "output'); verified 0 FLOPs / resolved_dtype=None -- a planning "
     "utility, not an arithmetic op this sweep targets."
 )
+SKIPPED["isnat"] = (
+    "isnat's only valid input kind is datetime64/timedelta64, both outside "
+    "the numeric allowlist the dtype ban enforces -- every real call is "
+    "refused before deduct() charges anything, so there is no billed dtype "
+    "left for this sweep to conform."
+)
 # --- blacklisted category, unreachable: raises AttributeError on access
 # (verified individually via flopscope.numpy.__getattr__'s "does not
 # provide" guard) -- never reaches deduct().
@@ -1076,11 +1076,11 @@ for _name in ("base_repr", "binary_repr"):
 
 SKIPPED["fromregex"] = (
     "numpy.fromregex requires a STRUCTURED dtype (each regex capture group "
-    "maps to a struct field); structured/void dtypes (kind 'V') bill the "
-    "neutral rate 1.0 unconditionally regardless of field types "
-    "(_NON_NUMERIC_KINDS in _dtype_billing.py, verified), so no int32-style "
-    "widening is representable through this op -- the numeric-widening "
-    "concern this sweep targets is structurally inapplicable. Its sibling "
+    "maps to a struct field, verified: a non-structured dtype raises "
+    "numpy's own TypeError). Structured/void (kind 'V') is outside the "
+    "numeric allowlist unconditionally, regardless of field types, so every "
+    "real fromregex call is now refused before deduct() charges anything -- "
+    "no billed dtype is representable through this op at all. Its sibling "
     "from{file,string} (plain numeric dtypes) are probed above."
 )
 
