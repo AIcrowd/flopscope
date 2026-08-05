@@ -374,9 +374,11 @@ class _LiveBackendCall:
         self._user_code0 = self._budget._total_user_code_time
         self._timer_backend0 = self._op_timer._backend_duration_s
 
+    def prepare(self) -> None:
+        self._snapshot_classification_baselines()
+
     def start(self, started_at: float) -> None:
         self._segment_t0 = started_at
-        self._snapshot_classification_baselines()
 
     def attach_tracker(self, tracker: _PythonCallbackTracker) -> None:
         self._tracker = tracker
@@ -517,9 +519,10 @@ def _call_numpy_impl(
         if live_call is not None:
             assert budget is not None
             with budget._summary_lock:
+                live_call.prepare()
+                budget._live_backend_calls.add(live_call)
                 t0 = time.perf_counter()
                 live_call.start(t0)
-                budget._live_backend_calls.add(live_call)
         else:
             t0 = time.perf_counter()
         if tracker is not None:

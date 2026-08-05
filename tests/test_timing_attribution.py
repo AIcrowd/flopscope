@@ -125,6 +125,36 @@ def test_backend_call_multiple_resets_uses_latest_epoch(monkeypatch):
     assert budget._live_backend_calls == set()
 
 
+def test_backend_registration_setup_is_overhead_not_backend(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    class ClockAdvancingSet(set):
+        def add(self, value):
+            logical_clock[0] = 2.0
+            super().add(value)
+
+    def backend():
+        logical_clock[0] = 5.0
+        return "ok"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        budget._live_backend_calls = ClockAdvancingSet()
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(backend) == "ok"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 5.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 2.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert summary["operations"]["ordinary"]["flopscope_overhead_time_s"] == 2.0
+    assert budget._live_backend_calls == set()
+
+
 def test_nested_ordinary_backend_calls_count_overlap_once(monkeypatch):
     logical_clock = [0.0]
     monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
