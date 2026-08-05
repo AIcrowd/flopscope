@@ -233,12 +233,8 @@ def _call_nonforeign_symmetric_out(operation, value, out, *, tracked=False, **kw
         ),
     ],
 )
-def test_nonforeign_symmetric_out_preserves_initialized_masked_values(
-    operation, where
-):
-    values = np.array(
-        [[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]]
-    )
+def test_nonforeign_symmetric_out_preserves_initialized_masked_values(operation, where):
+    values = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]])
     initial = np.array(
         [[101.0, 102.0, 103.0], [102.0, 104.0, 105.0], [103.0, 105.0, 106.0]]
     )
@@ -898,9 +894,7 @@ class _SymmetricOutProtocolDuck:
                     actual.__array_interface__["data"][0]
                     == np.asarray(expected).__array_interface__["data"][0]
                 )
-            assert actual.tobytes(order="C") == np.asarray(expected).tobytes(
-                order="C"
-            )
+            assert actual.tobytes(order="C") == np.asarray(expected).tobytes(order="C")
             if self.expected_input_alias:
                 if actual.size:
                     assert np.shares_memory(np.asarray(inputs[0]), actual)
@@ -958,9 +952,7 @@ def _strided_symmetric_out(layout):
         written = np.full((3, 3), -0.0)
     elif layout == "overlapping":
         backing = np.zeros(5, dtype=np.float64)
-        view = np.ndarray(
-            (3, 3), dtype=np.float64, buffer=backing, strides=(8, 8)
-        )
+        view = np.ndarray((3, 3), dtype=np.float64, buffer=backing, strides=(8, 8))
         written = np.add.outer(np.arange(3.0), np.arange(3.0)) + 1.0
     else:
         raise AssertionError(f"unknown layout: {layout}")
@@ -1186,9 +1178,7 @@ def test_foreign_ufunc_ignored_readonly_symmetric_out_preserves_sentinel():
     symmetric_input = flops.symmetrize(
         fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
     )
-    out = flops.symmetrize(
-        fnp.array([[4.0, -0.0], [-0.0, 5.0]]), symmetry=symmetry
-    )
+    out = flops.symmetrize(fnp.array([[4.0, -0.0], [-0.0, 5.0]]), symmetry=symmetry)
     out.flags.writeable = False
     before = np.asarray(out).tobytes()
     sentinel = object()
@@ -1229,7 +1219,9 @@ def test_foreign_ufunc_write_to_readonly_symmetric_out_fails_before_commit():
     assert out.symmetry == symmetry
 
 
-@pytest.mark.parametrize("callback_result", [None, object()], ids=["canonical", "sentinel"])
+@pytest.mark.parametrize(
+    "callback_result", [None, object()], ids=["canonical", "sentinel"]
+)
 def test_foreign_ufunc_rejects_asymmetric_alias_write_and_rolls_back(
     callback_result,
 ):

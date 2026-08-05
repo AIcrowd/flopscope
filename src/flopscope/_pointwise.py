@@ -623,12 +623,8 @@ def _symmetric_out_scratch(out: SymmetricTensor) -> _np.ndarray:
             (dimension - 1) * stride
             for dimension, stride in zip(source.shape, source.strides, strict=True)
         )
-        min_offset = _builtins.sum(
-            _builtins.min(0, extent) for extent in byte_extents
-        )
-        max_offset = _builtins.sum(
-            _builtins.max(0, extent) for extent in byte_extents
-        )
+        min_offset = _builtins.sum(_builtins.min(0, extent) for extent in byte_extents)
+        max_offset = _builtins.sum(_builtins.max(0, extent) for extent in byte_extents)
         storage_nbytes = max_offset - min_offset + source.dtype.itemsize
     backing = _np.empty(storage_nbytes, dtype=_np.uint8)
     scratch = _np.ndarray(

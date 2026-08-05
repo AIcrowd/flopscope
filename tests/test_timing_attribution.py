@@ -177,9 +177,7 @@ def test_foreign_ufunc_symmetric_out_callback_time_lands_in_residual():
     assert result is out
     assert duck.calls == 1
     assert len(caught) == 1
-    np.testing.assert_array_equal(
-        np.asarray(out), np.asarray(symmetric_input) + 10.0
-    )
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(symmetric_input) + 10.0)
     summary = budget.summary_dict()
     assert summary["residual_wall_time_s"] >= 0.03, summary
     assert summary["flopscope_backend_time_s"] < 0.02, summary
