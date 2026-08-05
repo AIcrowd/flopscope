@@ -18,6 +18,10 @@ def _client_xyz() -> str:
     return flopscope.__version__.split("+", 1)[0]
 
 
+def test_authoritative_budget_summary_capability_wire_value() -> None:
+    assert AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY == "authoritative_budget_summary_v1"
+
+
 def test_encode_hello_serializes_client_version():
     """encode_hello produces a hello op with a client_version kwarg."""
     raw = _protocol.encode_hello("0.3.0")
