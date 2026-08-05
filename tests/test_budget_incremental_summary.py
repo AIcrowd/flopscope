@@ -250,6 +250,11 @@ def test_rollup_matches_scan_for_generated_records(specs) -> None:
 @example(events=["default", "reenter"], by_namespace=True)
 @example(events=["inflight", "reset", "inflight"], by_namespace=True)
 @example(events=["inflight", "reset", "reset", "inflight"], by_namespace=True)
+@example(events=["inflight_backend_reset", "inflight"], by_namespace=True)
+@example(
+    events=["inflight_backend", "reset", "inflight_backend", "inflight"],
+    by_namespace=True,
+)
 @given(
     st.lists(
         st.sampled_from(
@@ -259,6 +264,8 @@ def test_rollup_matches_scan_for_generated_records(specs) -> None:
                 "exception",
                 "namespace",
                 "inflight",
+                "inflight_backend",
+                "inflight_backend_reset",
                 "close",
                 "reenter",
                 "reset",
@@ -291,7 +298,7 @@ def test_generated_context_and_session_transitions_match_scan(
     inflight_backend_baseline: float | None = None
     inflight_overhead_baseline: float | None = None
     inflight_usercode_baseline: float | None = None
-    inflight_direct_backend_baseline: float | None = None
+    inflight_expected_backend = 0.0
     inflight_namespace: str | None = None
     inflight_reset_epoch: int | None = None
     reset_epoch = 0
@@ -308,17 +315,14 @@ def test_generated_context_and_session_transitions_match_scan(
         nonlocal inflight, inflight_namespace, inflight_reset_epoch
         nonlocal inflight_segment_started_at, inflight_backend_baseline
         nonlocal inflight_overhead_baseline, inflight_usercode_baseline
-        nonlocal inflight_direct_backend_baseline
+        nonlocal inflight_expected_backend
         if inflight is not None:
             assert inflight_reset_epoch is not None
             assert inflight_segment_started_at is not None
             assert inflight_backend_baseline is not None
             assert inflight_overhead_baseline is not None
             assert inflight_usercode_baseline is not None
-            assert inflight_direct_backend_baseline is not None
-            backend_delta = (
-                inflight._backend_duration_s - inflight_direct_backend_baseline
-            )
+            backend_delta = inflight_expected_backend
             nested_delta = (
                 ctx._total_flopscope_backend_time - inflight_backend_baseline
             ) + (ctx._total_flopscope_overhead_time - inflight_overhead_baseline)
@@ -357,9 +361,46 @@ def test_generated_context_and_session_transitions_match_scan(
             inflight_backend_baseline = None
             inflight_overhead_baseline = None
             inflight_usercode_baseline = None
-            inflight_direct_backend_baseline = None
+            inflight_expected_backend = 0.0
             inflight_namespace = None
             inflight_reset_epoch = None
+
+    def begin_inflight() -> None:
+        nonlocal inflight, inflight_namespace, inflight_reset_epoch
+        nonlocal inflight_segment_started_at, inflight_backend_baseline
+        nonlocal inflight_overhead_baseline, inflight_usercode_baseline
+        nonlocal inflight_expected_backend
+        assert inflight is None
+        inflight = ctx.deduct(
+            "inflight_add",
+            flop_cost=6,
+            subscripts=None,
+            shapes=(),
+            dtypes=(),
+        )
+        inflight.__enter__()
+        inflight_segment_started_at = clock.now
+        inflight_backend_baseline = ctx._total_flopscope_backend_time
+        inflight_overhead_baseline = ctx._total_flopscope_overhead_time
+        inflight_usercode_baseline = ctx._total_user_code_time
+        inflight_expected_backend = 0.0
+        inflight_namespace = ctx.namespace
+        inflight_reset_epoch = reset_epoch
+
+    def reset_epoch_boundary() -> None:
+        nonlocal reset_epoch, inflight_segment_started_at
+        nonlocal inflight_backend_baseline, inflight_overhead_baseline
+        nonlocal inflight_usercode_baseline, inflight_expected_backend
+        flops.budget_reset()
+        reset_epoch += 1
+        orphan_operations.clear()
+        orphan_namespaces.clear()
+        if inflight is not None:
+            inflight_segment_started_at = clock.now
+            inflight_backend_baseline = ctx._total_flopscope_backend_time
+            inflight_overhead_baseline = ctx._total_flopscope_overhead_time
+            inflight_usercode_baseline = ctx._total_user_code_time
+            inflight_expected_backend = 0.0
 
     try:
         for event in events:
@@ -371,16 +412,7 @@ def test_generated_context_and_session_transitions_match_scan(
             elif event == "reenter":
                 ensure_entered()
             elif event == "reset":
-                flops.budget_reset()
-                reset_epoch += 1
-                orphan_operations.clear()
-                orphan_namespaces.clear()
-                if inflight is not None:
-                    inflight_segment_started_at = clock.now
-                    inflight_backend_baseline = ctx._total_flopscope_backend_time
-                    inflight_overhead_baseline = ctx._total_flopscope_overhead_time
-                    inflight_usercode_baseline = ctx._total_user_code_time
-                    inflight_direct_backend_baseline = inflight._backend_duration_s
+                reset_epoch_boundary()
             elif event == "default":
                 finish_inflight()
                 if entered:
@@ -429,23 +461,26 @@ def test_generated_context_and_session_transitions_match_scan(
                             pass
                 elif event == "inflight":
                     if inflight is None:
-                        inflight = ctx.deduct(
-                            "inflight_add",
-                            flop_cost=6,
-                            subscripts=None,
-                            shapes=(),
-                            dtypes=(),
-                        )
-                        inflight.__enter__()
-                        inflight_segment_started_at = clock.now
-                        inflight_backend_baseline = ctx._total_flopscope_backend_time
-                        inflight_overhead_baseline = ctx._total_flopscope_overhead_time
-                        inflight_usercode_baseline = ctx._total_user_code_time
-                        inflight_direct_backend_baseline = inflight._backend_duration_s
-                        inflight_namespace = ctx.namespace
-                        inflight_reset_epoch = reset_epoch
+                        begin_inflight()
                     else:
                         finish_inflight()
+                elif event == "inflight_backend":
+                    if inflight is None:
+                        begin_inflight()
+                    backend_duration = 0.003
+                    budget_module._call_numpy(clock.advance, backend_duration)
+                    inflight_expected_backend += backend_duration
+                elif event == "inflight_backend_reset":
+                    if inflight is None:
+                        begin_inflight()
+
+                    def backend_reset() -> None:
+                        clock.advance(0.001)
+                        reset_epoch_boundary()
+                        clock.advance(0.002)
+
+                    budget_module._call_numpy(backend_reset)
+                    inflight_expected_backend += 0.002
 
             expected_context = _scan_context(ctx, by_namespace, now=clock.now)
             active_during_context_summary = budget_module.get_active_budget()
