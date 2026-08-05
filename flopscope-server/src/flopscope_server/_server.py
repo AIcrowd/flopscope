@@ -248,7 +248,12 @@ class FlopscopeServer:
         except InvalidRequestError as exc:
             return encode_error_response("InvalidRequestError", str(exc))
 
-        if scope == "active_context" and self._session is None:
+        active_session = (
+            self._session
+            if self._session is not None and self._session.is_open
+            else None
+        )
+        if scope == "active_context" and active_session is None:
             return encode_error_response(
                 "NoBudgetContextError",
                 "no active budget context for active_context summary",
@@ -259,20 +264,20 @@ class FlopscopeServer:
                 result = flopscope.budget_summary_dict(by_namespace=by_namespace)
                 display_totals = flopscope._budget._budget_display_totals()
             else:
-                assert self._session is not None
-                result = self._session.budget_summary_dict(by_namespace=by_namespace)
+                assert active_session is not None
+                result = active_session.budget_summary_dict(by_namespace=by_namespace)
                 display_totals = {
                     "has_explicit_budget": True,
                     "budget": result["flop_budget"],
                     "used": result["flops_used"],
                 }
             display_totals["client_context_compute_ns"] = (
-                self._session.comms_tracker.summary()["total_compute_time_ns"]
-                if self._session is not None
+                active_session.comms_tracker.summary()["total_compute_time_ns"]
+                if active_session is not None
                 else None
             )
             budget = (
-                self._session.budget_status() if self._session is not None else None
+                active_session.budget_status() if active_session is not None else None
             )
             response = encode_budget_summary_response(
                 result,

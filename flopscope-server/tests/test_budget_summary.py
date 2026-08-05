@@ -77,6 +77,16 @@ def server_with_closed_and_active_cost() -> FlopscopeServer:
     return server
 
 
+@pytest.fixture
+def server_with_stale_closed_session() -> FlopscopeServer:
+    server = FlopscopeServer()
+    _open_direct(server)
+    _charge_direct(server, 5)
+    assert server._session is not None
+    server._session.close()
+    return server
+
+
 def _request(server, *, scope="session", by_namespace=False, **extra):
     kwargs = {"scope": scope, "by_namespace": by_namespace, **extra}
     raw = msgpack.packb(
@@ -191,6 +201,26 @@ def test_active_context_scope_requires_live_session() -> None:
     response = _request(FlopscopeServer(), scope="active_context")
     assert response["status"] == "error"
     assert response["error_type"] == "NoBudgetContextError"
+
+
+def test_active_context_scope_rejects_stale_closed_session(
+    server_with_stale_closed_session,
+) -> None:
+    response = _request(server_with_stale_closed_session, scope="active_context")
+
+    assert response["status"] == "error"
+    assert response["error_type"] == "NoBudgetContextError"
+
+
+def test_session_scope_ignores_stale_closed_session_metadata(
+    server_with_stale_closed_session,
+) -> None:
+    response = _request(server_with_stale_closed_session, scope="session")
+
+    assert response["status"] == "ok"
+    assert response["result"]["flops_used"] > 0
+    assert "budget" not in response
+    assert response["display_totals"]["client_context_compute_ns"] is None
 
 
 def test_closed_session_rejects_active_context_summary() -> None:
