@@ -417,28 +417,44 @@ arithmetic happens.
 
 ### Which dtype prices a call
 
-The billing dtype for a call is **`np.result_type` over every array operand plus any
-explicit `dtype=` / `out=` request** — the dtype the computation actually runs in —
-declared at each op's deduct site. Python scalars follow NumPy's NEP 50 weak promotion, so
-`f32_array * 2.0` stays float32 (the scalar does not up-promote the array).
+The billing dtype follows all work the call performs: the selected compute loop and any
+destination buffer it materializes. Each op declares those participants at its deduct
+site. Ordinary operands promote with `np.result_type`; Python scalars follow NumPy's
+NEP 50 weak promotion, so `f32_array * 2.0` stays float32 (the scalar does not up-promote
+the array). Single-output binary pointwise ufuncs — and their `ufunc.outer` spellings —
+derive their compute price from NumPy's complete resolved loop signature, including every
+input and output slot. That complete signature also determines whether the registry's
+complex-arithmetic factor applies. The promoted operands provide an input-rate floor: it
+can raise only `dtype_rate`, and does not invent complex arithmetic when NumPy resolves
+every loop slot to `bool` or `object`. `out=` then joins as a separate participant under
+the widest-participating-buffer doctrine.
 
 Worked consequences:
 
 - **Mixed kinds promote up.** `matmul(int32_array, float32_array)` resolves to `float64`
   (numpy's promotion for that mix) and bills at the float64 rate — the same as a genuine
   float64 matmul. There is no discount for feeding narrow-looking operands.
-- **An explicit `dtype=` forces the loop.** `multiply(f64, f64, dtype=float32)` casts
-  both operands to float32 on read and runs the float32 loop — billed at the float32
-  rate it actually computes (`1000` for a 1000-element call), not the float64 operand
-  promotion. `out=` alone does not narrow the loop: `multiply(f64, f64, out=float32_arr)`
-  still runs the float64 loop and only casts the result into `out`, so it stays billed
-  at the float64 rate (`2000`). The reverse direction is priced the same way: a
-  **wider** `out=` bills the wider rate too — `multiply(f32, f32, out=float64_arr)`
-  writes a genuine float64 buffer, so it bills `2000`, identical to
-  `astype(f32_array, float64)`. Storing into a wider buffer is real materialization
-  work, and pricing it at that wider rate holds `out=`-casting at exact `astype`
-  parity in both directions: a wider `out=` costs what the equivalent `astype` costs,
-  so `out=` can never be used to buy a cheaper wide copy than `astype` would.
+- **For these binary spellings, `dtype=` selects computation and `out=` prices
+  materialization.** An explicit non-boolean `dtype=` selects the ufunc loop:
+  `multiply(f64, f64, dtype=float32)` casts both operands on read and runs the float32
+  loop, so a 1000-element call bills at the float32 rate (`1000`), not at the operands'
+  float64 rate. (A boolean `dtype=` can name a predicate output rather than a narrow
+  arithmetic loop, so it does not override the input-derived compute price.) `out=` is
+  a separate participant: it cannot narrow compute, but a wider destination can raise
+  the bill. Thus
+  `multiply(f64, f64, out=float32_arr)` still computes and bills float64 (`2000`), while
+  `multiply(f32, f32, out=float64_arr)` also bills `2000` because it materializes a
+  genuine float64 buffer. This keeps `out=` casting at `astype` parity: a wider `out=`
+  costs what the equivalent cast costs, and a narrower `out=` never discounts the loop.
+- **`dtype=` and `out=` compose for these binary spellings.**
+  `add(int8, int8, dtype=float16, out=float64_arr)` computes with the float16 loop but
+  bills at the float64 rate under the widest-participating-buffer doctrine; without
+  `out=`, the same explicit loop bills at the float16 rate.
+- **For these binary spellings, a complex destination does not turn a non-complex loop
+  into complex arithmetic.** When a loop with no complex signature slot stores into a
+  complex `out=`, the destination still participates in width billing, but computation
+  keeps its resolved classification. The call uses a store-only complex factor of `2.0`
+  instead of the ufunc's complex-arithmetic factor.
 - **A destination NumPy would have allocated anyway is price-neutral.** The rule above
   prices a destination as a buffer the call materializes — but two kinds of destination
   are not stores of the computed value at all, and naming them must cost exactly what
@@ -544,22 +560,33 @@ computation actually happens, not the input's label:
 | family | integer / bool inputs compute in | float inputs |
 |---|---|---|
 | unary float-only ufuncs (`exp`, `sin`, `sqrt`, …) | the same-size float (`int8`/`uint8`/`bool` → `float16`; `int16`/`uint16` → `float32`; `int32`/`int64`/`uint32`/`uint64` → `float64`) | unchanged |
-| binary float-only ufuncs (`divide`, `arctan2`, `hypot`, …) | `float64` | unchanged |
-| `float_power` | `float64` minimum | `float64` minimum — `float32` has no narrower loop either; `complex64` still promotes to `complex128` |
+| binary float-only ufuncs except division (`arctan2`, `hypot`, `logaddexp`, …) | NumPy-selected float loop (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) | unchanged — this replaces the old blanket-float64 rule for narrow integers |
+| `divide` / `true_divide` | integer pairs resolve to `float64` | unchanged |
+| `float_power` | NumPy's selected loop has a `float64` real minimum | `float64` real minimum — unchanged in effect |
 | FFT family | `complex128` (no size-mapping — even `int8` runs the `complex128` path) | `float16`/`float32` → `complex64`; `float64` → `complex128` |
 | LAPACK-backed `linalg.*` | `float64` | unchanged — single-precision drivers stay single |
 | mean-shaped composites (`average`, `median`, `gradient`, `percentile`, `nanmedian`, `nanpercentile`, …) | `float64`, regardless of the integer's own width (no size-mapping, unlike the unary-ufunc row above) | unchanged |
 | always-float64 composites (`polyfit`, `polyint`, …) | `float64` | `float64` — forced even from `float32` |
 
+The binary ufunc rows above report NumPy loop-table results, not operation-name floors
+imposed by flopscope. In particular, `float_power`'s narrowest real and complex
+signatures are `dd->d` and `DD->D`, respectively, so `complex64` promotes to
+`complex128` — unchanged in effect.
+
 `exp` prices its size-mapped loop directly: on a 1000-element input, `int8` and `int16`
 both still bill the `1.0` rate (**16000** — float16 and float32 share the baseline rate),
-while `int32`/`int64` bill the `2.0` float64 rate (**32000**). `divide(int32, int32)`
-bills 2.0 per element (numpy true-divides in float64); `divide(float32, float32)` still
-bills 1.0 — the promotion only fires for the operand mixes numpy itself promotes, not a
-blanket float64 fold. `fft.fft` of a length-1024 (`N`) signal has a `5N·log₂N` = 51200
-real-FLOP count before the dtype rate; an int32 signal bills that count at the
-complex128 rate (**102400**), while a float32 signal keeps the complex64 rate and bills
-the raw **51200** unscaled.
+while `int32`/`int64` bill the `2.0` float64 rate (**32000**).
+
+For a worked binary example, `hypot(int8, int8)` selects a float16 loop and
+`hypot(int16, int16)` selects a float32 loop; both bill the baseline dtype rate `1.0`.
+By contrast, `divide(int16, int16)` resolves to and bills float64 at rate `2.0`. Billing
+inspects the selected **complete** loop signature and then floors it by the promoted raw
+input rate. That prevents a narrow output loop — or any other narrow slot — from
+discounting wider inputs; it does not regress to an output-slot-only rule.
+
+`fft.fft` of a length-1024 (`N`) signal has a `5N·log₂N` = 51200 real-FLOP count before
+the dtype rate; an int32 signal bills that count at the complex128 rate (**102400**),
+while a float32 signal keeps the complex64 rate and bills the raw **51200** unscaled.
 
 A single non-inexact operand forces `linalg.*`'s promotion, regardless of how wide the
 *other* operand is: an `8×8` `linalg.solve(int32_matrix, int32_vector)` bills float64
@@ -617,7 +644,10 @@ fails the build instead of shipping an undercount. The sweep covers charged *reg
 ops; the dynamic ufunc-method surface (`.outer`, `.reduceat`, `.at`, `.reduce`,
 `.accumulate`, which bill under per-call op names like `hypot.outer` rather than registry
 keys) is out of its reach and is locked by targeted tests in `tests/test_dtype_cost.py`
-instead, including the same input-rate floor.
+instead. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
+narrow binary loops, the promoted-input floor, direct/`outer` parity, explicit
+`dtype=` plus wider-`out=` composition, and store-only complex billing for the
+single-output binary paths.
 
 Reproduce any of these yourself: run the call inside a `BudgetContext` and read
 `op_log[-1].resolved_dtype` alongside `flops_used`.
@@ -733,9 +763,10 @@ arcsinh, arccosh, arctanh, sinc, i0, power, angle, and their NumPy 2.x
 aliases (asin, acos, atan, asinh, acosh, atanh, atan2, pow).
 
 **Moderate binary tier (weight 16.0)**: arctan2/atan2, hypot, logaddexp,
-logaddexp2, floor_divide, mod/remainder, fmod, float_power. `float_power` always
-returns float64 — numpy's own promotion rule for that ufunc — so it bills at the
-float64 rate even when both operands are float32.
+logaddexp2, floor_divide, mod/remainder, fmod, float_power. NumPy's selected
+`float_power` loop has no real signature narrower than `dd->d` and no complex signature
+narrower than `DD->D`, so float32 operands bill as float64 and complex64 operands bill
+as complex128. This comes from NumPy's loop table, not a hand-maintained family mapping.
 
 **Basis**: DECLARED per-element FMA=2 convention and empirical calibration.
 
@@ -1596,4 +1627,3 @@ weight tables by `scripts/generate_api_docs.py` and powers the website's API pag
 > shape-dependent. For those, the closed form and its derivation live in the family
 > tables above. Treat `ops.json` as the complete index and this document as the precise
 > reference; the completeness test ties them together.
-
