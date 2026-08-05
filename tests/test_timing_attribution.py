@@ -1,5 +1,6 @@
 """Timing-bucket attribution tests (issue: callback/data-movement misattribution)."""
 
+import sys
 import time
 
 import numpy as np
@@ -7,7 +8,132 @@ import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
-from flopscope._budget import _call_user_code, _counted_wrapper, get_active_budget
+from flopscope._budget import (
+    _call_numpy_with_python_callbacks,
+    _call_user_code,
+    _counted_wrapper,
+    get_active_budget,
+)
+
+
+class _NumericSleepyUfuncDuck:
+    """Numeric duck whose ufunc protocol spends observable time in Python."""
+
+    def __init__(self, payload, *, sleep_s=0.04, before_return=None, raises=None):
+        self.payload = np.asarray(payload)
+        self.sleep_s = sleep_s
+        self.before_return = before_return
+        self.raises = raises
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray(self.payload, dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        time.sleep(self.sleep_s)
+        if self.raises is not None:
+            raise self.raises
+        if self.before_return is not None:
+            self.before_return()
+        raw_inputs = tuple(self.payload if value is self else value for value in inputs)
+        return getattr(ufunc, method)(*raw_inputs, **kwargs)
+
+
+def _run_callback_aware_add(duck):
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            result = _call_numpy_with_python_callbacks(
+                np.add, np.array([1.0, 2.0]), duck
+            )
+    return result, budget
+
+
+def test_numpy_protocol_callback_time_lands_in_residual_not_backend():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+
+    result, budget = _run_callback_aware_add(duck)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    events = []
+
+    def prior_profile(frame, event, arg):
+        if frame.f_code.co_name == "__array_ufunc__":
+            events.append(event)
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert "call" in events
+    assert "return" in events
+
+
+def test_numpy_protocol_callback_exception_stays_residual_and_propagates():
+    error = RuntimeError("protocol boom")
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], raises=error)
+
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            with pytest.raises(RuntimeError, match="protocol boom") as raised:
+                _call_numpy_with_python_callbacks(
+                    np.add, np.array([1.0, 2.0]), duck
+                )
+
+    assert raised.value is error
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+def test_numpy_protocol_callback_excludes_nested_flopscope_operation_from_residual():
+    def nested_op():
+        fnp.add(fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]))
+
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], before_return=nested_op)
+
+    result, budget = _run_callback_aware_add(duck)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert duck.calls == 1
+    assert sum(record.op_name == "add" for record in budget.op_log) >= 2
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] >= 0.0, summary
+    assert summary["flopscope_overhead_time_s"] >= 0.0, summary
+    assert summary["wall_time_s"] == pytest.approx(
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"],
+        abs=0.01,
+    )
 
 
 def test_user_code_time_lands_in_residual_not_overhead():
