@@ -10,6 +10,7 @@ import time
 import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Literal, NamedTuple
@@ -841,7 +842,7 @@ def _counted_wrapper(fn):
                                     op.flopscope_overhead_duration_s or 0.0
                                 )
                                 + per_op,
-                            )
+                            ),
                         )
 
     return wrapped
@@ -1543,6 +1544,39 @@ class BudgetContext:
             complex_factor_override=complex_factor_override,
         )
 
+    @_summary_locked
+    def _materialize_context_summary(self, *, by_namespace: bool) -> dict:
+        wall_time = self._wall_time_s
+        if wall_time is None and self._start_time is not None:
+            wall_time = self.elapsed_s
+        cached = self._rollup_mapping_cache.get(by_namespace)
+        if cached is None or cached[0] != self._rollup_generation:
+            operations = self._summary_rollup.operations_dict()
+            namespaces = (
+                self._summary_rollup.namespaces_dict() if by_namespace else None
+            )
+            cached = (self._rollup_generation, operations, namespaces)
+            self._rollup_mapping_cache[by_namespace] = cached
+        _, operations, namespaces = cached
+        wall, backend, overhead, residual = _timing_summary(
+            wall_time,
+            self._total_flopscope_backend_time,
+            self._total_flopscope_overhead_time,
+        )
+        result = {
+            "flop_budget": self._flop_budget,
+            "flops_used": self._flops_used,
+            "flops_remaining": self.flops_remaining,
+            "operations": operations,
+            "wall_time_s": wall,
+            "flopscope_backend_time_s": backend,
+            "flopscope_overhead_time_s": overhead,
+            "residual_wall_time_s": residual,
+        }
+        if by_namespace:
+            result["by_namespace"] = namespaces
+        return deepcopy(result)
+
     def summary_dict(self, by_namespace: bool = False) -> dict:
         """Return structured summary data for this budget context.
 
@@ -1557,31 +1591,7 @@ class BudgetContext:
         tolerance).
         """
         with _measure_summary_overhead():
-            with self._summary_lock:
-                wall_time = self._wall_time_s
-                if wall_time is None and self._start_time is not None:
-                    wall_time = self.elapsed_s
-                wall_time, backend_time, overhead_time, residual_wall_time_s = (
-                    _timing_summary(
-                        wall_time,
-                        self._total_flopscope_backend_time,
-                        self._total_flopscope_overhead_time,
-                    )
-                )
-
-                result = {
-                    "flop_budget": self._flop_budget,
-                    "flops_used": self._flops_used,
-                    "flops_remaining": self.flops_remaining,
-                    "operations": _summarize_operations(self._op_log),
-                    "wall_time_s": wall_time,
-                    "flopscope_backend_time_s": backend_time,
-                    "flopscope_overhead_time_s": overhead_time,
-                    "residual_wall_time_s": residual_wall_time_s,
-                }
-                if by_namespace:
-                    result["by_namespace"] = _summarize_by_namespace(self._op_log)
-                return result
+            return self._materialize_context_summary(by_namespace=by_namespace)
 
     def summary(self, by_namespace: bool = False) -> str:
         """Return a pretty-printed FLOP budget summary."""

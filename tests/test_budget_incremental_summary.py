@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from flopscope._budget import (
     OpRecord,
     _summarize_by_namespace,
     _summarize_operations,
     _SummaryRollup,
 )
+
+
+class _PoisonedHistory(list):
+    def __iter__(self):
+        raise AssertionError("summary traversed historical operation records")
 
 
 def _op(
@@ -137,9 +144,7 @@ def test_context_rollup_tracks_staged_record_replacement() -> None:
 
     ctx = BudgetContext(100, quiet=True)
     with ctx:
-        timer = ctx.deduct(
-            "add", flop_cost=5, subscripts=None, shapes=(), dtypes=()
-        )
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
         before = ctx._summary_rollup.operations_dict()
         with timer:
             pass
@@ -155,6 +160,82 @@ def test_public_op_log_keeps_existing_backing_list_contract() -> None:
 
     ctx = BudgetContext(100, quiet=True)
     assert ctx.op_log is ctx._op_log
+
+
+def test_context_summary_does_not_iterate_op_log() -> None:
+    from flopscope._budget import BudgetContext
+
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    ctx._op_log = _PoisonedHistory(ctx._op_log)
+    assert ctx.summary_dict(by_namespace=True)["flops_used"] == 5
+
+
+def test_context_summary_returns_deep_defensive_copies() -> None:
+    from flopscope._budget import BudgetContext
+
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    first = ctx.summary_dict(by_namespace=True)
+    expected = deepcopy(first)
+    first["operations"]["add"]["calls"] = 99
+    first["by_namespace"][None]["operations"].clear()
+    assert ctx.summary_dict(by_namespace=True) == expected
+
+
+def test_context_live_reads_reuse_rollup_mapping_but_advance_wall(monkeypatch) -> None:
+    from flopscope._budget import BudgetContext, _SummaryRollup
+
+    operations_calls = 0
+    namespaces_calls = 0
+    original_operations = _SummaryRollup.operations_dict
+    original_namespaces = _SummaryRollup.namespaces_dict
+
+    def counted_operations(self):
+        nonlocal operations_calls
+        operations_calls += 1
+        return original_operations(self)
+
+    def counted_namespaces(self):
+        nonlocal namespaces_calls
+        namespaces_calls += 1
+        return original_namespaces(self)
+
+    monkeypatch.setattr(_SummaryRollup, "operations_dict", counted_operations)
+    monkeypatch.setattr(_SummaryRollup, "namespaces_dict", counted_namespaces)
+    with BudgetContext(100, quiet=True) as ctx:
+        first_flat = ctx.summary_dict()
+        second_flat = ctx.summary_dict()
+        first_namespaced = ctx.summary_dict(by_namespace=True)
+        second_namespaced = ctx.summary_dict(by_namespace=True)
+        assert (operations_calls, namespaces_calls) == (2, 1)
+
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+        staged_flat = ctx.summary_dict()
+        staged_namespaced = ctx.summary_dict(by_namespace=True)
+        assert (operations_calls, namespaces_calls) == (4, 2)
+        assert staged_flat["operations"]["add"]["calls"] == 1
+        assert staged_namespaced["by_namespace"][None]["calls"] == 1
+
+        with timer:
+            pass
+        final_flat = ctx.summary_dict()
+        final_namespaced = ctx.summary_dict(by_namespace=True)
+        assert (operations_calls, namespaces_calls) == (6, 3)
+        assert final_flat["operations"] == _summarize_operations(ctx.op_log)
+        assert final_namespaced["operations"] == _summarize_operations(ctx.op_log)
+        assert final_namespaced["by_namespace"] == _summarize_by_namespace(ctx.op_log)
+
+    assert second_flat["wall_time_s"] > first_flat["wall_time_s"]
+    assert (
+        second_flat["flopscope_overhead_time_s"]
+        > first_flat["flopscope_overhead_time_s"]
+    )
+    assert second_namespaced["wall_time_s"] > first_namespaced["wall_time_s"]
+    assert (
+        second_namespaced["flopscope_overhead_time_s"]
+        > first_namespaced["flopscope_overhead_time_s"]
+    )
 
 
 def test_cross_thread_summary_waits_for_context_snapshot_lock() -> None:
@@ -178,6 +259,79 @@ def test_cross_thread_summary_waits_for_context_snapshot_lock() -> None:
         assert not finished.wait(timeout=0.05)
     thread.join(timeout=1.0)
     assert finished.is_set()
+
+
+def test_live_wall_is_sampled_inside_context_snapshot_lock(monkeypatch) -> None:
+    import threading
+
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx._start_time = 0.0
+    meter_started = threading.Event()
+    wall_sampled = threading.Event()
+    release_clock = threading.Event()
+    reader_finished = threading.Event()
+    clock_lock = threading.Lock()
+    clock_phase = [1.0]
+    clock_calls = 0
+    summaries: list[dict] = []
+    errors: list[BaseException] = []
+
+    def fake_perf_counter() -> float:
+        nonlocal clock_calls
+        with clock_lock:
+            clock_calls += 1
+            call = clock_calls
+        if call == 1:
+            meter_started.set()
+            return 0.0
+        if call == 2:
+            wall_sampled.set()
+            assert release_clock.wait(timeout=5.0)
+            return clock_phase[0]
+        raise AssertionError(f"unexpected clock call {call}")
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", fake_perf_counter)
+
+    def inspect() -> None:
+        try:
+            summaries.append(ctx.summary_dict())
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            reader_finished.set()
+
+    reader = threading.Thread(target=inspect)
+    try:
+        with ctx._summary_lock:
+            reader.start()
+            assert meter_started.wait(timeout=5.0)
+            assert not wall_sampled.wait(timeout=0.05), (
+                "live wall sampled before acquiring the context snapshot lock"
+            )
+            ctx._add_flopscope_backend(5.0)
+            clock_phase[0] = 10.0
+            release_clock.set()
+    finally:
+        release_clock.set()
+        if reader.ident is not None:
+            reader.join(timeout=5.0)
+
+    assert not reader.is_alive()
+    assert reader_finished.is_set()
+    assert not errors
+    summary = summaries[0]
+    assert wall_sampled.is_set()
+    wall = summary["wall_time_s"]
+    assert wall is not None
+    measured = (
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"]
+    )
+    assert abs(wall - measured) <= 1e-12
 
 
 def test_timing_only_activity_advances_summary_generation() -> None:
@@ -241,9 +395,7 @@ def test_summary_imports_are_measured_as_summary_overhead(monkeypatch) -> None:
         ctx.summary()
         _rich_summary()
 
-    zero_depth_imports = {
-        name for name, depths in import_depths.items() if 0 in depths
-    }
+    zero_depth_imports = {name for name, depths in import_depths.items() if 0 in depths}
     assert all(import_depths.values())
     assert not zero_depth_imports
 
@@ -265,14 +417,16 @@ def test_cross_context_summary_avoids_lock_inversion(monkeypatch) -> None:
     snapshot_barrier = threading.Barrier(2, action=both_snapshot_locks_held.set)
     summaries: list[dict] = []
     errors: list[BaseException] = []
-    original_summarize = budget_module._summarize_operations
+    original_materialize = budget_module._SummaryRollup.operations_dict
 
-    def synchronized_summarize(op_log: list[OpRecord]) -> dict[str, dict]:
+    def synchronized_materialize(self: _SummaryRollup) -> dict[str, dict]:
         snapshot_barrier.wait(timeout=5.0)
-        return original_summarize(op_log)
+        return original_materialize(self)
 
     monkeypatch.setattr(
-        budget_module, "_summarize_operations", synchronized_summarize
+        budget_module._SummaryRollup,
+        "operations_dict",
+        synchronized_materialize,
     )
 
     def cross_inspect(active: BudgetContext, inspected: BudgetContext) -> None:
