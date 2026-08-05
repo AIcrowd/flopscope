@@ -88,6 +88,73 @@ def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
     assert "return" in events
 
 
+def test_numpy_protocol_callback_does_not_profile_cleanup_lookup():
+    """Restoration must not invoke the tracker while it is still installed."""
+
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    events = []
+
+    def prior_profile(frame, event, arg):
+        if event == "call" and frame.f_code.co_name in {
+            "previous_profile",
+            "begin_restoring",
+        }:
+            events.append(event)
+            raise RuntimeError("profile cleanup boom")
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert events == []
+
+
+def test_numpy_protocol_callback_restores_profile_after_profile_hook_error():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+
+    def prior_profile(frame, event, arg):
+        if event == "call" and frame.f_code.co_name == "__array_ufunc__":
+            raise RuntimeError("profile callback boom")
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        with pytest.raises(RuntimeError, match="profile callback boom"):
+            _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+
+def test_numpy_protocol_callback_does_not_chain_hook_while_restoring_profile():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    restore_events = []
+
+    def prior_profile(frame, event, arg):
+        if (
+            event == "c_call"
+            and arg is sys.setprofile
+            and frame.f_code.co_name == "_call_numpy_impl"
+        ):
+            restore_events.append(event)
+            if len(restore_events) == 2:
+                raise RuntimeError("profile restore boom")
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert restore_events == ["c_call"]
+
+
 def test_numpy_protocol_callback_exception_stays_residual_and_propagates():
     error = RuntimeError("protocol boom")
     duck = _NumericSleepyUfuncDuck([3.0, 4.0], raises=error)

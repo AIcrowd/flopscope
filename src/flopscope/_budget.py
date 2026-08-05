@@ -293,21 +293,23 @@ class _PythonCallbackTracker:
         "_raw_numpy_call_frame",
         "_previous_profile",
         "_roots",
+        "_restoring",
         "callback_wall_s",
     )
 
-    def __init__(self, budget: BudgetContext, raw_numpy_call_frame: Any):
+    def __init__(
+        self, budget: BudgetContext, raw_numpy_call_frame: Any, previous_profile: Any
+    ):
         self._budget = budget
         self._raw_numpy_call_frame = raw_numpy_call_frame
-        self._previous_profile = _sys.getprofile()
+        self._previous_profile = previous_profile
         self._roots: dict[Any, tuple[float, float, float]] = {}
+        self._restoring = False
         self.callback_wall_s = 0.0
 
-    @property
-    def previous_profile(self) -> Any:
-        return self._previous_profile
-
     def __call__(self, frame: Any, event: str, arg: Any) -> None:
+        if self._restoring:
+            return
         if event == "call" and frame.f_back is self._raw_numpy_call_frame:
             self._roots[frame] = (
                 time.perf_counter(),
@@ -343,17 +345,25 @@ def _call_numpy_impl(
     budget = get_active_budget()
     op_timer = budget._current_op_timer if budget is not None else None
     tracker: _PythonCallbackTracker | None = None
-    if track_python_callbacks and budget is not None and op_timer is not None:
-        tracker = _PythonCallbackTracker(budget, _sys._getframe())
-        _sys.setprofile(tracker)
-
-    t0 = time.perf_counter()
+    previous_profile: Any = None
+    t0: float | None = None
     try:
+        if track_python_callbacks and budget is not None and op_timer is not None:
+            previous_profile = _sys.getprofile()
+            tracker = _PythonCallbackTracker(
+                budget, _sys._getframe(), previous_profile
+            )
+            _sys.setprofile(tracker)
+        t0 = time.perf_counter()
         return fn(*args, **kwargs)
     finally:
-        duration = time.perf_counter() - t0
-        if tracker is not None:
-            _sys.setprofile(tracker.previous_profile)
+        duration = 0.0
+        try:
+            duration = time.perf_counter() - t0 if t0 is not None else 0.0
+        finally:
+            if tracker is not None:
+                tracker._restoring = True
+                _sys.setprofile(previous_profile)
         if tracker is not None:
             assert op_timer is not None
             op_timer._backend_duration_s += max(duration - tracker.callback_wall_s, 0.0)
