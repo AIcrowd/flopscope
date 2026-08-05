@@ -64,6 +64,34 @@ class _ForeignDtypeArrayLike:
     def __array__(self, dtype=None, copy=None):
         del copy
         resolved_dtype = None if dtype is None else np.dtype(dtype)
+        if resolved_dtype is None and None in self.array_calls:
+            raise AssertionError("dtype-free conversion was requested twice")
+        self.array_calls.append(resolved_dtype)
+        value = 8.0 if resolved_dtype is None else 0.5
+        return np.array([value], dtype=resolved_dtype or np.float32)
+
+
+class _PoisonedDtypeNdarray(np.ndarray):
+    """ndarray subclass whose public dtype metadata must not be touched."""
+
+    @property
+    def dtype(self):
+        raise AssertionError("overridden ndarray dtype property was accessed")
+
+
+class _PoisonedMetadataArrayLike:
+    """Valid array protocol object with unusable foreign dtype metadata."""
+
+    def __init__(self):
+        self.array_calls = []
+
+    @property
+    def dtype(self):
+        raise ValueError("foreign dtype metadata was accessed")
+
+    def __array__(self, dtype=None, copy=None):
+        del copy
+        resolved_dtype = None if dtype is None else np.dtype(dtype)
         self.array_calls.append(resolved_dtype)
         value = 8.0 if resolved_dtype is None else 0.5
         return np.array([value], dtype=resolved_dtype or np.float32)
@@ -134,7 +162,36 @@ def test_foreign_dtype_metadata_falls_back_to_array_inference():
     expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
     np.testing.assert_allclose(np.asarray(result), [expected], rtol=1e-15)
     assert result.dtype == np.dtype(np.float64)
-    assert x.array_calls == [None, None, np.dtype(np.float64)]
+    assert x.array_calls == [None, np.dtype(np.float64)]
+    assert len(caught) == 1
+    assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
+
+
+def test_ndarray_subclass_dtype_override_is_never_accessed():
+    x = np.array([0.5], dtype=np.float32).view(_PoisonedDtypeNdarray)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", FlopscopeWarning)
+        result = norm.pdf(x)
+
+    expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
+    np.testing.assert_allclose(np.asarray(result), [expected], rtol=1e-15)
+    assert result.dtype == np.dtype(np.float64)
+    assert len(caught) == 1
+    assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
+
+
+def test_foreign_dtype_property_is_never_accessed():
+    x = _PoisonedMetadataArrayLike()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", FlopscopeWarning)
+        result = norm.pdf(x)
+
+    expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
+    np.testing.assert_allclose(np.asarray(result), [expected], rtol=1e-15)
+    assert result.dtype == np.dtype(np.float64)
+    assert x.array_calls == [None, np.dtype(np.float64)]
     assert len(caught) == 1
     assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
 

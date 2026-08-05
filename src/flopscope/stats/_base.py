@@ -89,19 +89,11 @@ class ContinuousDistribution:
         # pure-numpy _compute_* kernel -- both cast/coerce a payload's
         # __float__ per element with nothing billed for it. Probe each one
         # first; a probe never casts.
-        refuse_non_numeric_source(op_name, x)
+        source_dtype = refuse_non_numeric_source(op_name, x)
         for _v in args:
             refuse_non_numeric_source(op_name, _v)
         for _v in kwargs.values():
             refuse_non_numeric_source(op_name, _v)
-        source_dtype = getattr(x, "dtype", None)
-        if source_dtype is not None:
-            try:
-                source_dtype = _np.dtype(source_dtype)
-            except TypeError:
-                source_dtype = None
-        if source_dtype is None:
-            source_dtype = _np.asarray(x).dtype
         if source_dtype.kind == "f" and source_dtype.itemsize < _np.dtype(
             _np.float64
         ).itemsize:

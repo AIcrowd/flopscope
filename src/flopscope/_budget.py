@@ -714,9 +714,12 @@ def _refuse_non_numeric_operands(
             check(value)
 
 
-def refuse_non_numeric_source(op_name: str, value: Any) -> None:
-    """Refuse *value* if it carries a non-numeric dtype, without ever
-    casting a payload through a numeric dtype to find out.
+def refuse_non_numeric_source(op_name: str, value: Any) -> _np.dtype:
+    """Return *value*'s dtype, refusing non-numeric array-like sources.
+
+    The returned dtype is the safe, actual pre-cast dtype obtained while
+    checking the source, without ever casting a payload through a numeric
+    dtype to find out.
 
     Complements ``_refuse_non_numeric_operands`` above: that backstop only
     recognizes a non-numeric array already boxed as ``np.ndarray`` (or
@@ -729,26 +732,30 @@ def refuse_non_numeric_source(op_name: str, value: Any) -> None:
     point instead.
 
     Recognized scalar types (``None``, ``bool``, ``int``, ``float``,
-    ``complex``, ``str``, ``bytes``, a numpy scalar) are skipped untouched --
-    ``np.asarray(None)`` is itself an object-dtype 0-d array, so probing
-    every ordinary default would refuse perfectly normal calls, the same
-    trap ``_refuse_non_numeric_operands`` avoids. A genuine ``np.ndarray`` is
+    ``complex``, ``str``, ``bytes``, a numpy scalar) remain exempt from the
+    refusal and return their safely inferred dtype. ``np.asarray(None)`` is
+    itself an object-dtype 0-d array, so refusing every ordinary default would
+    reject perfectly normal calls, the same trap
+    ``_refuse_non_numeric_operands`` avoids. A genuine ``np.ndarray`` is
     checked directly through the base ``dtype`` descriptor, so a hostile
     subclass cannot shadow it. Anything else -- a bare payload object, or a
-    list/tuple of them -- is realized with a dtype-free ``np.asarray()``,
-    which stores object pointers rather than casting, so no per-element
-    caller code runs before the check.
+    list/tuple of them -- is realized with a dtype-free ``np.asarray()``, which
+    stores object pointers rather than casting, so no per-element caller code
+    runs before the check.
     """
-    if value is None or isinstance(
-        value, (bool, int, float, complex, str, bytes, _np.generic)
-    ):
-        return
+    if isinstance(value, _np.generic):
+        return value.dtype
+    if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
+        return _np.asarray(value).dtype
     from flopscope._dtype_billing import refuse_non_numeric_dtype
 
     if isinstance(value, _np.ndarray):
-        refuse_non_numeric_dtype(op_name, _NDARRAY_DTYPE_DESCRIPTOR.__get__(value))
-        return
-    refuse_non_numeric_dtype(op_name, _np.asarray(value).dtype)
+        dtype = _NDARRAY_DTYPE_DESCRIPTOR.__get__(value)
+        refuse_non_numeric_dtype(op_name, dtype)
+        return dtype
+    dtype = _np.asarray(value).dtype
+    refuse_non_numeric_dtype(op_name, dtype)
+    return dtype
 
 
 def _counted_wrapper(fn):
