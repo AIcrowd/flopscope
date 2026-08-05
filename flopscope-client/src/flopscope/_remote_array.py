@@ -1427,6 +1427,22 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
 # ---------------------------------------------------------------------------
 
 
+def _has_proxy_base(value: Any, proxy_type: type) -> bool:
+    """Check a proxy base class without consulting ``value.__class__``."""
+    return any(
+        base is proxy_type
+        for base in type.__getattribute__(type(value), "__mro__")
+    )
+
+
+def _proxy_slot_value(value: Any, proxy_type: type, slot: str) -> Any:
+    """Read a trusted proxy slot without invoking subclass descriptors."""
+    descriptor = vars(proxy_type).get(slot)
+    if type(descriptor) is not types.MemberDescriptorType:
+        raise AssertionError(f"{proxy_type.__name__}.{slot} must be a slot")
+    return types.MemberDescriptorType.__get__(descriptor, value, type(value))
+
+
 def _encode_arg(arg):
     """Recursively encode RemoteArray/RemoteScalar objects for wire transmission.
 
@@ -1436,31 +1452,32 @@ def _encode_arg(arg):
     - everything else passes through unchanged
 
     Note: RemoteScalar must be checked *before* RemoteArray because the
-    metaclass makes ``isinstance(RemoteScalar(...), RemoteArray)`` True.
+    RemoteArray metaclass considers it array-like.
     """
-    # Check RemoteScalar first (it passes isinstance RemoteArray due to metaclass)
+    # Check RemoteScalar first (it passes RemoteArray's metaclass check).
     if type(arg) is RemoteScalar:
-        return arg._value
-    if isinstance(arg, RemoteArray):
-        return {"__handle__": arg.handle_id}
-    if isinstance(arg, RemoteGenerator):
-        return {"__gen__": arg.handle_id}
-    if isinstance(arg, RemoteRandomState):
-        return {"__rs__": arg.handle_id}
-    if isinstance(arg, RemoteSeedSequence):
-        return {"__seq__": arg.handle_id}
+        return _proxy_slot_value(arg, RemoteScalar, "_value")
+    if _has_proxy_base(arg, RemoteArray):
+        return {"__handle__": _proxy_slot_value(arg, RemoteArray, "_handle_id")}
+    if _has_proxy_base(arg, RemoteGenerator):
+        return {"__gen__": _proxy_slot_value(arg, RemoteGenerator, "_handle_id")}
+    if _has_proxy_base(arg, RemoteRandomState):
+        return {"__rs__": _proxy_slot_value(arg, RemoteRandomState, "_handle_id")}
+    if _has_proxy_base(arg, RemoteSeedSequence):
+        return {"__seq__": _proxy_slot_value(arg, RemoteSeedSequence, "_handle_id")}
     from flopscope._perm_group import SymmetryGroup
 
-    if isinstance(arg, SymmetryGroup):
-        return {"__symmetry_group__": arg.to_payload()}
+    if type(arg) is SymmetryGroup:
+        return {"__symmetry_group__": SymmetryGroup.to_payload(arg)}
     # Dtype-like args serialize to their canonical wire-name string: flopscope
     # dtype labels/objects, Python builtin types (``float``), numpy scalar types
     # (``np.float64``), and numpy dtype / new-style DType objects. Strings pass
     # through unchanged below (the server accepts dtype strings directly).
-    if not isinstance(arg, str):
-        _wire = _resolve_dtype_wire_name(arg)
-        if _wire is not None:
-            return _wire
-    if isinstance(arg, (list, tuple)):
+    if type(arg) is str:
+        return arg
+    _wire = _resolve_dtype_wire_name(arg)
+    if _wire is not None:
+        return _wire
+    if type(arg) is list or type(arg) is tuple:
         return [_encode_arg(item) for item in arg]
     return arg

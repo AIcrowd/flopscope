@@ -112,6 +112,38 @@ def test_unsupported_dtype_does_not_execute_repr_before_network(monkeypatch):
     assert network_calls == 0
 
 
+def test_proxy_dtype_does_not_execute_class_property_before_network(monkeypatch):
+    class HostileDtype:
+        def __init__(self):
+            self.class_calls = 0
+            self.dtype_calls = 0
+
+        @property
+        def __class__(self):
+            self.class_calls += 1
+            raise AssertionError("participant __class__ property executed")
+
+        @property
+        def _flopscope_dtype_name(self):
+            self.dtype_calls += 1
+            raise AssertionError("participant dtype property executed")
+
+    spec = HostileDtype()
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteCallbackError, match="dtype.*descriptor"):
+        flopscope.zeros((1,), dtype=spec)
+    assert spec.class_calls == 0
+    assert spec.dtype_calls == 0
+    assert network_calls == 0
+
+
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
 def test_callback_op_raises_remote_callback_error(op):
     fn = getattr(flopscope, op)
