@@ -1,5 +1,6 @@
 """Timing-bucket attribution tests (issue: callback/data-movement misattribution)."""
 
+import cProfile
 import gc
 import sys
 import time
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 import flopscope as flops
+import flopscope._budget as budget_module
 import flopscope.numpy as fnp
 from flopscope._budget import (
     _call_numpy,
@@ -89,6 +91,58 @@ def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
 
     assert "call" in events
     assert "return" in events
+
+
+def test_callback_helper_skips_non_callable_existing_profiler(monkeypatch):
+    profiler = object()
+    setprofile_calls = []
+    monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
+    monkeypatch.setattr(
+        budget_module._sys, "setprofile", lambda profile: setprofile_calls.append(profile)
+    )
+
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            result = _call_numpy_with_python_callbacks(
+                np.add, np.array([1.0, 2.0]), np.array([3.0, 4.0])
+            )
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((1,), ()),
+            dtypes=(np.float64,),
+        ):
+            with pytest.raises(TypeError):
+                _call_numpy_with_python_callbacks(np.add, np.array([1.0]), object())
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget_module._sys.getprofile() is profiler
+    assert setprofile_calls == []
+
+
+def test_callback_helper_preserves_active_cprofile_when_exposed():
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        if sys.getprofile() is None:
+            pytest.skip("this runtime does not expose the active cProfile object")
+        result, budget = _run_callback_aware_add(
+            _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+        )
+        assert sys.getprofile() is profiler
+    finally:
+        profiler.disable()
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget.flopscope_backend_time_s >= 0.0
 
 
 def test_numpy_protocol_callback_profiles_only_actual_callback_roots():

@@ -363,10 +363,11 @@ def _call_numpy_impl(
     try:
         if track_python_callbacks and budget is not None and op_timer is not None:
             previous_profile = _sys.getprofile()
-            tracker = _PythonCallbackTracker(
-                budget, op_timer, _sys._getframe(), previous_profile
-            )
-            _sys.setprofile(tracker)
+            if previous_profile is None or callable(previous_profile):
+                tracker = _PythonCallbackTracker(
+                    budget, op_timer, _sys._getframe(), previous_profile
+                )
+                _sys.setprofile(tracker)
         t0 = time.perf_counter()
         return fn(*args, **kwargs)
     finally:
@@ -416,7 +417,9 @@ def _call_numpy_with_python_callbacks(fn: Any, *args: Any, **kwargs: Any) -> Any
     removed from the outer backend duration, while only their non-nested
     flopscope time is added to the user-code bucket used by
     ``_counted_wrapper``. Outside an active timed op this is a transparent
-    passthrough, just like ``_call_numpy``.
+    passthrough, just like ``_call_numpy``. If CPython exposes a non-callable
+    active C profiler, this falls back to ordinary backend timing because the
+    C callback cannot be safely multiplexed with a Python profile hook.
     """
     return _call_numpy_impl(fn, args, kwargs, track_python_callbacks=True)
 
