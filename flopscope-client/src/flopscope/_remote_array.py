@@ -18,7 +18,6 @@ import msgpack
 
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
-from flopscope.errors import RemoteCallbackError, RemoteSerializationError
 
 # ---------------------------------------------------------------------------
 # dtype helpers  (NO numpy -- pure struct)
@@ -72,15 +71,22 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
 }
 
 _MISSING_DTYPE_ATTR = object()
+_MSGPACK_EXT_TYPE = vars(msgpack).get("ExtType")
 
 _SAFE_WIRE_KEY_TYPES = (type(None), bool, int, float, str, bytes, memoryview)
 
 
 def _trusted_client_dtype_name(spec: Any) -> str | None:
     """Return a client dtype name without inspecting participant objects."""
-    from flopscope._dtypes import _DType, _DtypeLabel
+    dtypes = sys.modules.get("flopscope._dtypes")
+    if type(dtypes) is not types.ModuleType:
+        return None
+    dtype_type = vars(dtypes).get("_DType")
+    label_type = vars(dtypes).get("_DtypeLabel")
+    if type(dtype_type) is not type or type(label_type) is not type:
+        return None
 
-    if type(spec) is _DType or type(spec) is _DtypeLabel:
+    if type(spec) is dtype_type or type(spec) is label_type:
         name = object.__getattribute__(spec, "name")
         return name if type(name) is str else None
     return None
@@ -113,6 +119,8 @@ def _static_dtype_string(
         value = types.GetSetDescriptorType.__get__(raw, spec, type(spec))
         return value if type(value) is str else None
     if _is_static_descriptor(raw):
+        from flopscope.errors import RemoteCallbackError
+
         raise RemoteCallbackError(
             f"dtype argument requires participant descriptor {attr!r}, which "
             "the client/server backend cannot execute remotely"
@@ -1460,6 +1468,8 @@ def _proxy_slot_value(value: Any, proxy_type: type, slot: str) -> Any:
     try:
         return types.MemberDescriptorType.__get__(descriptor, value, type(value))
     except AttributeError as exc:
+        from flopscope.errors import RemoteSerializationError
+
         raise RemoteSerializationError(
             "Cannot serialize an uninitialized remote proxy to the "
             "client/server backend"
@@ -1498,7 +1508,7 @@ def _encode_arg(arg):
 
     if type(arg) is SymmetryGroup:
         return {"__symmetry_group__": SymmetryGroup.to_payload(arg)}
-    if type(arg) is msgpack.ExtType:
+    if type(arg) is _MSGPACK_EXT_TYPE:
         return arg
     if _has_proxy_base(arg, list):
         return [_encode_arg(item) for item in list.__iter__(arg)]
@@ -1509,6 +1519,8 @@ def _encode_arg(arg):
         for key, value in dict.items(arg):
             encoded_key = _encode_arg(key)
             if not _is_safe_wire_key(encoded_key):
+                from flopscope.errors import RemoteSerializationError
+
                 raise RemoteSerializationError(
                     "Cannot serialize a dictionary key that is not a safe "
                     "wire scalar to the client/server backend"
