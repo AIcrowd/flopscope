@@ -29,7 +29,7 @@ from flopscope._dtype_billing import (
     resolve_billing_dtype,
     store_billing_dtypes,
     sum_accumulator_dtype,
-    ufunc_resolver_operand,  # noqa: F401 - reserved for the binary resolver path.
+    ufunc_resolver_operand,
     unary_float_loop_dtype,
 )
 from flopscope._flops import _ceil_log2
@@ -238,29 +238,6 @@ _UNARY_FLOAT_LOOP_OPS |= frozenset(
 # float/complex unchanged" mapping already expresses exactly this rule (it
 # doesn't care about arity), so it is reused here instead of a new helper.
 _UNARY_FLOAT64_MIN_OPS = frozenset({"i0", "sinc"})
-_BINARY_FLOAT_LOOP_OPS = frozenset(
-    {
-        "arctan2",
-        "atan2",
-        "copysign",
-        "divide",
-        "heaviside",
-        "hypot",
-        "ldexp",
-        "logaddexp",
-        "logaddexp2",
-        "nextafter",
-        "true_divide",
-    }
-)
-# float_power computes at DOUBLE PRECISION minimum: it has no
-# single-precision loops at all (dd->d / DD->D are its narrowest), so
-# float32 inputs compute float64 and complex64 inputs compute complex128.
-# It is deliberately NOT a member of _BINARY_FLOAT_LOOP_OPS: that set's
-# resolver (integer_to_float64_min_dtype) leaves float/complex inputs unchanged,
-# which would bill float_power(f32, f32) at float32 and
-# float_power(c64, c64) at complex64 -- both below its true compute width.
-_BINARY_FLOAT64_MIN_OPS = frozenset({"float_power"})
 
 # ---------------------------------------------------------------------------
 # Signature helpers
@@ -871,29 +848,24 @@ def _counted_binary(np_func, op_name: str):
         if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
             billing_dtypes = (_np.dtype(explicit_dtype),)
         else:
-            billing_dtypes = (billing_operand(x_orig, x), billing_operand(y_orig, y))
+            floor_operands = (
+                billing_operand(x_orig, x),
+                billing_operand(y_orig, y),
+            )
+            loop_billing_dtype = _ufunc_loop_billing_dtype(
+                np_func,
+                ufunc_resolver_operand(x_orig, x),
+                ufunc_resolver_operand(y_orig, y),
+            )
+            input_floor = resolve_billing_dtype(floor_operands)
+            billing_dtype = (
+                loop_billing_dtype
+                if input_floor is None
+                else heavier_billing_dtype(loop_billing_dtype, input_floor)
+            )
+            billing_dtypes = (billing_dtype,)
             if isinstance(out, _np.ndarray):
                 billing_dtypes += store_billing_dtypes(out)
-        if op_name in _BINARY_FLOAT_LOOP_OPS:
-            resolved = resolve_billing_dtype(billing_dtypes)
-            if resolved is not None:
-                billing_dtypes = (integer_to_float64_min_dtype(resolved),)
-        elif op_name in _BINARY_FLOAT64_MIN_OPS:
-            resolved = resolve_billing_dtype(billing_dtypes)
-            if resolved is not None:
-                # Double-precision minimum in BOTH kinds: float_power has no
-                # single-precision loops at all (dd->d / DD->D are its
-                # narrowest), so real inputs floor at float64 and complex
-                # inputs floor at complex128. The complex minimum stays
-                # complex-KIND so the registry complex_factor still applies
-                # -- folding complex into a bare real float64 would silently
-                # discard the complex structure premium.
-                minimum = (
-                    _np.dtype(_np.complex128)
-                    if resolved.kind == "c"
-                    else _np.dtype(_np.float64)
-                )
-                billing_dtypes = (heavier_billing_dtype(resolved, minimum),)
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1052,30 +1024,24 @@ def _counted_binary_multi(np_func, op_name: str):
 # ---------------------------------------------------------------------------
 
 
-def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
-    """The physical loop/output dtype numpy resolves for ``ufunc`` on ``operand_dtypes``.
+def _ufunc_loop_signature(
+    ufunc, *operand_dtypes: _np.dtype | type
+) -> tuple[_np.dtype, ...]:
+    """The complete input/output dtype signature NumPy resolves for ``ufunc``.
 
-    Shared by the five generic ufunc-method paths below (``outer`` /
-    ``reduce`` / ``accumulate`` / ``reduceat`` / ``at``) to bill a float-only
-    ufunc's actual compute dtype instead of its integer input dtype --
-    ``true_divide(int32, int32)`` runs entirely in float64; billing the raw
-    int32 label undercharges it 2x under production rates.
+    The returned tuple includes every resolved input-loop slot followed by
+    every output slot. Direct binary and ``outer`` billing inspect all slots:
+    predicates may return bool while still reading complex inputs, and mixed
+    logical loops may cast both inputs to object or bool regardless of their
+    declared operand kinds. Reduction/accumulator consumers use the first
+    output slot through :func:`_ufunc_loop_dtype`.
 
-    ``ufunc.resolve_dtypes`` asks numpy directly which loop it will select.
-    Its input tuple is sized from ``ufunc.nin``: a missing second operand of
-    a binary ufunc repeats the first (matching how reduce / accumulate /
-    reduceat feed a single array through a binary loop), and an unspecified
-    (``None``) output slot is appended. An operand may also be a bare
-    Python type (``int`` / ``float`` / ``complex``), which
-    ``resolve_dtypes`` treats as a NEP 50 weak scalar -- ``ufunc.at`` uses
-    this for Python-scalar ``vals``. On failure (``TypeError`` /
-    ``ValueError`` -- the operand combination has no valid loop for this
-    ufunc, or a multi-output ufunc needs a wider tuple) falls back to
-    ``np.result_type(*operand_dtypes)``, which recovers each call site's
-    pre-existing behavior exactly: a dtype with itself resolves to itself,
-    and two distinct operand dtypes resolve to their common promoted dtype
-    (the same resolution ``resolve_billing_dtype`` would have performed on
-    the undifferentiated tuple).
+    The input tuple retains the prior operand-repeat rule: a missing second
+    operand of a binary ufunc repeats the first, matching reduce/accumulate/
+    reduceat. Bare Python ``int``/``float``/``complex`` types remain valid
+    NEP 50 weak-scalar inputs to ``resolve_dtypes``. If NumPy refuses loop
+    resolution, every slot falls back to the same ``np.result_type`` used by
+    the previous output-only helper, preserving its conservative behavior.
     """
     first, *rest = operand_dtypes
     if ufunc.nin == 1:
@@ -1083,9 +1049,20 @@ def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
     else:
         inputs = (first, rest[0] if rest else first)
     try:
-        return ufunc.resolve_dtypes((*inputs, None))[len(inputs)]
+        return tuple(ufunc.resolve_dtypes((*inputs, *([None] * ufunc.nout))))
     except (TypeError, ValueError):
-        return _np.result_type(*operand_dtypes)
+        fallback = _np.result_type(*operand_dtypes)
+        return (fallback,) * (len(inputs) + ufunc.nout)
+
+
+def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
+    """Return the first output/accumulator slot of NumPy's resolved loop."""
+    return _ufunc_loop_signature(ufunc, *operand_dtypes)[ufunc.nin]
+
+
+def _ufunc_loop_billing_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
+    """Return the rate-heaviest dtype slot in NumPy's resolved loop."""
+    return heavier_billing_dtype(*_ufunc_loop_signature(ufunc, *operand_dtypes))
 
 
 def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
@@ -1390,15 +1367,21 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         # reduce/accumulate/reduceat/at siblings: a comparison/logical
         # ufunc's loop OUTPUT is bool, which for wide-int inputs would bill
         # NARROWER than the input -- never charge below it.
-        # heavier_billing_dtype keeps the loop dtype on a rate tie, so float
-        # widening (float64 >= int rate) is unaffected.
-        billing_dtypes = (
-            heavier_billing_dtype(
-                _ufunc_loop_dtype(ufunc, a_view.dtype, b_view.dtype),
-                a_view.dtype,
-                b_view.dtype,
-            ),
+        # The full resolved signature keeps NumPy's actual loop kind first on
+        # rate ties (complex inputs for a complex predicate loop, object/bool
+        # inputs for mixed logical loops). The jointly promoted input dtype is
+        # only a rate floor, so it can raise the rate but cannot replace that
+        # loop kind on a tie.
+        loop_billing_dtype = _ufunc_loop_billing_dtype(
+            ufunc, a_view.dtype, b_view.dtype
         )
+        input_floor = resolve_billing_dtype((a_view.dtype, b_view.dtype))
+        billing_dtype = (
+            loop_billing_dtype
+            if input_floor is None
+            else heavier_billing_dtype(loop_billing_dtype, input_floor)
+        )
+        billing_dtypes = (billing_dtype,)
     if isinstance(out_view, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out_view)
     with budget.deduct(

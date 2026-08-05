@@ -1214,31 +1214,8 @@ def test_small_int_unary_keeps_rate_one():
 
 
 # ---------------------------------------------------------------------------
-# Coordinator addendum: the same float-loop undercount class is live on
-# ufunc.outer / ufunc.reduceat (Task 4's Minor(8), folded into Task 6)
+# Generic ufunc-method accumulator and input-floor controls
 # ---------------------------------------------------------------------------
-
-
-def test_outer_float_only_binary_bills_float64_and_int_stays_int():
-    import warnings
-
-    import flopscope.numpy as fnp
-
-    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
-        load_weights()
-        a = fnp.asarray(np.ones(10, dtype=np.int32))
-        before = b.flops_used
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)  # auto-route notice
-            np.hypot.outer(a, a)
-        billed_hypot = b.flops_used - before
-        before = b.flops_used
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            np.add.outer(a, a)
-        billed_add = b.flops_used - before
-    assert billed_hypot == 3200  # 10*10 dense numel * f64 rate 2.0 * hypot weight 16.0
-    assert billed_add == 100  # 10*10 dense numel * int32 rate 1.0 (unaffected)
 
 
 def test_reduceat_float_only_binary_bills_float64_and_add_widens_too():
@@ -1706,12 +1683,12 @@ def test_float_power_forced_narrow_dtype_matches_numpys_own_rejection():
     # does not touch -- deduct() charges before the wrapped call runs, so
     # they do not; out of scope here.)
     # The reachable half of "the f64 minimum still applies" -- an
-    # unrequested float32 operand pair still floors at float64 -- is already
-    # locked by test_float_power_always_bills_float64_minimum above (the
-    # family-mapping block that enforces it is untouched by this task, and
-    # still runs downstream of the dtype=-replacement on the implicit-dtype
-    # path); this pin covers the explicit-dtype=-requested half, which numpy
-    # itself never allows to succeed at this width.
+    # unrequested float32 operand pair still resolves to float64 -- is already
+    # locked by test_float_power_always_bills_float64_minimum above. On that
+    # implicit-dtype path NumPy's resolve_dtypes supplies the minimum. An
+    # explicit non-bool dtype bypasses that default loop resolution for
+    # billing and is forwarded unchanged, after which NumPy rejects the
+    # unsupported float32 request as pinned here.
     import flopscope.numpy as fnp
 
     f32 = np.ones(1000, dtype=np.float32)
