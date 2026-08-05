@@ -509,14 +509,14 @@ def _has_foreign_array_ufunc(value) -> bool:
 
 def _flatten_ufunc_out_slots(out) -> tuple:
     """Flatten only true ufunc output slots, never arbitrary sequences."""
-    if isinstance(out, tuple):
+    if type(out) is tuple:
         return out
     return (out,)
 
 
 def _preflight_ufunc_out_arity(out, nout: int) -> None:
     """Match NumPy's tuple-arity error before inspecting ufunc participants."""
-    if isinstance(out, tuple) and len(out) != nout:
+    if type(out) is tuple and len(out) != nout:
         raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
 
 
@@ -1320,9 +1320,9 @@ def _preflight_ufunc_opt_out(*operands) -> None:
 
     NumPy raises before it materializes any operand or executes a ufunc loop
     when a participating type defines ``__array_ufunc__ = None``.  Callers
-    pass data operands directly, flatten only real ``out=`` slots, and append
-    a top-level accepted ``where=`` value; unrelated kwargs and index
-    sequences are deliberately excluded.
+    pass data operands directly and flatten only real ``out=`` slots;
+    ``where=`` and unrelated kwargs or index sequences are deliberately
+    excluded.
     """
     for operand in operands:
         if _static_array_ufunc_implementation(operand) is None:
@@ -2603,6 +2603,9 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         shapes=(a_view.shape,) if hasattr(a_view, "shape") else (),
         dtypes=billing_dtypes,
     ):
+        # A foreign NEP 13 callback may mutate and then raise, so the epoch
+        # must be advanced before the invocation rather than after it returns.
+        note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
         result = _call_ufunc_with_protocol_timing(
             f"{ufunc.__name__}.at",
             ufunc.at,
@@ -2612,15 +2615,6 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             protocol_operands=(a, *forward_args),
             **kwargs,
         )
-    # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
-    # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
-    # cannot list it either -- that set holds module-level function objects
-    # and ``at`` is a fresh bound method per ufunc. Record the write after the
-    # call confirms that foreign dispatch did not bypass NumPy's write path.
-    # The refusal above keeps a tagged SymmetricTensor out of this path, but a
-    # plain alias of a tagged buffer reaches it, which is exactly the case a
-    # guard on tagged arrays cannot cover.
-    note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
     if isinstance(result, _ForeignUfuncResult):
         return result.value
     return None  # numpy's ufunc.at returns None (mutation is the side effect)

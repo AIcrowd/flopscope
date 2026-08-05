@@ -944,6 +944,45 @@ def test_foreign_ufunc_at_callback_records_successful_write():
     assert epoch_of(target) != before
 
 
+def test_foreign_ufunc_at_callback_records_write_before_raising():
+    """A callback may mutate ``at``'s target before propagating its exception."""
+    from flopscope._write_epoch import epoch_of
+
+    class RaisingMutatingDuck:
+        def __init__(self, error):
+            self.error = error
+            self.calls = 0
+
+        def __array__(self, dtype=None, copy=None):
+            return np.asarray([0.0], dtype=dtype)
+
+        def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+            assert (ufunc, method) == (np.add, "at")
+            self.calls += 1
+            inputs[0][0] += 7
+            raise self.error
+
+    raw_error = RuntimeError("raw callback failure")
+    raw_target = np.zeros(2)
+    raw_duck = RaisingMutatingDuck(raw_error)
+    with pytest.raises(RuntimeError) as raw_raised:
+        np.add.at(raw_target, [0], raw_duck)
+
+    error = RuntimeError("callback failure")
+    target = fnp.zeros(2)
+    before = epoch_of(target)
+    duck = RaisingMutatingDuck(error)
+    with flops.BudgetContext(flop_budget=10**9):
+        with pytest.raises(RuntimeError) as raised:
+            np.add.at(target, [0], duck)
+
+    assert raw_raised.value is raw_error
+    assert raised.value is error
+    assert raw_duck.calls == duck.calls == 1
+    np.testing.assert_array_equal(target, raw_target)
+    assert epoch_of(target) != before
+
+
 @pytest.mark.parametrize(
     "make_result",
     [
@@ -1004,6 +1043,43 @@ def test_ufunc_wrong_out_arity_precedes_opt_out_preflight():
     assert str(raised.value) == str(raw_raised.value)
     assert value.array_calls == value.protocol_calls == 0
     assert _OptOutProtocolMeta.name_lookups == 0
+    assert budget.flops_used == 0
+
+
+def test_tuple_subclass_out_does_not_preflight_opt_out_contents():
+    raw_out = _ForeignTuple((_NonNdarrayUfuncOptOut(),))
+    with pytest.raises(TypeError) as raw_raised:
+        np.negative(np.ones(2), out=raw_out)
+
+    _OptOutProtocolMeta.name_lookups = 0
+    opt_out = _NonNdarrayUfuncOptOut()
+    out: Any = _ForeignTuple((opt_out,))
+    value = fnp.ones(2)
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            fnp.negative(value, out=out)
+
+    assert type(raised.value) is type(raw_raised.value)
+    assert "_NonNdarrayUfuncOptOut" not in str(raised.value)
+    assert opt_out.array_calls == opt_out.protocol_calls == 0
+    assert _OptOutProtocolMeta.name_lookups == 0
+    assert budget.flops_used == 0
+
+
+def test_wrong_arity_tuple_subclass_does_not_precede_input_opt_out():
+    raw_value = _NonNdarrayUfuncOptOut()
+    raw_out = _ForeignTuple((np.zeros(2), np.zeros(2)))
+    with pytest.raises(TypeError) as raw_raised:
+        np.negative(raw_value, out=raw_out)
+
+    value = _NonNdarrayUfuncOptOut()
+    out: Any = _ForeignTuple((fnp.zeros(2), fnp.zeros(2)))
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            fnp.negative(value, out=out)
+
+    assert str(raised.value) == str(raw_raised.value)
+    assert value.array_calls == value.protocol_calls == 0
     assert budget.flops_used == 0
 
 
