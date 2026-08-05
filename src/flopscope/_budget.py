@@ -348,11 +348,10 @@ class _LiveBackendCall:
         "_op_timer",
         "_segment_t0",
         "_tracker",
-        "_uses_fallback",
-        "_fallback_backend0",
-        "_fallback_overhead0",
-        "_fallback_user_code0",
-        "_fallback_timer_backend0",
+        "_backend0",
+        "_overhead0",
+        "_user_code0",
+        "_timer_backend0",
     )
 
     def __init__(
@@ -364,22 +363,20 @@ class _LiveBackendCall:
         self._op_timer = op_timer
         self._segment_t0: float | None = None
         self._tracker: _PythonCallbackTracker | None = None
-        self._uses_fallback = False
-        self._fallback_backend0 = 0.0
-        self._fallback_overhead0 = 0.0
-        self._fallback_user_code0 = 0.0
-        self._fallback_timer_backend0 = 0.0
+        self._backend0 = 0.0
+        self._overhead0 = 0.0
+        self._user_code0 = 0.0
+        self._timer_backend0 = 0.0
 
-    def _snapshot_fallback_baselines(self) -> None:
-        self._fallback_backend0 = self._budget._total_flopscope_backend_time
-        self._fallback_overhead0 = self._budget._total_flopscope_overhead_time
-        self._fallback_user_code0 = self._budget._total_user_code_time
-        self._fallback_timer_backend0 = self._op_timer._backend_duration_s
+    def _snapshot_classification_baselines(self) -> None:
+        self._backend0 = self._budget._total_flopscope_backend_time
+        self._overhead0 = self._budget._total_flopscope_overhead_time
+        self._user_code0 = self._budget._total_user_code_time
+        self._timer_backend0 = self._op_timer._backend_duration_s
 
-    def start(self, started_at: float, *, uses_fallback: bool) -> None:
+    def start(self, started_at: float) -> None:
         self._segment_t0 = started_at
-        self._uses_fallback = uses_fallback
-        self._snapshot_fallback_baselines()
+        self._snapshot_classification_baselines()
 
     def attach_tracker(self, tracker: _PythonCallbackTracker) -> None:
         self._tracker = tracker
@@ -387,7 +384,7 @@ class _LiveBackendCall:
     def rebase_after_reset(self, reset_time: float) -> None:
         if self._segment_t0 is not None:
             self._segment_t0 = reset_time
-        self._snapshot_fallback_baselines()
+        self._snapshot_classification_baselines()
         if self._tracker is not None:
             self._tracker.rebase_after_reset(reset_time)
 
@@ -397,16 +394,14 @@ class _LiveBackendCall:
         duration = max(ended_at - self._segment_t0, 0.0)
         if self._tracker is not None:
             backend_duration = max(duration - self._tracker.callback_wall_s, 0.0)
-        elif self._uses_fallback:
-            already_classified = (
-                self._budget._total_flopscope_backend_time - self._fallback_backend0
-            ) + (self._budget._total_flopscope_overhead_time - self._fallback_overhead0)
-            already_classified += (
-                self._budget._total_user_code_time - self._fallback_user_code0
-            ) + (self._op_timer._backend_duration_s - self._fallback_timer_backend0)
-            backend_duration = max(duration - already_classified, 0.0)
         else:
-            backend_duration = duration
+            already_classified = (
+                self._budget._total_flopscope_backend_time - self._backend0
+            ) + (self._budget._total_flopscope_overhead_time - self._overhead0)
+            already_classified += (
+                self._budget._total_user_code_time - self._user_code0
+            ) + (self._op_timer._backend_duration_s - self._timer_backend0)
+            backend_duration = max(duration - already_classified, 0.0)
         self._op_timer._backend_duration_s += backend_duration
 
 
@@ -504,7 +499,6 @@ def _call_numpy_impl(
     live_call: _LiveBackendCall | None = None
     tracker: _PythonCallbackTracker | None = None
     previous_profile: Any = None
-    non_callable_profiler_fallback = False
     t0: float | None = None
     ended_at: float | None = None
     if budget is not None and op_timer is not None:
@@ -520,13 +514,11 @@ def _call_numpy_impl(
                 live_call.attach_tracker(tracker)
                 tracker._restoring = True
                 _sys.setprofile(tracker)
-            else:
-                non_callable_profiler_fallback = True
         if live_call is not None:
             assert budget is not None
             with budget._summary_lock:
                 t0 = time.perf_counter()
-                live_call.start(t0, uses_fallback=non_callable_profiler_fallback)
+                live_call.start(t0)
                 budget._live_backend_calls.add(live_call)
         else:
             t0 = time.perf_counter()

@@ -125,6 +125,68 @@ def test_backend_call_multiple_resets_uses_latest_epoch(monkeypatch):
     assert budget._live_backend_calls == set()
 
 
+def test_nested_ordinary_backend_calls_count_overlap_once(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def inner_backend():
+        logical_clock[0] = 3.0
+        return "inner"
+
+    def outer_backend():
+        logical_clock[0] = 1.0
+        assert _call_numpy(inner_backend) == "inner"
+        logical_clock[0] = 5.0
+        return "outer"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(outer_backend) == "outer"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 5.0
+    assert summary["flopscope_backend_time_s"] == 5.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 5.0
+    assert budget._live_backend_calls == set()
+
+
+def test_nested_ordinary_backend_calls_reset_count_post_reset_overlap_once(
+    monkeypatch,
+):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def inner_backend():
+        logical_clock[0] = 2.0
+        flops.budget_reset()
+        logical_clock[0] = 4.0
+        return "inner"
+
+    def outer_backend():
+        logical_clock[0] = 1.0
+        assert _call_numpy(inner_backend) == "inner"
+        logical_clock[0] = 5.0
+        return "outer"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(outer_backend) == "outer"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert budget._live_backend_calls == set()
+
+
 def test_reset_after_backend_return_before_commit_drops_the_finished_call(
     monkeypatch,
 ):
