@@ -103,33 +103,23 @@ def ufunc_resolver_operand(orig, coerced) -> _np.dtype | type:
 def store_billing_dtypes(out) -> tuple:
     """What an ``out=`` buffer contributes to the billing resolution.
 
-    Its dtype, except when that dtype is non-numeric -- then nothing.
+    Its dtype, unconditionally, whenever ``out`` is an ``ndarray``. Every
+    non-numeric ``out=`` (object, string, bytes, structured/void, datetime64,
+    timedelta64) is refused outright rather than priced -- see
+    ``refuse_non_numeric_dtype`` -- and that refusal is keyed on ``dtypes``
+    tuples built from this function's return value, at every
+    ``deduct``/``deduct_after`` call site that folds this in. Dropping a
+    non-numeric dtype here instead of returning it would hide the
+    destination from that refusal, the same gap a discount would open.
 
-    ``result_type`` resolves any mix containing a non-numeric kind *to* that
-    kind, which bills at the neutral rate 1.0 and, for contractions, also drops
-    the complex factor. That is right when the arithmetic itself is
-    non-numeric, and wrong when the non-numeric dtype only says where the
-    result is *stored*: a contraction with an object ``out=`` still runs its
-    loop at the operands' precision and at native speed, so letting the store
-    set the price hands back the whole difference.
-
-    Filtering here rather than inside ``resolve_billing_dtype`` keeps operands
-    alone. A non-numeric *operand* really does describe the arithmetic --
-    ``multiply(object_array, float64_array)`` runs NumPy's object loop and
-    returns object -- and must keep resolving to the neutral rate.
-
-    Applied uniformly to every ``out=``, which slightly over-charges the one
-    case where the store *does* pick the loop: a ufunc forwards ``out=`` to
-    NumPy, so an object ``out`` really does run object arithmetic (measured
-    15.5x slower), where a contraction computes natively and only then copies
-    (1.00x). Billing those at the operand rate rather than the neutral one is
-    deliberate and matches how ``out=`` is already treated elsewhere -- see the
-    widest-participating-buffer note at the top of this module. The alternative
-    reopens a discount on a pathological call for no legitimate gain.
+    A *numeric* ``out=`` is priced at its own rate rather than folded away:
+    billing it at the operand rate is deliberate and matches how ``out=`` is
+    already treated elsewhere -- see the widest-participating-buffer note at
+    the top of this module.
     """
     if not isinstance(out, _np.ndarray):
         return ()
-    return () if out.dtype.kind in _NON_NUMERIC_KINDS else (out.dtype,)
+    return (out.dtype,)
 
 
 def natural_output_dtypes(np_func, resolved_input: _np.dtype | None) -> tuple | None:
@@ -244,31 +234,109 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
         return max(resolved, key=rate_for)
 
 
-# Non-numeric dtype kinds: object (O), str (U), bytes (S), void/structured (V),
-# datetime64 (M), timedelta64 (m). As OPERANDS these are not floating-point
-# arithmetic, so no precision-packing exploit is possible through them -- they
-# bill at the neutral rate 1.0 instead of failing closed, and their wall time is
-# covered by the residual-time penalty.
+# Numeric dtype kinds flopscope bills: bool (b), signed int (i), unsigned int
+# (u), float (f), complex (c). This is an ALLOWLIST, not a denylist of the
+# non-numeric kinds (object 'O', str 'U', bytes 'S', void/structured 'V',
+# datetime64 'M', timedelta64 'm') -- a future numpy dtype kind (e.g. the
+# variable-width string dtype's 'T') is refused by default instead of being
+# silently admitted the way a denylist would admit it.
 #
-# That reasoning covers operands only. A non-numeric dtype arriving as ``out=``
-# describes where the result is stored, not how it was computed: the loop still
-# runs at the operands' precision, at native speed, so neither the neutral rate
-# nor the residual penalty applies to it. ``store_billing_dtypes`` therefore keeps
-# such a dtype out of the resolution when it arrives as ``out=`` -- otherwise it
-# would drag the rate (and,
-# for contractions, the complex factor) down to 1.0.
+# Every kind outside this allowlist is refused outright by
+# ``refuse_non_numeric_dtype`` rather than priced, for two distinct reasons:
+# an object cell is a PyObject* whose arithmetic dispatches into arbitrary
+# Python of unbounded cost, which no finite rate expresses; the other kinds
+# (U/S/V/M/m) are bounded but their real per-element cost is not the fixed
+# 32-bit-class unit a flat rate would have to assume -- a wide string or
+# structured record does more work per element than a narrow one, and
+# datetime64/timedelta64 are integers underneath, at whatever the platform's
+# integer rate is, not the flat rate a dtype-blind price would charge them.
+# Both reasons converge on the same fix: refuse rather than mis-price.
 #
-# The fail-closed rule targets NUMERIC dtypes absent from the supported table --
-# future types numpy or an extension package might introduce; every known numpy
-# numeric dtype (including the extended-precision longdouble family) carries an
-# explicit rate.
-_NON_NUMERIC_KINDS = frozenset("OUSVMm")
+# ``rate_for`` and ``get_dtype_rate`` only ever see a dtype that already
+# cleared this allowlist -- every ``dtypes=`` tuple passed to
+# ``deduct``/``deduct_after`` is checked by ``refuse_non_numeric_dtype``
+# first, and numeric-to-numeric promotion (``resolve_billing_dtype``) cannot
+# produce a non-numeric result from non-numeric-free inputs. The kind check
+# below is kept anyway as ``rate_for``'s own defensive fallback, not a path
+# either function relies on being reachable.
+#
+# ``get_dtype_rate`` separately fails closed for NUMERIC dtypes absent from
+# the supported table (future types numpy or an extension package might
+# introduce; every known numpy numeric dtype, including the longdouble
+# family, carries an explicit rate).
+_NUMERIC_KINDS = frozenset("biufc")
 
 
 def rate_for(resolved: _np.dtype) -> float:
-    if resolved.kind in _NON_NUMERIC_KINDS:
+    if resolved.kind not in _NUMERIC_KINDS:
         return 1.0
     return get_dtype_rate(resolved.name)
+
+
+def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
+    """Raise if any participating dtype is not numeric.
+
+    flopscope's meter is ``count x rate``, sound only while a dtype's
+    per-element cost is bounded and captured by a single flat rate. The
+    predicate is a NUMERIC ALLOWLIST (``dtype.kind in "biufc"``: bool,
+    signed/unsigned integer, float, complex) rather than a non-numeric
+    denylist, so a dtype kind flopscope has never seen is refused by default
+    instead of silently admitted -- see ``_NUMERIC_KINDS`` above for why.
+
+    Two distinct dtype families fall outside the allowlist. An object cell
+    is a ``PyObject*`` whose arithmetic dispatches into arbitrary Python of
+    unbounded cost, so neither the count axis nor the rate axis observes it.
+    str/bytes/structured (void)/datetime64/timedelta64 are bounded, but their
+    real per-element cost is not the fixed 32-bit-class unit a flat rate
+    assumes -- a wide string or record does more work than a narrow one, and
+    datetime64/timedelta64 are integers underneath, at whatever the
+    platform's integer rate is, not a dtype-blind flat one. No finite rate
+    repairs either case, so every non-numeric dtype fails closed.
+
+    Subsumes ``hasobject``: a structured dtype embedding an object field has
+    kind ``'V'``, already outside the allowlist, so it is refused the same
+    way as any other structured dtype -- there is no separate object check
+    to bypass.
+
+    One exception: a zero-itemsize dtype (an empty structured spec such as
+    ``np.dtype([])``, or a zero-length ``'U0'``/``'S0'``) is let through
+    regardless of kind. Zero bytes per element cannot embed an object field
+    or any itemsize-dependent cost -- it is data-free by construction, the
+    same safety property that makes a numeric dtype billable in the first
+    place. This is not a hypothetical: NumPy's own ``broadcast_shapes``
+    allocates ``np.empty(shape, dtype=np.dtype([]))`` internally as a
+    zero-byte shape-computation placeholder, so this exception keeps a
+    dtype numpy invents for its own bookkeeping from being refused as if a
+    caller had asked to compute something in it.
+
+    Deliberately independent of the dtype-rate table: ``get_dtype_rate``
+    returns 1.0 for every name in unit mode, and the test suite resets weights
+    for every test, so a table-expressed ban would be silently disabled.
+
+    Python scalars reach the billing tuple via NEP 50 weak promotion and are
+    not dtypes; they are skipped rather than raising.
+    """
+    for candidate in dtypes:
+        if candidate is None:
+            continue
+        try:
+            resolved = _np.dtype(candidate)
+        except (TypeError, ValueError):
+            continue  # a weak Python scalar, not a dtype
+        if resolved.kind not in _NUMERIC_KINDS and resolved.itemsize != 0:
+            raise UnsupportedDtypeError(
+                f"{op_name}: dtype {resolved!r} is not billable -- flopscope "
+                "meters only numeric dtypes (bool, integer, float, complex). "
+                "object carries unbounded per-element computation; string, "
+                "bytes, structured/void, datetime64, and timedelta64 have a "
+                "real per-element cost a single flat rate cannot capture. "
+                "Refused as an operand, a dtype=, or an out= destination. "
+                "Fix: hold mixed/ragged data in a Python list of numeric "
+                "arrays, or pre-convert with plain NumPy where it is "
+                "available -- clean = np.array(x, dtype=np.float64) -- note "
+                "fnp.array/fnp.asarray/fnp.astype refuse non-numeric input "
+                "too."
+            )
 
 
 def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
@@ -379,7 +447,31 @@ def reduction_billing_dtype(
     bool (``logical_xor.reduce(complex128)``). Both are pinned back below.
     No reduce-capable op has a complex factor under 2.0, so re-imposing a
     complex dtype here can only raise a bill, never lower one.
+
+    A non-numeric dtype anywhere in the call -- the operand, an explicit
+    ``dtype=``, ``out=``, or the family default -- must reach ``deduct()``'s
+    refusal unchanged, so it is checked and returned before any of the
+    folding below runs. Every branch past this point picks a SINGLE winning
+    dtype by rate: the ``explicit_dtype`` branch returns it outright
+    (dropping ``a_dtype`` entirely), and ``heavier_billing_dtype`` folds two
+    into one. Every non-numeric dtype rates 1.0, so a numeric partner with a
+    higher rate would silently erase it from the resolution the same way it
+    did in ``astype()`` before that was fixed -- e.g. ``sum(object_arr,
+    dtype=np.float64)`` returning float64 outright, or ``sum(float64_arr,
+    out=m8_arr)`` losing the destination to
+    ``heavier_billing_dtype(floor, out_dtype)``. Returning the non-numeric
+    dtype here (rather than raising directly) is deliberate: every call site
+    threads this return straight into the ``dtypes=`` tuple it hands to
+    ``deduct()``/``deduct_after()``, which already refuses it with the
+    correct op name -- duplicating the raise here would just race that
+    check with a worse error message.
     """
+    for candidate in (a_dtype, explicit_dtype, out_dtype, default_dtype):
+        if candidate is None:
+            continue
+        candidate_dtype = _np.dtype(candidate)
+        if candidate_dtype.kind not in _NUMERIC_KINDS:
+            return candidate_dtype
     if explicit_dtype is not None:
         return _np.dtype(explicit_dtype)
     # The family default is the floor, not something ``out=`` can replace --

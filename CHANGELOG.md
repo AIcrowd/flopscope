@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+### BREAKING CHANGE
+
+- **billing**: every non-numeric dtype — `object`, `str_`, `bytes_`,
+  `datetime64`, `timedelta64`, and structured/void (object-free included) —
+  now raises `UnsupportedDtypeError` wherever it reaches a registered
+  operation, including a free, 0-FLOP one, as an operand (an ndarray, or a
+  Python sequence that coerces to one), an explicit `dtype=`, a fill value or
+  distribution parameter about to be cast the same way, or an `out=`
+  destination. The predicate is a NUMERIC ALLOWLIST (`dtype.kind in
+  "biufc"`: bool, signed/unsigned integer, float, complex), not a denylist,
+  so a dtype kind flopscope has never seen is refused by default. Object
+  carries unbounded per-element Python cost that no rate expresses; the
+  other kinds are bounded, but their real per-element cost (itemsize for
+  string/bytes/structured, the underlying integer rate for
+  datetime64/timedelta64) is not the fixed unit a flat rate assumed. One
+  exception: a zero-itemsize dtype (an empty structured spec, or a
+  zero-length string/bytes dtype) is let through regardless of kind, since it
+  carries no data either way — NumPy's own internals allocate one as a
+  zero-byte shape-computation placeholder. This includes flopscope's own
+  conversion ops (`array`/`asarray`/`astype`/`fromiter`/`require`/`full`/
+  `full_like`) and every random sampler (module-level, `Generator`, and
+  `RandomState`) and `flopscope.stats` distribution, all of which refuse
+  non-numeric input rather than convert or relocate through it. Calls that
+  previously succeeded now raise, e.g. `fnp.array([1.0, None])`,
+  `fnp.zeros(3, dtype=object)`, `fnp.multiply(object_arr, object_arr)`,
+  `fnp.random.normal(loc=[obj, obj], scale=1.0)`,
+  `fnp.reshape(str_arr, str_arr.shape)`, and `fnp.add(m8_arr, m8_arr)`.
+  Convert with plain NumPy before passing data to flopscope
+  (`clean = np.array(x, dtype=np.float64)` — not `fnp.array(...)`, which
+  refuses non-numeric input too), or hold ragged/mixed data in a Python list
+  of numeric arrays. This supersedes part of 0.10.0: #159 stopped an object
+  `out=` from discounting the arithmetic's rate to 1.0; such destinations,
+  and every other non-numeric one, are now refused outright.
+
+### Billing impact
+
+- A counted op on a non-numeric-dtype array or destination previously billed
+  at a flat rate that did not track the real per-element cost — unbounded
+  for `object`, itemsize- or representation-blind for the rest; that surface
+  is now refused rather than mis-priced. `copyto`'s non-numeric destination
+  now routes through the same `store_billing_dtypes` doctrine every other
+  `out=` path uses instead of resolving as a plain operand, so it is refused
+  the same way. The same under-bill existed on the sibling routes named
+  above (a source or parameter cast to a numeric dtype while only the output
+  element count was billed); it is closed the same way.
+
+### Fix
+
+- **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
+- **billing**: `UnsupportedDtypeError` raised from inside a wrapper built by
+  an internal factory (e.g. `mean`/`std`/`var`/`nanmean`/`nanstd`/`nanvar`)
+  now names the actual operation in its message instead of the factory's
+  generic internal closure name.
+
 ## v0.10.0 (2026-07-31)
 
 ### BREAKING CHANGE

@@ -289,20 +289,28 @@ Everything else -- free ops, counted custom ops (dot, einsum, etc.), submodule f
 
 ### Test suites
 
-We run 7 NumPy test modules covering core math, ufuncs, numerics, linear algebra, FFT, polynomials, and random:
+We run 8 NumPy test modules covering core math, ufuncs, numerics, linear algebra, FFT, polynomials, and random. Counts below are measured with `make test-numpy-compat` on numpy 2.2.6; they shift across the 2.0-2.4 CI matrix.
 
 | Suite | Module | Passed | xfailed |
 |-------|--------|--------|---------|
-| Core math | `numpy._core.tests.test_umath` | 4,668 | 13 |
-| Ufunc infrastructure | `numpy._core.tests.test_ufunc` | 795 | 7 |
-| Numeric operations | `numpy._core.tests.test_numeric` | 1,560 | 20 |
-| Linear algebra | `numpy.linalg.tests.test_linalg` | 48 | 255 |
-| FFT | `numpy.fft.tests.test_pocketfft` | 114 | 34 |
-| Polynomials | `numpy.polynomial.tests.test_polynomial` | 36 | 2 |
-| Random | `numpy.random.tests.test_random` | 142 | 0 |
-| **Total** | | **7,363** | **331** |
+| Core math | `numpy._core.tests.test_umath` | 4,620 | 64 |
+| Ufunc infrastructure | `numpy._core.tests.test_ufunc` | 530 | 190 |
+| Numeric operations | `numpy._core.tests.test_numeric` | 0 (module skipped) | — |
+| Linear algebra | `numpy.linalg.tests.test_linalg` | 0 (module skipped) | — |
+| FFT | `numpy.fft.tests.test_pocketfft` | 94 | 57 |
+| FFT helpers | `numpy.fft.tests.test_helper` | 11 | 0 |
+| Polynomials | `numpy.polynomial.tests.test_polynomial` | 20 | 18 |
+| Random | `numpy.random.tests.test_random` | 0 (module skipped) | — |
+| **Total** | | **5,275** | **329** |
 
-All failures are tracked as xfails in `tests/numpy_compat/xfails.py`.
+Three suites fail to *import* rather than run any of their own tests, and are counted as
+fully skipped: `test_numeric` builds a non-numeric-dtype array at module import time, which
+the dtype ban refuses; `test_linalg` and `test_random` each mutate an array at
+module import time, which flopscope's immutable arrays refuse. Each of these collection
+failures is caught and reported as a single module-level skip rather than failing the
+run — see `pytest_make_collect_report` in `tests/numpy_compat/conftest.py`.
+
+All other failures are tracked as xfails in `tests/numpy_compat/xfails.py`.
 
 ### Running the tests
 
@@ -326,17 +334,22 @@ The numpy_compat tests are excluded from the default `pytest` run (via `pyprojec
 
 ### Known divergences (xfails)
 
-Tests that fail due to known, accepted differences are tracked in `tests/numpy_compat/xfails.py`. Each entry maps a test pattern to a categorized reason:
+Tests that fail due to known, accepted differences are tracked in `tests/numpy_compat/xfails.py`. Each entry maps a test pattern to a categorized reason. As measured on numpy 2.2.6:
 
-| Category | Meaning | Examples |
-|----------|---------|---------|
-| `NOT_IMPLEMENTED` | Function exists but lacks a kwarg or edge case | Missing `out=`, `where=`, `subok=` kwargs |
-| `UNSUPPORTED_DTYPE` | flopscope doesn't support this dtype | timedelta, object arrays |
-| `UFUNC_INTERNALS` | Test relies on ufunc protocol | `.reduce`, `__array_ufunc__` |
-| `BUDGET_SIDE_EFFECT` | Test assumes no global state changes | Budget deduction during assertions |
-| `NUMPY_INTERNAL` | Test uses numpy internals | `_umath_tests`, internal type tables |
+| Category | Count | Meaning |
+|----------|-------|---------|
+| `SUBCLASS_RETURN` | 26 | A patched op returns/propagates `FlopscopeArray` where the test expects a plain `ndarray` or scalar |
+| `NONNUMERIC_DTYPE_BANNED` | 21 | The dtype ban (a numeric allowlist: bool, integer, float, complex) refuses a non-numeric-dtype array — object, string, bytes, structured/void, datetime64, or timedelta64 — the test constructs or requires directly |
+| `NEEDS_TRIAGE` | 16 | Passes in isolation but fails under the parametrize sweep — order-dependent state pollution, not yet root-caused |
+| `NOT_IMPLEMENTED` | 11 | Function exists but lacks a kwarg or edge case (missing `out=`, `where=`, `subok=`, …) |
+| `NUMPY_INTERNAL` | 1 | Test uses numpy internals (`_umath_tests`, internal type tables) |
+| `UPSTREAM_NUMPY_FLAKE` | 1 | A numpy-side tolerance/precision flake unrelated to flopscope |
+| `BY_DESIGN` | 1 | flopscope intentionally diverges from numpy's behavior here |
+| immutability | 1 | flopscope arrays are immutable; the test mutates one in place |
 
-The linalg suite has the most xfails (255) because flopscope's linalg wrappers don't support stacked/batched arrays, 0-size arrays, or some advanced kwargs that numpy's linalg tests exercise extensively.
+`test_numeric`, `test_linalg`, and `test_random` no longer contribute xfails to this table at
+all — all three suites fail to *import* on this numpy version (see [Test
+suites](#test-suites) above), so none of their individual tests are collected.
 
 #### Triaging new failures
 

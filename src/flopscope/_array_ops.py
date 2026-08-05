@@ -10,6 +10,7 @@ route through ``budget.deduct(..., flop_cost=0)`` so their time is accounted.
 from __future__ import annotations
 
 import inspect as _inspect
+import itertools as _itertools
 import math as _math
 import operator as _operator
 from collections.abc import Sequence
@@ -20,9 +21,18 @@ import numpy as _np
 from numpy.typing import ArrayLike, DTypeLike
 
 from flopscope import _symmetry_transport as _st
-from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
+from flopscope._budget import (
+    _DTYPE_SCAN_MAX_DEPTH,
+    _call_numpy,
+    _call_user_code,
+    _counted_wrapper,
+)
 from flopscope._docstrings import attach_docstring
-from flopscope._dtype_billing import billing_operand, store_billing_dtypes
+from flopscope._dtype_billing import (
+    billing_operand,
+    refuse_non_numeric_dtype,
+    store_billing_dtypes,
+)
 from flopscope._dtype_billing import heavier_billing_dtype as _heavier_billing_dtype
 from flopscope._ndarray import (
     FlopscopeArray,
@@ -126,6 +136,13 @@ def _eye_diagonal_length(N: int, M: int | None, k: int) -> int:
 # Tensor creation
 # ---------------------------------------------------------------------------
 
+# Plain object dtype -- the one dtype safe to forward into array()'s cost
+# probe (see array() below). Deliberately an equality check, not
+# `hasobject`: a structured dtype can carry `hasobject` via one field while
+# another is numeric, and constructing that from a sequence would coerce
+# the numeric field's source values too.
+_OBJECT_DTYPE = _np.dtype(object)
+
 
 @_counted_wrapper
 def array(
@@ -135,15 +152,40 @@ def array(
 ) -> FlopscopeArray:
     """Create an array. Cost: numel(output)."""
     budget = require_budget()
-    # Pre-compute cost from input to keep numpy call inside the timer
-    _probe = _np.asarray(object)
+    # Pre-compute cost from input to keep numpy call inside the timer. The
+    # probe must never perform an object->numeric cast (arbitrary participant
+    # code, and by the time it returned there would be nothing object-shaped
+    # left for `refuse_non_numeric_dtype` below to catch), so `dtype` is only
+    # forwarded into the probe when it resolves to plain ``object`` -- a
+    # reference store, never element coercion. Every other case probes with
+    # no dtype at all, so `_probe.dtype` reflects the source's true dtype.
+    # This also lets a ragged `dtype=object` request succeed here, as plain
+    # numpy allows, so the ban's own message fires instead of numpy's raw
+    # "inhomogeneous shape" error (see test_object_dtype_ban.py's ragged/
+    # duck-typed-dtype tests). `_np.dtype(dtype)` itself only runs numpy's
+    # documented dtype protocol, not speculative probing of an untrusted
+    # property.
+    _requested_dtype = _np.dtype(dtype) if dtype is not None else None
+    _probe_dtype = _requested_dtype if _requested_dtype == _OBJECT_DTYPE else None
+    _probe = (
+        _np.asarray(object, dtype=_probe_dtype)
+        if _probe_dtype is not None
+        else _np.asarray(object)
+    )
+    # An explicit dtype= drops the source dtype from the billing tuple below,
+    # so check the source independently of what feeds the rate -- converting
+    # it to a numeric dtype would otherwise slip an object source past the
+    # ban. Pass the already-resolved `_requested_dtype`, not the raw `dtype`
+    # arg, so a duck-typed dtype-like object's `.dtype` property is read only
+    # once per call (see `_plain_dtype_like`'s docstring).
+    refuse_non_numeric_dtype("array", _probe.dtype, _requested_dtype)
     cost = max(_probe.size, 1)
     with budget.deduct(
         "array",
         flop_cost=cost,
         subscripts=None,
         shapes=(_probe.shape,),
-        dtypes=(_np.dtype(dtype) if dtype is not None else _probe.dtype,),
+        dtypes=(_requested_dtype if _requested_dtype is not None else _probe.dtype,),
     ):
         result = _call_numpy(_np.array, object, dtype=dtype, **kwargs)
     return result  # type: ignore[return-value]
@@ -206,9 +248,14 @@ def full(
     # dtype from the argument or numpy's fill_value inference.
     dims = (shape,) if isinstance(shape, (int, _np.integer)) else tuple(shape)
     cost = max(int(_math.prod(int(d) for d in dims)), 0)
-    _billing_dtype = (
-        _np.dtype(dtype) if dtype is not None else _np.asarray(fill_value).dtype
-    )
+    # Probe fill_value's OWN dtype with no dtype forced (stores pointers,
+    # never casts) independently of what feeds the rate below -- an explicit
+    # numeric dtype= would otherwise drop fill_value's true dtype from the
+    # billing tuple entirely, the same gap array()'s probe closes for its
+    # source argument.
+    _fill_probe_dtype = _np.asarray(fill_value).dtype
+    refuse_non_numeric_dtype("full", _fill_probe_dtype)
+    _billing_dtype = _np.dtype(dtype) if dtype is not None else _fill_probe_dtype
     with budget.deduct(
         "full", flop_cost=cost, subscripts=None, shapes=(), dtypes=(_billing_dtype,)
     ):
@@ -438,6 +485,11 @@ def full_like(
     budget = require_budget()
     a_arr = _np.asarray(a)
     cost = max(a_arr.size, 1)
+    # Unlike full(), the default billing dtype here is `a`'s (the shape
+    # template), never fill_value's -- so fill_value must be checked on its
+    # own regardless of whether dtype= was given at all. Probed with no
+    # dtype forced, so this never casts.
+    refuse_non_numeric_dtype("full_like", _np.asarray(fill_value).dtype)
     _billing_dtype = _np.dtype(dtype) if dtype is not None else a_arr.dtype
     with budget.deduct(
         "full_like",
@@ -1615,6 +1667,12 @@ def astype(
     budget = require_budget()
     x_arr = _np.asarray(x)
     resolved_dtype = _np.dtype(dtype)
+    # _heavier_billing_dtype below folds source and destination into a SINGLE
+    # winning dtype by rate, which silently drops whichever side loses --
+    # object always rates 1.0, so any destination with a higher rate (e.g.
+    # float64) would erase it from the billing tuple and let an object
+    # source escape the ban. Check both sides directly first.
+    refuse_non_numeric_dtype("astype", x_arr.dtype, resolved_dtype)
     is_noop = copy is False and resolved_dtype == x_arr.dtype
     cost = 0 if is_noop else x_arr.size
     with budget.deduct(
@@ -1663,6 +1721,10 @@ def _astype_counted(
     budget = require_budget()
     arr_np = _np.asarray(arr)
     resolved_dtype = _np.dtype(dtype)
+    # See the array-API astype() above: _heavier_billing_dtype picks a single
+    # winner by rate and would silently drop an object source that loses to
+    # a higher-rate numeric destination.
+    refuse_non_numeric_dtype("astype", arr_np.dtype, resolved_dtype)
     is_noop = copy is False and resolved_dtype == arr_np.dtype
     cost = 0 if is_noop else arr_np.size
     with budget.deduct(
@@ -2382,7 +2444,7 @@ def copyto(dst, src, casting="same_kind", where=True):
         flop_cost=cost,
         subscripts=None,
         shapes=(),
-        dtypes=(src_arr.dtype, dst_arr.dtype),
+        dtypes=(src_arr.dtype,) + store_billing_dtypes(dst_arr),
     ):
         result = _call_numpy(
             _np.copyto,
@@ -2758,7 +2820,50 @@ def fromiter(*args, **kwargs):
     """
     _warn_remote_callback("fromiter")
     budget = require_budget()
-    result = _call_user_code(budget, _np.fromiter, *args, **kwargs)
+    # numpy signature: fromiter(iter, dtype, count=-1, *, like=None) -- dtype
+    # has no default. A malformed call (missing dtype, a 4th positional arg,
+    # a non-int count) falls straight through to the original raw call so
+    # numpy's own arity/type error surfaces unchanged; only a well-formed
+    # call takes the probe path below.
+    _bound: dict[str, Any] = (
+        dict(zip(("iter", "dtype", "count"), args, strict=False))
+        if len(args) <= 3
+        else {}
+    )
+    _bound.update(kwargs)
+    _count = _bound.get("count", -1)
+    _well_formed = (
+        len(args) <= 3
+        and "dtype" in _bound
+        and (_count == -1 or isinstance(_count, (int, _np.integer)))
+    )
+    if _well_formed:
+        _iterable = _bound["iter"]
+        _dtype = _bound["dtype"]
+        # -1 (or omitted) means "read the whole iterable", matching
+        # np.fromiter's own sentinel exactly -- every other value, including
+        # every other negative one, bounds how much of the (possibly
+        # unbounded) source this materializes.
+        _read_all = _count == -1
+        _materialized = _call_user_code(
+            budget,
+            (lambda: list(_iterable))
+            if _read_all
+            else (lambda: list(_itertools.islice(_iterable, max(int(_count), 0)))),
+        )
+        # Probe with no dtype forced -- stores object pointers rather than
+        # casting, so the probe's dtype reveals the source's true dtype
+        # before anything downstream coerces a single element.
+        _probe = _np.asarray(_materialized)
+        refuse_non_numeric_dtype("fromiter", _probe.dtype, _np.dtype(_dtype))
+        _extra = {
+            k: v for k, v in _bound.items() if k not in ("iter", "dtype", "count")
+        }
+        result = _call_user_code(
+            budget, _np.fromiter, _materialized, _dtype, count=_count, **_extra
+        )
+    else:
+        result = _call_user_code(budget, _np.fromiter, *args, **kwargs)
     cost = result.size if hasattr(result, "size") else 1
     with budget.deduct(
         "fromiter",
@@ -3089,6 +3194,11 @@ attach_docstring(
 def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
     """Swap last two axes. Wraps ``numpy.matrix_transpose``. Cost: 0 FLOPs."""
     x_arr = _np.asarray(x)
+    # Unlike its siblings (transpose, swapaxes, ...), this function is not
+    # decorated with @_counted_wrapper, so the non-numeric-dtype backstop
+    # there never runs for it -- check directly. linalg.matrix_transpose
+    # delegates here, so this one check covers both registry entries.
+    refuse_non_numeric_dtype("matrix_transpose", x_arr.dtype)
     result = _np.matrix_transpose(x_arr)
     in_group = x.symmetry if isinstance(x, SymmetricTensor) else None
     out_group = _st.transport_matrix_transpose(in_group, ndim=x_arr.ndim)
@@ -3183,9 +3293,59 @@ def packbits(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
 attach_docstring(packbits, _np.packbits, "counted_custom", "numel(input) FLOPs")
 
 
+def _refuse_non_numeric_dtype_tree(
+    op_name: str,
+    value: Any,
+    _depth: int = 0,
+    _scanned: set[int] | None = None,
+    _active: set[int] | None = None,
+) -> None:
+    """Recursively refuse a non-numeric-dtype array anywhere inside *value*
+    (a bare array, or a list/tuple of arrays).
+
+    Depth-bounded by ``_DTYPE_SCAN_MAX_DEPTH`` for the same reason as
+    ``_refuse_non_numeric_operands.check`` in ``_budget.py``, and guarded by
+    the identical pair of ``_scanned``/``_active`` id sets -- see that
+    function's docstring for the full rationale: ``_scanned`` keeps a
+    container reachable through more than one non-cyclic path from being
+    walked (and, for a list of arrays, checked) more than once, and
+    ``_active`` turns a genuine self-reference into a prompt ``ValueError``
+    instead of NumPy re-deriving the same conclusion at exponential cost.
+    """
+    dtype = getattr(value, "dtype", None)
+    if dtype is not None:
+        refuse_non_numeric_dtype(op_name, dtype)
+    elif isinstance(value, (list, tuple)) and _depth < _DTYPE_SCAN_MAX_DEPTH:
+        if _scanned is None:
+            _scanned = set()
+        if _active is None:
+            _active = set()
+        marker = id(value)
+        if marker in _active:
+            raise ValueError(
+                f"{op_name}: cannot construct an array from a self-referential sequence"
+            )
+        if marker in _scanned:
+            return
+        _scanned.add(marker)
+        _active.add(marker)
+        try:
+            for item in value:
+                _refuse_non_numeric_dtype_tree(
+                    op_name, item, _depth + 1, _scanned, _active
+                )
+        finally:
+            _active.discard(marker)
+
+
 def permute_dims(*args, **kwargs):
     """Permute dimensions of array. Wraps ``numpy.permute_dims``. Cost: 0 FLOPs."""
     stripped_args = _to_base_ndarray_tree(args)
+    # Not decorated with @_counted_wrapper (unlike its sibling movement ops),
+    # so the non-numeric-dtype backstop there never runs for it -- check
+    # directly.
+    for _a in stripped_args:
+        _refuse_non_numeric_dtype_tree("permute_dims", _a)
     return _np.permute_dims(*stripped_args, **kwargs)
 
 
@@ -3402,6 +3562,12 @@ def require(*args: Any, **kwargs: Any) -> FlopscopeArray:
     # -- dtype is the second positional or the ``dtype=`` kwarg.
     _dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
     _billing_dtype = _np.dtype(_dtype) if _dtype is not None else a_arr.dtype
+    # a_arr is already the safe, no-dtype probe of `a`'s true source dtype
+    # (see array()) -- it was just never checked. Without this, an explicit
+    # dtype= drops that probe from the billing tuple, and np.require(a,
+    # dtype=...) then casts `a` for real, running any object payload's
+    # __float__/__index__/__complex__ per element before anything refuses.
+    refuse_non_numeric_dtype("require", a_arr.dtype)
     with budget.deduct(
         "require",
         flop_cost=cost,

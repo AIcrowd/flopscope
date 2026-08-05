@@ -512,6 +512,39 @@ def test_fromiter():
     assert list(r) == [0.0, 1.0, 2.0, 3.0, 4.0]
 
 
+def test_fromiter_generator_with_count():
+    def gen():
+        yield from (0.0, 1.0, 2.0)
+
+    r = ops.fromiter(gen(), dtype=float, count=3)
+    assert list(r) == [0.0, 1.0, 2.0]
+
+
+def test_fromiter_bounds_consumption_of_an_infinite_generator():
+    """count= must bound how much of the source is pulled, even though the
+    object-dtype probe now materializes it -- an infinite generator with a
+    finite count must return promptly rather than hang."""
+
+    def infinite():
+        i = 0
+        while True:
+            yield float(i)
+            i += 1
+
+    r = ops.fromiter(infinite(), dtype=float, count=5)
+    assert list(r) == [0.0, 1.0, 2.0, 3.0, 4.0]
+
+
+def test_fromiter_iterator_too_short_still_raises():
+    with pytest.raises(ValueError, match="iterator too short"):
+        ops.fromiter(iter([1.0, 2.0]), dtype=float, count=5)
+
+
+def test_fromiter_missing_dtype_still_raises():
+    with pytest.raises(TypeError):
+        ops.fromiter([1.0, 2.0, 3.0])
+
+
 def test_fromstring():
     r = ops.fromstring("1 2 3", sep=" ")
     assert list(r) == [1.0, 2.0, 3.0]

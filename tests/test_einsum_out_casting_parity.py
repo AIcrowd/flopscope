@@ -36,6 +36,7 @@ import pytest
 
 import flopscope as f
 import flopscope.numpy as fnp
+from flopscope.errors import UnsupportedDtypeError
 
 # The 16 dtypes of the reference matrix.
 MATRIX_DTYPES = [
@@ -384,26 +385,39 @@ def test_refusal_message_operand_index_is_the_input_count(arity):
             fnp.einsum(subscripts, *ops, out=out)
 
 
-def test_datetime_destination_propagates_the_promotion_error():
-    """``np.result_type`` fails outright rather than reporting a cast; numpy
-    lets ``DTypePromotionError`` out and so must flopscope. It is a TypeError
-    subclass, so the accept/refuse contract is unaffected."""
+def test_datetime_destination_is_refused():
+    """Plain numpy's ``np.result_type`` fails outright rather than reporting
+    a cast for a float64-vs-datetime64 destination, and used to let
+    ``DTypePromotionError`` out; flopscope let the same error out too, since
+    at the time datetime64 was still a priced, non-refused destination kind.
+
+    Under the numeric-allowlist dtype ban, a datetime64 destination is
+    refused before ``np.result_type`` is ever consulted -- the ban's own
+    ``UnsupportedDtypeError`` fires first, not numpy's promotion error. It is
+    a ``TypeError`` subclass either way, so the accept/refuse contract is
+    unaffected; only which exception class explains the refusal changes."""
     a = np.ones((N, N), dtype=np.float64)
     out = np.zeros((N, N), dtype="M8[ns]")
     with pytest.raises(np.exceptions.DTypePromotionError):
         np.einsum("ij,jk->ik", a, a, out=out, optimize=False)
     with f.BudgetContext(flop_budget=_BUDGET, quiet=True) as budget:
-        with pytest.raises(np.exceptions.DTypePromotionError):
+        with pytest.raises(UnsupportedDtypeError):
             fnp.einsum("ij,jk->ik", a, a, out=out)
         assert budget.flops_used == 0
 
 
 @pytest.mark.parametrize("out_dtype", ["U64", "S64", "U32", "S16"])
 def test_string_destinations_are_refused(out_dtype):
-    """einsum has no string inner loop. numpy either fails the cast rule or
-    reaches the missing loop and mis-reports the resulting
-    ``TypeError('invalid data type for einsum')`` as a ``SystemError``;
-    flopscope raises that underlying TypeError, before billing."""
+    """einsum has no string inner loop, and numpy itself either fails the
+    cast rule or reaches the missing loop and mis-reports the resulting
+    ``TypeError('invalid data type for einsum')`` as a ``SystemError``.
+
+    Under the numeric-allowlist dtype ban, flopscope refuses a string
+    destination via its own ``UnsupportedDtypeError`` before numpy's einsum
+    call runs at all, rather than by propagating whatever numpy's own
+    casting/loop failure happens to be. ``UnsupportedDtypeError`` is a
+    ``TypeError`` subclass, so this ``pytest.raises(TypeError)`` still holds
+    either way, and refusal is still free."""
     a = np.ones((N, N), dtype=np.float64)
     out = np.empty((N, N), dtype=out_dtype)
     with f.BudgetContext(flop_budget=_BUDGET, quiet=True) as budget:
@@ -412,16 +426,17 @@ def test_string_destinations_are_refused(out_dtype):
         assert budget.flops_used == 0
 
 
-def test_object_destination_still_works():
-    """object is a legal einsum dtype and must stay accepted -- the string
-    refusal is about a missing inner loop, not about non-numeric kinds."""
+def test_object_destination_is_refused():
+    """object was a legal einsum destination through 0.10.0. As of 0.10.1 it is
+    refused: a destination dtype carrying Python objects cannot be priced, so
+    allowing it back in reopens the same unbounded-cost gap
+    ``refuse_non_numeric_dtype`` closes everywhere else -- widened since to a
+    numeric allowlist covering every non-numeric kind, not just object."""
     a = np.ones((N, N), dtype=np.float64) * 2
-    expected = np.zeros((N, N), dtype=object)
-    np.einsum("ij,jk->ik", a, a, out=expected, optimize=False)
     out = np.zeros((N, N), dtype=object)
     with f.BudgetContext(flop_budget=_BUDGET, quiet=True):
-        fnp.einsum("ij,jk->ik", a, a, out=out)
-    assert np.array_equal(out, expected)
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.einsum("ij,jk->ik", a, a, out=out)
 
 
 # --- the destination still behaves like a destination ---------------------

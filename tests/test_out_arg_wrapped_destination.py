@@ -63,6 +63,7 @@ import flopscope.numpy as fnp
 from flopscope._budget import get_active_budget
 from flopscope._registry import REGISTRY
 from flopscope._symmetric import SymmetricTensor
+from flopscope.errors import UnsupportedDtypeError
 
 SEED = 20260727
 
@@ -248,6 +249,12 @@ _NOT_DRIVEN: dict[str, str] = {
     "modf": "multi-output (nout=2); driven by the multi-output tests",
     "frexp": "multi-output (nout=2); driven by the multi-output tests",
     "divmod": "multi-output (nout=2); driven by the multi-output tests",
+    # isnat's only valid input kind is datetime64/timedelta64, both outside
+    # the numeric allowlist the dtype ban enforces -- no recipe can build it
+    # a valid operand anymore, so the generic driver's every recipe fails at
+    # construction. The premise is pinned in
+    # test_the_ops_the_dtype_ban_refuses_every_recipe_for.
+    "isnat": "its only valid input dtype (datetime64/timedelta64) is refused by the dtype ban",
 }
 
 #: The ops in ``_NOT_DRIVEN`` whose stated reason is "numpy itself refuses a
@@ -269,6 +276,13 @@ _NUMPY_REFUSES_THE_CONTAINER: dict[str, Callable[[Any], Any]] = {
     "random.Generator.permuted": lambda out: np.random.default_rng(0).permuted(
         np.arange(8.0), out=out
     ),
+}
+
+#: The ops in ``_NOT_DRIVEN`` whose stated reason is "the dtype ban refuses
+#: its only valid input", paired with a call over a genuine datetime64
+#: operand that demonstrates the refusal.
+_DTYPE_BAN_REFUSES_EVERY_RECIPE: dict[str, Callable[[], Any]] = {
+    "isnat": lambda: fnp.isnat(_arr((8,), "datetime")),
 }
 
 _DISCOVERED = _discover_out_ops()
@@ -489,7 +503,11 @@ def test_the_not_driven_list_is_neither_stale_nor_a_silent_skip():
     # A written reason is a claim; each one has to be backed by a test that
     # would fail if the claim stopped being true. Without this, "cannot be
     # driven" degrades into "skipped, with prose".
-    demonstrated = set(_NUMPY_REFUSES_THE_CONTAINER) | set(_MULTI_OUTPUT_OPS)
+    demonstrated = (
+        set(_NUMPY_REFUSES_THE_CONTAINER)
+        | set(_MULTI_OUTPUT_OPS)
+        | set(_DTYPE_BAN_REFUSES_EVERY_RECIPE)
+    )
     undemonstrated = sorted(set(_NOT_DRIVEN) - demonstrated)
     assert not undemonstrated, (
         f"{undemonstrated} are excused from the generic driver with a reason "
@@ -512,6 +530,17 @@ def test_the_ops_numpy_itself_refuses_a_container_for(name):
     call(dest)  # the bare array is the accepted spelling
     with pytest.raises((TypeError, ValueError)):
         call((dest,))
+
+
+@pytest.mark.parametrize("name", sorted(_DTYPE_BAN_REFUSES_EVERY_RECIPE))
+def test_the_ops_the_dtype_ban_refuses_every_recipe_for(name):
+    """The premise behind the ``isnat`` ``_NOT_DRIVEN`` entry: its only valid
+    operand dtype (datetime64/timedelta64) is outside the numeric allowlist,
+    so a genuine, well-formed call is refused before any recipe could reach
+    a driveable ``out=`` — there is no recipe the generic driver is missing.
+    """
+    with pytest.raises(UnsupportedDtypeError):
+        _DTYPE_BAN_REFUSES_EVERY_RECIPE[name]()
 
 
 @pytest.mark.parametrize("name", _DRIVEN_NAMES)

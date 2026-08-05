@@ -6,7 +6,7 @@ import math as _math
 
 import numpy as _np
 
-from flopscope._budget import _counted_wrapper
+from flopscope._budget import _counted_wrapper, refuse_non_numeric_source
 from flopscope._ndarray import _asflopscope
 from flopscope._validation import require_budget
 
@@ -68,6 +68,17 @@ class ContinuousDistribution:
         would undercount.
         """
         budget = require_budget()
+        op_name = f"stats.{self._name}.{method}"
+        # x is about to be cast to float64 below, and every distribution
+        # parameter (loc/scale/a/b/s/...) is broadcast against it by the
+        # pure-numpy _compute_* kernel -- both cast/coerce a payload's
+        # __float__ per element with nothing billed for it. Probe each one
+        # first; a probe never casts.
+        refuse_non_numeric_source(op_name, x)
+        for _v in args:
+            refuse_non_numeric_source(op_name, _v)
+        for _v in kwargs.values():
+            refuse_non_numeric_source(op_name, _v)
         x = _np.asarray(x, dtype=_np.float64)
         param_shapes = tuple(
             _np.shape(v) for v in (*args, *kwargs.values()) if v is not None
@@ -80,7 +91,6 @@ class ContinuousDistribution:
             # must not change the exception surface for invalid calls.
             out_shape = x.shape
         n = max(_math.prod(out_shape), 1)
-        op_name = f"stats.{self._name}.{method}"
         compute_fn = getattr(self, f"_compute_{method}")
         with budget.deduct(
             op_name,

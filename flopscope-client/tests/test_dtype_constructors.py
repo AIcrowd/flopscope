@@ -124,6 +124,23 @@ class TestEncodeArgDtype:
         assert ra_mod._encode_arg(0.5) == 0.5
         assert ra_mod._encode_arg("hello") == "hello"
 
+    def test_encode_arg_serializes_remote_scalar_subclass(self):
+        class ScalarSubclass(ra_mod.RemoteScalar):
+            pass
+
+        encoded = ra_mod._encode_arg(ScalarSubclass(3.5, "float64"))
+        assert type(encoded) is float
+        assert encoded == 3.5
+
+    @pytest.mark.parametrize("attr", ["name", "_flopscope_dtype_name"])
+    def test_encode_arg_accepts_inert_dtype_name_without_descriptor(self, attr):
+        class InertDtype:
+            pass
+
+        value = InertDtype()
+        setattr(value, attr, "float32")
+        assert ra_mod._encode_arg(value) == "float32"
+
 
 class TestConstructorDispatch:
     def test_float32_constructor_returns_remote_array(self):

@@ -119,9 +119,9 @@ def _normalize_dtype(spec: Any) -> str:
     wire = _resolve_dtype_wire_name(spec)
     if wire is not None:
         return wire
-    if isinstance(spec, str):
+    if type(spec) is str:
         raise TypeError(f"Unknown dtype: {spec!r}")
-    raise TypeError(f"Cannot interpret {spec!r} as a flopscope dtype")
+    raise TypeError("Cannot interpret dtype argument as a flopscope dtype")
 
 
 def dtype(spec: Any) -> _DType:

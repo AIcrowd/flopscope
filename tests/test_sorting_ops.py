@@ -72,14 +72,18 @@ class TestSort:
         with BudgetContext(flop_budget=10**6):
             assert numpy.array_equal(sort(a), numpy.sort(a))
 
-    def test_order_structured_dtype(self):
-        """sort(order=...) must forward to numpy — reproduces the drop-order bug."""
+    def test_order_structured_dtype_is_refused(self):
+        """sort(order=...) only means anything for a structured dtype, which
+        is now refused unconditionally (kind 'V' is outside the numeric
+        allowlist, object-free fields included) -- there is no numeric
+        substitute for a keyword that exists solely to name a struct field."""
+        from flopscope.errors import UnsupportedDtypeError
+
         dt = numpy.dtype([("a", "i4"), ("b", "i4")])
         s = numpy.array([(2, 1), (1, 5), (2, 0)], dtype=dt)
         with BudgetContext(flop_budget=10**9, quiet=True):
-            result = numpy.asarray(sort(s, order="b"))
-        expected = numpy.sort(s, order="b")
-        numpy.testing.assert_array_equal(result, expected)
+            with pytest.raises(UnsupportedDtypeError):
+                sort(s, order="b")
 
     def test_kind_stable_float(self):
         """sort(kind='stable') must forward to numpy — duplicate-preserving sort."""

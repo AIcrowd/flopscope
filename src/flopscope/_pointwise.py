@@ -15,7 +15,11 @@ from numpy.exceptions import AxisError as _AxisError
 from numpy.typing import ArrayLike
 
 from flopscope._accumulation._cost import contraction_complex_override
-from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._budget import (
+    _call_numpy,
+    _call_numpy_with_python_callbacks,
+    _counted_wrapper,
+)
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
@@ -62,6 +66,7 @@ from flopscope.errors import (
     CostFallbackWarning,
     SymmetryError,
     UnsupportedFunctionError,
+    _warn_remote_callback,
     _warn_symmetry_loss,
 )
 
@@ -451,13 +456,105 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
     return _builtins.max(int(dense_cost) * int(unique) // dense_output, 1)
 
 
-def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwargs):
+_ARRAY_UFUNC_MISSING = object()
+
+
+class _ForeignUfuncResult:
+    """Raw result of a call whose dispatch involved foreign NEP 13 code."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
+def _static_array_ufunc_implementation(value):
+    """Read a type's NEP 13 implementation without invoking its metaclass."""
+    return _inspect.getattr_static(type(value), "__array_ufunc__", _ARRAY_UFUNC_MISSING)
+
+
+def _has_foreign_array_ufunc(value) -> bool:
+    """Whether *value* can dispatch a raw ufunc call to foreign Python code."""
+    if isinstance(value, FlopscopeArray):
+        return False
+    implementation = _static_array_ufunc_implementation(value)
+    return (
+        implementation is not _ARRAY_UFUNC_MISSING
+        and implementation is not None
+        and implementation is not _np.ndarray.__array_ufunc__
+    )
+
+
+def _flatten_ufunc_out_slots(out) -> tuple:
+    """Flatten only true ufunc output slots, never arbitrary sequences."""
+    if type(out) is tuple:
+        return out
+    return (out,)
+
+
+def _preflight_ufunc_out_arity(out, nout: int) -> None:
+    """Match NumPy's tuple-arity error before inspecting ufunc participants."""
+    if type(out) is tuple and len(out) != nout:
+        raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+
+
+def _call_ufunc_with_protocol_timing(
+    op_name, fn, *args, protocol_operands=(), **kwargs
+):
+    """Call a ufunc, attributing foreign protocol callbacks to residual time."""
+    if _builtins.any(_has_foreign_array_ufunc(value) for value in protocol_operands):
+        _warn_remote_callback(op_name)
+        return _ForeignUfuncResult(
+            _call_numpy_with_python_callbacks(fn, *args, **kwargs)
+        )
+    return _call_numpy(fn, *args, **kwargs)
+
+
+def _restore_foreign_ufunc_out_identity(result, out, stripped):
+    """Map only NumPy's canonical stripped-``out`` result back to the caller."""
+    if isinstance(result, _ForeignUfuncResult):
+        value = result.value
+        if (
+            type(value) is tuple
+            and isinstance(out, tuple)
+            and isinstance(stripped, tuple)
+            and len(value) == len(stripped)
+            and _builtins.all(
+                original is None or returned is stripped_value
+                for original, stripped_value, returned in zip(
+                    out, stripped, value, strict=True
+                )
+            )
+        ):
+            value = tuple(
+                original
+                if original is not None and returned is stripped_value
+                else returned
+                for original, stripped_value, returned in zip(
+                    out, stripped, value, strict=True
+                )
+            )
+        elif out is not None and value is stripped:
+            value = out
+        return _ForeignUfuncResult(value)
+    return result
+
+
+def _call_with_optional_out(
+    np_func,
+    *args,
+    out=None,
+    supports_out=False,
+    callback_op_name=None,
+    **kwargs,
+):
     # Strip flopscope subclasses (FlopscopeArray / SymmetricTensor) from arrays so
     # the raw NumPy call does not re-dispatch through ``__array_ufunc__`` /
     # ``__array_function__`` and recurse infinitely. Python scalars and
     # other non-array values pass through unchanged so NEP 50 weak-typing
     # rules continue to apply at the NumPy boundary.
     args = tuple(_to_base_ndarray(a) for a in args)
+    protocol_args = args
     # ``where=`` kwarg may be a FlopscopeArray bool mask; strip it. Other
     # array-valued kwargs (e.g. ``axes`` lists for matmul / einsum
     # tensor-axis specs) typically aren't ndarrays, but tree-strip is
@@ -470,8 +567,29 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
     _require_ndarray_out(out, getattr(np_func, "__name__", "op"))
     out_stripped = _to_base_ndarray(out) if out is not None else None
     if out is None:
+        if isinstance(np_func, _np.ufunc):
+            return _call_ufunc_with_protocol_timing(
+                callback_op_name or np_func.__name__,
+                np_func,
+                *args,
+                protocol_operands=protocol_args,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, **kwargs)
     if supports_out:
+        if isinstance(np_func, _np.ufunc):
+            return _restore_foreign_ufunc_out_identity(
+                _call_ufunc_with_protocol_timing(
+                    callback_op_name or np_func.__name__,
+                    np_func,
+                    *args,
+                    out=out_stripped,
+                    protocol_operands=(*protocol_args, out),
+                    **kwargs,
+                ),
+                out,
+                out_stripped,
+            )
         return _call_numpy(np_func, *args, out=out_stripped, **kwargs)
     result = _call_numpy(np_func, *args, **kwargs)
     # Fallback copy when np_func doesn't natively support out=. This is
@@ -482,7 +600,9 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
     return out
 
 
-def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
+def _call_with_optional_multi_out(
+    np_func, *args, out=None, nout, callback_op_name=None, **kwargs
+):
     """Multi-output sibling of :func:`_call_with_optional_out`.
 
     ``out`` is either ``None`` (numpy allocates all outputs) or a tuple of
@@ -496,12 +616,21 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
     returned.
     """
     args = tuple(_to_base_ndarray(a) for a in args)
+    protocol_args = args
     for k, v in list(kwargs.items()):
         if isinstance(v, _np.ndarray):
             kwargs[k] = _to_base_ndarray(v)
         elif isinstance(v, (tuple, list)):
             kwargs[k] = _to_base_ndarray_tree(v)
     if out is None:
+        if isinstance(np_func, _np.ufunc):
+            return _call_ufunc_with_protocol_timing(
+                callback_op_name or np_func.__name__,
+                np_func,
+                *args,
+                protocol_operands=protocol_args,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, **kwargs)
     if not isinstance(out, tuple) or len(out) != nout:
         length_repr = len(out) if hasattr(out, "__len__") else "?"
@@ -510,8 +639,25 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
             f"out= to be a tuple of length {nout}; got "
             f"{type(out).__name__} of length {length_repr}"
         )
+    protocol_operands = (*protocol_args, *out)
     stripped = tuple(_to_base_ndarray(o) if o is not None else None for o in out)
-    result = _call_numpy(np_func, *args, out=stripped, **kwargs)
+    if isinstance(np_func, _np.ufunc):
+        result = _restore_foreign_ufunc_out_identity(
+            _call_ufunc_with_protocol_timing(
+                callback_op_name or np_func.__name__,
+                np_func,
+                *args,
+                out=stripped,
+                protocol_operands=protocol_operands,
+                **kwargs,
+            ),
+            out,
+            stripped,
+        )
+    else:
+        result = _call_numpy(np_func, *args, out=stripped, **kwargs)
+    if isinstance(result, _ForeignUfuncResult):
+        return result
     # Numpy returns a tuple of the stripped buffers (or fresh allocations
     # for None slots). Replace each non-None slot with the caller's
     # original to preserve object identity.
@@ -598,19 +744,26 @@ def _pointwise_symmetry(operands, output_shape):
 @_counted_wrapper
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
+    is_ufunc = isinstance(np_func, _np.ufunc)
 
     @_counted_wrapper
     def wrapper(
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
-        # Above every later read of ``out`` -- the billing dtype, the
-        # symmetry check, and what gets returned -- and above the deduct,
-        # so a refused form costs nothing.
+        # Ufuncs must reject an opt-out before inspecting out or billing. The
+        # non-ufunc NumPy dispatch helpers materialize such operands instead.
+        if is_ufunc:
+            _preflight_ufunc_out_arity(out, np_func.nout)
+            _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        if is_ufunc:
+            x, x_fwd = _resolve_ufunc_data_operand(x)
+        else:
+            if not isinstance(x, _np.ndarray):
+                x = _np.asarray(x)
+            x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
@@ -642,11 +795,14 @@ def _counted_unary(np_func, op_name: str):
         ):
             result = _call_with_optional_out(
                 np_func,
-                x,
+                x_fwd,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
+        if is_ufunc and isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
@@ -668,19 +824,26 @@ def _free_unary(np_func, op_name: str):
     ``budget.deduct`` so wall time is accounted.
     """
     supports_out = _supports_out_argument(np_func)
+    is_ufunc = isinstance(np_func, _np.ufunc)
 
     @_counted_wrapper
     def wrapper(
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
-        # Above every later read of ``out`` -- the billing dtype, the
-        # symmetry check, and what gets returned -- and above the deduct,
-        # so a refused form costs nothing.
+        # Ufuncs must reject an opt-out before inspecting out or billing. The
+        # non-ufunc NumPy dispatch helpers materialize such operands instead.
+        if is_ufunc:
+            _preflight_ufunc_out_arity(out, np_func.nout)
+            _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        if is_ufunc:
+            x, x_fwd = _resolve_ufunc_data_operand(x)
+        else:
+            if not isinstance(x, _np.ndarray):
+                x = _np.asarray(x)
+            x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
         billing_dtypes: tuple = (x.dtype,)
         if kwargs.get("dtype") is not None:
@@ -696,11 +859,14 @@ def _free_unary(np_func, op_name: str):
         ):
             result = _call_with_optional_out(
                 np_func,
-                x,
+                x_fwd,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
+        if is_ufunc and isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
@@ -750,10 +916,11 @@ def _counted_unary_multi(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, nout)
+        _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        x, x_fwd = _resolve_ufunc_data_operand(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
@@ -788,11 +955,14 @@ def _counted_unary_multi(np_func, op_name: str):
         ):
             result = _call_with_optional_multi_out(
                 np_func,
-                x,
+                x_fwd,
                 out=out,
                 nout=nout,
+                callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         return _wrap_multi_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
     wrapper.__name__ = op_name
@@ -831,6 +1001,8 @@ def _counted_binary(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, np_func.nout)
+        _preflight_ufunc_opt_out(x, y, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
         # Resolve and freeze a caller-supplied dtype before observing either
         # operand. A dtype-like object's property can be stateful or mutate an
@@ -929,8 +1101,11 @@ def _counted_binary(np_func, op_name: str):
                 y_fwd,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         if out_symmetry is not None:
             lost = []
@@ -981,6 +1156,8 @@ def _counted_binary_multi(np_func, op_name: str):
         # Above every later read of ``out`` -- the billing dtype, the
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
+        _preflight_ufunc_out_arity(out, nout)
+        _preflight_ufunc_opt_out(x, y, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
@@ -1037,8 +1214,11 @@ def _counted_binary_multi(np_func, op_name: str):
                 y_orig,
                 out=out,
                 nout=nout,
+                callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         # Symmetry-loss warnings (parity with _counted_binary).
         if out_symmetry is not None:
             lost = []
@@ -1210,17 +1390,35 @@ def _implements_array_ufunc(x) -> bool:
     """Does ``type(x)`` define NumPy's ufunc-dispatch protocol (NEP 13)?
 
     Checked on the TYPE, matching how numpy itself looks this up for
-    protocol dispatch (an instance attribute would not count). Excludes the
-    ``__array_ufunc__ = None`` opt-out spelling on purpose: that spelling
-    means "this type refuses to be a ufunc operand at all" -- numpy raises
-    ``TypeError`` for it immediately, at the C level, without ever calling
-    either ``__array_ufunc__`` or ``__array__`` -- so it carries none of the
-    "protocol runs instead of ``__array__``" guarantee the three-way rule in
-    :func:`_resolve_ufunc_data_operand` relies on. Such an object falls
-    through to the plain array-like branch instead, exactly as it did before
-    this rule existed.
+    protocol dispatch (an instance attribute would not count). The explicit
+    ``__array_ufunc__ = None`` opt-out spelling is excluded: callers that
+    resolve data operands reject it before this predicate can consider a
+    protocol implementation, matching NumPy's immediate ``TypeError``.
     """
-    return getattr(type(x), "__array_ufunc__", None) is not None
+    implementation = _static_array_ufunc_implementation(x)
+    return implementation is not _ARRAY_UFUNC_MISSING and implementation is not None
+
+
+def _raise_ufunc_opt_out(x) -> None:
+    """Raise NumPy's error for a type declaring ``__array_ufunc__ = None``."""
+    type_name = type.__getattribute__(type(x), "__name__")
+    raise TypeError(
+        f"operand '{type_name}' does not support ufuncs (__array_ufunc__=None)"
+    )
+
+
+def _preflight_ufunc_opt_out(*operands) -> None:
+    """Reject top-level ufunc operands that explicitly opt out of NEP 13.
+
+    NumPy raises before it materializes any operand or executes a ufunc loop
+    when a participating type defines ``__array_ufunc__ = None``.  Callers
+    pass data operands directly and flatten only real ``out=`` slots;
+    ``where=`` and unrelated kwargs or index sequences are deliberately
+    excluded.
+    """
+    for operand in operands:
+        if _static_array_ufunc_implementation(operand) is None:
+            _raise_ufunc_opt_out(operand)
 
 
 def _resolve_ufunc_data_operand(x):
@@ -1237,7 +1435,11 @@ def _resolve_ufunc_data_operand(x):
     for the *billing* read the way this helper does -- see that function's
     docstring -- but mirrors this same three-way rule.)
 
-    Three operand kinds, three different requirements:
+    Four operand kinds, four different requirements:
+
+    - An explicit type-level ``__array_ufunc__ = None`` opt-out: reject it
+      immediately, before either billing or ``__array__`` materialization,
+      because NumPy does exactly that for every ufunc operand.
 
     - Already an ``ndarray`` (including a flopscope subclass, or a foreign
       one like ``np.ma.MaskedArray``): forward the ORIGINAL object to numpy
@@ -1268,8 +1470,8 @@ def _resolve_ufunc_data_operand(x):
       off a single ``_np.asarray(x)`` view -- ONE call, same accounting as
       the ndarray branch above, and never a second one, since the real call
       below never touches ``__array__`` on this object.
-    - Anything else (a duck type implementing only ``__array__``, a
-      list/tuple/other sequence, or a type with ``__array_ufunc__ = None``):
+    - Anything else (a duck type implementing only ``__array__`, or a
+      list/tuple/other sequence):
       materialize it EXACTLY ONCE via ``_np.asarray``, and use that SAME
       materialized array as both the billing view and the forwarded object.
       There is no legitimate subclass semantics to lose here -- it was never
@@ -1290,10 +1492,13 @@ def _resolve_ufunc_data_operand(x):
 
     Returns ``(billing_view, forward_obj)``.
     """
+    implementation = _static_array_ufunc_implementation(x)
+    if implementation is None:
+        _raise_ufunc_opt_out(x)
     if isinstance(x, _np.ndarray):
         stripped = _to_base_ndarray(x)
         return _np.asarray(stripped), stripped
-    if _implements_array_ufunc(x):
+    if implementation is not _ARRAY_UFUNC_MISSING:
         return _np.asarray(x), x
     if isinstance(x, (bool, int, float, complex)) and not isinstance(x, _np.generic):
         return _np.asarray(x), x
@@ -1364,6 +1569,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
+    _preflight_ufunc_opt_out(a, b, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
     # Resolved here, BEFORE ``a``/``b`` are read for billing below, not
     # down where it is USED. ``np.dtype()`` accepts any object exposing a
@@ -1517,13 +1724,21 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
             loop_dtypes, out_view
         ),
     ):
-        result = _call_numpy(
-            ufunc.outer,
-            a_fwd,
-            b_fwd,
-            out=out_fwd,
-            **kwargs,
+        result = _restore_foreign_ufunc_out_identity(
+            _call_ufunc_with_protocol_timing(
+                f"{ufunc.__name__}.outer",
+                ufunc.outer,
+                a_fwd,
+                b_fwd,
+                out=out_fwd,
+                protocol_operands=(a_fwd, b_fwd, out_fwd),
+                **kwargs,
+            ),
+            out,
+            out_fwd,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1605,6 +1820,8 @@ def _counted_ufunc_reduce_generic(
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below -- see
     # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
@@ -1680,14 +1897,23 @@ def _counted_ufunc_reduce_generic(
         shapes=(a_view.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(
-            ufunc.reduce,
-            a_fwd,
-            axis=axis,
-            out=_to_base_ndarray(out) if out is not None else None,
-            keepdims=keepdims,
-            **kwargs,
+        out_fwd = _to_base_ndarray(out) if out is not None else None
+        result = _restore_foreign_ufunc_out_identity(
+            _call_ufunc_with_protocol_timing(
+                f"{ufunc.__name__}.reduce",
+                ufunc.reduce,
+                a_fwd,
+                axis=axis,
+                out=out_fwd,
+                keepdims=keepdims,
+                protocol_operands=(a_fwd, out),
+                **kwargs,
+            ),
+            out,
+            out_fwd,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1706,6 +1932,8 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below -- see
     # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
@@ -1776,13 +2004,22 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         shapes=(a_view.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(
-            ufunc.accumulate,
-            a_fwd,
-            axis=axis,
-            out=_to_base_ndarray(out) if out is not None else None,
-            **kwargs,
+        out_fwd = _to_base_ndarray(out) if out is not None else None
+        result = _restore_foreign_ufunc_out_identity(
+            _call_ufunc_with_protocol_timing(
+                f"{ufunc.__name__}.accumulate",
+                ufunc.accumulate,
+                a_fwd,
+                axis=axis,
+                out=out_fwd,
+                protocol_operands=(a_fwd, out),
+                **kwargs,
+            ),
+            out,
+            out_fwd,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1863,8 +2100,8 @@ def _resolve_reduceat_axis(axis, ndim: int) -> int:
     return axis
 
 
-def _reduceat_applications_per_lane(indices, n: int) -> int:
-    """Honest per-lane application count for ``ufunc.reduceat(a, indices)``.
+def _reduceat_work_per_lane(indices, n: int) -> tuple[int, int]:
+    """Per-lane arithmetic applications and produced cells for ``reduceat``.
 
     ``indices`` MUST already be the frozen, owned snapshot built by
     :func:`_counted_ufunc_reduceat` -- reading it here must be the only
@@ -1874,10 +2111,13 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     NumPy's semantics per segment ``i``: if ``indices[i] < indices[i+1]``,
     ``result[i] = reduce(a[indices[i]:indices[i+1]])`` (``L-1`` applications
     for a length-``L`` segment); otherwise ``result[i] = a[indices[i]]``, a
-    plain copy with no arithmetic (0 applications). The final segment always
-    runs to the end of the axis (length ``n``). Segments may overlap or run
-    backwards, so the true application count is bounded by the INDEX
-    VALUES, not by the array's own size.
+    plain copy with no arithmetic (0 applications). Every accepted segment
+    still produces one output cell, so safely castable index snapshots also
+    return ``k`` as a produced-cell billing floor. Rejected ndarray index
+    dtypes retain their existing arithmetic bill without gaining that floor.
+    The final segment always runs to the end of the axis (length ``n``).
+    Segments may overlap or run backwards, so the true application count is
+    bounded by the INDEX VALUES, not by the array's own size.
 
     ``n`` is the resolved axis's length -- ``_resolve_reduceat_axis`` raises
     directly (before this function is ever called) for any axis it cannot
@@ -1895,10 +2135,10 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     """
     k = indices.shape[0] if indices.ndim == 1 else 0
     if k == 0 or n == 0:
-        return 0
+        return (0, 0)
     idx64 = indices.astype(_np.int64)
     if bool(_np.any((idx64 < 0) | (idx64 >= n))):
-        return 0
+        return (0, 0)
     ends = _np.empty(k, dtype=_np.int64)
     ends[:-1] = idx64[1:]
     ends[-1] = n  # the final segment always runs to the axis end
@@ -1906,16 +2146,28 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     # A real reduce segment of length L costs L-1 applications; the
     # non-monotonic (indices[i] >= indices[i+1]) branch is a plain element
     # copy and costs 0 -- np.maximum(lengths - 1, 0) covers both uniformly.
-    return int(_np.sum(_np.maximum(lengths - 1, 0)))
+    segment_applications = _np.maximum(lengths - 1, 0)
+    # The range guard above makes every contribution at most n-1. Keep the
+    # vectorized hot path whenever its Python-int upper bound fits int64;
+    # only potentially overflowing totals need per-element Python integers.
+    if k * (n - 1) <= _np.iinfo(_np.int64).max:
+        applications = int(_np.sum(segment_applications))
+    else:
+        applications = _builtins.sum(int(value) for value in segment_applications)
+    output_cells = (
+        k if _np.can_cast(indices.dtype, _np.dtype(_np.intp), casting="safe") else 0
+    )
+    return (applications, output_cells)
 
 
 @_counted_wrapper
 def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     """Cost-tracked ``ufunc.reduceat(a, indices, axis=...)``.
 
-    Cost is the honest per-segment application count from
-    :func:`_reduceat_applications_per_lane`, times the number of lanes
-    (every combination of indices in the axes other than ``axis``).
+    Cost is the larger of the honest per-segment application count and the
+    valid produced-cell floor from :func:`_reduceat_work_per_lane`, each
+    times the number of lanes (every combination of indices in the axes
+    other than ``axis``).
     Output symmetry is ``None``: arbitrary segment boundaries don't respect
     any axis-permutation group action.
     """
@@ -1923,6 +2175,8 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
+    _preflight_ufunc_out_arity(out, ufunc.nout)
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
     # Resolved here, BEFORE ``a`` is read for billing below, for the same
     # reason as ``_counted_ufunc_reduce_generic``: ``np.dtype()`` honours an
@@ -2024,9 +2278,15 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     if not (-a_view.ndim <= resolved_axis < a_view.ndim):
         raise _AxisError(resolved_axis, a_view.ndim)
     n = a_view.shape[resolved_axis]
-    applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
+    applications_per_lane, output_cells_per_lane = _reduceat_work_per_lane(
+        indices_snapshot, n
+    )
     lanes = a_view.size // n if n else 0
-    cost = _builtins.max(lanes * applications_per_lane, 1)
+    cost = _builtins.max(
+        lanes * applications_per_lane,
+        lanes * output_cells_per_lane,
+        1,
+    )
     # ``out=``'s billing view is captured here -- LAST, after every other
     # participant-controlled argument (``dtype=``, ``indices`` via
     # ``indices_snapshot``, and ``axis`` via ``resolved_axis``/the
@@ -2089,14 +2349,22 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         # form ``_resolve_reduceat_axis`` cannot pin down already raised,
         # above, before reaching this point -- there is no fallback to the
         # original ``axis`` object left to guard here.
-        result = _call_numpy(
-            ufunc.reduceat,
-            a_fwd,
-            indices_snapshot,
-            axis=resolved_axis,
-            out=out_fwd,
-            **kwargs,
+        result = _restore_foreign_ufunc_out_identity(
+            _call_ufunc_with_protocol_timing(
+                f"{ufunc.__name__}.reduceat",
+                ufunc.reduceat,
+                a_fwd,
+                indices_snapshot,
+                axis=resolved_axis,
+                out=out_fwd,
+                protocol_operands=(a_fwd, out_fwd),
+                **kwargs,
+            ),
+            out,
+            out_fwd,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=None)
 
 
@@ -2284,6 +2552,7 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             f"np.{ufunc.__name__}.at(...)."
         )
     budget = require_budget()
+    _preflight_ufunc_opt_out(a, *args)
     # ``indices`` can be many things: int, list of ints, ndarray, slice,
     # Ellipsis, or a tuple thereof (for multi-axis fancy indexing).
     # ``ufunc.at`` accepts all of these. ``_canonical_index`` resolves every
@@ -2345,6 +2614,8 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # participant report a cheap dtype to us while handing numpy something
     # pricier.
     def _resolve_at_operand(v):
+        if _static_array_ufunc_implementation(v) is None:
+            _raise_ufunc_opt_out(v)
         if isinstance(v, _np.ndarray):
             forward = _to_base_ndarray(v)
             return forward, _np.asarray(forward)
@@ -2442,21 +2713,20 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         shapes=(a_view.shape,) if hasattr(a_view, "shape") else (),
         dtypes=billing_dtypes,
     ):
-        # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
-        # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
-        # cannot list it either -- that set holds module-level function objects
-        # and ``at`` is a fresh bound method per ufunc. Record the write here.
-        # The refusal above keeps a tagged SymmetricTensor out of this path, but
-        # a plain alias of a tagged buffer reaches it, which is exactly the case
-        # a guard on tagged arrays cannot cover.
+        # A foreign NEP 13 callback may mutate and then raise, so the epoch
+        # must be advanced before the invocation rather than after it returns.
         note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
-        _call_numpy(
+        result = _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.at",
             ufunc.at,
             _to_base_ndarray(a),
             canonical,
             *forward_args,
+            protocol_operands=(a, *forward_args),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
 
 
@@ -2727,9 +2997,6 @@ def around(
 ) -> FlopscopeArray | Any:
     """Counted version of np.around. Cost = numel(output) FLOPs."""
     budget = require_budget()
-    # Above every later read of ``out`` -- the billing dtype, the
-    # symmetry check, and what gets returned -- and above the deduct,
-    # so a refused form costs nothing.
     out = _normalize_out(out, "around")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
@@ -2747,7 +3014,7 @@ def around(
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_with_optional_out(
+        result: Any = _call_with_optional_out(
             _np.around,
             a,
             decimals=decimals,
@@ -2841,9 +3108,6 @@ def round(
 ) -> FlopscopeArray | Any:
     """Counted version of np.round. Cost = numel(output) FLOPs."""
     budget = require_budget()
-    # Above every later read of ``out`` -- the billing dtype, the
-    # symmetry check, and what gets returned -- and above the deduct,
-    # so a refused form costs nothing.
     out = _normalize_out(out, "round")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
@@ -2861,7 +3125,7 @@ def round(
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_with_optional_out(
+        result: Any = _call_with_optional_out(
             _np.round,
             a,
             decimals=decimals,
@@ -3303,6 +3567,8 @@ def _counted_mean(np_func, op_name: str):
             return _wrap_result(result, out=out, symmetry=new_symmetry)  # type: ignore[return-value]
         return _wrap_result(result, symmetry=new_symmetry)  # type: ignore[return-value]
 
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -3395,6 +3661,8 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
             return _wrap_result(result, out=out, symmetry=new_symmetry)  # type: ignore[return-value]
         return _wrap_result(result, symmetry=new_symmetry)  # type: ignore[return-value]
 
+    wrapper.__name__ = op_name
+    wrapper.__qualname__ = op_name
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 

@@ -7,9 +7,14 @@ operations are dispatched to the server transparently.
 
 from __future__ import annotations
 
+import inspect
 import struct
+import sys
+import types
 import weakref
-from typing import Any
+from typing import Any, cast
+
+import msgpack
 
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
@@ -65,6 +70,111 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
     complex: "complex128",
 }
 
+_MISSING_DTYPE_ATTR = object()
+_MSGPACK_EXT_TYPE = vars(msgpack).get("ExtType")
+
+_SAFE_WIRE_KEY_TYPES = (type(None), bool, int, float, str, bytes, memoryview)
+
+
+def _trusted_client_dtype_name(spec: Any) -> str | None:
+    """Return a client dtype name without inspecting participant objects."""
+    dtypes = sys.modules.get("flopscope._dtypes")
+    if type(dtypes) is not types.ModuleType:
+        return None
+    dtype_type = vars(dtypes).get("_DType")
+    label_type = vars(dtypes).get("_DtypeLabel")
+    if type(dtype_type) is not type or type(label_type) is not type:
+        return None
+
+    if type(spec) is dtype_type or type(spec) is label_type:
+        name = object.__getattribute__(spec, "name")
+        return name if type(name) is str else None
+    return None
+
+
+def _is_static_descriptor(value: Any) -> bool:
+    """Whether *value* is a descriptor, without invoking it."""
+    return (
+        inspect.getattr_static(type(value), "__get__", _MISSING_DTYPE_ATTR)
+        is not _MISSING_DTYPE_ATTR
+    )
+
+
+def _static_dtype_string(
+    spec: Any, attr: str, *, allow_getset_descriptor: bool = False
+) -> str | None:
+    """Read an inert dtype attribute or reject a participant descriptor."""
+    raw = inspect.getattr_static(spec, attr, _MISSING_DTYPE_ATTR)
+    if raw is _MISSING_DTYPE_ATTR:
+        return None
+    if type(raw) is str:
+        return raw
+    if type(raw) is types.MemberDescriptorType:
+        try:
+            value = types.MemberDescriptorType.__get__(raw, spec, type(spec))
+        except AttributeError:
+            return None
+        return value if type(value) is str else None
+    if allow_getset_descriptor and type(raw) is types.GetSetDescriptorType:
+        value = types.GetSetDescriptorType.__get__(raw, spec, type(spec))
+        return value if type(value) is str else None
+    if _is_static_descriptor(raw):
+        from flopscope.errors import RemoteCallbackError
+
+        raise RemoteCallbackError(
+            f"dtype argument requires participant descriptor {attr!r}, which "
+            "the client/server backend cannot execute remotely"
+        )
+    return None
+
+
+def _loaded_numpy_dtype_name(spec: Any) -> str | None:
+    """Resolve a loaded NumPy dtype object without importing NumPy."""
+    numpy = sys.modules.get("numpy")
+    if type(numpy) is not types.ModuleType:
+        return None
+    dtype_type = vars(numpy).get("dtype")
+    if not _is_numpy_dtype_type(type(spec), dtype_type, numpy):
+        return None
+    return _static_dtype_string(spec, "name", allow_getset_descriptor=True)
+
+
+def _is_numpy_dtype_type(
+    spec_type: type, dtype_type: Any, numpy: types.ModuleType
+) -> bool:
+    """Whether *spec_type* is an exact dtype type exported by loaded NumPy."""
+    try:
+        type.__getattribute__(dtype_type, "__mro__")
+    except TypeError:
+        return False
+    if spec_type is dtype_type:
+        return True
+
+    dtypes = vars(numpy).get("dtypes")
+    if type(dtypes) is not types.ModuleType:
+        return False
+    for candidate in vars(dtypes).values():
+        try:
+            type.__getattribute__(candidate, "__mro__")
+        except TypeError:
+            continue
+        if spec_type is candidate:
+            return True
+    return False
+
+
+def _loaded_numpy_scalar_type_name(spec: Any) -> str | None:
+    """Resolve an exact NumPy scalar class without accepting lookalikes."""
+    if type(spec) is not type:
+        return None
+    numpy = sys.modules.get("numpy")
+    if type(numpy) is not types.ModuleType:
+        return None
+    name = type.__getattribute__(spec, "__name__")
+    if type(name) is str and vars(numpy).get(name) is spec:
+        return name
+    return None
+
 
 def _flatten_to_list(nested):
     """Flatten arbitrarily-nested lists (RemoteArray.tolist() output) to a flat list."""
@@ -97,18 +207,30 @@ def _resolve_dtype_wire_name(spec: Any) -> str | None:
     Exotic/unsupported dtypes (e.g. ``longdouble``, structured) return ``None``;
     the caller decides whether to reject or fall through.
     """
-    name = getattr(spec, "_flopscope_dtype_name", None)
-    if isinstance(name, str):
-        return name
-    if isinstance(spec, str):
+    if type(spec) is str:
         return _DTYPE_ALIASES.get(spec)
-    if isinstance(spec, type):
-        if spec in _PY_TYPE_TO_WIRE:
-            return _PY_TYPE_TO_WIRE[spec]
-        return _DTYPE_ALIASES.get(getattr(spec, "__name__", ""))
-    nm = getattr(spec, "name", None)
-    if isinstance(nm, str):
-        return _DTYPE_ALIASES.get(nm)
+
+    trusted = _trusted_client_dtype_name(spec)
+    if trusted is not None:
+        return _DTYPE_ALIASES.get(trusted)
+
+    for builtin_type, wire_name in _PY_TYPE_TO_WIRE.items():
+        if spec is builtin_type:
+            return wire_name
+
+    numpy_name = _loaded_numpy_scalar_type_name(spec)
+    if numpy_name is not None:
+        return _DTYPE_ALIASES.get(numpy_name)
+    numpy_name = _loaded_numpy_dtype_name(spec)
+    if numpy_name is not None:
+        return _DTYPE_ALIASES.get(numpy_name)
+
+    advertised = _static_dtype_string(spec, "_flopscope_dtype_name")
+    if advertised is not None:
+        return _DTYPE_ALIASES.get(advertised)
+    name = _static_dtype_string(spec, "name")
+    if name is not None:
+        return _DTYPE_ALIASES.get(name)
     return None
 
 
@@ -752,6 +874,18 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
         encoded_args = [_encode_arg(a) for a in args]
         encoded_kwargs = {k: _encode_arg(v) for k, v in kwargs.items()}
+        from flopscope import _describe_unserializable
+
+        bad = _describe_unserializable(encoded_args, encoded_kwargs)
+        if bad:
+            from flopscope.errors import RemoteSerializationError
+
+            detail = f" {bad}" if bad else ""
+            raise RemoteSerializationError(
+                f"{op_name}() received an argument{detail} that cannot be sent "
+                f"to the remote (client/server) backend. Pass a materialized "
+                f"array or built-in (list / number / str) instead."
+            )
         try:
             request = encode_request(op_name, args=encoded_args, kwargs=encoded_kwargs)
         except (TypeError, ValueError) as exc:
@@ -760,10 +894,8 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             # from msgpack (this is how the RemoteScalar bug surfaced). Surface
             # a clear error naming the offending type instead. Imported lazily
             # (error path only) to avoid a circular import: __init__ imports us.
-            from flopscope import _describe_unserializable
             from flopscope.errors import RemoteSerializationError
 
-            bad = _describe_unserializable(encoded_args, encoded_kwargs)
             detail = f" {bad}" if bad else ""
             raise RemoteSerializationError(
                 f"{op_name}() received an argument{detail} that cannot be sent "
@@ -1323,6 +1455,35 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
 # ---------------------------------------------------------------------------
 
 
+def _has_proxy_base(value: Any, proxy_type: type) -> bool:
+    """Check a proxy base class without consulting ``value.__class__``."""
+    return any(
+        base is proxy_type for base in type.__getattribute__(type(value), "__mro__")
+    )
+
+
+def _proxy_slot_value(value: Any, proxy_type: type, slot: str) -> Any:
+    """Read a trusted proxy slot without invoking subclass descriptors."""
+    descriptor = vars(proxy_type).get(slot)
+    if type(descriptor) is not types.MemberDescriptorType:
+        raise AssertionError(f"{proxy_type.__name__}.{slot} must be a slot")
+    try:
+        return types.MemberDescriptorType.__get__(descriptor, value, type(value))
+    except AttributeError as exc:
+        from flopscope.errors import RemoteSerializationError
+
+        raise RemoteSerializationError(
+            "Cannot serialize an uninitialized remote proxy to the "
+            "client/server backend"
+        ) from exc
+
+
+def _is_safe_wire_key(value: Any) -> bool:
+    """Whether inserting *value* into an encoded mapping cannot run user code."""
+    value_type = type(value)
+    return any(value_type is safe_type for safe_type in _SAFE_WIRE_KEY_TYPES)
+
+
 def _encode_arg(arg):
     """Recursively encode RemoteArray/RemoteScalar objects for wire transmission.
 
@@ -1332,31 +1493,61 @@ def _encode_arg(arg):
     - everything else passes through unchanged
 
     Note: RemoteScalar must be checked *before* RemoteArray because the
-    metaclass makes ``isinstance(RemoteScalar(...), RemoteArray)`` True.
+    RemoteArray metaclass considers it array-like.
     """
-    # Check RemoteScalar first (it passes isinstance RemoteArray due to metaclass)
-    if type(arg) is RemoteScalar:
-        return arg._value
-    if isinstance(arg, RemoteArray):
-        return {"__handle__": arg.handle_id}
-    if isinstance(arg, RemoteGenerator):
-        return {"__gen__": arg.handle_id}
-    if isinstance(arg, RemoteRandomState):
-        return {"__rs__": arg.handle_id}
-    if isinstance(arg, RemoteSeedSequence):
-        return {"__seq__": arg.handle_id}
+    # Check RemoteScalar first (it passes RemoteArray's metaclass check).
+    if _has_proxy_base(arg, RemoteScalar):
+        return _proxy_slot_value(arg, RemoteScalar, "_value")
+    if _has_proxy_base(arg, RemoteArray):
+        return {"__handle__": _proxy_slot_value(arg, RemoteArray, "_handle_id")}
+    if _has_proxy_base(arg, RemoteGenerator):
+        return {"__gen__": _proxy_slot_value(arg, RemoteGenerator, "_handle_id")}
+    if _has_proxy_base(arg, RemoteRandomState):
+        return {"__rs__": _proxy_slot_value(arg, RemoteRandomState, "_handle_id")}
+    if _has_proxy_base(arg, RemoteSeedSequence):
+        return {"__seq__": _proxy_slot_value(arg, RemoteSeedSequence, "_handle_id")}
     from flopscope._perm_group import SymmetryGroup
 
-    if isinstance(arg, SymmetryGroup):
-        return {"__symmetry_group__": arg.to_payload()}
+    if type(arg) is SymmetryGroup:
+        return {"__symmetry_group__": SymmetryGroup.to_payload(arg)}
+    if type(arg) is _MSGPACK_EXT_TYPE:
+        return arg
+    if _has_proxy_base(arg, list):
+        return [_encode_arg(item) for item in list.__iter__(arg)]
+    if _has_proxy_base(arg, tuple):
+        return [_encode_arg(item) for item in tuple.__iter__(arg)]
+    if _has_proxy_base(arg, dict):
+        encoded: dict[Any, Any] = {}
+        for key, value in dict.items(arg):
+            encoded_key = _encode_arg(key)
+            if not _is_safe_wire_key(encoded_key):
+                from flopscope.errors import RemoteSerializationError
+
+                raise RemoteSerializationError(
+                    "Cannot serialize a dictionary key that is not a safe "
+                    "wire scalar to the client/server backend"
+                )
+            encoded[encoded_key] = _encode_arg(value)
+        return encoded
+    if type(arg) is bool:
+        return arg
+    if type(arg) is not bytes and _has_proxy_base(arg, bytes):
+        return bytes(bytes.__iter__(cast(bytes, arg)))
+    if type(arg) is not bytearray and _has_proxy_base(arg, bytearray):
+        return bytearray(bytearray.__iter__(cast(bytearray, arg)))
+    if type(arg) is not int and _has_proxy_base(arg, int):
+        return int.__int__(cast(int, arg))
+    if type(arg) is not float and _has_proxy_base(arg, float):
+        return float.__float__(cast(float, arg))
     # Dtype-like args serialize to their canonical wire-name string: flopscope
     # dtype labels/objects, Python builtin types (``float``), numpy scalar types
     # (``np.float64``), and numpy dtype / new-style DType objects. Strings pass
     # through unchanged below (the server accepts dtype strings directly).
-    if not isinstance(arg, str):
-        _wire = _resolve_dtype_wire_name(arg)
-        if _wire is not None:
-            return _wire
-    if isinstance(arg, (list, tuple)):
-        return [_encode_arg(item) for item in arg]
+    if type(arg) is str:
+        return arg
+    if _has_proxy_base(arg, str):
+        return str.__str__(cast(str, arg))
+    _wire = _resolve_dtype_wire_name(arg)
+    if _wire is not None:
+        return _wire
     return arg

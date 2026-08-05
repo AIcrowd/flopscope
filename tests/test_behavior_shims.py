@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import flopscope.numpy as fnp
 
@@ -46,13 +47,22 @@ def test_count_nonzero_int_return_is_unconditional():
 
 # -------------------------------------------------------------------------
 # unique: string / complex input must return sorted values on all versions
+#
+# The shim's ``_UNSORTED_IN_NP_2_3`` set names four kinds (str 'U', bytes
+# 'S', object 'O', complex 'c'). U/S/O are now outside the numeric allowlist
+# the dtype ban enforces, so a string/bytes/object array can never reach
+# `unique` at all anymore -- the shim's re-sort branch is only reachable for
+# complex today. The string-exemplar tests below are converted to pin the
+# refusal instead; complex coverage is unaffected (complex is numeric).
 # -------------------------------------------------------------------------
 
 
-def test_unique_strings_returns_sorted():
+def test_unique_strings_are_refused():
+    from flopscope.errors import UnsupportedDtypeError
+
     arr = np.array(["banana", "apple", "cherry", "apple"])
-    result = fnp.unique(arr)
-    np.testing.assert_array_equal(result, np.array(["apple", "banana", "cherry"]))
+    with pytest.raises(UnsupportedDtypeError):
+        fnp.unique(arr)
 
 
 def test_unique_complex_returns_sorted():
@@ -69,24 +79,26 @@ def test_unique_numeric_sort_unaffected():
     np.testing.assert_array_equal(result, np.array([1.0, 2.0, 3.0]))
 
 
-def test_unique_with_return_index_delegates_to_numpy():
-    """Shim does not attempt to re-sort when auxiliary arrays are requested."""
+def test_unique_with_return_index_is_refused_for_strings():
+    """Shim does not attempt to re-sort when auxiliary arrays are requested
+    -- moot for strings now, since the operand itself is refused before the
+    shim's return_index branch is ever reached."""
+    from flopscope.errors import UnsupportedDtypeError
+
     arr = np.array(["b", "a", "c"])
-    values, idx = fnp.unique(arr, return_index=True)
-    # Shape / type consistency; actual order is whatever numpy returns.
-    assert values.shape == (3,)
-    assert idx.shape == (3,)
+    with pytest.raises(UnsupportedDtypeError):
+        fnp.unique(arr, return_index=True)
 
 
-def test_unique_shim_forced_for_strings(monkeypatch):
-    """Force the shim's code path to verify the re-sort on numpy <2.3 too."""
+def test_unique_shim_forced_for_strings_is_unreachable(monkeypatch):
+    """The re-sort shim's string branch used to be forceable on numpy <2.3
+    by faking ``_NUMPY_GE_2_3``; now the string operand is refused before
+    ``unique``'s body -- and so before that branch -- ever runs, regardless
+    of ``_NUMPY_GE_2_3``. Pins that the refusal wins the race, not the shim."""
     import flopscope._sorting_ops as _sorting_ops
+    from flopscope.errors import UnsupportedDtypeError
 
     monkeypatch.setattr(_sorting_ops, "_NUMPY_GE_2_3", True)
-    # Input order matters — fnp need something numpy would return unsorted
-    # if the 2.3+ behavior were active. Since fnp're on 2.2, the raw call
-    # sorts; our re-sort is a no-op. So test that the RESULT is sorted
-    # either way.
     arr = np.array(["banana", "apple", "cherry"])
-    result = _sorting_ops.unique(arr)
-    np.testing.assert_array_equal(result, np.array(["apple", "banana", "cherry"]))
+    with pytest.raises(UnsupportedDtypeError):
+        _sorting_ops.unique(arr)

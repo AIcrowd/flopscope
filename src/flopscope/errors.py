@@ -132,12 +132,17 @@ class UnsupportedFunctionError(FlopscopeError):
 
 
 class UnsupportedDtypeError(TypeError):
-    """An operation resolved to a dtype with no billing rate.
+    """An operation's dtype cannot be billed.
 
-    Raised when production dtype rates are active and the resolved
-    calculation dtype is a numeric type absent from the supported table
-    (a future dtype numpy or an extension package might introduce), or
-    when a complex-dtype call reaches an op marked complex-illegal.
+    Raised in three cases: (1) a participating dtype is non-numeric --
+    ``dtype.kind`` outside the numeric allowlist ``"biufc"`` (bool, integer,
+    float, complex), which covers object as well as string, bytes,
+    structured/void, datetime64, and timedelta64 -- refused regardless of
+    which weight table is loaded; (2) production dtype rates are active and
+    the resolved calculation dtype is a numeric type absent from the
+    supported table (a future dtype numpy or an extension package might
+    introduce); or (3) a complex-dtype call reaches an op marked
+    complex-illegal.
     """
 
 

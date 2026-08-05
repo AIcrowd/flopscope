@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 import sys as _sys
 import threading
 import time
@@ -71,8 +72,9 @@ class _OpTimer:
             result = _call_numpy(np_func, ...)
 
     On __exit__, the block's wall time is split into:
-      - backend duration: sum of _call_numpy durations reported during the block
-      - in-block overhead: block_duration - backend duration
+      - backend duration: direct _call_numpy durations reported during the block
+      - in-block overhead: the remainder after direct backend, already-recorded
+        nested flopscope work, and user callback time
     """
 
     __slots__ = (
@@ -80,6 +82,9 @@ class _OpTimer:
         "_op_index",
         "_block_t0",
         "_backend_duration_s",
+        "_backend_baseline",
+        "_overhead_baseline",
+        "_usercode_baseline",
         "_prev_timer",
     )
 
@@ -88,10 +93,16 @@ class _OpTimer:
         self._op_index = op_index
         self._block_t0: float | None = None
         self._backend_duration_s: float = 0.0
+        self._backend_baseline: float = 0.0
+        self._overhead_baseline: float = 0.0
+        self._usercode_baseline: float = 0.0
         self._prev_timer: _OpTimer | _DeferredOpTimer | None = None
 
     def __enter__(self) -> _OpTimer:
         self._block_t0 = time.perf_counter()
+        self._backend_baseline = self._budget._total_flopscope_backend_time
+        self._overhead_baseline = self._budget._total_flopscope_overhead_time
+        self._usercode_baseline = self._budget._total_user_code_time
         # Stack discipline supports the rare case of nested deduct() blocks
         self._prev_timer = self._budget._current_op_timer
         self._budget._current_op_timer = self
@@ -100,7 +111,13 @@ class _OpTimer:
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         if self._block_t0 is not None:
             block_duration = time.perf_counter() - self._block_t0
-            in_block_overhead = max(block_duration - self._backend_duration_s, 0.0)
+            nested = (
+                self._budget._total_flopscope_backend_time - self._backend_baseline
+            ) + (self._budget._total_flopscope_overhead_time - self._overhead_baseline)
+            user_code = self._budget._total_user_code_time - self._usercode_baseline
+            in_block_overhead = max(
+                block_duration - self._backend_duration_s - nested - user_code, 0.0
+            )
 
             self._budget._total_flopscope_backend_time += self._backend_duration_s
             self._budget._total_flopscope_overhead_time += in_block_overhead
@@ -158,6 +175,9 @@ class _DeferredOpTimer:
         "_cost",
         "_block_t0",
         "_backend_duration_s",
+        "_backend_baseline",
+        "_overhead_baseline",
+        "_usercode_baseline",
         "_prev_timer",
     )
 
@@ -180,6 +200,9 @@ class _DeferredOpTimer:
         self._cost: int | None = None
         self._block_t0: float | None = None
         self._backend_duration_s: float = 0.0
+        self._backend_baseline: float = 0.0
+        self._overhead_baseline: float = 0.0
+        self._usercode_baseline: float = 0.0
         self._prev_timer: _OpTimer | _DeferredOpTimer | None = None
 
     def set_cost(self, flop_cost: int) -> None:
@@ -197,17 +220,29 @@ class _DeferredOpTimer:
         rate 1.0 / complex factor 1.0 -- silently discounting float64 and
         complex inputs regardless of what the registry declares for the op.
         """
+        from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+        refuse_non_numeric_dtype(self._op_name, *dtypes)
         self._dtypes = dtypes
 
     def __enter__(self) -> _DeferredOpTimer:
         self._block_t0 = time.perf_counter()
+        self._backend_baseline = self._budget._total_flopscope_backend_time
+        self._overhead_baseline = self._budget._total_flopscope_overhead_time
+        self._usercode_baseline = self._budget._total_user_code_time
         self._prev_timer = self._budget._current_op_timer
         self._budget._current_op_timer = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         block_duration = time.perf_counter() - self._block_t0  # type: ignore[operator]
-        in_block_overhead = max(block_duration - self._backend_duration_s, 0.0)
+        nested = (
+            self._budget._total_flopscope_backend_time - self._backend_baseline
+        ) + (self._budget._total_flopscope_overhead_time - self._overhead_baseline)
+        user_code = self._budget._total_user_code_time - self._usercode_baseline
+        in_block_overhead = max(
+            block_duration - self._backend_duration_s - nested - user_code, 0.0
+        )
         # Pop first so a nested _call_numpy after this block attributes to the
         # restored (outer) timer, not this exited one.
         self._budget._current_op_timer = self._prev_timer
@@ -248,6 +283,136 @@ _MUTATES_FIRST_ARG = frozenset(
 )
 
 
+class _PythonCallbackTracker:
+    """Profile Python callback roots entered from one raw NumPy call frame."""
+
+    __slots__ = (
+        "_budget",
+        "_op_timer",
+        "_raw_numpy_call_frame_id",
+        "_previous_profile",
+        "_roots",
+        "_restoring",
+        "callback_wall_s",
+    )
+
+    def __init__(
+        self,
+        budget: BudgetContext,
+        op_timer: _OpTimer | _DeferredOpTimer,
+        raw_numpy_call_frame: Any,
+        previous_profile: Any,
+    ):
+        self._budget = budget
+        self._op_timer = op_timer
+        self._raw_numpy_call_frame_id = id(raw_numpy_call_frame)
+        self._previous_profile = previous_profile
+        self._roots: dict[Any, tuple[float, float, float, float, float]] = {}
+        self._restoring = False
+        self.callback_wall_s = 0.0
+
+    def __call__(self, frame: Any, event: str, arg: Any) -> None:
+        if self._restoring:
+            return
+        if event == "call" and id(frame.f_back) == self._raw_numpy_call_frame_id:
+            self._roots[frame] = (
+                time.perf_counter(),
+                self._budget._total_flopscope_backend_time,
+                self._budget._total_flopscope_overhead_time,
+                self._budget._total_user_code_time,
+                self._op_timer._backend_duration_s,
+            )
+        try:
+            if self._previous_profile is not None:
+                self._previous_profile(frame, event, arg)
+        finally:
+            if not self._restoring and _sys.getprofile() is not self:
+                _sys.setprofile(self)
+            if event == "return":
+                snapshot = self._roots.pop(frame, None)
+                if snapshot is not None:
+                    t0, backend0, overhead0, user_code0, timer_backend0 = snapshot
+                    wall = time.perf_counter() - t0
+                    nested = (self._budget._total_flopscope_backend_time - backend0) + (
+                        self._budget._total_flopscope_overhead_time - overhead0
+                    )
+                    nested += (self._budget._total_user_code_time - user_code0) + (
+                        self._op_timer._backend_duration_s - timer_backend0
+                    )
+                    self.callback_wall_s += wall
+                    self._budget._total_user_code_time += max(wall - nested, 0.0)
+
+
+def _call_numpy_impl(
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    track_python_callbacks: bool,
+) -> Any:
+    """Shared implementation for raw NumPy calls with optional callback timing."""
+    out = kwargs.get("out")
+    if out is not None:
+        note_write(out)
+    if fn in _MUTATES_FIRST_ARG and args:
+        note_write(args[0])
+
+    budget = get_active_budget()
+    op_timer = budget._current_op_timer if budget is not None else None
+    tracker: _PythonCallbackTracker | None = None
+    previous_profile: Any = None
+    fallback_backend0 = 0.0
+    fallback_overhead0 = 0.0
+    fallback_user_code0 = 0.0
+    fallback_timer_backend0 = 0.0
+    non_callable_profiler_fallback = False
+    t0: float | None = None
+    try:
+        if track_python_callbacks and budget is not None and op_timer is not None:
+            previous_profile = _sys.getprofile()
+            if previous_profile is None or callable(previous_profile):
+                tracker = _PythonCallbackTracker(
+                    budget, op_timer, _sys._getframe(), previous_profile
+                )
+                _sys.setprofile(tracker)
+            else:
+                non_callable_profiler_fallback = True
+                fallback_backend0 = budget._total_flopscope_backend_time
+                fallback_overhead0 = budget._total_flopscope_overhead_time
+                fallback_user_code0 = budget._total_user_code_time
+                fallback_timer_backend0 = op_timer._backend_duration_s
+        t0 = time.perf_counter()
+        return fn(*args, **kwargs)
+    finally:
+        duration = 0.0
+        try:
+            duration = time.perf_counter() - t0 if t0 is not None else 0.0
+        finally:
+            if tracker is not None:
+                tracker._restoring = True
+                try:
+                    tracker._roots.clear()
+                    tracker._previous_profile = None
+                finally:
+                    _sys.setprofile(previous_profile)
+        if tracker is not None:
+            assert op_timer is not None
+            op_timer._backend_duration_s += max(duration - tracker.callback_wall_s, 0.0)
+        elif non_callable_profiler_fallback:
+            assert budget is not None and op_timer is not None
+            already_classified = (
+                budget._total_flopscope_backend_time - fallback_backend0
+            ) + (budget._total_flopscope_overhead_time - fallback_overhead0)
+            already_classified += (
+                budget._total_user_code_time - fallback_user_code0
+            ) + (op_timer._backend_duration_s - fallback_timer_backend0)
+            op_timer._backend_duration_s += max(duration - already_classified, 0.0)
+        else:
+            budget = get_active_budget()
+            if budget is not None and budget._current_op_timer is not None:
+                budget._current_op_timer._backend_duration_s += duration
+
+
 def _call_numpy(fn: Any, *args: Any, **kwargs: Any) -> Any:
     """Invoke a numpy callable, attributing only its wall time to backend time.
 
@@ -263,19 +428,23 @@ def _call_numpy(fn: Any, *args: Any, **kwargs: Any) -> Any:
     convention used by ``_call_with_optional_out``. Wrappers' explicit return
     annotations carry the public type contract.
     """
-    out = kwargs.get("out")
-    if out is not None:
-        note_write(out)
-    if fn in _MUTATES_FIRST_ARG and args:
-        note_write(args[0])
-    t0 = time.perf_counter()
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        d = time.perf_counter() - t0
-        budget = get_active_budget()
-        if budget is not None and budget._current_op_timer is not None:
-            budget._current_op_timer._backend_duration_s += d
+    return _call_numpy_impl(fn, args, kwargs, track_python_callbacks=False)
+
+
+def _call_numpy_with_python_callbacks(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Invoke NumPy while filing direct Python protocol callbacks as residual.
+
+    While a counted operation's timer is active, temporarily profiles Python
+    frames entered directly from this raw NumPy call. Their full wall time is
+    removed from the outer backend duration, while only their non-nested
+    flopscope time is added to the user-code bucket used by
+    ``_counted_wrapper``. Outside an active timed op this is a transparent
+    passthrough, just like ``_call_numpy``. If CPython exposes a non-callable
+    active C profiler, unclassified callback time remains backend because the
+    C callback cannot be safely multiplexed with a Python profile hook; nested
+    work keeps its original timing classification.
+    """
+    return _call_numpy_impl(fn, args, kwargs, track_python_callbacks=True)
 
 
 def _call_user_code(budget: BudgetContext, fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -303,6 +472,285 @@ def _call_user_code(budget: BudgetContext, fn: Any, *args: Any, **kwargs: Any) -
         budget._total_user_code_time += max(wall - nested, 0.0)
 
 
+#: Per-function cache of ``inspect.signature(fn)``, keyed by function
+#: identity. Used to detect a POSITIONALLY-passed ``dtype=`` (e.g.
+#: ``zeros(shape, object)``); each wrapped function's signature is fixed
+#: for the life of the process, so this is paid once per wrapper, not once
+#: per call.
+_SIGNATURE_CACHE: dict[Any, inspect.Signature | None] = {}
+
+#: Sentinel distinguishing "no dtype= argument at all" from "dtype=None was
+#: passed explicitly": ``None`` is numpy's own "no override" default and
+#: must fall through unrefused, while a genuinely absent argument never
+#: needs to be checked.
+_NO_DTYPE = object()
+
+#: The base ``ndarray.dtype`` getset descriptor, captured once so
+#: ``_refuse_non_numeric_operands`` can read an array's real dtype directly
+#: rather than through ordinary attribute lookup. Plain ``value.dtype``
+#: resolves through ``type(value)``'s MRO, and a ``np.ndarray`` subclass
+#: can shadow the C-level slot with its own Python ``@property`` -- calling
+#: the base class's descriptor via ``__get__`` bypasses that MRO entry and
+#: reads the real dtype unconditionally.
+_NDARRAY_DTYPE_DESCRIPTOR = _np.ndarray.dtype
+
+#: Depth cap for ``_refuse_non_numeric_operands``'s list/tuple scan. Deep enough
+#: for any legitimate nesting flopscope's own wrappers pass around, but
+#: well below Python's recursion limit, so a self-referential container
+#: (``a = []; a.append(a)``) cannot turn the scan into a ``RecursionError``
+#: -- it just stops looking, and NumPy's own construction raises its usual
+#: ``ValueError`` instead.
+_DTYPE_SCAN_MAX_DEPTH = 64
+
+
+def _resolve_dtype_kwarg_value(fn: Any, args: tuple, kwargs: dict) -> Any:
+    """Return the effective ``dtype=`` argument bound to *fn*'s call, however
+    it was supplied -- keyword (the common case) or positional (e.g. the
+    array-creation family's ``zeros(shape, dtype)`` slot). Returns
+    ``_NO_DTYPE`` when no ``dtype`` parameter was supplied or the binding
+    cannot be determined (mismatched arity, an ``fn`` signature that cannot
+    be introspected, ...) -- callers must treat that identically to "no
+    dtype requested" rather than raising here, since a malformed call should
+    surface numpy's/the wrapper's own error, not a speculative one from this
+    backstop.
+    """
+    if "dtype" in kwargs:
+        return kwargs["dtype"]
+    try:
+        sig = _SIGNATURE_CACHE[fn]
+    except KeyError:
+        try:
+            sig = inspect.signature(fn)
+        except (TypeError, ValueError):
+            sig = None
+        _SIGNATURE_CACHE[fn] = sig
+    if sig is None or "dtype" not in sig.parameters:
+        # No `dtype` PARAMETER in fn's own signature at all -- true for most
+        # counted ops. A positional bind to a name absent from the signature
+        # is structurally impossible (a `**kwargs` catch-all stores under
+        # its own name, already handled by the `"dtype" in kwargs` check
+        # above), so skip `bind_partial` -- a real binding pass, not free --
+        # entirely in that case; that's the hot-path cost this cache exists
+        # to avoid.
+        return _NO_DTYPE
+    try:
+        bound = sig.bind_partial(*args, **kwargs)
+    except TypeError:
+        return _NO_DTYPE
+    return bound.arguments.get("dtype", _NO_DTYPE)
+
+
+#: Leaf types ``_is_inert_dtype_spec`` accepts inside a list/tuple dtype
+#: specifier without recursing further. Each is data, not a duck-typed
+#: proxy, so encountering one cannot run participant code -- unlike an
+#: object exposing a ``.dtype`` property, which is exactly what this
+#: check exists to keep untouched.
+_INERT_DTYPE_SPEC_LEAF_TYPES = (str, bytes, type, int, _np.dtype)
+
+
+def _is_inert_dtype_spec(value: Any, _depth: int = 0) -> bool:
+    """Return whether *value* is built only from plainly-inert leaves --
+    ``str``/``bytes``/``type``/``int``/``np.dtype``/``None``, or a
+    list/tuple nesting the same -- so resolving it with ``np.dtype()``
+    cannot run participant code.
+
+    A structured dtype spec is a list/tuple of field tuples, and a field's
+    format can itself be a nested structured spec or a subarray shape
+    tuple, so this recurses. Depth is capped the same as the operand scan:
+    legitimate specs are shallow, and a pathological one is declared
+    non-inert rather than walked unbounded.
+    """
+    if isinstance(value, _INERT_DTYPE_SPEC_LEAF_TYPES) or value is None:
+        return True
+    if isinstance(value, (list, tuple)):
+        if _depth >= _DTYPE_SCAN_MAX_DEPTH:
+            return False
+        return all(_is_inert_dtype_spec(item, _depth + 1) for item in value)
+    return False
+
+
+def _plain_dtype_like(value: Any) -> _np.dtype | None:
+    """Coerce *value* to a ``np.dtype`` WITHOUT touching a ``.dtype``
+    property.
+
+    A dtype-LIKE argument's ``.dtype`` can be a stateful property (a
+    duck-typed proxy numpy's own ``np.dtype()`` constructor accepts) that
+    must be resolved exactly once per call -- reading it here and letting
+    the op's own dtype-billing logic read it again could report a
+    different dtype the second time. Ops with their own correct ``dtype=``
+    handling own that single resolution; this backstop must not add another.
+
+    Only specifiers that are cheap and side-effect-free to resolve are
+    handled here: an actual ``np.dtype``, a dtype-code string, a numpy/
+    Python scalar type, ``None``, or a list/tuple structured-dtype
+    specifier built entirely from such inert leaves (see
+    ``_is_inert_dtype_spec``). A list/tuple with a non-inert leaf --
+    e.g. a duck-typed ``.dtype`` proxy nested inside a field spec -- is
+    left unresolved here for the same reason a bare one is: touching it
+    could run participant code. Anything else is left unchecked, for the
+    op's own resolution.
+    """
+    if isinstance(value, _np.dtype):
+        return value
+    try:
+        if isinstance(value, str):
+            return _np.dtype(value)
+        if isinstance(value, bytes):
+            # Accepted by np.dtype() at runtime (it decodes the code
+            # string), but neither the __new__ overloads nor
+            # numpy.typing.DTypeLike itself declare a bare `bytes` spec.
+            return _np.dtype(value)  # type: ignore[call-overload]
+        if isinstance(value, type):
+            return _np.dtype(value)
+        if value is None:
+            return _np.dtype(value)
+        if isinstance(value, (list, tuple)) and _is_inert_dtype_spec(value):
+            return _np.dtype(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _refuse_non_numeric_operands(
+    fn: Any, args: tuple, kwargs: dict, op_name: str
+) -> None:
+    """Backstop for ops whose ``dtypes=`` declaration never reaches
+    ``deduct()``'s non-numeric-dtype refusal.
+
+    ``op_name`` names the call for the error message and is a SEPARATE
+    parameter from ``fn`` -- deliberately, not just read off ``fn.__name__``.
+    Many wrappers are built by a factory that defines an inner closure named
+    generically (``def wrapper(...): ...``), decorates it, and only then
+    renames the DECORATED object returned by the decorator (``wrapper.
+    __name__ = op_name``, after ``@_counted_wrapper`` already ran). That
+    rename lands on a different object than ``fn`` -- the wrapped closure the
+    decorator captured -- so reading ``fn.__name__`` here would report the
+    closure's literal definition-time name (``"wrapper"``) forever, no
+    matter what the factory renames afterward. The caller passes the live
+    name of the object actually being called instead.
+
+    Two gaps land here, both upstream of any FLOP charge:
+
+    * Dtype-neutral movement ops (``reshape``, ``transpose``, ``copy``,
+      ``concatenate``, ``take``, ``choice``, ``permutation``, ...) declare
+      ``dtypes=()`` because their cost genuinely does not depend on dtype --
+      but that also means a non-numeric-dtype operand they relocate never
+      reaches any dtype check at all.
+    * Array-creation ops (``zeros``, ``empty``, ``asarray``, ``stack``, ...)
+      can be asked to manufacture a non-numeric array directly via a
+      ``dtype=`` argument the wrapper never folds into its billing
+      ``dtypes`` tuple.
+      Only specifiers ``_plain_dtype_like`` can resolve without touching a
+      ``.dtype`` property are caught here -- an ``np.dtype``, a dtype-code
+      string, a type, ``None``, or an inert list/tuple structured spec.
+      A dtype-LIKE object whose own ``.dtype`` is a property is left to the
+      op's own resolution, which for ``zeros``/``empty`` does not exist.
+
+    Only genuine ``np.ndarray`` instances are inspected, and only through
+    ``_NDARRAY_DTYPE_DESCRIPTOR`` rather than plain attribute access:
+
+    * flopscope's own internals pass ordinary non-array defaults through
+      counted wrappers (e.g. ``linalg.norm``'s ``ord=None``), and
+      ``np.asarray(None)`` is itself an object-dtype 0-d array -- coercing
+      every argument via ``np.asarray``/``np.dtype`` would refuse perfectly
+      ordinary calls.
+    * A caller can hand this check any object exposing a ``.dtype``
+      property, and plain ``getattr`` would run that property's body as a
+      side effect of the ban's own check, whether or not the check
+      ultimately raises. A ``np.ndarray`` subclass can also shadow the
+      C-level ``dtype`` slot with such a property, so even a type-gated
+      ``value.dtype`` isn't safe -- reading through the base descriptor's
+      own ``__get__`` bypasses the subclass's MRO entry and returns the
+      real dtype unconditionally.
+    """
+    from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+    # `scanned`: every container id this scan has already fully walked, kept
+    # for the whole call so a container reachable by more than one path (a
+    # shared, non-cyclic sublist) is not walked again -- it is the same
+    # object with the same contents each time, so the one walk that runs the
+    # first time it is reached already finds anything inside it.
+    scanned: set[int] = set()
+    # `active`: container ids currently on the recursion path (added before
+    # descending, removed on the way back out). A container whose id is
+    # already `active` is its own ancestor -- a genuine cycle, not merely a
+    # shared reference -- and cannot be realized as an array at all. NumPy's
+    # own construction would reach the same conclusion, but only after
+    # exploring every branch down to its own dimension limit, which is
+    # exponential in depth for a container with more than one self-reference;
+    # raising here reaches the same outcome without that cost.
+    active: set[int] = set()
+
+    def check(value: Any, _depth: int = 0) -> None:
+        if isinstance(value, _np.ndarray):
+            refuse_non_numeric_dtype(op_name, _NDARRAY_DTYPE_DESCRIPTOR.__get__(value))
+        elif isinstance(value, (list, tuple)) and _depth < _DTYPE_SCAN_MAX_DEPTH:
+            marker = id(value)
+            if marker in active:
+                raise ValueError(
+                    f"{op_name}: cannot construct an array from a "
+                    "self-referential sequence"
+                )
+            if marker in scanned:
+                return
+            scanned.add(marker)
+            active.add(marker)
+            try:
+                for item in value:
+                    check(item, _depth + 1)
+            finally:
+                active.discard(marker)
+
+    dtype_kwarg = _resolve_dtype_kwarg_value(fn, args, kwargs)
+    if dtype_kwarg is not _NO_DTYPE and dtype_kwarg is not None:
+        plain = _plain_dtype_like(dtype_kwarg)
+        if plain is not None:
+            refuse_non_numeric_dtype(op_name, plain)
+
+    for value in args:
+        check(value)
+    for key, value in kwargs.items():
+        if key != "dtype":
+            check(value)
+
+
+def refuse_non_numeric_source(op_name: str, value: Any) -> None:
+    """Refuse *value* if it carries a non-numeric dtype, without ever
+    casting a payload through a numeric dtype to find out.
+
+    Complements ``_refuse_non_numeric_operands`` above: that backstop only
+    recognizes a non-numeric array already boxed as ``np.ndarray`` (or
+    nested inside a list/tuple looking for one) -- it deliberately does not
+    realize a bare payload or a raw Python sequence of them, since doing
+    that for every argument of every counted op would cost a full array
+    conversion on the hot path for no reason. Call sites that are about to
+    cast a genuinely uninspected source through a dtype -- a fill value, a
+    distribution parameter, a materialized iterator -- call this at that one
+    point instead.
+
+    Recognized scalar types (``None``, ``bool``, ``int``, ``float``,
+    ``complex``, ``str``, ``bytes``, a numpy scalar) are skipped untouched --
+    ``np.asarray(None)`` is itself an object-dtype 0-d array, so probing
+    every ordinary default would refuse perfectly normal calls, the same
+    trap ``_refuse_non_numeric_operands`` avoids. A genuine ``np.ndarray`` is
+    checked directly through the base ``dtype`` descriptor, so a hostile
+    subclass cannot shadow it. Anything else -- a bare payload object, or a
+    list/tuple of them -- is realized with a dtype-free ``np.asarray()``,
+    which stores object pointers rather than casting, so no per-element
+    caller code runs before the check.
+    """
+    if value is None or isinstance(
+        value, (bool, int, float, complex, str, bytes, _np.generic)
+    ):
+        return
+    from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+    if isinstance(value, _np.ndarray):
+        refuse_non_numeric_dtype(op_name, _NDARRAY_DTYPE_DESCRIPTOR.__get__(value))
+        return
+    refuse_non_numeric_dtype(op_name, _np.asarray(value).dtype)
+
+
 def _counted_wrapper(fn):
     """Decorator that brackets a flopscope wrapper and bills its non-numpy,
     non-nested-overhead time to flopscope_overhead_time_s.
@@ -312,6 +760,11 @@ def _counted_wrapper(fn):
 
     Per-op attribution: wrapper-own overhead is distributed equally across
     ops created during this call (typically exactly 1 across this codebase).
+
+    Also runs ``_refuse_non_numeric_operands`` as the first thing inside the
+    timed block -- see its docstring. This fires for every registered op,
+    not just billed ones: even a 0-FLOP op like ``zeros`` can be asked to
+    manufacture a non-numeric array, which the cost model cannot price.
     """
 
     @functools.wraps(fn)
@@ -325,6 +778,12 @@ def _counted_wrapper(fn):
         usercode_baseline = budget._total_user_code_time
         ops_before = len(budget._op_log)
         try:
+            # wrapped.__name__, not fn.__name__: a factory that renames its
+            # returned wrapper after decorating (`wrapper.__name__ = op_name`)
+            # renames THIS object, not the closure `fn` still refers to --
+            # see _refuse_non_numeric_operands's docstring. Read live, at call
+            # time, so it reflects whatever the factory's rename left behind.
+            _refuse_non_numeric_operands(fn, args, kwargs, wrapped.__name__)
             return fn(*args, **kwargs)
         finally:
             wall = time.perf_counter() - fs_t0
@@ -800,6 +1259,9 @@ class BudgetContext:
                 f"deduct({op_name!r}): dtypes= is required; pass () for a "
                 "dtype-neutral op"
             )
+        from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+        refuse_non_numeric_dtype(op_name, *dtypes)
         fs_t0 = time.perf_counter()
         n0 = len(self._op_log)
         try:
@@ -843,6 +1305,9 @@ class BudgetContext:
                 f"deduct({op_name!r}): dtypes= is required; pass () for a "
                 "dtype-neutral op"
             )
+        from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+        refuse_non_numeric_dtype(op_name, *dtypes)
         return _DeferredOpTimer(
             self,
             op_name,

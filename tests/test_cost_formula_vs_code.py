@@ -161,9 +161,16 @@ def test_isclose_numel(we):
     assert _cost_of(we.isclose, a, a) == 6 * 100  # 6/elem tolerance core
 
 
-def test_isnat_numel(we):
+def test_isnat_refuses_its_only_valid_input_dtype(we):
+    """isnat's sole valid input kind is datetime64/timedelta64 -- both
+    outside the numeric allowlist, so every real call is now refused before
+    a cost formula ever runs; there is no numeric substitute for an op whose
+    entire domain is non-numeric."""
+    from flopscope.errors import UnsupportedDtypeError
+
     dt = numpy.array(["2024-01-01", "2024-01-02"], dtype="datetime64")
-    assert _cost_of(we.isnat, dt) == 2
+    with pytest.raises(UnsupportedDtypeError):
+        _cost_of(we.isnat, dt)
 
 
 # ---------------------------------------------------------------------------
