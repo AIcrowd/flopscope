@@ -722,9 +722,9 @@ def _refuse_non_numeric_operands(
 def refuse_non_numeric_source(op_name: str, value: Any) -> _np.dtype:
     """Return *value*'s dtype, refusing non-numeric array-like sources.
 
-    The returned dtype is the safe, actual pre-cast dtype obtained while
-    checking the source, without ever casting a payload through a numeric
-    dtype to find out.
+    The return is the actual pre-cast dtype for NumPy arrays, NumPy scalars,
+    and array-likes, or a representative dtype for exempt Python scalar
+    categories. No payload is cast through a numeric dtype to find out.
 
     Complements ``_refuse_non_numeric_operands`` above: that backstop only
     recognizes a non-numeric array already boxed as ``np.ndarray`` (or
