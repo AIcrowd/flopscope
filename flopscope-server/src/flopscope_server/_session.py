@@ -203,7 +203,20 @@ class Session:
             namespace is not None
             for namespace in budget_breakdown.get("by_namespace", {})
         )
-        budget_summary = self._budget_ctx.summary(by_namespace=show_namespaces)
+        from flopscope._display import _format_budget_summary_text
+
+        budget_summary = _format_budget_summary_text(
+            budget_breakdown,
+            by_namespace=show_namespaces,
+            header=(
+                "flopscope FLOP Budget Summary"
+                + (
+                    f" [{self._budget_ctx.namespace}]"
+                    if self._budget_ctx.namespace
+                    else ""
+                )
+            ),
+        )
         comms_summary = self._comms_tracker.summary()
         # The array + generator stores are owned by the connection, not the
         # session, so they are intentionally NOT cleared here — module-level

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import msgpack
 import pytest
 from flopscope_server._request_handler import RequestHandler
@@ -12,6 +14,30 @@ import flopscope
 from flopscope._budget import get_active_budget
 
 TOKEN = "test-control-token"
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.ns = 0
+
+    def tick(self, ns: int) -> None:
+        self.ns += ns
+
+    def perf_counter_ns(self) -> int:
+        return self.ns
+
+    def perf_counter(self) -> float:
+        return self.ns / 1e9
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    import flopscope_server._server as server_module
+
+    clock = FakeClock()
+    monkeypatch.setattr(server_module, "perf_counter_ns", clock.perf_counter_ns)
+    monkeypatch.setattr(flopscope._budget.time, "perf_counter", clock.perf_counter)
+    return clock
 
 
 @pytest.fixture(autouse=True)
@@ -271,6 +297,113 @@ def test_active_scope_is_only_active_context(
         response["display_totals"]["client_context_compute_ns"]
         == (server._session.comms_tracker.summary()["total_compute_time_ns"])
     )
+
+
+def test_summary_outer_overhead_appears_once_in_next_snapshot(
+    fake_clock, monkeypatch
+) -> None:
+    import flopscope_server._server as server_module
+
+    import flopscope._budget as core_budget
+
+    active_server = FlopscopeServer()
+    _open_direct(active_server)
+    _charge_direct(active_server, 7)
+    original_decode = server_module.decode_request
+    original_snapshot = core_budget._accumulator.snapshot
+    original_encode = server_module.encode_budget_summary_response
+
+    def decode(raw):
+        fake_clock.tick(2_000_000)
+        return original_decode(raw)
+
+    def snapshot(*args, **kwargs):
+        fake_clock.tick(3_000_000)
+        return original_snapshot(*args, **kwargs)
+
+    def encode(*args, **kwargs):
+        fake_clock.tick(5_000_000)
+        return original_encode(*args, **kwargs)
+
+    monkeypatch.setattr(server_module, "decode_request", decode)
+    monkeypatch.setattr(core_budget._accumulator, "snapshot", snapshot)
+    monkeypatch.setattr(server_module, "encode_budget_summary_response", encode)
+
+    first = _request(active_server, scope="session")["result"]
+    second = _request(active_server, scope="session")["result"]
+    third = _request(active_server, scope="session")["result"]
+
+    first_overhead = first["flopscope_overhead_time_s"]
+    delta_2 = second["flopscope_overhead_time_s"] - first_overhead
+    delta_3 = third["flopscope_overhead_time_s"] - second["flopscope_overhead_time_s"]
+    assert delta_2 == pytest.approx(0.010)
+    assert delta_3 == pytest.approx(delta_2)
+
+
+def test_between_session_summary_does_not_mutate_closed_aggregate(
+    server_with_closed_cost,
+) -> None:
+    closed_server = server_with_closed_cost
+    before = _request(closed_server, scope="session")["result"]
+    _request(closed_server, scope="session")
+    after = _request(closed_server, scope="session")["result"]
+    assert after == before
+
+
+def test_unknown_duration_is_rejected_and_not_attributed(
+    server_with_closed_and_active_cost,
+) -> None:
+    active_server = server_with_closed_and_active_cost
+    assert active_server._session is not None
+    before = active_server._session.budget_context.flopscope_overhead_time_s
+    response = _request(active_server, duration_s=1000.0)
+    after = active_server._session.budget_context.flopscope_overhead_time_s
+    assert response["error_type"] == "InvalidRequestError"
+    assert after == before
+
+
+def test_summary_serialization_failure_is_encoded_and_recorded_once(
+    server_with_closed_and_active_cost, monkeypatch
+) -> None:
+    import flopscope_server._server as server_module
+
+    active_server = server_with_closed_and_active_cost
+    monkeypatch.setattr(
+        server_module,
+        "encode_budget_summary_response",
+        lambda *a, **k: (_ for _ in ()).throw(TypeError("boom")),
+    )
+    assert active_server._session is not None
+    before = active_server._session.comms_tracker.summary()["request_count"]
+    response = _request(active_server)
+    after = active_server._session.comms_tracker.summary()["request_count"]
+    assert response["error_type"] == "FlopscopeServerError"
+    assert "TypeError" in response["message"]
+    assert after == before + 1
+
+
+def test_close_uses_one_final_mapping_and_includes_prior_summary_overhead(
+    server_with_closed_and_active_cost, monkeypatch
+) -> None:
+    server = server_with_closed_and_active_cost
+    assert server._session is not None
+    _request(server, scope="active_context")
+    context = server._session.budget_context
+    committed_before_close = context.flopscope_overhead_time_s
+    wrapped = MagicMock(wraps=context.summary_dict)
+    monkeypatch.setattr(context, "summary_dict", wrapped)
+
+    response = msgpack.unpackb(
+        server._handle_budget_close(0, 0),
+        raw=False,
+        strict_map_key=False,
+    )
+    breakdown = response["result"]["budget_breakdown"]
+    text = response["result"]["budget_summary"]
+    assert wrapped.call_count == 1
+    assert breakdown["flopscope_overhead_time_s"] >= committed_before_close
+    assert f"{breakdown['flops_used']:,}" in text
+    assert all(name in text for name in breakdown["operations"])
 
 
 def test_reset_requires_control_token(closed_token_server) -> None:

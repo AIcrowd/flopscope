@@ -1104,6 +1104,17 @@ def test_timing_only_activity_advances_summary_generation() -> None:
     assert ctx._rollup_generation == rollup_generation
 
 
+def test_external_summary_overhead_is_generation_tracked() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    generation = ctx._summary_generation
+    ctx._record_external_flopscope_overhead(0.25)
+    assert ctx.flopscope_overhead_time_s == pytest.approx(0.25)
+    assert ctx._summary_generation > generation
+    assert ctx._has_unrecorded_activity()
+
+
 def test_summary_overhead_is_not_retroactive() -> None:
     from flopscope._budget import BudgetContext
 

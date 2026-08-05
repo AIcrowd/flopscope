@@ -1405,6 +1405,10 @@ class BudgetContext:
         self._total_flopscope_overhead_time += duration_s
         self._advance_summary_generation()
 
+    def _record_external_flopscope_overhead(self, duration_s: float) -> None:
+        if duration_s > 0.0:
+            self._add_flopscope_overhead(duration_s)
+
     @_summary_locked
     def _append_op_record(self, record: OpRecord) -> int:
         self._op_log.append(record)
