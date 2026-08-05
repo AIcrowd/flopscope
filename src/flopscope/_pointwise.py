@@ -534,6 +534,14 @@ def _restore_foreign_ufunc_out_identity(result, out, stripped):
                     out, stripped, value, strict=True
                 )
             )
+        elif (
+            type(value) is tuple
+            and not isinstance(out, tuple)
+            and not isinstance(stripped, tuple)
+            and len(value) == 1
+            and value[0] is stripped
+        ):
+            value = (out,)
         elif out is not None and value is stripped:
             value = out
         return _ForeignUfuncResult(value)

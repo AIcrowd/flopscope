@@ -923,6 +923,14 @@ class _SymmetricOutProtocolDuck:
         return self.result
 
 
+class _OutTupleReturningSymmetricOutProtocolDuck(_SymmetricOutProtocolDuck):
+    """Foreign participant that returns NumPy's canonical single-out tuple."""
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        super().__array_ufunc__(ufunc, method, *inputs, **kwargs)
+        return self.seen_out
+
+
 class _ForeignTuple(tuple):
     pass
 
@@ -1149,6 +1157,32 @@ def test_foreign_ufunc_writes_and_returns_symmetric_out():
     assert np.shares_memory(duck.seen_out[0], np.asarray(out))
     assert result is out
     np.testing.assert_array_equal(np.asarray(out), np.asarray(symmetric_input) + 10.0)
+
+
+def test_foreign_ufunc_preserves_single_output_tuple_identity():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    values = np.array([[1.0, 2.0], [2.0, 3.0]])
+
+    raw_out = np.zeros((2, 2))
+    raw_result = np.add(
+        values,
+        _OutTupleReturningSymmetricOutProtocolDuck(10.0),
+        out=raw_out,
+    )
+
+    symmetric_input = flops.symmetrize(fnp.array(values), symmetry=symmetry)
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(
+                symmetric_input,
+                _OutTupleReturningSymmetricOutProtocolDuck(10.0),
+                out=out,
+            )
+
+    assert type(raw_result) is tuple and raw_result[0] is raw_out
+    assert type(result) is tuple and result[0] is out
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(raw_out))
 
 
 @pytest.mark.parametrize(
