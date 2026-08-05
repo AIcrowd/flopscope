@@ -139,7 +139,9 @@ def _loaded_numpy_dtype_name(spec: Any) -> str | None:
     return _static_dtype_string(spec, "name", allow_getset_descriptor=True)
 
 
-def _is_numpy_dtype_type(spec_type: type, dtype_type: Any, numpy: types.ModuleType) -> bool:
+def _is_numpy_dtype_type(
+    spec_type: type, dtype_type: Any, numpy: types.ModuleType
+) -> bool:
     """Whether *spec_type* is an exact dtype type exported by loaded NumPy."""
     try:
         type.__getattribute__(dtype_type, "__mro__")
@@ -172,6 +174,7 @@ def _loaded_numpy_scalar_type_name(spec: Any) -> str | None:
     if type(name) is str and vars(numpy).get(name) is spec:
         return name
     return None
+
 
 def _flatten_to_list(nested):
     """Flatten arbitrarily-nested lists (RemoteArray.tolist() output) to a flat list."""
@@ -1455,8 +1458,7 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
 def _has_proxy_base(value: Any, proxy_type: type) -> bool:
     """Check a proxy base class without consulting ``value.__class__``."""
     return any(
-        base is proxy_type
-        for base in type.__getattribute__(type(value), "__mro__")
+        base is proxy_type for base in type.__getattribute__(type(value), "__mro__")
     )
 
 

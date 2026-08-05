@@ -113,9 +113,7 @@ class _OpTimer:
             block_duration = time.perf_counter() - self._block_t0
             nested = (
                 self._budget._total_flopscope_backend_time - self._backend_baseline
-            ) + (
-                self._budget._total_flopscope_overhead_time - self._overhead_baseline
-            )
+            ) + (self._budget._total_flopscope_overhead_time - self._overhead_baseline)
             user_code = self._budget._total_user_code_time - self._usercode_baseline
             in_block_overhead = max(
                 block_duration - self._backend_duration_s - nested - user_code, 0.0
@@ -335,18 +333,22 @@ class _PythonCallbackTracker:
                 if snapshot is not None:
                     t0, backend0, overhead0, user_code0, timer_backend0 = snapshot
                     wall = time.perf_counter() - t0
-                    nested = (
-                        self._budget._total_flopscope_backend_time - backend0
-                    ) + (self._budget._total_flopscope_overhead_time - overhead0)
-                    nested += (
-                        self._budget._total_user_code_time - user_code0
-                    ) + (self._op_timer._backend_duration_s - timer_backend0)
+                    nested = (self._budget._total_flopscope_backend_time - backend0) + (
+                        self._budget._total_flopscope_overhead_time - overhead0
+                    )
+                    nested += (self._budget._total_user_code_time - user_code0) + (
+                        self._op_timer._backend_duration_s - timer_backend0
+                    )
                     self.callback_wall_s += wall
                     self._budget._total_user_code_time += max(wall - nested, 0.0)
 
 
 def _call_numpy_impl(
-    fn: Any, args: tuple[Any, ...], kwargs: dict[str, Any], *, track_python_callbacks: bool
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    track_python_callbacks: bool,
 ) -> Any:
     """Shared implementation for raw NumPy calls with optional callback timing."""
     out = kwargs.get("out")

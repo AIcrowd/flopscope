@@ -506,7 +506,9 @@ def test_unset_dtype_slot_is_not_a_raw_attribute_error(monkeypatch):
 
 
 @pytest.mark.parametrize("proxy_type", [flopscope.RemoteScalar, flopscope.RemoteArray])
-def test_uninitialized_proxy_subclass_raises_serialization_error(proxy_type, monkeypatch):
+def test_uninitialized_proxy_subclass_raises_serialization_error(
+    proxy_type, monkeypatch
+):
     class ProxySubclass(proxy_type):
         pass
 

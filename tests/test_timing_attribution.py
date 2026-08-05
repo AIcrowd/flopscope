@@ -618,9 +618,9 @@ def test_nested_counted_callback_aware_call_is_not_double_counted_as_user_time(
     assert summary["residual_wall_time_s"] == pytest.approx(
         2 * callback_sleep, abs=1e-12
     ), summary
-    assert summary["wall_time_s"] == pytest.approx(
-        2 * callback_sleep, abs=1e-12
-    ), summary
+    assert summary["wall_time_s"] == pytest.approx(2 * callback_sleep, abs=1e-12), (
+        summary
+    )
     assert summary["wall_time_s"] == pytest.approx(
         summary["flopscope_backend_time_s"]
         + summary["flopscope_overhead_time_s"]

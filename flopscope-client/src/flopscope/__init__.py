@@ -169,18 +169,14 @@ _MSGPACK_SUBCLASS_BASES = (
 def _is_exact_msgpack_scalar(value: Any) -> bool:
     """Check msgpack scalar support without invoking participant hooks."""
     value_type = builtins.type(value)
-    return builtins.any(
-        value_type is supported_type for supported_type in _MSGPACK_OK
-    )
+    return builtins.any(value_type is supported_type for supported_type in _MSGPACK_OK)
 
 
 def _has_msgpack_subclass_base(value: Any) -> bool:
     """Recognize supported subclasses without invoking their protocols."""
     return builtins.any(
         mro_type is supported_type
-        for mro_type in builtins.type.__getattribute__(
-            builtins.type(value), "__mro__"
-        )
+        for mro_type in builtins.type.__getattribute__(builtins.type(value), "__mro__")
         for supported_type in _MSGPACK_SUBCLASS_BASES
     )
 
