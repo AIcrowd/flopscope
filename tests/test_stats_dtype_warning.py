@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 import pytest
 
-from flopscope._budget import BudgetContext
+from flopscope._budget import BudgetContext, refuse_non_numeric_source
 from flopscope._weights import load_weights
 from flopscope.errors import FlopscopeWarning
 from flopscope.stats import (
@@ -95,6 +95,27 @@ class _PoisonedMetadataArrayLike:
         self.array_calls.append(resolved_dtype)
         value = 8.0 if resolved_dtype is None else 0.5
         return np.array([value], dtype=resolved_dtype or np.float32)
+
+
+class _StatefulFloat(float):
+    """Float subclass whose conversion result changes on repeated access."""
+
+    def __new__(cls):
+        value = super().__new__(cls, 0.5)
+        value.float_calls = 0
+        return value
+
+    def __float__(self):
+        self.float_calls += 1
+        return 0.5 if self.float_calls == 1 else 8.0
+
+
+class _PoisonedDtypeFloat32(np.float32):
+    """NumPy scalar subclass whose public dtype metadata must not be touched."""
+
+    @property
+    def dtype(self):
+        raise AssertionError("overridden NumPy scalar dtype property was accessed")
 
 
 def _promotion_message(op_name: str, dtype_name: str) -> str:
@@ -194,6 +215,50 @@ def test_foreign_dtype_property_is_never_accessed():
     assert x.array_calls == [None, np.dtype(np.float64)]
     assert len(caught) == 1
     assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
+
+
+def test_python_float_subclass_is_not_coerced_during_dtype_inspection():
+    x = _StatefulFloat()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", FlopscopeWarning)
+        result = norm.pdf(x)
+
+    expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
+    np.testing.assert_allclose(np.asarray(result), expected, rtol=1e-15)
+    assert result.dtype == np.dtype(np.float64)
+    assert x.float_calls == 1
+    assert caught == []
+
+
+def test_numpy_scalar_subclass_dtype_override_is_never_accessed():
+    x = _PoisonedDtypeFloat32(0.5)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", FlopscopeWarning)
+        result = norm.pdf(x)
+
+    expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
+    np.testing.assert_allclose(np.asarray(result), expected, rtol=1e-15)
+    assert result.dtype == np.dtype(np.float64)
+    assert len(caught) == 1
+    assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
+
+
+@pytest.mark.parametrize(
+    "value,expected_type",
+    (
+        (True, np.bool_),
+        (1, np.int64),
+        (1.0, np.float64),
+        (1.0j, np.complex128),
+        ("text", np.str_),
+        (b"bytes", np.bytes_),
+        (None, np.object_),
+    ),
+)
+def test_source_guard_returns_representative_scalar_dtype(value, expected_type):
+    assert refuse_non_numeric_source("test.scalar", value).type is expected_type
 
 
 @pytest.mark.parametrize("dtype", (np.float64, np.longdouble, np.int32, np.bool_))

@@ -485,6 +485,11 @@ _SIGNATURE_CACHE: dict[Any, inspect.Signature | None] = {}
 #: needs to be checked.
 _NO_DTYPE = object()
 
+#: The base NumPy scalar ``dtype`` descriptor. A scalar subclass can shadow
+#: ``value.dtype`` with participant code just as an ndarray subclass can, so
+#: source validation reads the real dtype through this descriptor instead.
+_NP_GENERIC_DTYPE_DESCRIPTOR = _np.generic.dtype
+
 #: The base ``ndarray.dtype`` getset descriptor, captured once so
 #: ``_refuse_non_numeric_operands`` can read an array's real dtype directly
 #: rather than through ordinary attribute lookup. Plain ``value.dtype``
@@ -733,20 +738,31 @@ def refuse_non_numeric_source(op_name: str, value: Any) -> _np.dtype:
 
     Recognized scalar types (``None``, ``bool``, ``int``, ``float``,
     ``complex``, ``str``, ``bytes``, a numpy scalar) remain exempt from the
-    refusal and return their safely inferred dtype. ``np.asarray(None)`` is
-    itself an object-dtype 0-d array, so refusing every ordinary default would
-    reject perfectly normal calls, the same trap
-    ``_refuse_non_numeric_operands`` avoids. A genuine ``np.ndarray`` is
-    checked directly through the base ``dtype`` descriptor, so a hostile
-    subclass cannot shadow it. Anything else -- a bare payload object, or a
-    list/tuple of them -- is realized with a dtype-free ``np.asarray()``, which
-    stores object pointers rather than casting, so no per-element caller code
-    runs before the check.
+    refusal. Python scalars return a representative dtype selected only from
+    their type category, without coercing the value; NumPy scalars are read
+    through the base ``np.generic.dtype`` descriptor. A genuine
+    ``np.ndarray`` is checked directly through its base ``dtype`` descriptor,
+    so a hostile subclass cannot shadow it. Anything else -- a bare payload
+    object, or a list/tuple of them -- is realized with a dtype-free
+    ``np.asarray()``, which stores object pointers rather than casting, so no
+    per-element caller code runs before the check.
     """
     if isinstance(value, _np.generic):
-        return value.dtype
-    if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
-        return _np.asarray(value).dtype
+        return _NP_GENERIC_DTYPE_DESCRIPTOR.__get__(value)
+    if value is None:
+        return _np.dtype(_np.object_)
+    if isinstance(value, bool):
+        return _np.dtype(_np.bool_)
+    if isinstance(value, int):
+        return _np.dtype(_np.int64)
+    if isinstance(value, float):
+        return _np.dtype(_np.float64)
+    if isinstance(value, complex):
+        return _np.dtype(_np.complex128)
+    if isinstance(value, str):
+        return _np.dtype(_np.str_)
+    if isinstance(value, bytes):
+        return _np.dtype(_np.bytes_)
     from flopscope._dtype_billing import refuse_non_numeric_dtype
 
     if isinstance(value, _np.ndarray):
