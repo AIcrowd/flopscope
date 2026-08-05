@@ -12,7 +12,7 @@ import struct
 import sys
 import types
 import weakref
-from typing import Any
+from typing import Any, cast
 
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
@@ -100,7 +100,10 @@ def _static_dtype_string(
     if type(raw) is str:
         return raw
     if type(raw) is types.MemberDescriptorType:
-        value = types.MemberDescriptorType.__get__(raw, spec, type(spec))
+        try:
+            value = types.MemberDescriptorType.__get__(raw, spec, type(spec))
+        except AttributeError:
+            return None
         return value if type(value) is str else None
     if allow_getset_descriptor and type(raw) is types.GetSetDescriptorType:
         value = types.GetSetDescriptorType.__get__(raw, spec, type(spec))
@@ -1465,7 +1468,7 @@ def _encode_arg(arg):
     RemoteArray metaclass considers it array-like.
     """
     # Check RemoteScalar first (it passes RemoteArray's metaclass check).
-    if type(arg) is RemoteScalar:
+    if _has_proxy_base(arg, RemoteScalar):
         return _proxy_slot_value(arg, RemoteScalar, "_value")
     if _has_proxy_base(arg, RemoteArray):
         return {"__handle__": _proxy_slot_value(arg, RemoteArray, "_handle_id")}
@@ -1479,6 +1482,25 @@ def _encode_arg(arg):
 
     if type(arg) is SymmetryGroup:
         return {"__symmetry_group__": SymmetryGroup.to_payload(arg)}
+    if _has_proxy_base(arg, list):
+        return [_encode_arg(item) for item in list.__iter__(arg)]
+    if _has_proxy_base(arg, tuple):
+        return [_encode_arg(item) for item in tuple.__iter__(arg)]
+    if _has_proxy_base(arg, dict):
+        return {
+            _encode_arg(key): _encode_arg(value)
+            for key, value in dict.items(arg)
+        }
+    if type(arg) is bool:
+        return arg
+    if type(arg) is not bytes and _has_proxy_base(arg, bytes):
+        return bytes(bytes.__iter__(cast(bytes, arg)))
+    if type(arg) is not bytearray and _has_proxy_base(arg, bytearray):
+        return bytearray(bytearray.__iter__(cast(bytearray, arg)))
+    if type(arg) is not int and _has_proxy_base(arg, int):
+        return int.__int__(cast(int, arg))
+    if type(arg) is not float and _has_proxy_base(arg, float):
+        return float.__float__(cast(float, arg))
     # Dtype-like args serialize to their canonical wire-name string: flopscope
     # dtype labels/objects, Python builtin types (``float``), numpy scalar types
     # (``np.float64``), and numpy dtype / new-style DType objects. Strings pass
@@ -1488,6 +1510,4 @@ def _encode_arg(arg):
     _wire = _resolve_dtype_wire_name(arg)
     if _wire is not None:
         return _wire
-    if type(arg) is list or type(arg) is tuple:
-        return [_encode_arg(item) for item in arg]
     return arg

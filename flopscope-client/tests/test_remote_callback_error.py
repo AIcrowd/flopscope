@@ -7,6 +7,7 @@ connection is made.
 
 import time
 
+import msgpack
 import pytest
 from flopscope._protocol import encode_request
 from flopscope._registry_data import LOCAL_CALLBACK_OPS
@@ -237,11 +238,175 @@ def test_proxy_preserves_msgpack_container_and_string_subclasses(monkeypatch):
         raise Encoded
 
     monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
-    for spec in (L([1]), T((1,)), D(a=1), S("x")):
+    for spec, expected in (
+        (L([1]), [1]),
+        (T((1,)), [1]),
+        (D(a=1), {"a": 1}),
+        (S("x"), "x"),
+    ):
         with pytest.raises(Encoded):
             flopscope.zeros((1,), dtype=spec)
         assert encoded[-1][0:2] == ("zeros", [[1]])
-        assert encoded[-1][2]["dtype"] is spec
+        assert encoded[-1][2]["dtype"] == expected
+
+
+def test_proxy_normalizes_container_subclasses_without_hooks(monkeypatch):
+    class L(list):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.calls = 0
+
+        def __iter__(self):
+            self.calls += 1
+            raise AssertionError("participant list iterator executed")
+
+    class T(tuple):
+        def __new__(cls, *args):
+            value = super().__new__(cls, *args)
+            value.calls = 0
+            return value
+
+        def __iter__(self):
+            self.calls += 1
+            raise AssertionError("participant tuple iterator executed")
+
+    class D(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.calls = 0
+
+        def items(self):
+            self.calls += 1
+            raise AssertionError("participant dict items executed")
+
+    class Encoded(Exception):
+        pass
+
+    encoded = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append(kwargs["dtype"])
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    for spec, expected_type, expected_value in (
+        (L([1]), list, [1]),
+        (T((1,)), list, [1]),
+        (D(a=1), dict, {"a": 1}),
+    ):
+        with pytest.raises(Encoded):
+            flopscope.zeros((1,), dtype=spec)
+        assert type(encoded[-1]) is expected_type
+        assert encoded[-1] == expected_value
+        assert spec.calls == 0
+
+
+def test_container_subclass_with_unsupported_value_is_serialization_error(monkeypatch):
+    class L(list):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.calls = 0
+
+        def __iter__(self):
+            self.calls += 1
+            raise AssertionError("participant list iterator executed")
+
+    spec = L([object()])
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteSerializationError, match="zeros"):
+        flopscope.zeros((1,), dtype=spec)
+    assert spec.calls == 0
+    assert network_calls == 0
+
+
+def test_proxy_normalizes_msgpack_scalar_subclasses_without_hooks(monkeypatch):
+    class B(bytes):
+        def __init__(self, *args):
+            self.calls = 0
+
+        def __bytes__(self):
+            self.calls += 1
+            raise AssertionError("participant bytes conversion executed")
+
+    class BA(bytearray):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.calls = 0
+
+        def __iter__(self):
+            self.calls += 1
+            raise AssertionError("participant bytearray iterator executed")
+
+    class IntSubclass(int):
+        def __new__(cls, value):
+            result = super().__new__(cls, value)
+            result.calls = 0
+            return result
+
+        def __int__(self):
+            self.calls += 1
+            raise AssertionError("participant int conversion executed")
+
+    class FloatSubclass(float):
+        def __new__(cls, value):
+            result = super().__new__(cls, value)
+            result.calls = 0
+            return result
+
+        def __float__(self):
+            self.calls += 1
+            raise AssertionError("participant float conversion executed")
+
+    class Encoded(Exception):
+        pass
+
+    original_encode_request = flopscope.encode_request
+    encoded = []
+    packed = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append(kwargs["dtype"])
+        packed.append(original_encode_request(op_name, args, kwargs))
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    for spec, expected_type, expected_value in (
+        (B(b"x"), bytes, b"x"),
+        (BA(b"x"), bytearray, bytearray(b"x")),
+        (IntSubclass(2), int, 2),
+        (FloatSubclass(2.5), float, 2.5),
+    ):
+        with pytest.raises(Encoded):
+            flopscope.zeros((1,), dtype=spec)
+        decoded = msgpack.unpackb(packed[-1], raw=False)
+        value = decoded["kwargs"]["dtype"]
+        assert type(encoded[-1]) is expected_type
+        assert value == expected_value
+        assert spec.calls == 0
+
+
+def test_unset_dtype_slot_is_not_a_raw_attribute_error(monkeypatch):
+    class UnsetDtype:
+        __slots__ = ("name",)
+
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(TypeError, match="Cannot interpret dtype"):
+        flopscope.array([1.0], dtype=UnsetDtype())
+    assert network_calls == 0
 
 
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
