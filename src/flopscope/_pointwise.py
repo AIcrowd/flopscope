@@ -478,12 +478,34 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
     return _builtins.max(int(dense_cost) * int(unique) // dense_output, 1)
 
 
+_ARRAY_UFUNC_MISSING = object()
+_UFUNC_KWARG_MISSING = object()
+
+
+def _static_array_ufunc_implementation(value):
+    """Read a type's NEP 13 implementation without invoking its metaclass."""
+    return _inspect.getattr_static(
+        type(value), "__array_ufunc__", _ARRAY_UFUNC_MISSING
+    )
+
+
 def _has_foreign_array_ufunc(value) -> bool:
     """Whether *value* can dispatch a raw ufunc call to foreign Python code."""
     if isinstance(value, FlopscopeArray):
         return False
-    implementation = _inspect.getattr_static(type(value), "__array_ufunc__", None)
-    return implementation is not None and implementation is not _np.ndarray.__array_ufunc__
+    implementation = _static_array_ufunc_implementation(value)
+    return (
+        implementation is not _ARRAY_UFUNC_MISSING
+        and implementation is not None
+        and implementation is not _np.ndarray.__array_ufunc__
+    )
+
+
+def _with_where_protocol_operand(operands: tuple, where):
+    """Append a supplied top-level ``where=`` value for NEP 13 detection."""
+    if where is _UFUNC_KWARG_MISSING:
+        return operands
+    return (*operands, where)
 
 
 def _call_ufunc_with_protocol_timing(
@@ -511,7 +533,8 @@ def _call_with_optional_out(
     # ``__array_function__`` and recurse infinitely. Python scalars and
     # other non-array values pass through unchanged so NEP 50 weak-typing
     # rules continue to apply at the NumPy boundary.
-    protocol_operands = (*args, out)
+    protocol_args = args
+    protocol_where = kwargs.get("where", _UFUNC_KWARG_MISSING)
     args = tuple(_to_base_ndarray(a) for a in args)
     # ``where=`` kwarg may be a FlopscopeArray bool mask; strip it. Other
     # array-valued kwargs (e.g. ``axes`` lists for matmul / einsum
@@ -530,7 +553,9 @@ def _call_with_optional_out(
                 callback_op_name or np_func.__name__,
                 np_func,
                 *args,
-                protocol_operands=args,
+                protocol_operands=_with_where_protocol_operand(
+                    protocol_args, protocol_where
+                ),
                 **kwargs,
             )
         return _call_numpy(np_func, *args, **kwargs)
@@ -541,7 +566,9 @@ def _call_with_optional_out(
                 np_func,
                 *args,
                 out=out_stripped,
-                protocol_operands=protocol_operands,
+                protocol_operands=_with_where_protocol_operand(
+                    (*protocol_args, out), protocol_where
+                ),
                 **kwargs,
             )
         return _call_numpy(np_func, *args, out=out_stripped, **kwargs)
@@ -570,6 +597,7 @@ def _call_with_optional_multi_out(
     returned.
     """
     protocol_args = args
+    protocol_where = kwargs.get("where", _UFUNC_KWARG_MISSING)
     args = tuple(_to_base_ndarray(a) for a in args)
     for k, v in list(kwargs.items()):
         if isinstance(v, _np.ndarray):
@@ -582,7 +610,9 @@ def _call_with_optional_multi_out(
                 callback_op_name or np_func.__name__,
                 np_func,
                 *args,
-                protocol_operands=protocol_args,
+                protocol_operands=_with_where_protocol_operand(
+                    protocol_args, protocol_where
+                ),
                 **kwargs,
             )
         return _call_numpy(np_func, *args, **kwargs)
@@ -593,7 +623,9 @@ def _call_with_optional_multi_out(
             f"out= to be a tuple of length {nout}; got "
             f"{type(out).__name__} of length {length_repr}"
         )
-    protocol_operands = (*protocol_args, *out)
+    protocol_operands = _with_where_protocol_operand(
+        (*protocol_args, *out), protocol_where
+    )
     stripped = tuple(_to_base_ndarray(o) if o is not None else None for o in out)
     if isinstance(np_func, _np.ufunc):
         result = _call_ufunc_with_protocol_timing(
@@ -1192,17 +1224,21 @@ def _implements_array_ufunc(x) -> bool:
     """Does ``type(x)`` define NumPy's ufunc-dispatch protocol (NEP 13)?
 
     Checked on the TYPE, matching how numpy itself looks this up for
-    protocol dispatch (an instance attribute would not count). Excludes the
-    ``__array_ufunc__ = None`` opt-out spelling on purpose: that spelling
-    means "this type refuses to be a ufunc operand at all" -- numpy raises
-    ``TypeError`` for it immediately, at the C level, without ever calling
-    either ``__array_ufunc__`` or ``__array__`` -- so it carries none of the
-    "protocol runs instead of ``__array__``" guarantee the three-way rule in
-    :func:`_resolve_ufunc_data_operand` relies on. Such an object falls
-    through to the plain array-like branch instead, exactly as it did before
-    this rule existed.
+    protocol dispatch (an instance attribute would not count). The explicit
+    ``__array_ufunc__ = None`` opt-out spelling is excluded: callers that
+    resolve data operands reject it before this predicate can consider a
+    protocol implementation, matching NumPy's immediate ``TypeError``.
     """
-    return _inspect.getattr_static(type(x), "__array_ufunc__", None) is not None
+    implementation = _static_array_ufunc_implementation(x)
+    return implementation is not _ARRAY_UFUNC_MISSING and implementation is not None
+
+
+def _raise_ufunc_opt_out(x) -> None:
+    """Raise NumPy's error for a type declaring ``__array_ufunc__ = None``."""
+    type_name = type.__getattribute__(type(x), "__name__")
+    raise TypeError(
+        f"operand '{type_name}' does not support ufuncs (__array_ufunc__=None)"
+    )
 
 
 def _resolve_ufunc_data_operand(x):
@@ -1218,7 +1254,11 @@ def _resolve_ufunc_data_operand(x):
     for the *billing* read the way this helper does -- see that function's
     docstring -- but mirrors this same three-way rule.)
 
-    Three operand kinds, three different requirements:
+    Four operand kinds, four different requirements:
+
+    - An explicit type-level ``__array_ufunc__ = None`` opt-out: reject it
+      immediately, before either billing or ``__array__`` materialization,
+      because NumPy does exactly that for every ufunc operand.
 
     - Already an ``ndarray`` (including a flopscope subclass, or a foreign
       one like ``np.ma.MaskedArray``): forward the ORIGINAL object to numpy
@@ -1249,8 +1289,8 @@ def _resolve_ufunc_data_operand(x):
       off a single ``_np.asarray(x)`` view -- ONE call, same accounting as
       the ndarray branch above, and never a second one, since the real call
       below never touches ``__array__`` on this object.
-    - Anything else (a duck type implementing only ``__array__``, a
-      list/tuple/other sequence, or a type with ``__array_ufunc__ = None``):
+    - Anything else (a duck type implementing only ``__array__`, or a
+      list/tuple/other sequence):
       materialize it EXACTLY ONCE via ``_np.asarray``, and use that SAME
       materialized array as both the billing view and the forwarded object.
       There is no legitimate subclass semantics to lose here -- it was never
@@ -1271,10 +1311,13 @@ def _resolve_ufunc_data_operand(x):
 
     Returns ``(billing_view, forward_obj)``.
     """
+    implementation = _static_array_ufunc_implementation(x)
+    if implementation is None:
+        _raise_ufunc_opt_out(x)
     if isinstance(x, _np.ndarray):
         stripped = _to_base_ndarray(x)
         return _np.asarray(stripped), stripped
-    if _implements_array_ufunc(x):
+    if implementation is not _ARRAY_UFUNC_MISSING:
         return _np.asarray(x), x
     if isinstance(x, (bool, int, float, complex)) and not isinstance(x, _np.generic):
         return _np.asarray(x), x
@@ -1342,6 +1385,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     :func:`_symmetry_adjusted_cost`).
     """
     budget = require_budget()
+    protocol_where = kwargs.get("where", _UFUNC_KWARG_MISSING)
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
@@ -1487,7 +1531,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
             a_fwd,
             b_fwd,
             out=out_fwd,
-            protocol_operands=(a_fwd, b_fwd, out_fwd),
+            protocol_operands=_with_where_protocol_operand(
+                (a_fwd, b_fwd, out_fwd), protocol_where
+            ),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=out_sym)
@@ -1568,6 +1614,7 @@ def _counted_ufunc_reduce_generic(
     :func:`reduce_group(symmetry, ndim, axis, keepdims)`.
     """
     budget = require_budget()
+    protocol_where = kwargs.get("where", _UFUNC_KWARG_MISSING)
     # Above every later read of ``out`` -- the billing dtype, the
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
@@ -1653,7 +1700,9 @@ def _counted_ufunc_reduce_generic(
             axis=axis,
             out=_to_base_ndarray(out) if out is not None else None,
             keepdims=keepdims,
-            protocol_operands=(a_fwd, out),
+            protocol_operands=_with_where_protocol_operand(
+                (a_fwd, out), protocol_where
+            ),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=out_sym)
@@ -2338,6 +2387,8 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
     # participant report a cheap dtype to us while handing numpy something
     # pricier.
     def _resolve_at_operand(v):
+        if _static_array_ufunc_implementation(v) is None:
+            _raise_ufunc_opt_out(v)
         if isinstance(v, _np.ndarray):
             forward = _to_base_ndarray(v)
             return forward, _np.asarray(forward)

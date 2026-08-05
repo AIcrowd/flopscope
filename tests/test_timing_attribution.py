@@ -46,6 +46,16 @@ class _NumericSleepyUfuncDuck:
         return getattr(ufunc, method)(*raw_inputs, **kwargs)
 
 
+class _SleepyWhereUfuncDuck(_NumericSleepyUfuncDuck):
+    """A slow ufunc participant supplied through the top-level ``where=``."""
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        time.sleep(self.sleep_s)
+        kwargs["where"] = self.payload
+        return getattr(ufunc, method)(*inputs, **kwargs)
+
+
 class _NumericSleepyUfuncArray(np.ndarray):
     """Foreign ndarray output whose ufunc protocol sleeps in Python."""
 
@@ -170,6 +180,42 @@ def test_foreign_ufunc_protocol_time_lands_in_residual(op_name, make_duck, invok
 )
 def test_unary_ufunc_protocol_time_lands_in_residual(op_name, invoke):
     duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
+            invoke(duck)
+
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+@pytest.mark.parametrize(
+    "op_name, invoke",
+    [
+        (
+            "add",
+            lambda duck: fnp.add(
+                fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=duck
+            ),
+        ),
+        (
+            "add.outer",
+            lambda duck: np.add.outer(
+                fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=duck
+            ),
+        ),
+        (
+            "subtract.reduce",
+            lambda duck: np.subtract.reduce(
+                fnp.array([3.0, 4.0]), where=duck, initial=0
+            ),
+        ),
+    ],
+)
+def test_where_ufunc_protocol_time_lands_in_residual(op_name, invoke):
+    duck = _SleepyWhereUfuncDuck([True, False])
     flops.budget_reset()
     with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
         with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):

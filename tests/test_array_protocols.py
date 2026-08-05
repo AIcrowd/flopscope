@@ -697,6 +697,29 @@ class _MetaclassProtocolDuck(metaclass=_StatefulProtocolMeta):
         return np.asarray([99.0, 99.0])
 
 
+class _OptOutProtocolMeta(type):
+    """Record dynamic class-name reads during a ufunc opt-out error."""
+
+    name_lookups = 0
+
+    def __getattribute__(cls, name):
+        if name == "__name__":
+            _OptOutProtocolMeta.name_lookups += 1
+        return super().__getattribute__(name)
+
+
+class _NonNdarrayUfuncOptOut(metaclass=_OptOutProtocolMeta):
+    __array_ufunc__ = None
+
+    def __init__(self):
+        self.array_calls = 0
+        self.protocol_calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.array_calls += 1
+        raise AssertionError("__array__ must not be called for a ufunc opt-out")
+
+
 def test_metaclass_protocol_lookup_matches_raw_numpy_once():
     _StatefulProtocolMeta.protocol_lookups = 0
     raw_duck = _MetaclassProtocolDuck()
@@ -711,6 +734,35 @@ def test_metaclass_protocol_lookup_matches_raw_numpy_once():
     np.testing.assert_array_equal(actual, expected)
     assert (raw_lookups, raw_duck.calls) == (1, 1)
     assert (_StatefulProtocolMeta.protocol_lookups, duck.calls) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call",
+    [
+        (lambda value: np.negative(value), lambda value: fnp.negative(value)),
+        (lambda value: np.modf(value), lambda value: fnp.modf(value)),
+    ],
+)
+def test_non_ndarray_ufunc_opt_out_matches_raw_numpy_without_materializing(
+    raw_call, flops_call
+):
+    _OptOutProtocolMeta.name_lookups = 0
+    raw_value = _NonNdarrayUfuncOptOut()
+    with pytest.raises(TypeError) as raw_raised:
+        raw_call(raw_value)
+    raw_name_lookups = _OptOutProtocolMeta.name_lookups
+
+    _OptOutProtocolMeta.name_lookups = 0
+    value = _NonNdarrayUfuncOptOut()
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            flops_call(value)
+
+    assert str(raised.value) == str(raw_raised.value)
+    assert value.array_calls == raw_value.array_calls == 0
+    assert value.protocol_calls == raw_value.protocol_calls == 0
+    assert _OptOutProtocolMeta.name_lookups == raw_name_lookups
+    assert budget.flops_used == 0
 
 
 @pytest.mark.parametrize(

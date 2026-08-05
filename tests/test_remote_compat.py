@@ -53,7 +53,7 @@ class _NumericUfuncDuck:
 
 
 class _ForeignMaskDuck:
-    """Array-like mask that must not be treated as a ufunc data operand."""
+    """Array-like mask that participates in a ufunc protocol call."""
 
     def __init__(self):
         self.calls = 0
@@ -194,11 +194,10 @@ def test_non_foreign_ufunc_protocol_operands_do_not_warn(operand, expect_error):
                     fnp.add(fnp.array([1.0, 2.0]), operand)
 
 
-def test_where_protocol_is_not_treated_as_a_ufunc_callback_operand():
+def test_where_protocol_warns_and_dispatches_once():
     mask = _ForeignMaskDuck()
     with flops.BudgetContext(flop_budget=10**9):
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", RemoteCallbackWarning)
+        with pytest.warns(RemoteCallbackWarning, match=r"^add\(\)"):
             result = fnp.add(
                 fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=mask
             )
