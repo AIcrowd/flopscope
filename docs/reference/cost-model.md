@@ -434,13 +434,16 @@ Worked consequences:
 - **Mixed kinds promote up.** `matmul(int32_array, float32_array)` resolves to `float64`
   (numpy's promotion for that mix) and bills at the float64 rate — the same as a genuine
   float64 matmul. There is no discount for feeding narrow-looking operands.
-- **For these binary spellings, `dtype=` selects computation and `out=` prices
-  materialization.** An explicit non-boolean `dtype=` selects the ufunc loop:
+- **For these binary spellings, `dtype=` and `signature=` select computation, while
+  `out=` prices materialization.** An explicit `dtype=` constrains NumPy's output DType;
+  billing still resolves every input and output slot of the resulting loop. For example,
+  `ldexp(int8, int64, dtype=float16)` runs the `float16,int64->float16` loop and therefore
+  bills at the int64 rate. For symmetric loops,
   `multiply(f64, f64, dtype=float32)` casts both operands on read and runs the float32
   loop, so a 1000-element call bills at the float32 rate (`1000`), not at the operands'
-  float64 rate. (A boolean `dtype=` can name a predicate output rather than a narrow
-  arithmetic loop, so it does not override the input-derived compute price.) `out=` is
-  a separate participant: it cannot narrow compute, but a wider destination can raise
+  float64 rate. A forced `signature=` (or its `sig=` alias) likewise prices the exact
+  loop NumPy executes, including a forced complex loop's registry complex factor. `out=`
+  is a separate participant: it cannot narrow compute, but a wider destination can raise
   the bill. Thus
   `multiply(f64, f64, out=float32_arr)` still computes and bills float64 (`2000`), while
   `multiply(f32, f32, out=float64_arr)` also bills `2000` because it materializes a
@@ -646,8 +649,8 @@ ops; the dynamic ufunc-method surface (`.outer`, `.reduceat`, `.at`, `.reduce`,
 keys) is out of its reach and is locked by targeted tests in `tests/test_dtype_cost.py`
 instead. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
 narrow binary loops, the promoted-input floor, direct/`outer` parity, explicit
-`dtype=` plus wider-`out=` composition, and store-only complex billing for the
-single-output binary paths.
+`dtype=`/`signature=` constraints plus wider-`out=` composition, descriptor-safe operand
+metadata, and store-only complex billing for the single-output binary paths.
 
 Reproduce any of these yourself: run the call inside a `BudgetContext` and read
 `op_log[-1].resolved_dtype` alongside `flops_used`.

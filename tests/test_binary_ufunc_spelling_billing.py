@@ -303,6 +303,142 @@ def test_explicit_narrow_dtype_bills_wider_out_for_direct_and_outer(name):
 
 
 @pytest.mark.parametrize(
+    ("left_dtype", "explicit_dtype"),
+    ((np.int8, np.float16), (np.int16, np.float32)),
+)
+@pytest.mark.parametrize("out_dtype", (None, np.float64))
+def test_explicit_dtype_keeps_asymmetric_ldexp_input_slot(
+    left_dtype, explicit_dtype, out_dtype
+):
+    load_weights()
+    left = np.arange(1, 9, dtype=left_dtype)
+    right = np.arange(8, dtype=np.int64)
+    direct_out = None if out_dtype is None else np.empty((8, 8), dtype=out_dtype)
+    outer_out = None if out_dtype is None else np.empty((8, 8), dtype=out_dtype)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        direct, direct_bill, direct_dtype = _delta(
+            ctx,
+            lambda: fnp.ldexp(
+                fnp.asarray(left[:, None]),
+                fnp.asarray(right[None, :]),
+                dtype=explicit_dtype,
+                out=direct_out,
+            ),
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            outer, outer_bill, outer_dtype = _delta(
+                ctx,
+                lambda: np.ldexp.outer(
+                    fnp.asarray(left),
+                    fnp.asarray(right),
+                    dtype=explicit_dtype,
+                    out=outer_out,
+                ),
+            )
+
+    expected_logged_dtype = "int64" if out_dtype is None else "float64"
+    expected_result_dtype = explicit_dtype if out_dtype is None else out_dtype
+    expected_bill = 64 * get_weight("ldexp") * get_dtype_rate("int64")
+    assert np.array_equal(direct, outer)
+    assert direct_bill == outer_bill == expected_bill
+    assert direct_dtype == outer_dtype == expected_logged_dtype
+    assert direct.dtype == outer.dtype == np.dtype(expected_result_dtype)
+    if direct_out is not None:
+        assert direct is direct_out
+        assert outer is outer_out
+
+
+@pytest.mark.parametrize("keyword", ("signature", "sig"))
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+@pytest.mark.parametrize(
+    ("name", "input_dtype", "signature", "expected_dtype", "complex_factor"),
+    (
+        ("hypot", np.int8, "dd->d", "float64", 1.0),
+        ("multiply", np.float32, "DD->D", "complex128", 6.0),
+    ),
+)
+def test_forced_binary_signature_controls_billing(
+    keyword, spelling, name, input_dtype, signature, expected_dtype, complex_factor
+):
+    load_weights()
+    left = np.arange(1, 3, dtype=input_dtype)
+    right = np.arange(2, 0, -1, dtype=input_dtype)
+    np_func = getattr(np, name)
+    kwargs = {keyword: signature}
+    if spelling == "direct":
+        expected = np_func(left[:, None], right[None, :], **kwargs)
+
+        def call():
+            return getattr(fnp, name)(
+                fnp.asarray(left[:, None]), fnp.asarray(right[None, :]), **kwargs
+            )
+
+    else:
+        expected = np_func.outer(left, right, **kwargs)
+
+        def call():
+            return np_func.outer(fnp.asarray(left), fnp.asarray(right), **kwargs)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            actual, bill, resolved_dtype = _delta(ctx, call)
+
+    expected_bill = (
+        4 * get_weight(name) * get_dtype_rate(expected_dtype) * complex_factor
+    )
+    assert np.array_equal(actual, expected)
+    assert actual.dtype == expected.dtype == np.dtype(expected_dtype)
+    assert bill == expected_bill
+    assert resolved_dtype == expected_dtype
+
+
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+def test_explicit_signature_slots_are_resolved_once(spelling):
+    load_weights()
+    reads = [0, 0, 0]
+
+    class StatefulSignatureSlot:
+        def __init__(self, index):
+            self.index = index
+
+        @property
+        def dtype(self):
+            reads[self.index] += 1
+            return np.dtype(np.complex128 if reads[self.index] == 1 else np.complex64)
+
+    signature = tuple(StatefulSignatureSlot(index) for index in range(3))
+    left = np.arange(1, 3, dtype=np.float32)
+    right = np.arange(2, 0, -1, dtype=np.float32)
+
+    def call():
+        if spelling == "direct":
+            return fnp.multiply(
+                fnp.asarray(left[:, None]),
+                fnp.asarray(right[None, :]),
+                signature=signature,
+            )
+        return np.multiply.outer(  # pyright: ignore[reportCallIssue]
+            fnp.asarray(left),
+            fnp.asarray(right),
+            signature=signature,  # pyright: ignore[reportArgumentType]
+        )
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            actual, bill, resolved_dtype = _delta(ctx, call)
+
+    expected_bill = 4 * get_weight("multiply") * get_dtype_rate("complex128") * 6
+    assert reads == [1, 1, 1]
+    assert actual.dtype == np.dtype(np.complex128)
+    assert bill == expected_bill
+    assert resolved_dtype == "complex128"
+
+
+@pytest.mark.parametrize(
     ("name", "dtype"),
     (("hypot", np.float16), ("bitwise_and", np.int8)),
 )
@@ -425,7 +561,91 @@ def test_binary_billing_never_reads_out_subclass_dtype_override(spelling):
     assert resolved_dtype == "complex128"
 
 
-def test_direct_refreshes_out_billing_view_after_operand_dtype_resolution():
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+@pytest.mark.parametrize("liar_is_left", (False, True))
+def test_binary_input_subclass_uses_underlying_metadata_for_billing(
+    spelling, liar_is_left
+):
+    load_weights()
+    dtype_reads = 0
+    shape_reads = 0
+
+    class LiesAboutMetadata(np.ndarray):
+        @property
+        def dtype(self):
+            nonlocal dtype_reads
+            dtype_reads += 1
+            return np.dtype(np.float16)
+
+        @property
+        def shape(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+            nonlocal shape_reads
+            shape_reads += 1
+            return (1,)
+
+    liar = np.arange(1, 101, dtype=np.float64).view(LiesAboutMetadata)
+    honest = fnp.asarray(np.array([2.0], dtype=np.float32))
+    left, right = (liar, honest) if liar_is_left else (honest, liar)
+
+    def call():
+        if spelling == "direct":
+            return fnp.add(left, right)
+        return np.add.outer(left, right)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            actual, bill, resolved_dtype = _delta(ctx, call)
+
+    output_size = 100 if spelling == "direct" else 100
+    expected_bill = output_size * get_weight("add") * get_dtype_rate("float64")
+    assert dtype_reads == 0
+    assert shape_reads == 0
+    assert np.asarray(actual).size == output_size
+    assert np.asarray(actual).dtype == np.dtype(np.float64)
+    assert bill == expected_bill
+    assert resolved_dtype == "float64"
+
+
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+def test_binary_input_subclass_dtype_getter_cannot_mutate_execution(spelling):
+    load_weights()
+    reads = 0
+
+    class MutatingDtype(np.ndarray):
+        def __new__(cls):
+            result = super().__new__(cls, (2,), dtype=np.float64)
+            result[...] = (1.0, 2.0)
+            return result
+
+        @property
+        def dtype(self):
+            nonlocal reads
+            reads += 1
+            self.resize(100, refcheck=False)
+            return np.dtype(np.float16)
+
+    mutating = MutatingDtype()
+    honest = fnp.asarray(np.array([3.0], dtype=np.float32))
+
+    def call():
+        if spelling == "direct":
+            return fnp.add(mutating, honest)
+        return np.add.outer(mutating, honest)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            actual, bill, resolved_dtype = _delta(ctx, call)
+
+    expected_bill = 2 * get_weight("add") * get_dtype_rate("float64")
+    assert reads == 0
+    assert np.asarray(mutating).size == np.asarray(actual).size == 2
+    assert bill == expected_bill
+    assert resolved_dtype == "float64"
+
+
+def test_direct_refreshes_out_billing_view_after_signature_resolution():
     load_weights()
     dtype_reads = 0
 
@@ -435,7 +655,7 @@ def test_direct_refreshes_out_billing_view_after_operand_dtype_resolution():
 
     out = OwningDestination()
 
-    class MutatingOperandDtype(np.ndarray):
+    class MutatingSignatureDtype:
         @property
         def dtype(self):
             nonlocal dtype_reads
@@ -445,18 +665,19 @@ def test_direct_refreshes_out_billing_view_after_operand_dtype_resolution():
                 out.dtype = np.complex128  # pyright: ignore[reportAttributeAccessIssue]
             return np.dtype(np.float32)
 
-    left = np.array([3.0, 5.0], dtype=np.float32).view(MutatingOperandDtype)
+    left = np.array([3.0, 5.0], dtype=np.float32)
     right = np.array([4.0, 12.0], dtype=np.float32)
     expected = np.hypot(np.asarray(left), right).astype(np.complex128)
+    signature = (MutatingSignatureDtype(), np.float32, np.float32)
 
     with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
         actual, bill, resolved_dtype = _delta(
             ctx,
-            lambda: fnp.hypot(left, right, out=out),  # pyright: ignore[reportArgumentType]
+            lambda: fnp.hypot(left, right, out=out, signature=signature),  # pyright: ignore[reportArgumentType]
         )
 
     expected_bill = 2 * get_weight("hypot") * get_dtype_rate("complex128") * 2.0
-    assert dtype_reads > 0
+    assert dtype_reads == 1
     assert actual is out
     assert np.asarray(out).dtype == np.dtype(np.complex128)
     assert out.shape == (2,)
