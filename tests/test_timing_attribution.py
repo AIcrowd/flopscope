@@ -518,9 +518,23 @@ def test_numpy_protocol_callback_excludes_nested_flopscope_operation_from_residu
     )
 
 
-def test_nested_callback_aware_calls_exclude_same_timer_backend_from_user_time():
+def test_nested_callback_aware_calls_exclude_same_timer_backend_from_user_time(
+    monkeypatch,
+):
     callback_sleep = 0.02
     backend_sleep = 0.02
+    logical_clock = 0.0
+
+    def perf_counter():
+        return logical_clock
+
+    def sleep(duration):
+        nonlocal logical_clock
+        logical_clock += duration
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", perf_counter)
+    monkeypatch.setattr(time, "sleep", sleep)
+
     inner = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=callback_sleep)
 
     def same_timer_work():
@@ -536,11 +550,24 @@ def test_nested_callback_aware_calls_exclude_same_timer_backend_from_user_time()
     assert np.array_equal(result, np.array([4.0, 6.0]))
     assert (outer.calls, inner.calls) == (1, 1)
     assert budget._total_user_code_time == pytest.approx(  # type: ignore[attr-defined]
-        2 * callback_sleep, abs=0.015
+        2 * callback_sleep, abs=1e-12
     )
     summary = budget.summary_dict()
-    assert summary["flopscope_backend_time_s"] >= 0.015, summary
-    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] == pytest.approx(
+        backend_sleep, abs=1e-12
+    ), summary
+    assert summary["residual_wall_time_s"] == pytest.approx(
+        2 * callback_sleep, abs=1e-12
+    ), summary
+    assert summary["wall_time_s"] == pytest.approx(
+        2 * callback_sleep + backend_sleep, abs=1e-12
+    ), summary
+    assert summary["wall_time_s"] == pytest.approx(
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"],
+        abs=1e-12,
+    ), summary
 
 
 def test_nested_counted_callback_aware_call_is_not_double_counted_as_user_time():
