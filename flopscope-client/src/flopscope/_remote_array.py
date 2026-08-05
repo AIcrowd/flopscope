@@ -7,12 +7,16 @@ operations are dispatched to the server transparently.
 
 from __future__ import annotations
 
+import inspect
 import struct
+import sys
+import types
 import weakref
 from typing import Any
 
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
+from flopscope.errors import RemoteCallbackError
 
 # ---------------------------------------------------------------------------
 # dtype helpers  (NO numpy -- pure struct)
@@ -65,6 +69,72 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
     complex: "complex128",
 }
 
+_MISSING_DTYPE_ATTR = object()
+
+
+def _trusted_client_dtype_name(spec: Any) -> str | None:
+    """Return a client dtype name without inspecting participant objects."""
+    from flopscope._dtypes import _DType, _DtypeLabel
+
+    if type(spec) is _DType or type(spec) is _DtypeLabel:
+        name = object.__getattribute__(spec, "name")
+        return name if type(name) is str else None
+    return None
+
+
+def _is_static_descriptor(value: Any) -> bool:
+    """Whether *value* is a descriptor, without invoking it."""
+    return (
+        inspect.getattr_static(type(value), "__get__", _MISSING_DTYPE_ATTR)
+        is not _MISSING_DTYPE_ATTR
+    )
+
+
+def _static_dtype_string(
+    spec: Any, attr: str, *, allow_getset_descriptor: bool = False
+) -> str | None:
+    """Read an inert dtype attribute or reject a participant descriptor."""
+    raw = inspect.getattr_static(spec, attr, _MISSING_DTYPE_ATTR)
+    if raw is _MISSING_DTYPE_ATTR:
+        return None
+    if type(raw) is str:
+        return raw
+    if type(raw) is types.MemberDescriptorType:
+        value = types.MemberDescriptorType.__get__(raw, spec, type(spec))
+        return value if type(value) is str else None
+    if allow_getset_descriptor and type(raw) is types.GetSetDescriptorType:
+        value = types.GetSetDescriptorType.__get__(raw, spec, type(spec))
+        return value if type(value) is str else None
+    if _is_static_descriptor(raw):
+        raise RemoteCallbackError(
+            f"dtype argument requires participant descriptor {attr!r}, which "
+            "the client/server backend cannot execute remotely"
+        )
+    return None
+
+
+def _loaded_numpy_dtype_name(spec: Any) -> str | None:
+    """Resolve a loaded NumPy dtype object without importing NumPy."""
+    numpy = sys.modules.get("numpy")
+    if type(numpy) is not types.ModuleType:
+        return None
+    dtype_type = vars(numpy).get("dtype")
+    if not isinstance(dtype_type, type) or not isinstance(spec, dtype_type):
+        return None
+    return _static_dtype_string(spec, "name", allow_getset_descriptor=True)
+
+
+def _loaded_numpy_scalar_type_name(spec: Any) -> str | None:
+    """Resolve an exact NumPy scalar class without accepting lookalikes."""
+    if type(spec) is not type:
+        return None
+    numpy = sys.modules.get("numpy")
+    if type(numpy) is not types.ModuleType:
+        return None
+    name = type.__getattribute__(spec, "__name__")
+    if type(name) is str and vars(numpy).get(name) is spec:
+        return name
+    return None
 
 def _flatten_to_list(nested):
     """Flatten arbitrarily-nested lists (RemoteArray.tolist() output) to a flat list."""
@@ -97,18 +167,30 @@ def _resolve_dtype_wire_name(spec: Any) -> str | None:
     Exotic/unsupported dtypes (e.g. ``longdouble``, structured) return ``None``;
     the caller decides whether to reject or fall through.
     """
-    name = getattr(spec, "_flopscope_dtype_name", None)
-    if isinstance(name, str):
-        return name
-    if isinstance(spec, str):
+    if type(spec) is str:
         return _DTYPE_ALIASES.get(spec)
-    if isinstance(spec, type):
-        if spec in _PY_TYPE_TO_WIRE:
-            return _PY_TYPE_TO_WIRE[spec]
-        return _DTYPE_ALIASES.get(getattr(spec, "__name__", ""))
-    nm = getattr(spec, "name", None)
-    if isinstance(nm, str):
-        return _DTYPE_ALIASES.get(nm)
+
+    trusted = _trusted_client_dtype_name(spec)
+    if trusted is not None:
+        return _DTYPE_ALIASES.get(trusted)
+
+    for builtin_type, wire_name in _PY_TYPE_TO_WIRE.items():
+        if spec is builtin_type:
+            return wire_name
+
+    numpy_name = _loaded_numpy_scalar_type_name(spec)
+    if numpy_name is not None:
+        return _DTYPE_ALIASES.get(numpy_name)
+    numpy_name = _loaded_numpy_dtype_name(spec)
+    if numpy_name is not None:
+        return _DTYPE_ALIASES.get(numpy_name)
+
+    advertised = _static_dtype_string(spec, "_flopscope_dtype_name")
+    if advertised is not None:
+        return _DTYPE_ALIASES.get(advertised)
+    name = _static_dtype_string(spec, "name")
+    if name is not None:
+        return _DTYPE_ALIASES.get(name)
     return None
 
 

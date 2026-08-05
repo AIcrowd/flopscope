@@ -5,12 +5,14 @@ These tests need no live server: the error fires at encode time, before any
 connection is made.
 """
 
+import time
+
 import pytest
 from flopscope._protocol import encode_request
 from flopscope._registry_data import LOCAL_CALLBACK_OPS
 
 import flopscope
-from flopscope.errors import RemoteCallbackError
+from flopscope.errors import RemoteCallbackError, RemoteSerializationError
 
 
 def test_local_callback_ops_set():
@@ -35,6 +37,55 @@ def test_encode_request_rejects_callables():
     # Precondition: msgpack genuinely cannot serialize a Python function.
     with pytest.raises((TypeError, ValueError)):
         encode_request("apply_along_axis", args=[lambda x: x], kwargs={})
+
+
+class _PropertyDtype:
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def _flopscope_dtype_name(self):
+        self.calls += 1
+        time.sleep(0.1)
+        raise AssertionError("participant property executed")
+
+
+class _NameDescriptor:
+    def __get__(self, instance, owner):
+        instance.calls += 1
+        time.sleep(0.1)
+        raise AssertionError("participant descriptor executed")
+
+
+class _DescriptorDtype:
+    name = _NameDescriptor()
+
+    def __init__(self):
+        self.calls = 0
+
+
+@pytest.mark.parametrize("spec", [_PropertyDtype(), _DescriptorDtype()])
+def test_dtype_descriptor_raises_remote_callback_without_execution(spec, monkeypatch):
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteCallbackError, match="dtype.*descriptor"):
+        flopscope.array([1.0], dtype=spec)
+    assert spec.calls == 0
+    assert network_calls == 0
+
+
+def test_inert_unsupported_dtype_like_value_remains_serialization_error():
+    class InertDtype:
+        pass
+
+    with pytest.raises(RemoteSerializationError):
+        flopscope.concatenate([InertDtype()])
 
 
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
