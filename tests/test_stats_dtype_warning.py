@@ -49,6 +49,26 @@ class _DtypeSensitiveArrayLike:
         return np.array([value], dtype=resolved_dtype or self.dtype)
 
 
+class _ForeignDtype:
+    """Sentinel metadata that NumPy cannot normalize as a dtype."""
+
+
+class _ForeignDtypeArrayLike:
+    """Array-like with foreign metadata but valid NumPy array conversion."""
+
+    dtype = _ForeignDtype()
+
+    def __init__(self):
+        self.array_calls = []
+
+    def __array__(self, dtype=None, copy=None):
+        del copy
+        resolved_dtype = None if dtype is None else np.dtype(dtype)
+        self.array_calls.append(resolved_dtype)
+        value = 8.0 if resolved_dtype is None else 0.5
+        return np.array([value], dtype=resolved_dtype or np.float32)
+
+
 def _promotion_message(op_name: str, dtype_name: str) -> str:
     return (
         f"stats.{op_name} promoted its {dtype_name} input to float64 to match "
@@ -100,6 +120,21 @@ def test_dtype_sensitive_array_like_preserves_direct_float64_conversion():
     expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
     np.testing.assert_allclose(np.asarray(result), [expected], rtol=1e-15)
     assert x.array_calls == [None, np.dtype(np.float64)]
+    assert len(caught) == 1
+    assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
+
+
+def test_foreign_dtype_metadata_falls_back_to_array_inference():
+    x = _ForeignDtypeArrayLike()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", FlopscopeWarning)
+        result = norm.pdf(x)
+
+    expected = np.exp(-0.5 * 0.5**2) / np.sqrt(2.0 * np.pi)
+    np.testing.assert_allclose(np.asarray(result), [expected], rtol=1e-15)
+    assert result.dtype == np.dtype(np.float64)
+    assert x.array_calls == [None, None, np.dtype(np.float64)]
     assert len(caught) == 1
     assert str(caught[0].message) == _promotion_message("norm.pdf", "float32")
 
