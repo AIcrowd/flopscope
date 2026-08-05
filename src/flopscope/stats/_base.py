@@ -94,12 +94,16 @@ class ContinuousDistribution:
             refuse_non_numeric_source(op_name, _v)
         for _v in kwargs.values():
             refuse_non_numeric_source(op_name, _v)
-        source_x = _np.asarray(x)
-        if source_x.dtype.kind == "f" and source_x.dtype.itemsize < _np.dtype(
+        source_dtype = getattr(x, "dtype", None)
+        if source_dtype is None:
+            source_dtype = _np.asarray(x).dtype
+        else:
+            source_dtype = _np.dtype(source_dtype)
+        if source_dtype.kind == "f" and source_dtype.itemsize < _np.dtype(
             _np.float64
         ).itemsize:
-            _warn_float64_promotion(op_name, source_x.dtype)
-        x = _np.asarray(source_x, dtype=_np.float64)
+            _warn_float64_promotion(op_name, source_dtype)
+        x = _np.asarray(x, dtype=_np.float64)
         param_shapes = tuple(
             _np.shape(v) for v in (*args, *kwargs.values()) if v is not None
         )
