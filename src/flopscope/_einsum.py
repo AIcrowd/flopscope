@@ -276,8 +276,10 @@ def _execute_pairwise(path_info, operands: list):
         # non-dispatching sum-of-products loop), never re-plan it. That
         # holds only for two-operand steps — numpy would decompose an
         # n-ary step (from an explicit user path) into its own pairwise
-        # path — and only for non-object dtypes: the tensordot route
-        # changes object-element semantics (multiplication order and
+        # path — and only for non-object dtypes. Object operands are
+        # refused upstream by ``refuse_non_numeric_dtype``, so this dtype check
+        # is defensive only: were it reachable, the tensordot route would
+        # change object-element semantics (multiplication order and
         # c_einsum's `0 + first_term` accumulator seeding).
         use_optimize = len(bases) == 2 and all(
             base.dtype != _np.object_ for base in bases

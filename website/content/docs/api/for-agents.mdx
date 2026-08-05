@@ -67,19 +67,21 @@ payload for one operation:
 {
   "name": "einsum",
   "slug": "einsum",
-  "detail_href": "/docs/api/einsum/",
+  "area": "core",
+  "detail_href": "/docs/api/numpy/einsum/",
   "detail_json_href": "/api-data/ops/einsum.json",
   "module": "numpy",
   "flopscope_ref": "fnp.einsum",
   "numpy_ref": "np.einsum",
   "category": "counted_custom",
-  "cost_formula": "FMA=2 textbook: 2 * product of contracted dims − output cell count",
-  "cost_formula_latex": "$\\prod_i d_i$",
+  "cost_formula": "op_factor * product of all index dims",
+  "cost_formula_latex": "$\\text{op\\_factor} \\cdot \\prod_i d_i$",
+  "weight": 1.0,
   "free": false,
   "blocked": false,
   "status": "supported",
-  "summary": "Evaluate Einstein summation with FLOP counting and optional path optimization.",
-  "notes": "Supports SymmetricTensor inputs and repeated-operand detection for automatic cost reduction"
+  "summary": "Evaluates the Einstein summation convention on the operands.",
+  "notes": "Generalized Einstein summation."
 }
 ```
 
@@ -87,6 +89,8 @@ Use this to:
 
 - Check if an operation is supported: filter by `"blocked": false`
 - Get the cost formula for a specific operation: look up by `name`
+- Get an operation's cost weight: read `weight` (the per-unit multiplier; the dtype
+  rate is applied on top — see the [FLOP counting model](/docs/understanding/flop-counting-model))
 - List all free operations: filter by `"free": true`
 - Map between NumPy and flopscope calls: use `numpy_ref` and `flopscope_ref`
 - Jump to the standalone page or full payload: use `detail_href` and `detail_json_href`

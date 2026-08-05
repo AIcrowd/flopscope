@@ -44,7 +44,8 @@ from numpy.random import SeedSequence
 
 # Public exports below; concrete counted classes pulled in lazily to avoid
 # circular import with _counted_classes.py.
-from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._budget import _call_numpy, _counted_wrapper, refuse_non_numeric_source
+from flopscope._dtype_billing import refuse_non_numeric_dtype
 from flopscope._flops import _ceil_log2, sort_cost  # noqa: F401
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
 from flopscope._perm_group import SymmetryGroup
@@ -89,6 +90,15 @@ def _counted_sampler(
     @_counted_wrapper
     def wrapper(*args, **kwargs):
         budget = require_budget()
+        # Every distribution parameter (loc/scale/lam/a/b/...) reaches numpy
+        # BELOW as a raw, uninspected value -- numpy casts each to float64
+        # itself, running any object payload's __float__ per element with
+        # nothing billed for it. Probe each one first; a probe never casts.
+        for _v in args:
+            refuse_non_numeric_source(op_name, _v)
+        for _k, _v in kwargs.items():
+            if _k != "dtype":
+                refuse_non_numeric_source(op_name, _v)
         result = np_func(*args, **kwargs)
         # This factory wraps many distributions with heterogeneous output
         # dtypes (float64 for normal/exponential/..., int64 for
@@ -346,6 +356,8 @@ def uniform(low=0.0, high=1.0, size=None):
     so the honest cost is ``3 * numel(output)``.
     """
     budget = require_budget()
+    refuse_non_numeric_source("random.uniform", low)
+    refuse_non_numeric_source("random.uniform", high)
     result = _npr.uniform(low, high, size)
     n = _builtins.max(result.size, 1) if isinstance(result, _np.ndarray) else 1
     # np.random.uniform has no dtype= param and always returns float64.
@@ -425,6 +437,8 @@ def multivariate_normal(mean, cov, size=None, check_valid="warn", tol=1e-8):
     """
     budget = require_budget()
     mean_arr = _np.asarray(mean)
+    refuse_non_numeric_dtype("random.multivariate_normal", mean_arr.dtype)
+    refuse_non_numeric_source("random.multivariate_normal", cov)
     d = int(mean_arr.shape[-1]) if mean_arr.ndim else 1
     N = _output_size(size=size) if size is not None else 1
     flop_cost = multivariate_normal_cost(N, d)

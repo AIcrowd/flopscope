@@ -68,7 +68,7 @@ for i, W in enumerate(weights):
     h = fnp.einsum("ij,j->i", W, h)
     if i < depth - 1:
         h = fnp.maximum(h, 0)
-flops.budget_summary()  # 6,231,041 FLOPs
+flops.budget_summary()  # 12,459,522 FLOPs
 ```
 
 </td>
@@ -173,15 +173,15 @@ flops.budget_summary()  # accumulated session/global summary
 flopscope FLOP Budget Summary
 =============================
   Total budget:             100,000,000
-  Used:                       6,231,041  (6.2%)
-  Remaining:                 93,768,959  (93.8%)
+  Used:                      12,459,522  (12.5%)
+  Remaining:                 87,540,478  (87.5%)
 
   By operation:
-    random.randn            5,246,976  ( 84.2%)  [6 calls]
-    einsum                    655,360  ( 10.5%)  [5 calls]
-    multiply                  327,680  (  5.3%)  [5 calls]
-    maximum                     1,024  (  0.0%)  [4 calls]
-    sqrt                            1  (  0.0%)  [1 call]
+    random.randn           10,493,952  ( 84.2%)  [6 calls]
+    einsum                   1,308,160  ( 10.5%)  [5 calls]
+    multiply                   655,360  (  5.3%)  [5 calls]
+    maximum                      2,048  (  0.0%)  [4 calls]
+    sqrt                             2  (  0.0%)  [1 call]
 
   Total Wall Time:     ...s
   Flopscope Backend:   ...s  (...%)
@@ -194,7 +194,7 @@ flopscope FLOP Budget Summary
 ```python
 # Query FLOP costs without running anything (no BudgetContext needed)
 cost = flops.accounting.einsum_cost("ij,jk->ik", shapes=[(256, 256), (256, 256)])
-print(f"Matmul cost: {cost:,}")  # 33,554,432
+print(f"Matmul cost: {cost:,}")  # 33,488,896
 
 cost = flops.accounting.svd_cost(m=256, n=256, k=10)
 print(f"SVD cost: {cost:,}")  # 2,621,440
@@ -210,7 +210,7 @@ A = np.zeros((256, 256))
 B = np.zeros((256, 256))
 # Returns an AccumulationCost decomposition without running the op
 cost = flops.einsum_accumulation_cost("ij,jk->ik", A, B)
-print(cost.total)  # 33,554,432
+print(cost.total)  # 33,488,896
 
 cost = flops.reduction_accumulation_cost(A, op_factor=1)
 print(cost.total)  # 65,535
@@ -239,14 +239,16 @@ including triple products and block symmetries.
 
 ## How It Works
 
-1. **FLOPs are tracked automatically.** A global default budget activates on first use, or you can wrap code in an explicit `BudgetContext` for a custom limit. Free ops (tensor creation, reshaping) cost 0 FLOPs.
-2. **FLOP costs are analytical.** Costs are computed from tensor shapes, not measured from execution. A matmul of `(m, k) @ (k, n)` always costs `m * k * n` FLOPs regardless of hardware.
+1. **FLOPs are tracked automatically.** A global default budget activates on first use, or you can wrap code in an explicit `BudgetContext` for a custom limit. Some ops are free (0 FLOPs) -- `zeros`, `empty`, `transpose`, and other pure-view/uninitialized-allocation operations. Ops that materialize a new buffer (`reshape`, `copy`, `concatenate`, `full`) are charged `numel` per element, like any other write; see the [FLOP Counting Model](https://aicrowd.github.io/flopscope/docs/understanding/flop-counting-model/) for the full free-tier rule.
+2. **FLOP costs are analytical.** Costs are computed from tensor shapes, not measured from execution. A matmul of `(m, k) @ (k, n)` always costs `m * n * (2k - 1)` FLOPs (`k` multiplies plus `k - 1` adds per output element) regardless of hardware.
 3. **Budget is checked before execution.** If an operation would exceed the remaining budget, `BudgetExhaustedError` is raised and the operation does not run.
 4. **All tensors are plain `numpy.ndarray`.** Standard flopscope arrays are regular NumPy arrays with no hidden state. `SymmetricTensor` is a lightweight `ndarray` subclass that carries symmetry metadata for einsum savings — it works everywhere a normal array does.
 
 ## Sharp Edges
 
 **Budget is always active.** A global default budget (1e15 FLOPs, configurable via `FLOPSCOPE_DEFAULT_BUDGET` env var) activates automatically. Use an explicit `BudgetContext` to set a custom limit.
+
+**Only numeric dtypes are supported.** flopscope bills bool, integer, float, and complex arrays; every other dtype — `object` (data that coerces to `dtype=object`: a `None` in a list, mixed types, ragged nesting), `str_`, `bytes_`, `datetime64`, `timedelta64`, and structured/void — raises `UnsupportedDtypeError` wherever it reaches a registered operation — as an operand, an explicit `dtype=`, a fill value or distribution parameter, or an `out=` destination — including `fnp.array`/`fnp.asarray`/`fnp.astype`/`fnp.fromiter`/`fnp.require` and every random sampler. Clean the data with plain NumPy first (`np.array(x, dtype=np.float64)`), or keep ragged data as a Python list of numeric arrays.
 
 **31 operations are blocked.** Config and system-level functions (`set_printoptions`, `geterr`, and text/legacy I/O like `savetxt`/`loadtxt`) raise `AttributeError` by design. **Weight I/O is supported:** use `fnp.savez`/`fnp.load` (and the `flops.Module` base class) to persist numeric state safely — see the [Saving & Loading guide](https://aicrowd.github.io/flopscope/docs/guides/save-load/). Loading data is free (0 FLOPs) and never unpickles.
 

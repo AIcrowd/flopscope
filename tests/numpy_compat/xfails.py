@@ -4,7 +4,43 @@ Each entry maps a test node ID (or pattern) to a reason string.
 Tests matching these patterns are marked xfail when running NumPy's
 test suite against flopscope.
 
-Current state (2026-07-29, numpy 2.4.6, PR #171 first REAL numpy-version matrix):
+Current state (2026-08-05, numpy 2.2.6, object-dtype-ban widen to a numeric allowlist):
+    The dtype ban widened from an object-only (`hasobject`) check to a
+    numeric allowlist: refuse_non_numeric_dtype now refuses every dtype
+    whose `kind` is outside `"biufc"` (bool, integer, float, complex), not
+    just object. NumPy's own test_ufunc.py and test_umath.py construct
+    string/bytes/structured-void/datetime64/timedelta64 arrays directly and
+    far more often than object arrays -- as ufunc-loop-signature probes, as
+    alignment/padding test techniques (a structured dtype with a padding
+    field), and as genuine operands for ops that accept timedelta64 (e.g.
+    `absolute`) or accept "anything" (the logical ufuncs) -- so those tests
+    now hit UnsupportedDtypeError instead of running. 6 new
+    NONNUMERIC_DTYPE_BANNED patterns added below: test_ufunc_noncontiguous
+    and test_ufunc_types match the whole parametrized test function rather
+    than an enumerated per-ufunc list (91 of ~140, and 18, variants actually
+    fail; the rest xpass harmlessly under strict=False -- the same
+    broad-wildcard trade-off test_reduction_with_where* below already makes).
+    TestUfunc::test_logical_ufuncs_support_anything (all 3 variants fail
+    unconditionally), TestUfunc::test_at_no_loop_for_op,
+    TestAdd::test_reduce_alignment, and the module-level test_reduceat round
+    out the six. test_pocketfft/test_helper/test_polynomial/test_random were
+    unaffected, same as the object-only ban.
+
+    The renamed OBJECT_DTYPE_BANNED -> NONNUMERIC_DTYPE_BANNED category
+    keeps its original 15 patterns unchanged (object is still refused the
+    same way, just via a wider predicate).
+
+    The 16th, not-expressible-as-a-per-test-node-xfail case from the
+    previous state is now fixed: `_ImmutabilityXfailPlugin`'s
+    `pytest_make_collect_report` hook (conftest.py) is extended to match
+    the ban's sentinel too (widened from "object dtype is not billable" to
+    the dtype-agnostic "flopscope meters only numeric dtypes"), reclassifying
+    numpy._core.tests.test_numeric.py's collection failure
+    (TestClip.test_clip_problem_cases evaluates
+    ``np.zeros(10, dtype=object)`` as a class-body-level default argument at
+    MODULE IMPORT time) as a module-level skip instead of a collection error.
+
+Previous state (2026-07-29, numpy 2.4.6, PR #171 first REAL numpy-version matrix):
     The CI matrix pin was vacuous before PR #171 (uv run re-synced the locked
     numpy back in), so this was the first genuine 2.4 run of the borrowed
     suites. 1 new xfail added: TestUfunc::test_output_ellipsis_errors —
@@ -152,8 +188,94 @@ NEEDS_TRIAGE = (
     "ufunc/SymmetricTensor pipeline. Not in scope for the issue-70 PR; "
     "follow-up triage queued."
 )
+NONNUMERIC_DTYPE_BANNED = (
+    "NONNUMERIC_DTYPE_BANNED: flopscope's dtype ban refuses any array whose "
+    "dtype.kind is outside the numeric allowlist 'biufc' (bool, integer, "
+    "float, complex) wherever it participates in billing -- as an operand, "
+    "as an out=, as a dtype= request -- via "
+    "refuse_non_numeric_dtype/UnsupportedDtypeError. This NumPy test "
+    "constructs or requires a non-numeric-dtype array (object, string, "
+    "bytes, structured/void, datetime64, or timedelta64) directly, so it "
+    "now hits that refusal instead of running. By design, not a bug: see "
+    "tests/test_object_dtype_ban.py."
+)
 
 XFAIL_PATTERNS: dict[str, str] = {
+    # ------------------------------------------------------------------ #
+    # NONNUMERIC_DTYPE_BANNED — object-dtype-ban plan Task 5, widened to a #
+    # numeric allowlist                                                   #
+    # ------------------------------------------------------------------ #
+    # numpy's test_ufunc.py tests object-dtype ufunc loops (PyUFunc_O_O and
+    # friends), object-dtype reduction/accumulate/reduceat, and a handful of
+    # tests that fold an object-dtype case into an otherwise-numeric
+    # parametrize sweep (test_zerosize_reduction's `[]`-vs-object-array pair,
+    # test_vecmatvec_identity's vec2/vec3 object-dtype variants). Each of
+    # these constructs an object array and passes it through a flopscope-
+    # patched function, which now raises UnsupportedDtypeError before the
+    # arithmetic numpy's test wants to observe ever runs.
+    "*TestUfuncGenericLoops::test_unary_PyUFunc_O_O": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfuncGenericLoops::test_unary_PyUFunc_O_O_method_simple": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfuncGenericLoops::test_binary_PyUFunc_OO_O": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfuncGenericLoops::test_binary_PyUFunc_OO_O_method": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfuncGenericLoops::test_binary_PyUFunc_On_Om_method": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfunc::test_object_array_reduction": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfunc::test_object_array_accumulate_inplace": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfunc::test_object_array_reduceat_inplace": NONNUMERIC_DTYPE_BANNED,
+    "*TestUfunc::test_vecdot_object_breaks_outer_loop_on_error": NONNUMERIC_DTYPE_BANNED,
+    # test_zerosize_reduction's own list mixes a plain `[]` case (still
+    # passes) with `np.array([], dtype=object)` (now refused) inside one
+    # test body, so the whole test node fails, not just one parametrize id.
+    "*TestUfunc::test_zerosize_reduction": NONNUMERIC_DTYPE_BANNED,
+    # vec2/vec3 are the object-dtype entries in test_vecmatvec_identity's
+    # `vec` parametrize list (vec0/vec1 are float/complex and still pass).
+    # No leading/embedded `*`: fnmatch treats `[...]` as a character CLASS,
+    # not a literal bracket, so a wildcard pattern built around a bracketed
+    # parametrize id silently fails to match (confirmed: `[*-vec2]` matches
+    # nothing). These rely on the loader's plain-substring fallback
+    # (`pattern in node_id`) instead, the same way the pre-existing
+    # `TestRandomDist::test_shuffle_untyped_warning[random2]` entry below
+    # does.
+    "TestUfunc::test_vecmatvec_identity[None-vec2]": NONNUMERIC_DTYPE_BANNED,
+    "TestUfunc::test_vecmatvec_identity[None-vec3]": NONNUMERIC_DTYPE_BANNED,
+    "TestUfunc::test_vecmatvec_identity[matrix1-vec2]": NONNUMERIC_DTYPE_BANNED,
+    "TestUfunc::test_vecmatvec_identity[matrix1-vec3]": NONNUMERIC_DTYPE_BANNED,
+    # Module-level function (no test class), so no leading `*Class::` scope.
+    "test_ufunc_out_casterrors": NONNUMERIC_DTYPE_BANNED,
+    # test_ufunc_noncontiguous builds an alignment-testing operand via a
+    # structured (void) dtype for every non-skipped type in each ufunc's
+    # loop signature. Most ufuncs the parametrize sweep reaches hit it (91 of
+    # the ~140 variants measured); a ufunc whose signature has no loop that
+    # survives the test's own 'O?mM' skip fails cleanly through to numpy's
+    # loop and still passes. One wildcard covers every current and future
+    # affected variant without enumerating ~90 individual ufunc names, at the
+    # cost of an XPASS (not a failure, strict=False) on the unaffected ones
+    # -- the same trade-off test_reduction_with_where* below already makes.
+    "*test_ufunc_noncontiguous*": NONNUMERIC_DTYPE_BANNED,
+    # test_ufunc_types iterates every dtype letter in a ufunc's loop
+    # signature and constructs an operand array for it; a ufunc whose
+    # signature includes a timedelta64/datetime64 loop now hits the ban
+    # before the type-check assertion the test wants to make. Same
+    # broad-wildcard trade-off as test_ufunc_noncontiguous above -- most
+    # comparison/logical ufuncs have no non-numeric loop and still pass.
+    "*test_ufunc_types*": NONNUMERIC_DTYPE_BANNED,
+    # Constructs a structured (void) array directly to exercise "logical
+    # ufuncs accept anything, even an unpromotable dtype" -- exactly the
+    # claim the numeric allowlist now refuses.
+    "*TestUfunc::test_logical_ufuncs_support_anything*": NONNUMERIC_DTYPE_BANNED,
+    # str dtype has no ufunc loop for np.add; the test constructs a str
+    # array specifically to exercise that numpy-side refusal, but the
+    # array construction itself is now refused first.
+    "*TestUfunc::test_at_no_loop_for_op": NONNUMERIC_DTYPE_BANNED,
+    # Structured (void) dtype used as an alignment-testing technique (gh-9876
+    # regression pin), the same shape as test_ufunc_noncontiguous above.
+    "*TestAdd::test_reduce_alignment": NONNUMERIC_DTYPE_BANNED,
+    # Module-level function; structured (void) dtype used directly as the
+    # test's own subject matter (a reduceat/structured-array interaction
+    # bug), not incidentally. Leading `*` and no trailing wildcard anchors
+    # the match to the exact node id -- a bare "test_reduceat" would also
+    # match "test_reduceat_empty" via the loader's substring fallback,
+    # xfailing an unrelated, unaffected test.
+    "*::test_reduceat": NONNUMERIC_DTYPE_BANNED,
     # ------------------------------------------------------------------ #
     # test_pocketfft.py — upstream numpy flake (not flopscope's fault)        #
     # ------------------------------------------------------------------ #

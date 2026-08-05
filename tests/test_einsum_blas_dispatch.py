@@ -12,18 +12,21 @@ arrangement:
 2. a multi-operand contraction still executes the billed path step by
    step, never as one fused numpy call over all operands — including a
    user-pinned n-ary step, which numpy must not re-plan;
-3. object-dtype steps keep the plain-einsum element semantics
-   (multiplication order, accumulator seeding, scalar-output dtype);
+3. object-dtype operands never reach a dispatch decision at all -- the
+   object-dtype ban (0.10.1) refuses them before ``numpy.einsum`` is ever
+   called, on either path;
 4. billed FLOPs and result values are unaffected by dispatch.
 """
 
 import time
 
 import numpy as np
+import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._symmetric import SymmetricTensor
+from flopscope.errors import UnsupportedDtypeError
 
 
 def test_pairwise_steps_call_numpy_einsum_with_optimize(monkeypatch):
@@ -108,13 +111,13 @@ class _NC:
         return _NC(f"({other}+{self.tag})")
 
 
-def test_object_dtype_steps_keep_plain_einsum_element_semantics(monkeypatch):
-    # The optimized route changes object-element semantics: tensordot
-    # flips per-term multiplication order and drops c_einsum's
-    # `0 + first_term` accumulator seeding. Object steps must stay on
-    # the plain path: the spy pins the dispatch, the `(0+` prefix on
-    # every accumulated element pins c_einsum's seeding semantics
-    # (the tensordot route never seeds with 0).
+def test_object_dtype_operands_are_refused_before_any_dispatch(monkeypatch):
+    """Through 0.10.0 the optimized route needed to stay off object-dtype
+    steps: tensordot flips per-term multiplication order and drops
+    c_einsum's `0 + first_term` accumulator seeding relative to the plain
+    loop. As of the 0.10.1 object-dtype ban neither path runs at all -- an
+    object operand is refused before dispatch is even chosen, which this
+    pins by asserting numpy.einsum (spied below) is never called."""
     A = np.empty((2, 3), dtype=object)
     B = np.empty((3, 2), dtype=object)
     for i in range(2):
@@ -133,27 +136,22 @@ def test_object_dtype_steps_keep_plain_einsum_element_semantics(monkeypatch):
 
     monkeypatch.setattr(np, "einsum", spy)
     with flops.BudgetContext(flop_budget=10**16, quiet=True):
-        got = fnp.einsum("ij,jk->ik", A, B)
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.einsum("ij,jk->ik", A, B)
 
-    assert calls == [False]
-    got = np.asarray(got)
-    assert got.dtype == np.object_
-    for element in got.flat:
-        # e.g. '(((0+(b00*a00))+(b10*a01))+(b20*a02))' — the '(0+' seed
-        # is only ever produced by c_einsum calling __radd__ with 0.
-        assert "(0+" in element.tag
+    assert calls == []
 
 
-def test_object_scalar_output_dtype_matches_plain_einsum():
-    # Plain np.einsum returns a raw Python scalar for 'i,i->' on object
-    # input, which asarray coerces to int64; the optimized route would
-    # return a 0-d object array instead. Pin the plain behavior.
+def test_object_dtype_scalar_form_is_refused_before_any_dispatch():
+    """Same refusal for the 'i,i->' scalar-output form, which used to need
+    its own pin -- plain np.einsum returns a raw Python scalar for object
+    input (asarray coerces it to int64) while the optimized route would
+    have returned a 0-d object array instead. Moot now: object never
+    reaches either path."""
     obj = np.array([2, 3, 4], dtype=object)
     with flops.BudgetContext(flop_budget=10**16, quiet=True):
-        result = fnp.einsum("i,i->", obj, obj)
-    arr = np.asarray(result)
-    assert arr.dtype == np.int64
-    assert arr == 29
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.einsum("i,i->", obj, obj)
 
 
 def test_nonfinite_result_with_declared_symmetry_is_never_stamped():

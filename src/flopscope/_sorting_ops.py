@@ -487,8 +487,12 @@ def _membership_cost(a1: _np.ndarray, a2: _np.ndarray) -> int:
     """Cost for isin/in1d: replicates numpy 2.x _in1d branch selection.
 
     Returns max(sort_cost(n+m), 2*n*m) when numpy's masked-loop path triggers
-    (m < 10*n**0.145 with non-integer dtypes, or object dtype), else sort_cost(n+m).
-    The loop path runs n*m comparisons + n*m boolean accumulates = 2*n*m FLOPs.
+    (m < 10*n**0.145 with non-integer dtypes), else sort_cost(n+m).
+
+    The ``contains_object`` limb is retained defensively; both public
+    callers (``isin``/``in1d`` below) run through ``@_counted_wrapper``,
+    which refuses an object-dtype operand before this function ever runs,
+    so that limb cannot currently evaluate True.
     """
     n = a1.size
     m = a2.size
@@ -548,8 +552,8 @@ def isin(
     """Counted version of ``numpy.isin``.
 
     Cost: (n+m)*ceil(log2(n+m)) FLOPs (sort path) or max(sort_cost(n+m), 2*n*m)
-    when numpy's masked-loop path triggers (m < 10*n**0.145 for non-integer dtypes,
-    or object dtype).
+    when numpy's masked-loop path triggers (m < 10*n**0.145 for non-integer
+    dtypes). Object dtype is refused before this cost is ever computed.
     """
     budget = require_budget()
     el = _np.asarray(element)

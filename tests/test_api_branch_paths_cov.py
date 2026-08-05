@@ -3,9 +3,10 @@
 Three families:
 
 * ``fnp.random`` — scalar draws, int/list/array pool equivalence for the
-  cost formulas, global-state round trip, object-dtype choice identity, and
-  the ``random.symmetric`` shape/distribution parser (values stay honest:
-  results are checked for symmetry / reproducibility, errors for type).
+  cost formulas, global-state round trip, the object-dtype-ban refusal on
+  a ``choice`` pool, and the ``random.symmetric`` shape/distribution parser
+  (values stay honest: results are checked for symmetry / reproducibility,
+  errors for type).
 * ``fnp.linalg`` / ``fnp.fft`` — plain-list inputs must produce numpy's exact
   values (the ``asarray`` coercion branch of each op), plus norm's invalid-ord
   error passthrough, cond's NaN handling, and matrix_rank's 1-D/tol branches.
@@ -21,6 +22,7 @@ import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
+from flopscope.errors import UnsupportedDtypeError
 
 
 @pytest.fixture
@@ -66,7 +68,7 @@ def test_permutation_pool_forms_bill_identically(budget):
     assert sorted(perm.tolist()) == list(range(7))
 
 
-def test_choice_pool_forms_and_object_identity(budget):
+def test_choice_pool_forms_bill_identically(budget):
     _, cost_list = _billed(budget, lambda: fnp.random.choice([10, 20, 30], size=2))
     _, cost_int = _billed(budget, lambda: fnp.random.choice(3, size=2))
     _, cost_arr = _billed(
@@ -76,12 +78,20 @@ def test_choice_pool_forms_and_object_identity(budget):
     picked = fnp.random.choice([10, 20, 30], size=2)
     assert set(np.asarray(picked).tolist()) <= {10, 20, 30}
 
-    # Object-dtype pools with size=None hand back the pooled object itself.
+
+def test_choice_object_dtype_pool_is_refused(budget):
+    """Superseded by the object-dtype ban (see test_object_dtype_ban.py):
+    ``choice``/``permutation``/``shuffle`` relocate values without touching
+    them, so an object-dtype pool used to be let through with identity
+    preserved on a ``size=None`` pick (the prior behavior this test used to
+    pin). The ban is unconditional -- object dtype is refused everywhere,
+    including pure data-movement ops -- so an object-dtype pool now raises
+    before any pick happens, rather than returning one of its elements."""
     first, second = {"a": 1}, {"b": 2}
     pool = np.empty(2, dtype=object)
     pool[0], pool[1] = first, second
-    got = fnp.random.choice(pool)
-    assert got is first or got is second
+    with pytest.raises(UnsupportedDtypeError):
+        fnp.random.choice(pool)
 
 
 def test_global_state_roundtrip_reproduces_stream(budget):

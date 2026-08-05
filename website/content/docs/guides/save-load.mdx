@@ -60,8 +60,13 @@ Use `fnp.savez_compressed` when file size matters — it writes the same format 
 fnp.savez_compressed("layer_compressed.npz", W=W, b=b)
 ```
 
-> **Note:** object-dtype arrays (`dtype=object`) are rejected at save time.
-> Only numeric dtypes (float, int, bool, complex) are accepted.
+> **Note:** flopscope refuses `object` dtype everywhere, not just at save —
+> building one with `fnp.array(..., dtype=object)` already raises
+> `UnsupportedDtypeError`. See the object-dtype note in the [FLOP counting
+> model](/docs/understanding/flop-counting-model). The file format itself
+> accepts only numeric dtypes (float, int, bool, complex); `str_`, `bytes_`,
+> `datetime64`, `timedelta64`, and structured dtypes are rejected by `save`
+> with a `ValueError` even though they are billable everywhere else.
 
 ## Custom models with flops.Module
 
