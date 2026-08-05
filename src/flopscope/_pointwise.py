@@ -492,6 +492,15 @@ class _ForeignUfuncResult:
         self.value = value
 
 
+class _ForeignArrayFunctionResult:
+    """Raw result of a non-ufunc call dispatched through NEP 18."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
 def _static_array_ufunc_implementation(value):
     """Read a type's NEP 13 implementation without invoking its metaclass."""
     return _inspect.getattr_static(
@@ -499,8 +508,10 @@ def _static_array_ufunc_implementation(value):
     )
 
 
-def _implements_array_function(value) -> bool:
-    """Whether a non-ndarray operand provides NEP 18 dispatch."""
+def _has_foreign_array_function(value) -> bool:
+    """Whether *value* can dispatch a raw NumPy function through NEP 18."""
+    if isinstance(value, _np.ndarray):
+        return False
     implementation = _inspect.getattr_static(
         type(value), "__array_function__", _ARRAY_FUNCTION_MISSING
     )
@@ -547,6 +558,20 @@ def _call_ufunc_with_protocol_timing(
     return _call_numpy(fn, *args, **kwargs)
 
 
+def _call_non_ufunc_with_protocol_timing(
+    op_name, fn, *args, protocol_operands=(), **kwargs
+):
+    """Run foreign NEP 18 callbacks without changing their raw result."""
+    if _builtins.any(
+        _has_foreign_array_function(value) for value in protocol_operands
+    ):
+        _warn_remote_callback(op_name)
+        return _ForeignArrayFunctionResult(
+            _call_numpy_with_python_callbacks(fn, *args, **kwargs)
+        )
+    return _call_numpy(fn, *args, **kwargs)
+
+
 def _call_with_optional_out(
     np_func,
     *args,
@@ -585,6 +610,14 @@ def _call_with_optional_out(
                 ),
                 **kwargs,
             )
+        if callback_op_name is not None:
+            return _call_non_ufunc_with_protocol_timing(
+                callback_op_name,
+                np_func,
+                *args,
+                protocol_operands=protocol_args,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, **kwargs)
     if supports_out:
         if isinstance(np_func, _np.ufunc):
@@ -596,6 +629,15 @@ def _call_with_optional_out(
                 protocol_operands=_with_where_protocol_operand(
                     (*protocol_args, out), protocol_where
                 ),
+                **kwargs,
+            )
+        if callback_op_name is not None:
+            return _call_non_ufunc_with_protocol_timing(
+                callback_op_name,
+                np_func,
+                *args,
+                out=out_stripped,
+                protocol_operands=(*protocol_args, out),
                 **kwargs,
             )
         return _call_numpy(np_func, *args, out=out_stripped, **kwargs)
@@ -771,6 +813,17 @@ def _counted_unary(np_func, op_name: str):
                     (), kwargs.get("where", _UFUNC_KWARG_MISSING)
                 ),
             )
+        if not is_ufunc and _has_foreign_array_function(x):
+            result = _call_with_optional_out(
+                np_func,
+                x,
+                out=None if isinstance(out, SymmetricTensor) else out,
+                supports_out=supports_out,
+                callback_op_name=op_name,
+                **kwargs,
+            )
+            assert isinstance(result, _ForeignArrayFunctionResult)
+            return result.value
         symmetry = _symmetry_of(x)
         if is_ufunc:
             x, x_fwd = _resolve_ufunc_data_operand(x)
@@ -854,6 +907,17 @@ def _free_unary(np_func, op_name: str):
                     (), kwargs.get("where", _UFUNC_KWARG_MISSING)
                 ),
             )
+        if not is_ufunc and _has_foreign_array_function(x):
+            result = _call_with_optional_out(
+                np_func,
+                x,
+                out=None if isinstance(out, SymmetricTensor) else out,
+                supports_out=supports_out,
+                callback_op_name=op_name,
+                **kwargs,
+            )
+            assert isinstance(result, _ForeignArrayFunctionResult)
+            return result.value
         symmetry = _symmetry_of(x)
         if is_ufunc:
             x, x_fwd = _resolve_ufunc_data_operand(x)
@@ -1429,17 +1493,14 @@ def _resolve_non_ufunc_data_operand(x):
     The array-dispatch helpers wrapped by ``_counted_unary`` and
     ``_free_unary`` are not ufuncs: ``__array_ufunc__ = None`` does not
     reject them.  Ordinary array-likes are therefore materialized once and
-    forwarded as that same array.  A NEP 18 participant instead remains the
-    forwarded operand, so NumPy can invoke its ``__array_function__`` method;
-    its one materialization is used only for our shape and dtype billing.
+    forwarded as that same array. Foreign NEP 18 participants are resolved
+    before this helper, so their callback can run before any materialization.
     """
     if isinstance(x, _np.ndarray):
         stripped = _to_base_ndarray(x)
         return _np.asarray(stripped), stripped
-    billing_view = _np.asarray(x)
-    if _implements_array_function(x):
-        return billing_view, x
-    return billing_view, billing_view
+    resolved = _np.asarray(x)
+    return resolved, resolved
 
 
 def _refresh_ufunc_data_operand(x, cached: tuple):
@@ -2916,9 +2977,21 @@ def around(
     """Counted version of np.around. Cost = numel(output) FLOPs."""
     budget = require_budget()
     out = _normalize_out(out, "around")
-    a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
+    if _has_foreign_array_function(a):
+        result = _call_with_optional_out(
+            _np.around,
+            a,
+            decimals=decimals,
+            out=None if isinstance(out, SymmetricTensor) else out,
+            supports_out=True,
+            callback_op_name="around",
+        )
+        assert isinstance(result, _ForeignArrayFunctionResult)
+        return result.value
+    a_is_scalar = False
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+        a_is_scalar = a.ndim == 0
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
@@ -2938,6 +3011,7 @@ def around(
             decimals=decimals,
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
+            callback_op_name="around",
         )
     maybe_check_nan_inf(result, "around")
     if (
@@ -3027,9 +3101,21 @@ def round(
     """Counted version of np.round. Cost = numel(output) FLOPs."""
     budget = require_budget()
     out = _normalize_out(out, "round")
-    a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
+    if _has_foreign_array_function(a):
+        result = _call_with_optional_out(
+            _np.round,
+            a,
+            decimals=decimals,
+            out=None if isinstance(out, SymmetricTensor) else out,
+            supports_out=True,
+            callback_op_name="round",
+        )
+        assert isinstance(result, _ForeignArrayFunctionResult)
+        return result.value
+    a_is_scalar = False
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
+        a_is_scalar = a.ndim == 0
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
     cost = pointwise_cost(a.shape, symmetry=symmetry)
@@ -3049,6 +3135,7 @@ def round(
             decimals=decimals,
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
+            callback_op_name="round",
         )
     maybe_check_nan_inf(result, "round")
     if (
