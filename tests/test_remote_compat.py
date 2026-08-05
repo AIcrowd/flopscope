@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 import flopscope as flops
+from flopscope._ndarray import FlopscopeArray
 from flopscope._registry import REGISTRY
 
 # Derived from REGISTRY, never hand-maintained: a literal copy of this set is
@@ -152,6 +153,14 @@ def test_ufunc_protocol_warning_uses_charged_alias_name(op_name, invoke):
         with pytest.warns(RemoteCallbackWarning, match=rf"^{op_name}\(\)"):
             invoke(duck)
     assert duck.calls == 1
+
+
+def test_numpy_scalar_is_not_treated_as_foreign_ufunc_callback():
+    with flops.BudgetContext(flop_budget=10**9):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RemoteCallbackWarning)
+            result = fnp.add(fnp.array([1.0, 2.0]), np.float64(3.0))
+    assert isinstance(result, FlopscopeArray)
 
 
 @pytest.mark.parametrize(
