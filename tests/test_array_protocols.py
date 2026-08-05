@@ -720,6 +720,20 @@ class _NonNdarrayUfuncOptOut(metaclass=_OptOutProtocolMeta):
         raise AssertionError("__array__ must not be called for a ufunc opt-out")
 
 
+class _NonUfuncDispatcherOptOut:
+    """Object accepted by NumPy's non-ufunc array-dispatch helpers."""
+
+    __array_ufunc__ = None
+
+    def __init__(self, values):
+        self.values = np.asarray(values)
+        self.array_calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        self.array_calls += 1
+        return np.asarray(self.values, dtype=dtype)
+
+
 class _NdarrayUfuncOptOut(np.ndarray):
     __array_ufunc__ = None
 
@@ -782,6 +796,31 @@ def test_non_ndarray_ufunc_opt_out_matches_raw_numpy_without_materializing(
     assert value.protocol_calls == raw_value.protocol_calls == 0
     assert _OptOutProtocolMeta.name_lookups == raw_name_lookups
     assert budget.flops_used == 0
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call, flops_array_calls",
+    [
+        (lambda value: np.real(value), lambda value: fnp.real(value), 1),
+        (lambda value: np.angle(value), lambda value: fnp.angle(value), 1),
+        (lambda value: np.nan_to_num(value), lambda value: fnp.nan_to_num(value), 1),
+        (lambda value: np.around(value), lambda value: fnp.around(value), 2),
+        (lambda value: np.round(value), lambda value: fnp.round(value), 2),
+    ],
+)
+def test_non_ufunc_dispatchers_materialize_ufunc_opt_out(
+    raw_call, flops_call, flops_array_calls
+):
+    raw_value = _NonUfuncDispatcherOptOut([1.5, -2.5])
+    expected = raw_call(raw_value)
+
+    value = _NonUfuncDispatcherOptOut([1.5, -2.5])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = flops_call(value)
+
+    np.testing.assert_array_equal(np.asarray(actual), expected)
+    assert raw_value.array_calls == 1
+    assert value.array_calls == flops_array_calls
 
 
 @pytest.mark.parametrize(

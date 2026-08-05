@@ -479,6 +479,7 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
 
 
 _ARRAY_UFUNC_MISSING = object()
+_ARRAY_FUNCTION_MISSING = object()
 _UFUNC_KWARG_MISSING = object()
 
 
@@ -496,6 +497,14 @@ def _static_array_ufunc_implementation(value):
     return _inspect.getattr_static(
         type(value), "__array_ufunc__", _ARRAY_UFUNC_MISSING
     )
+
+
+def _implements_array_function(value) -> bool:
+    """Whether a non-ndarray operand provides NEP 18 dispatch."""
+    implementation = _inspect.getattr_static(
+        type(value), "__array_function__", _ARRAY_FUNCTION_MISSING
+    )
+    return implementation is not _ARRAY_FUNCTION_MISSING and implementation is not None
 
 
 def _has_foreign_array_ufunc(value) -> bool:
@@ -744,25 +753,29 @@ def _pointwise_symmetry(operands, output_shape):
 @_counted_wrapper
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
+    is_ufunc = isinstance(np_func, _np.ufunc)
 
     @_counted_wrapper
     def wrapper(
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
-        # Above every later read of ``out`` -- the billing dtype, the
-        # symmetry check, and what gets returned -- and above the deduct,
-        # so a refused form costs nothing.
+        # Ufuncs must reject an opt-out before inspecting out or billing. The
+        # non-ufunc NumPy dispatch helpers materialize such operands instead.
         out = _normalize_out(out, op_name)
-        _preflight_ufunc_opt_out(
-            x,
-            *_flatten_ufunc_out_slots(out),
-            *_with_where_protocol_operand(
-                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
-            ),
-        )
+        if is_ufunc:
+            _preflight_ufunc_opt_out(
+                x,
+                *_flatten_ufunc_out_slots(out),
+                *_with_where_protocol_operand(
+                    (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+                ),
+            )
         symmetry = _symmetry_of(x)
-        x, x_fwd = _resolve_ufunc_data_operand(x)
+        if is_ufunc:
+            x, x_fwd = _resolve_ufunc_data_operand(x)
+        else:
+            x, x_fwd = _resolve_non_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
@@ -800,7 +813,7 @@ def _counted_unary(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
-        if isinstance(result, _ForeignUfuncResult):
+        if is_ufunc and isinstance(result, _ForeignUfuncResult):
             return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -823,25 +836,29 @@ def _free_unary(np_func, op_name: str):
     ``budget.deduct`` so wall time is accounted.
     """
     supports_out = _supports_out_argument(np_func)
+    is_ufunc = isinstance(np_func, _np.ufunc)
 
     @_counted_wrapper
     def wrapper(
         x: ArrayLike, out: FlopscopeArray | None = None, **kwargs: Any
     ) -> FlopscopeArray:
         budget = require_budget()
-        # Above every later read of ``out`` -- the billing dtype, the
-        # symmetry check, and what gets returned -- and above the deduct,
-        # so a refused form costs nothing.
+        # Ufuncs must reject an opt-out before inspecting out or billing. The
+        # non-ufunc NumPy dispatch helpers materialize such operands instead.
         out = _normalize_out(out, op_name)
-        _preflight_ufunc_opt_out(
-            x,
-            *_flatten_ufunc_out_slots(out),
-            *_with_where_protocol_operand(
-                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
-            ),
-        )
+        if is_ufunc:
+            _preflight_ufunc_opt_out(
+                x,
+                *_flatten_ufunc_out_slots(out),
+                *_with_where_protocol_operand(
+                    (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+                ),
+            )
         symmetry = _symmetry_of(x)
-        x, x_fwd = _resolve_ufunc_data_operand(x)
+        if is_ufunc:
+            x, x_fwd = _resolve_ufunc_data_operand(x)
+        else:
+            x, x_fwd = _resolve_non_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         billing_dtypes: tuple = (x.dtype,)
         if kwargs.get("dtype") is not None:
@@ -863,7 +880,7 @@ def _free_unary(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
-        if isinstance(result, _ForeignUfuncResult):
+        if is_ufunc and isinstance(result, _ForeignUfuncResult):
             return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -1404,6 +1421,25 @@ def _resolve_ufunc_data_operand(x):
         return _np.asarray(x), x
     resolved = _np.asarray(x)
     return resolved, resolved
+
+
+def _resolve_non_ufunc_data_operand(x):
+    """Return a billing view and the proper operand for a NumPy dispatcher.
+
+    The array-dispatch helpers wrapped by ``_counted_unary`` and
+    ``_free_unary`` are not ufuncs: ``__array_ufunc__ = None`` does not
+    reject them.  Ordinary array-likes are therefore materialized once and
+    forwarded as that same array.  A NEP 18 participant instead remains the
+    forwarded operand, so NumPy can invoke its ``__array_function__`` method;
+    its one materialization is used only for our shape and dtype billing.
+    """
+    if isinstance(x, _np.ndarray):
+        stripped = _to_base_ndarray(x)
+        return _np.asarray(stripped), stripped
+    billing_view = _np.asarray(x)
+    if _implements_array_function(x):
+        return billing_view, x
+    return billing_view, billing_view
 
 
 def _refresh_ufunc_data_operand(x, cached: tuple):
@@ -2879,11 +2915,7 @@ def around(
 ) -> FlopscopeArray | Any:
     """Counted version of np.around. Cost = numel(output) FLOPs."""
     budget = require_budget()
-    # Above every later read of ``out`` -- the billing dtype, the
-    # symmetry check, and what gets returned -- and above the deduct,
-    # so a refused form costs nothing.
     out = _normalize_out(out, "around")
-    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -2900,15 +2932,13 @@ def around(
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_with_optional_out(
+        result: Any = _call_with_optional_out(
             _np.around,
             a,
             decimals=decimals,
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
         )
-    if isinstance(result, _ForeignUfuncResult):
-        return result.value
     maybe_check_nan_inf(result, "around")
     if (
         a_is_scalar
@@ -2996,11 +3026,7 @@ def round(
 ) -> FlopscopeArray | Any:
     """Counted version of np.round. Cost = numel(output) FLOPs."""
     budget = require_budget()
-    # Above every later read of ``out`` -- the billing dtype, the
-    # symmetry check, and what gets returned -- and above the deduct,
-    # so a refused form costs nothing.
     out = _normalize_out(out, "round")
-    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -3017,15 +3043,13 @@ def round(
         shapes=(a.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_with_optional_out(
+        result: Any = _call_with_optional_out(
             _np.round,
             a,
             decimals=decimals,
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
         )
-    if isinstance(result, _ForeignUfuncResult):
-        return result.value
     maybe_check_nan_inf(result, "round")
     if (
         a_is_scalar
