@@ -287,6 +287,11 @@ def test_generated_context_and_session_transitions_match_scan(
     ctx.__enter__()
     entered = True
     inflight = None
+    inflight_segment_started_at: float | None = None
+    inflight_backend_baseline: float | None = None
+    inflight_overhead_baseline: float | None = None
+    inflight_usercode_baseline: float | None = None
+    inflight_direct_backend_baseline: float | None = None
     inflight_namespace: str | None = None
     inflight_reset_epoch: int | None = None
     reset_epoch = 0
@@ -301,18 +306,33 @@ def test_generated_context_and_session_transitions_match_scan(
 
     def finish_inflight() -> None:
         nonlocal inflight, inflight_namespace, inflight_reset_epoch
+        nonlocal inflight_segment_started_at, inflight_backend_baseline
+        nonlocal inflight_overhead_baseline, inflight_usercode_baseline
+        nonlocal inflight_direct_backend_baseline
         if inflight is not None:
             assert inflight_reset_epoch is not None
-            operation_before = ctx.op_log[inflight._op_index]
+            assert inflight_segment_started_at is not None
+            assert inflight_backend_baseline is not None
+            assert inflight_overhead_baseline is not None
+            assert inflight_usercode_baseline is not None
+            assert inflight_direct_backend_baseline is not None
+            backend_delta = (
+                inflight._backend_duration_s - inflight_direct_backend_baseline
+            )
+            nested_delta = (
+                ctx._total_flopscope_backend_time - inflight_backend_baseline
+            ) + (ctx._total_flopscope_overhead_time - inflight_overhead_baseline)
+            usercode_delta = ctx._total_user_code_time - inflight_usercode_baseline
+            overhead_delta = max(
+                clock.now
+                - inflight_segment_started_at
+                - backend_delta
+                - nested_delta
+                - usercode_delta,
+                0.0,
+            )
             inflight.__exit__(None, None, None)
             if inflight_reset_epoch != reset_epoch:
-                operation_after = ctx.op_log[inflight._op_index]
-                backend_delta = (
-                    operation_after.flopscope_backend_duration_s or 0.0
-                ) - (operation_before.flopscope_backend_duration_s or 0.0)
-                overhead_delta = (
-                    operation_after.flopscope_overhead_duration_s or 0.0
-                ) - (operation_before.flopscope_overhead_duration_s or 0.0)
                 operation_delta = {
                     "inflight_add": {
                         "flop_cost": 0,
@@ -333,6 +353,11 @@ def test_generated_context_and_session_transitions_match_scan(
                 _merge_bucket_mapping(orphan_operations, operation_delta)
                 _merge_bucket_mapping(orphan_namespaces, namespace_delta)
             inflight = None
+            inflight_segment_started_at = None
+            inflight_backend_baseline = None
+            inflight_overhead_baseline = None
+            inflight_usercode_baseline = None
+            inflight_direct_backend_baseline = None
             inflight_namespace = None
             inflight_reset_epoch = None
 
@@ -350,6 +375,12 @@ def test_generated_context_and_session_transitions_match_scan(
                 reset_epoch += 1
                 orphan_operations.clear()
                 orphan_namespaces.clear()
+                if inflight is not None:
+                    inflight_segment_started_at = clock.now
+                    inflight_backend_baseline = ctx._total_flopscope_backend_time
+                    inflight_overhead_baseline = ctx._total_flopscope_overhead_time
+                    inflight_usercode_baseline = ctx._total_user_code_time
+                    inflight_direct_backend_baseline = inflight._backend_duration_s
             elif event == "default":
                 finish_inflight()
                 if entered:
@@ -406,6 +437,11 @@ def test_generated_context_and_session_transitions_match_scan(
                             dtypes=(),
                         )
                         inflight.__enter__()
+                        inflight_segment_started_at = clock.now
+                        inflight_backend_baseline = ctx._total_flopscope_backend_time
+                        inflight_overhead_baseline = ctx._total_flopscope_overhead_time
+                        inflight_usercode_baseline = ctx._total_user_code_time
+                        inflight_direct_backend_baseline = inflight._backend_duration_s
                         inflight_namespace = ctx.namespace
                         inflight_reset_epoch = reset_epoch
                     else:
@@ -1429,6 +1465,222 @@ def test_reset_drops_inflight_diagnostic_provenance_but_keeps_later_timing(
     assert all(not record.op_log for record in accumulator._records)
     assert accumulator.get_data(by_namespace=True) == result
     assert budget_module.budget_summary_dict(by_namespace=True) == result
+
+
+def test_reset_rebases_live_timer_and_nested_timing_to_the_new_epoch(
+    monkeypatch,
+) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True, namespace="train")
+    ctx.__enter__()
+    outer = ctx.deduct("outer", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    outer.__enter__()
+    assert ctx._live_op_timers == {outer}
+
+    now[0] = 1.0
+    before_reset = ctx.deduct(
+        "before_reset", flop_cost=2, subscripts=None, shapes=(), dtypes=()
+    )
+    before_reset.__enter__()
+    assert ctx._live_op_timers == {outer, before_reset}
+    before_reset._backend_duration_s = 1.0
+    now[0] = 3.0
+    before_reset.__exit__(None, None, None)
+    assert ctx._live_op_timers == {outer}
+    outer._backend_duration_s += 0.5
+
+    now[0] = 4.0
+    budget_module.budget_reset()
+    assert ctx._live_op_timers == {outer}
+
+    now[0] = 5.0
+    after_reset = ctx.deduct(
+        "after_reset", flop_cost=3, subscripts=None, shapes=(), dtypes=()
+    )
+    after_reset.__enter__()
+    assert ctx._live_op_timers == {outer, after_reset}
+    after_reset._backend_duration_s = 0.5
+    now[0] = 7.0
+    after_reset.__exit__(None, None, None)
+    assert ctx._live_op_timers == {outer}
+    outer._backend_duration_s += 0.25
+
+    now[0] = 8.0
+    outer.__exit__(None, None, None)
+    assert ctx._live_op_timers == set()
+    ctx.__exit__(None, None, None)
+
+    result = accumulator.snapshot(by_namespace=True)
+    assert result["wall_time_s"] == 4.0
+    assert result["flopscope_backend_time_s"] == 0.75
+    assert result["flopscope_overhead_time_s"] == 3.25
+    assert result["residual_wall_time_s"] == 0.0
+    assert result["wall_time_s"] == (
+        result["flopscope_backend_time_s"]
+        + result["flopscope_overhead_time_s"]
+        + result["residual_wall_time_s"]
+    )
+
+    operations = result["operations"]
+    assert "before_reset" not in operations
+    assert operations["after_reset"] == {
+        "flop_cost": 3,
+        "calls": 1,
+        "flopscope_backend_time_s": 0.5,
+        "flopscope_overhead_time_s": 1.5,
+    }
+    assert operations["outer"] == {
+        "flop_cost": 0,
+        "calls": 0,
+        "flopscope_backend_time_s": 0.25,
+        "flopscope_overhead_time_s": 1.75,
+    }
+    namespace = result["by_namespace"]["train"]
+    assert namespace["flops_used"] == 3
+    assert namespace["calls"] == 1
+    assert namespace["operations"] == operations
+
+
+def test_reset_rebases_live_deferred_timer_to_the_new_epoch(monkeypatch) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True, namespace="train")
+    ctx.__enter__()
+    timer = ctx.deduct_after("deferred", subscripts=None, shapes=(), dtypes=())
+    timer.__enter__()
+    timer.set_cost(4)
+    timer._backend_duration_s = 0.75
+
+    now[0] = 2.0
+    budget_module.budget_reset()
+    timer._backend_duration_s += 0.25
+    now[0] = 3.0
+    timer.__exit__(None, None, None)
+    ctx.__exit__(None, None, None)
+
+    result = accumulator.snapshot(by_namespace=True)
+    assert result["wall_time_s"] == 1.0
+    assert result["flopscope_backend_time_s"] == 0.25
+    assert result["flopscope_overhead_time_s"] == 0.75
+    assert result["residual_wall_time_s"] == 0.0
+    assert result["operations"]["deferred"] == {
+        "flop_cost": 4,
+        "calls": 1,
+        "flopscope_backend_time_s": 0.25,
+        "flopscope_overhead_time_s": 0.75,
+    }
+    assert ctx._live_op_timers == set()
+
+
+def test_live_timer_registry_is_cleaned_on_exceptional_exits() -> None:
+    from flopscope._budget import BudgetContext
+    from flopscope.errors import TimeExhaustedError
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx.__enter__()
+
+    missing_cost = ctx.deduct_after(
+        "missing_cost", subscripts=None, shapes=(), dtypes=()
+    )
+    missing_cost.__enter__()
+    with pytest.raises(RuntimeError, match=r"set_cost\(\) was never called"):
+        missing_cost.__exit__(None, None, None)
+    assert ctx._live_op_timers == set()
+    assert ctx._current_op_timer is None
+
+    block_error = ctx.deduct_after("block_error", subscripts=None, shapes=(), dtypes=())
+    block_error.__enter__()
+    assert block_error.__exit__(RuntimeError, RuntimeError("boom"), None) is False
+    assert ctx._live_op_timers == set()
+    assert ctx._current_op_timer is None
+
+    deadline = ctx.deduct(
+        "deadline", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+    )
+    deadline.__enter__()
+    ctx._deadline = float("-inf")
+    ctx._wall_time_limit_s = 0.0
+    with pytest.raises(TimeExhaustedError):
+        deadline.__exit__(None, None, None)
+    assert ctx._live_op_timers == set()
+    assert ctx._current_op_timer is None
+
+    ctx._deadline = None
+    ctx.__exit__(None, None, None)
+
+
+def test_reset_waits_for_live_timer_exit_accounting(monkeypatch) -> None:
+    import threading
+
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx.__enter__()
+    timer = ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=())
+    timer.__enter__()
+
+    exit_clock_entered = threading.Event()
+    release_exit_clock = threading.Event()
+    reset_started = threading.Event()
+    reset_finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def blocked_clock() -> float:
+        exit_clock_entered.set()
+        if not release_exit_clock.wait(timeout=5.0):
+            raise AssertionError("timer exit clock was not released")
+        return 1.0
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", blocked_clock)
+
+    def exit_timer() -> None:
+        try:
+            timer.__exit__(None, None, None)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    def reset_context() -> None:
+        reset_started.set()
+        try:
+            ctx._mark_reset_baseline()
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+        finally:
+            reset_finished.set()
+
+    exit_thread = threading.Thread(target=exit_timer)
+    reset_thread = threading.Thread(target=reset_context)
+    exit_thread.start()
+    assert exit_clock_entered.wait(timeout=5.0)
+    reset_thread.start()
+    assert reset_started.wait(timeout=5.0)
+    assert not reset_finished.wait(timeout=0.05)
+
+    release_exit_clock.set()
+    exit_thread.join(timeout=5.0)
+    reset_thread.join(timeout=5.0)
+
+    assert not errors
+    assert not exit_thread.is_alive()
+    assert not reset_thread.is_alive()
+    assert ctx._live_op_timers == set()
+    assert ctx._unrecorded_rollup.operations_dict() == {}
+    assert ctx._recorded_summary_generation == ctx._summary_generation
+    ctx.__exit__(None, None, None)
 
 
 def test_diagnostic_provenance_tracks_only_unfinished_operations(monkeypatch) -> None:

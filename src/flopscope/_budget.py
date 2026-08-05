@@ -91,6 +91,7 @@ class _OpTimer:
         "_overhead_baseline",
         "_usercode_baseline",
         "_prev_timer",
+        "_is_active",
     )
 
     def __init__(self, budget: BudgetContext, op_index: int):
@@ -102,29 +103,49 @@ class _OpTimer:
         self._overhead_baseline: float = 0.0
         self._usercode_baseline: float = 0.0
         self._prev_timer: _OpTimer | _DeferredOpTimer | None = None
+        self._is_active = False
 
-    def __enter__(self) -> _OpTimer:
-        self._block_t0 = time.perf_counter()
+    def _rebase_after_reset(self, reset_time: float) -> None:
+        """Discard timing before ``reset_time`` while this timer stays open."""
+        self._block_t0 = reset_time
+        self._backend_duration_s = 0.0
         self._backend_baseline = self._budget._total_flopscope_backend_time
         self._overhead_baseline = self._budget._total_flopscope_overhead_time
         self._usercode_baseline = self._budget._total_user_code_time
-        # Stack discipline supports the rare case of nested deduct() blocks
-        self._prev_timer = self._budget._current_op_timer
-        self._budget._current_op_timer = self
+
+    def __enter__(self) -> _OpTimer:
+        with self._budget._summary_lock:
+            if self._is_active:
+                raise RuntimeError("Operation timers cannot be re-entered")
+            self._block_t0 = time.perf_counter()
+            self._backend_baseline = self._budget._total_flopscope_backend_time
+            self._overhead_baseline = self._budget._total_flopscope_overhead_time
+            self._usercode_baseline = self._budget._total_user_code_time
+            # Stack discipline supports the rare case of nested deduct() blocks.
+            self._prev_timer = self._budget._current_op_timer
+            self._budget._live_op_timers.add(self)
+            self._is_active = True
+            self._budget._current_op_timer = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
-        if self._block_t0 is not None:
-            block_duration = time.perf_counter() - self._block_t0
-            nested = (
-                self._budget._total_flopscope_backend_time - self._backend_baseline
-            ) + (self._budget._total_flopscope_overhead_time - self._overhead_baseline)
-            user_code = self._budget._total_user_code_time - self._usercode_baseline
-            in_block_overhead = max(
-                block_duration - self._backend_duration_s - nested - user_code, 0.0
-            )
+        with self._budget._summary_lock:
+            try:
+                if self._block_t0 is None:
+                    return False
+                block_duration = time.perf_counter() - self._block_t0
+                nested = (
+                    self._budget._total_flopscope_backend_time - self._backend_baseline
+                ) + (
+                    self._budget._total_flopscope_overhead_time
+                    - self._overhead_baseline
+                )
+                user_code = self._budget._total_user_code_time - self._usercode_baseline
+                in_block_overhead = max(
+                    block_duration - self._backend_duration_s - nested - user_code,
+                    0.0,
+                )
 
-            with self._budget._summary_lock:
                 self._budget._add_flopscope_backend(self._backend_duration_s)
                 self._budget._add_flopscope_overhead(in_block_overhead)
 
@@ -140,21 +161,23 @@ class _OpTimer:
                     ),
                 )
 
-            # Post-op deadline check (preserves existing behavior)
-            if (
-                exc_type is None
-                and self._budget._deadline is not None
-                and time.perf_counter() > self._budget._deadline
-            ):
-                from flopscope.errors import TimeExhaustedError
+                # Post-op deadline check (preserves existing behavior)
+                if (
+                    exc_type is None
+                    and self._budget._deadline is not None
+                    and time.perf_counter() > self._budget._deadline
+                ):
+                    from flopscope.errors import TimeExhaustedError
 
-                raise TimeExhaustedError(
-                    op.op_name,
-                    elapsed_s=time.perf_counter() - self._budget._start_time,  # type: ignore[operator]
-                    limit_s=self._budget._wall_time_limit_s,  # type: ignore[arg-type]
-                )
-
-        self._budget._current_op_timer = self._prev_timer
+                    raise TimeExhaustedError(
+                        op.op_name,
+                        elapsed_s=time.perf_counter() - self._budget._start_time,  # type: ignore[operator]
+                        limit_s=self._budget._wall_time_limit_s,  # type: ignore[arg-type]
+                    )
+            finally:
+                self._budget._current_op_timer = self._prev_timer
+                self._budget._live_op_timers.discard(self)
+                self._is_active = False
         return False
 
 
@@ -190,6 +213,7 @@ class _DeferredOpTimer:
         "_overhead_baseline",
         "_usercode_baseline",
         "_prev_timer",
+        "_is_active",
     )
 
     def __init__(
@@ -215,6 +239,15 @@ class _DeferredOpTimer:
         self._overhead_baseline: float = 0.0
         self._usercode_baseline: float = 0.0
         self._prev_timer: _OpTimer | _DeferredOpTimer | None = None
+        self._is_active = False
+
+    def _rebase_after_reset(self, reset_time: float) -> None:
+        """Discard timing before ``reset_time`` while this timer stays open."""
+        self._block_t0 = reset_time
+        self._backend_duration_s = 0.0
+        self._backend_baseline = self._budget._total_flopscope_backend_time
+        self._overhead_baseline = self._budget._total_flopscope_overhead_time
+        self._usercode_baseline = self._budget._total_user_code_time
 
     def set_cost(self, flop_cost: int) -> None:
         self._cost = flop_cost
@@ -237,46 +270,58 @@ class _DeferredOpTimer:
         self._dtypes = dtypes
 
     def __enter__(self) -> _DeferredOpTimer:
-        self._block_t0 = time.perf_counter()
-        self._backend_baseline = self._budget._total_flopscope_backend_time
-        self._overhead_baseline = self._budget._total_flopscope_overhead_time
-        self._usercode_baseline = self._budget._total_user_code_time
-        self._prev_timer = self._budget._current_op_timer
-        self._budget._current_op_timer = self
+        with self._budget._summary_lock:
+            if self._is_active:
+                raise RuntimeError("Operation timers cannot be re-entered")
+            self._block_t0 = time.perf_counter()
+            self._backend_baseline = self._budget._total_flopscope_backend_time
+            self._overhead_baseline = self._budget._total_flopscope_overhead_time
+            self._usercode_baseline = self._budget._total_user_code_time
+            self._prev_timer = self._budget._current_op_timer
+            self._budget._live_op_timers.add(self)
+            self._is_active = True
+            self._budget._current_op_timer = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
-        block_duration = time.perf_counter() - self._block_t0  # type: ignore[operator]
-        nested = (
-            self._budget._total_flopscope_backend_time - self._backend_baseline
-        ) + (self._budget._total_flopscope_overhead_time - self._overhead_baseline)
-        user_code = self._budget._total_user_code_time - self._usercode_baseline
-        in_block_overhead = max(
-            block_duration - self._backend_duration_s - nested - user_code, 0.0
-        )
-        # Pop first so a nested _call_numpy after this block attributes to the
-        # restored (outer) timer, not this exited one.
-        self._budget._current_op_timer = self._prev_timer
         with self._budget._summary_lock:
-            # Attribute the measured time regardless of how we exit.
-            self._budget._add_flopscope_backend(self._backend_duration_s)
-            self._budget._add_flopscope_overhead(in_block_overhead)
-            if exc_type is not None:
-                return False  # propagate; nothing charged or recorded
-            if self._cost is None:
-                raise RuntimeError(
-                    f"deduct_after({self._op_name!r}): set_cost() was never called"
+            try:
+                block_duration = time.perf_counter() - self._block_t0  # type: ignore[operator]
+                nested = (
+                    self._budget._total_flopscope_backend_time - self._backend_baseline
+                ) + (
+                    self._budget._total_flopscope_overhead_time
+                    - self._overhead_baseline
                 )
-            self._budget._charge_op(
-                self._op_name,
-                self._cost,
-                self._subscripts,
-                self._shapes,
-                dtypes=self._dtypes,
-                complex_factor_override=self._complex_factor_override,
-                backend_duration_s=self._backend_duration_s,
-                overhead_duration_s=in_block_overhead,
-            )
+                user_code = self._budget._total_user_code_time - self._usercode_baseline
+                in_block_overhead = max(
+                    block_duration - self._backend_duration_s - nested - user_code,
+                    0.0,
+                )
+                # Attribute the measured time regardless of how we exit.
+                self._budget._add_flopscope_backend(self._backend_duration_s)
+                self._budget._add_flopscope_overhead(in_block_overhead)
+                if exc_type is not None:
+                    return False  # propagate; nothing charged or recorded
+                if self._cost is None:
+                    raise RuntimeError(
+                        f"deduct_after({self._op_name!r}): set_cost() was never called"
+                    )
+                self._budget._charge_op(
+                    self._op_name,
+                    self._cost,
+                    self._subscripts,
+                    self._shapes,
+                    dtypes=self._dtypes,
+                    complex_factor_override=self._complex_factor_override,
+                    backend_duration_s=self._backend_duration_s,
+                    overhead_duration_s=in_block_overhead,
+                )
+            finally:
+                # Restore the outer timer before any later raw NumPy call.
+                self._budget._current_op_timer = self._prev_timer
+                self._budget._live_op_timers.discard(self)
+                self._is_active = False
         return False
 
 
@@ -1277,6 +1322,7 @@ class BudgetContext:
         self._total_user_code_time: float = 0.0
         self._pre_enter_overhead: float = 0.0
         self._current_op_timer: _OpTimer | _DeferredOpTimer | None = None
+        self._live_op_timers: set[_OpTimer | _DeferredOpTimer] = set()
         self._recorded_flops_used = 0
         self._recorded_op_count = 0
         self._unrecorded_replaced_op_indices: set[int] = set()
@@ -1777,15 +1823,18 @@ class BudgetContext:
 
     @_summary_locked
     def _mark_reset_baseline(self) -> None:
+        reset_time = time.perf_counter()
         pending_pre_enter_overhead = 0.0
         if self is _global_default:
             wall_time = 0.0
+        elif self._wall_time_s is not None:
+            wall_time = self._wall_time_s
+        elif self._start_time is not None:
+            wall_time = self._pre_enter_overhead + reset_time - self._start_time
         else:
-            wall_time = self._accounting_wall_time_s()
-        if wall_time is None:
-            wall_time = time.perf_counter() - self._creation_time
+            wall_time = reset_time - self._creation_time
             pending_pre_enter_overhead = wall_time
-        elif self._wall_time_s is None:
+        if self._wall_time_s is None and self._start_time is not None:
             pending_pre_enter_overhead = self._pre_enter_overhead
         self._recorded_flops_used = self._flops_used
         self._recorded_op_count = len(self._op_log)
@@ -1797,6 +1846,8 @@ class BudgetContext:
         self._unrecorded_rollup.clear()
         self._unrecorded_replaced_op_indices.clear()
         self._budget_recorded = False
+        for timer in tuple(self._live_op_timers):
+            timer._rebase_after_reset(reset_time)
         self._advance_summary_generation(rollup_changed=True)
         self._recorded_summary_generation = self._summary_generation
 
