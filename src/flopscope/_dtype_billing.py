@@ -36,6 +36,39 @@ from flopscope._weights import _UFUNC_METHOD_SUFFIXES, get_dtype_rate
 from flopscope.errors import UnsupportedDtypeError
 
 
+def _weak_numeric_subclass_types() -> frozenset[type]:
+    """Built-in scalar families whose subclasses NumPy still promotes weakly.
+
+    NumPy 2.0 treats subclasses of Python's numeric scalar types as weak,
+    while NumPy 2.1 and later treat them as concrete scalars. Probe the public
+    ``result_type`` behavior so resolver operands track the installed NumPy
+    instead of encoding that version boundary here.
+    """
+
+    class IntSubclass(int):
+        pass
+
+    class FloatSubclass(float):
+        pass
+
+    class ComplexSubclass(complex):
+        pass
+
+    cases = (
+        (int, IntSubclass(1), _np.dtype(_np.int8)),
+        (float, FloatSubclass(1.0), _np.dtype(_np.float32)),
+        (complex, ComplexSubclass(1.0j), _np.dtype(_np.complex64)),
+    )
+    return frozenset(
+        scalar_type
+        for scalar_type, probe, narrow_dtype in cases
+        if _np.result_type(narrow_dtype, probe) == narrow_dtype
+    )
+
+
+_WEAK_NUMERIC_SUBCLASS_TYPES = _weak_numeric_subclass_types()
+
+
 def billing_operand(orig, coerced):
     """Result-type operand for billing.
 
@@ -47,6 +80,23 @@ def billing_operand(orig, coerced):
         orig, _np.generic
     ):
         return orig
+    return coerced.dtype
+
+
+def ufunc_resolver_operand(orig, coerced) -> _np.dtype | type:
+    """Operand form accepted by ``ufunc.resolve_dtypes``.
+
+    Exact built-in int, float, and complex scalars contribute their bare type
+    so NumPy applies NEP 50 weak promotion. Numeric subclasses follow the
+    installed NumPy's promotion behavior. Bool, NumPy scalars, and arrays
+    contribute their concrete dtype.
+    """
+    if type(orig) in (int, float, complex):
+        return type(orig)
+    if type(orig) is not bool and not isinstance(orig, _np.generic):
+        for scalar_type in _WEAK_NUMERIC_SUBCLASS_TYPES:
+            if isinstance(orig, scalar_type):
+                return scalar_type
     return coerced.dtype
 
 
@@ -292,6 +342,14 @@ def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
 def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     """Return the operand dtype with the highest billing rate (ties -> first).
 
+    A forbidden non-numeric, nonzero-itemsize dtype is propagated before the
+    rate comparison so the eventual ``deduct`` call can refuse it with the
+    operation's name. Otherwise a higher-rate numeric participant could erase
+    it while collapsing a complete ufunc signature -- for example, the
+    ``timedelta64, float64 -> timedelta64`` loop would collapse to float64 and
+    bypass the numeric-only policy. Zero-itemsize dtypes retain the central
+    policy's explicit exception and continue through the normal comparison.
+
     Unlike ``np.result_type``, this never promotes to a *third* dtype. Use it
     where the billed cost is the MAX of the operand rates rather than the
     promoted-loop rate -- e.g. ``astype``, which reads the source and writes
@@ -301,6 +359,9 @@ def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     under-charges when the destination is pricier (``complex64 -> float64``).
     """
     dts = [_np.dtype(d) for d in dtypes]
+    for dtype in dts:
+        if dtype.kind not in _NUMERIC_KINDS and dtype.itemsize != 0:
+            return dtype
     return max(dts, key=rate_for)
 
 
@@ -498,13 +559,8 @@ def unary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
     return _np.dtype(_np.float64)
 
 
-def binary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
-    """Compute dtype of a float-only BINARY ufunc (divide/arctan2/hypot...).
-
-    Unlike the unary case, numpy resolves integer/bool operand pairs of a
-    binary float-only ufunc to the default float: divide(int8, int8) ->
-    float64. Float and complex inputs keep their own loop.
-    """
+def integer_to_float64_min_dtype(resolved: _np.dtype) -> _np.dtype:
+    """Floor integer/bool computation at float64; preserve inexact kinds."""
     if resolved.kind in "biu":
         return _np.dtype(_np.float64)
     return resolved

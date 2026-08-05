@@ -1198,7 +1198,7 @@ def test_fixed_composites_do_not_overbill_f32():
     histogramdd's counts, sort_complex, stats.*, vander) -- those correctly
     bill float64 (or wider) for an f32 probe too, verified separately above.
     i0/sinc only widen INTEGER/bool input unconditionally; float32 stays
-    float32 (binary_float_loop_dtype leaves float/complex kinds unchanged),
+    float32 (integer_to_float64_min_dtype leaves float/complex kinds unchanged),
     so they ARE included below.
     """
     load_weights()
