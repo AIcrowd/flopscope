@@ -802,6 +802,23 @@ def _counted_unary_multi(np_func, op_name: str):
     return wrapper
 
 
+def _pointwise_complex_factor_override(
+    loop_dtypes: tuple[_np.dtype, ...], out: object
+) -> float | None:
+    """Derive complex structure from the binary ufunc loop, not its rate floor.
+
+    Any complex loop slot retains the operation's registry factor. A complex
+    destination after a non-complex loop moves two real components, while a
+    non-complex loop with no such destination is structurally neutral even if
+    the promoted raw inputs raise its billing rate to a complex dtype.
+    """
+    if _builtins.any(dtype.kind == "c" for dtype in loop_dtypes):
+        return None
+    if isinstance(out, _np.ndarray) and out.dtype.kind == "c":
+        return 2.0
+    return 1.0
+
+
 @_counted_wrapper
 def _counted_binary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
@@ -815,6 +832,11 @@ def _counted_binary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
+        # Resolve and freeze a caller-supplied dtype before observing either
+        # operand. A dtype-like object's property can be stateful or mutate an
+        # owning ndarray, so this one immutable value must govern both billing
+        # snapshots and the real numpy call.
+        explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -844,19 +866,20 @@ def _counted_binary(np_func, op_name: str):
         # promotion for billing. out= alone does not narrow the loop. A bool
         # dtype= is excluded: it names the output of a value-testing loop,
         # which still reads full-width operands -- bill the operands.
-        explicit_dtype = kwargs.get("dtype")
-        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
-            billing_dtypes = (_np.dtype(explicit_dtype),)
+        if explicit_dtype is not None and explicit_dtype.kind != "b":
+            loop_dtypes = (explicit_dtype,)
+            billing_dtypes = (explicit_dtype,)
         else:
             floor_operands = (
                 billing_operand(x_orig, x),
                 billing_operand(y_orig, y),
             )
-            loop_billing_dtype = _ufunc_loop_billing_dtype(
+            loop_dtypes = _ufunc_loop_signature(
                 np_func,
                 ufunc_resolver_operand(x_orig, x),
                 ufunc_resolver_operand(y_orig, y),
             )
+            loop_billing_dtype = heavier_billing_dtype(*loop_dtypes)
             input_floor = resolve_billing_dtype(floor_operands)
             billing_dtype = (
                 loop_billing_dtype
@@ -864,14 +887,26 @@ def _counted_binary(np_func, op_name: str):
                 else heavier_billing_dtype(loop_billing_dtype, input_floor)
             )
             billing_dtypes = (billing_dtype,)
-            if isinstance(out, _np.ndarray):
-                billing_dtypes += store_billing_dtypes(out)
+        # Billing must inspect the destination's real ndarray descriptor,
+        # never an overridable Python-level ``.dtype`` on a foreign subclass.
+        # Derive this view only after every input dtype/loop participant has
+        # resolved, since any of those caller-controlled reads can mutate an
+        # owning destination. The original ``out`` remains authoritative for
+        # symmetry, numpy forwarding, and return identity.
+        out_view = (
+            _np.asarray(_to_base_ndarray(out)) if isinstance(out, _np.ndarray) else None
+        )
+        if isinstance(out_view, _np.ndarray):
+            billing_dtypes += store_billing_dtypes(out_view)
         with budget.deduct(
             op_name,
             flop_cost=cost,
             subscripts=None,
             shapes=(x.shape, y.shape),
             dtypes=billing_dtypes,
+            complex_factor_override=_pointwise_complex_factor_override(
+                loop_dtypes, out_view
+            ),
         ):
             # Call the underlying ufunc with the ORIGINAL inputs so that
             # Python-scalar dtype promotion (NEP 50) and FloatingPointError
@@ -1060,25 +1095,20 @@ def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
     return _ufunc_loop_signature(ufunc, *operand_dtypes)[ufunc.nin]
 
 
-def _ufunc_loop_billing_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
-    """Return the rate-heaviest dtype slot in NumPy's resolved loop."""
-    return heavier_billing_dtype(*_ufunc_loop_signature(ufunc, *operand_dtypes))
-
-
 def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
     """Resolve a ``dtype=`` kwarg to a concrete ``np.dtype`` exactly once.
 
-    Shared by the four generic ufunc-method paths below (``outer`` /
-    ``reduce`` / ``accumulate`` / ``reduceat``). ``kwargs["dtype"]`` (when
-    present) is read here to compute the billing dtype, AND is the same
-    object later forwarded to the real numpy call via ``**kwargs`` -- a
-    caller-supplied dtype-like object (e.g. one exposing a stateful
-    ``.dtype`` property, which ``np.dtype()`` honours) would otherwise get
-    independently re-resolved a second time inside numpy's own call,
-    letting it report a cheap dtype to us while handing numpy something
-    pricier. Overwriting ``kwargs["dtype"]`` in place with the resolved,
-    immutable ``np.dtype`` closes that gap: numpy then resolves the exact
-    same value we billed.
+    Shared by direct single-output binary wrappers and the four generic
+    ufunc-method paths below (``outer`` / ``reduce`` / ``accumulate`` /
+    ``reduceat``). ``kwargs["dtype"]`` (when present) is read here to compute
+    the billing dtype, AND is the same object later forwarded to the real
+    numpy call via ``**kwargs`` -- a caller-supplied dtype-like object (e.g.
+    one exposing a stateful ``.dtype`` property, which ``np.dtype()``
+    honours) would otherwise get independently re-resolved a second time
+    inside numpy's own call, letting it report a cheap dtype to us while
+    handing numpy something pricier. Overwriting ``kwargs["dtype"]`` in place
+    with the resolved, immutable ``np.dtype`` closes that gap: numpy then
+    resolves the exact same value we billed.
 
     ``dtype=None`` (the default, meaning "no explicit dtype") is left
     alone -- resolving it here would turn "use the family default" into an
@@ -1361,6 +1391,7 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # (lighter) bool rate. (``explicit_dtype`` itself was already resolved
     # above, before ``a``/``b``; this just decides how to use it.)
     if explicit_dtype is not None and explicit_dtype.kind != "b":
+        loop_dtypes = (explicit_dtype,)
         billing_dtypes: tuple = (explicit_dtype,)
     else:
         # This default path shares the operand-width behavior of the
@@ -1372,9 +1403,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         # inputs for mixed logical loops). The jointly promoted input dtype is
         # only a rate floor, so it can raise the rate but cannot replace that
         # loop kind on a tie.
-        loop_billing_dtype = _ufunc_loop_billing_dtype(
-            ufunc, a_view.dtype, b_view.dtype
-        )
+        loop_dtypes = _ufunc_loop_signature(ufunc, a_view.dtype, b_view.dtype)
+        loop_billing_dtype = heavier_billing_dtype(*loop_dtypes)
         input_floor = resolve_billing_dtype((a_view.dtype, b_view.dtype))
         billing_dtype = (
             loop_billing_dtype
@@ -1390,6 +1420,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         subscripts=None,
         shapes=(a_view.shape, b_view.shape),
         dtypes=billing_dtypes,
+        complex_factor_override=_pointwise_complex_factor_override(
+            loop_dtypes, out_view
+        ),
     ):
         result = _call_numpy(
             ufunc.outer,
