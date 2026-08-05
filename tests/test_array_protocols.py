@@ -767,6 +767,31 @@ class _NonUfuncArrayFunctionSentinel:
         return self.sentinel
 
 
+class _NdarrayArrayFunctionSentinel(np.ndarray):
+    """ndarray subclass whose NEP 18 override must take precedence."""
+
+    def __new__(cls, sentinel):
+        value = np.asarray([1.5, -2.5]).view(cls)
+        value.sentinel = sentinel
+        value.array_calls = 0
+        value.function_calls = []
+        return value
+
+    def __array_finalize__(self, source):
+        if source is not None:
+            self.sentinel = getattr(source, "sentinel", None)
+            self.array_calls = getattr(source, "array_calls", 0)
+            self.function_calls = getattr(source, "function_calls", [])
+
+    def __array__(self, dtype=None, copy=None):
+        self.array_calls += 1
+        return np.ndarray.__array__(self, dtype=dtype, copy=copy)
+
+    def __array_function__(self, function, types, args, kwargs):
+        self.function_calls.append(function.__name__)
+        return self.sentinel
+
+
 class _NdarrayUfuncOptOut(np.ndarray):
     __array_ufunc__ = None
 
@@ -876,34 +901,116 @@ def test_round_dispatchers_materialize_stateful_array_like_once(raw_call, flops_
 
 
 @pytest.mark.parametrize(
-    "expected_function, raw_call, flops_call",
+    "expected_function, raw_call, flops_call, value_factory",
     [
-        ("real", lambda value: np.real(value), lambda value: fnp.real(value)),
-        ("angle", lambda value: np.angle(value), lambda value: fnp.angle(value)),
+        (
+            "real",
+            lambda value: np.real(value),
+            lambda value: fnp.real(value),
+            _NonUfuncArrayFunctionSentinel,
+        ),
+        (
+            "real",
+            lambda value: np.real(value),
+            lambda value: fnp.real(value),
+            _NdarrayArrayFunctionSentinel,
+        ),
+        (
+            "angle",
+            lambda value: np.angle(value),
+            lambda value: fnp.angle(value),
+            _NonUfuncArrayFunctionSentinel,
+        ),
+        (
+            "angle",
+            lambda value: np.angle(value),
+            lambda value: fnp.angle(value),
+            _NdarrayArrayFunctionSentinel,
+        ),
         (
             "nan_to_num",
             lambda value: np.nan_to_num(value),
             lambda value: fnp.nan_to_num(value),
+            _NonUfuncArrayFunctionSentinel,
         ),
-        ("around", lambda value: np.around(value), lambda value: fnp.around(value)),
-        ("round", lambda value: np.round(value), lambda value: fnp.round(value)),
+        (
+            "nan_to_num",
+            lambda value: np.nan_to_num(value),
+            lambda value: fnp.nan_to_num(value),
+            _NdarrayArrayFunctionSentinel,
+        ),
+        (
+            "around",
+            lambda value: np.around(value),
+            lambda value: fnp.around(value),
+            _NonUfuncArrayFunctionSentinel,
+        ),
+        (
+            "around",
+            lambda value: np.around(value),
+            lambda value: fnp.around(value),
+            _NdarrayArrayFunctionSentinel,
+        ),
+        (
+            "round",
+            lambda value: np.round(value),
+            lambda value: fnp.round(value),
+            _NonUfuncArrayFunctionSentinel,
+        ),
+        (
+            "round",
+            lambda value: np.round(value),
+            lambda value: fnp.round(value),
+            _NdarrayArrayFunctionSentinel,
+        ),
     ],
 )
 def test_non_ufunc_dispatchers_forward_array_function_before_materializing(
-    expected_function, raw_call, flops_call
+    expected_function, raw_call, flops_call, value_factory
 ):
     raw_sentinel = object()
-    raw_value = _NonUfuncArrayFunctionSentinel(raw_sentinel)
+    raw_value = value_factory(raw_sentinel)
     assert raw_call(raw_value) is raw_sentinel
 
     sentinel = object()
-    value = _NonUfuncArrayFunctionSentinel(sentinel)
+    value = value_factory(sentinel)
     with flops.BudgetContext(flop_budget=int(1e10)):
         actual = flops_call(value)
 
     assert actual is sentinel
     assert raw_value.function_calls == value.function_calls == [expected_function]
     assert raw_value.array_calls == value.array_calls == 0
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call",
+    [
+        (lambda value: np.real(value), lambda value: fnp.real(value)),
+        (lambda value: np.angle(value), lambda value: fnp.angle(value)),
+        (lambda value: np.nan_to_num(value), lambda value: fnp.nan_to_num(value)),
+        (lambda value: np.around(value), lambda value: fnp.around(value)),
+        (lambda value: np.round(value), lambda value: fnp.round(value)),
+    ],
+)
+@pytest.mark.parametrize(
+    "value_factory",
+    [
+        lambda: np.asarray([1.5, -2.5]),
+        lambda: fnp.asarray([1.5, -2.5]),
+        lambda: _NonUfuncDispatcherOptOut([1.5, -2.5]),
+    ],
+)
+def test_non_ufunc_dispatchers_wrap_nonparticipants(
+    raw_call, flops_call, value_factory
+):
+    value = value_factory()
+    expected = raw_call(np.asarray(value))
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = flops_call(value)
+
+    assert isinstance(actual, FlopscopeArray)
+    np.testing.assert_array_equal(np.asarray(actual), expected)
 
 
 @pytest.mark.parametrize(

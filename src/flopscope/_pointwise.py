@@ -510,12 +510,16 @@ def _static_array_ufunc_implementation(value):
 
 def _has_foreign_array_function(value) -> bool:
     """Whether *value* can dispatch a raw NumPy function through NEP 18."""
-    if isinstance(value, _np.ndarray):
+    if isinstance(value, FlopscopeArray):
         return False
     implementation = _inspect.getattr_static(
         type(value), "__array_function__", _ARRAY_FUNCTION_MISSING
     )
-    return implementation is not _ARRAY_FUNCTION_MISSING and implementation is not None
+    return (
+        implementation is not _ARRAY_FUNCTION_MISSING
+        and implementation is not None
+        and implementation is not _np.ndarray.__array_function__
+    )
 
 
 def _has_foreign_array_ufunc(value) -> bool:
