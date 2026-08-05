@@ -8,6 +8,7 @@ import sys as _sys
 import threading
 import time
 import weakref
+from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
 import numpy as _np
@@ -1007,6 +1008,124 @@ def _summarize_by_namespace(op_log: list[OpRecord]) -> dict[str | None, dict]:
             bucket["flopscope_overhead_time_s"] += op.flopscope_overhead_duration_s
         _update_operation_summary(bucket["operations"], op)
     return by_namespace
+
+
+@dataclass
+class _OperationTotals:
+    flop_cost: int = 0
+    calls: int = 0
+    backend_s: float = 0.0
+    overhead_s: float = 0.0
+
+    def apply(self, op: OpRecord, sign: int) -> None:
+        self.flop_cost += sign * op.flop_cost
+        self.calls += sign
+        self.backend_s += sign * (op.flopscope_backend_duration_s or 0.0)
+        self.overhead_s += sign * (op.flopscope_overhead_duration_s or 0.0)
+
+    def merge(self, other: _OperationTotals, sign: int = 1) -> None:
+        self.flop_cost += sign * other.flop_cost
+        self.calls += sign * other.calls
+        self.backend_s += sign * other.backend_s
+        self.overhead_s += sign * other.overhead_s
+
+    def to_dict(self) -> dict:
+        return {
+            "flop_cost": self.flop_cost,
+            "calls": self.calls,
+            "flopscope_backend_time_s": self.backend_s,
+            "flopscope_overhead_time_s": self.overhead_s,
+        }
+
+
+@dataclass
+class _NamespaceTotals:
+    flops_used: int = 0
+    calls: int = 0
+    backend_s: float = 0.0
+    overhead_s: float = 0.0
+    operations: dict[str, _OperationTotals] = field(default_factory=dict)
+
+    def apply(self, op: OpRecord, sign: int) -> None:
+        self.flops_used += sign * op.flop_cost
+        self.calls += sign
+        self.backend_s += sign * (op.flopscope_backend_duration_s or 0.0)
+        self.overhead_s += sign * (op.flopscope_overhead_duration_s or 0.0)
+        bucket = self.operations.setdefault(op.op_name, _OperationTotals())
+        bucket.apply(op, sign)
+        if bucket.calls == 0:
+            del self.operations[op.op_name]
+
+    def merge(self, other: _NamespaceTotals, sign: int = 1) -> None:
+        self.flops_used += sign * other.flops_used
+        self.calls += sign * other.calls
+        self.backend_s += sign * other.backend_s
+        self.overhead_s += sign * other.overhead_s
+        for name, source in tuple(other.operations.items()):
+            bucket = self.operations.setdefault(name, _OperationTotals())
+            bucket.merge(source, sign)
+            if bucket.calls == 0:
+                del self.operations[name]
+
+    def to_dict(self) -> dict:
+        return {
+            "flops_used": self.flops_used,
+            "calls": self.calls,
+            "flopscope_backend_time_s": self.backend_s,
+            "flopscope_overhead_time_s": self.overhead_s,
+            "operations": {
+                name: bucket.to_dict() for name, bucket in self.operations.items()
+            },
+        }
+
+
+@dataclass
+class _SummaryRollup:
+    operations: dict[str, _OperationTotals] = field(default_factory=dict)
+    namespaces: dict[str | None, _NamespaceTotals] = field(default_factory=dict)
+
+    def apply_record(self, old: OpRecord | None, new: OpRecord | None) -> None:
+        if old is not None:
+            self._apply(old, -1)
+        if new is not None:
+            self._apply(new, 1)
+
+    def _apply(self, op: OpRecord, sign: int) -> None:
+        operation = self.operations.setdefault(op.op_name, _OperationTotals())
+        operation.apply(op, sign)
+        if operation.calls == 0:
+            del self.operations[op.op_name]
+        namespace = self.namespaces.setdefault(op.namespace, _NamespaceTotals())
+        namespace.apply(op, sign)
+        if namespace.calls == 0:
+            del self.namespaces[op.namespace]
+
+    def merge(self, other: _SummaryRollup, sign: int = 1) -> None:
+        for name, source in tuple(other.operations.items()):
+            bucket = self.operations.setdefault(name, _OperationTotals())
+            bucket.merge(source, sign)
+            if bucket.calls == 0:
+                del self.operations[name]
+        for name, source in tuple(other.namespaces.items()):
+            bucket = self.namespaces.setdefault(name, _NamespaceTotals())
+            bucket.merge(source, sign)
+            if bucket.calls == 0:
+                del self.namespaces[name]
+
+    def copy(self) -> _SummaryRollup:
+        result = _SummaryRollup()
+        result.merge(self)
+        return result
+
+    def clear(self) -> None:
+        self.operations.clear()
+        self.namespaces.clear()
+
+    def operations_dict(self) -> dict[str, dict]:
+        return {name: bucket.to_dict() for name, bucket in self.operations.items()}
+
+    def namespaces_dict(self) -> dict[str | None, dict]:
+        return {name: bucket.to_dict() for name, bucket in self.namespaces.items()}
 
 
 def _timing_summary(
