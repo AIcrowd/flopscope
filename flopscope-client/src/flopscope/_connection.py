@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import NoReturn
 
 import zmq
 
@@ -55,6 +56,13 @@ class Connection:
         self._socket = sock
         return sock
 
+    def _fail_handshake(
+        self, message: str, *, cause: BaseException | None = None
+    ) -> NoReturn:
+        """Reset invalid handshake state and raise a client-facing error."""
+        self._reset_socket()
+        raise ConnectionError(message) from cause
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -92,25 +100,48 @@ class Connection:
                 "server did not respond"
             ) from err
 
-        response = decode_response(raw)
+        try:
+            response_obj: object = decode_response(raw)
+        except Exception as err:
+            self._fail_handshake(
+                f"malformed handshake response from server: {err}", cause=err
+            )
+        if not isinstance(response_obj, dict):
+            self._fail_handshake(
+                "malformed handshake response from server: expected a mapping, "
+                f"got {response_obj!r}"
+            )
+        response = response_obj
         if (
             response.get("status") == "error"
             and response.get("error_type") == "VersionMismatch"
         ):
-            raise ConnectionError(
+            self._fail_handshake(
                 f"flopscope-client {client_xyz} cannot talk to this server: "
                 f"{response.get('message', 'version mismatch')}"
             )
         if response.get("status") != "ok":
-            raise ConnectionError(
+            self._fail_handshake(
                 f"unexpected handshake response from server: {response!r}"
+            )
+        server_version = response.get("server_version")
+        if not isinstance(server_version, str) or not server_version:
+            self._fail_handshake(
+                "malformed server_version in server handshake: expected a "
+                f"non-empty string matching {client_xyz!r}, got {server_version!r}. "
+                "Install matching client/server versions."
+            )
+        if server_version != client_xyz:
+            self._fail_handshake(
+                f"flopscope-client {client_xyz} cannot talk to flopscope-server "
+                f"{server_version}: versions must match. Install matching "
+                "client/server versions."
             )
         raw_capabilities = response.get("capabilities", [])
         if not isinstance(raw_capabilities, list) or not all(
             isinstance(value, str) for value in raw_capabilities
         ):
-            self._reset_socket()
-            raise ConnectionError(
+            self._fail_handshake(
                 f"malformed capabilities in server handshake: {raw_capabilities!r}"
             )
         self._capabilities = frozenset(raw_capabilities)

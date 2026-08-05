@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import msgpack
 import pytest
+from flopscope._protocol import AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY
 
 from flopscope import _connection, _protocol
 from flopscope.errors import FlopscopeServerError
 
-CAPABILITY = "authoritative_budget_summary_v1"
+CAPABILITY = AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY
+
+
+def _client_xyz() -> str:
+    import flopscope
+
+    return flopscope.__version__.split("+", 1)[0]
 
 
 def test_encode_hello_serializes_client_version():
@@ -25,6 +32,7 @@ class _FakeSocket:
     def __init__(self, recv_payloads: list[bytes]) -> None:
         self.sent: list[bytes] = []
         self._recv_payloads = list(recv_payloads)
+        self.closed_with_linger: int | None = None
 
     def send(self, payload: bytes) -> None:
         self.sent.append(payload)
@@ -44,7 +52,7 @@ def _make_connection(socket: _FakeSocket) -> _connection.Connection:
 
 def test_ensure_handshaked_happy_path_sets_flag_and_sends_hello():
     server_ok = msgpack.packb(
-        {"status": "ok", "server_version": "0.3.0"}, use_bin_type=True
+        {"status": "ok", "server_version": _client_xyz()}, use_bin_type=True
     )
     sock = _FakeSocket([server_ok])
     conn = _make_connection(sock)
@@ -58,11 +66,87 @@ def test_ensure_handshaked_happy_path_sets_flag_and_sends_hello():
     assert "client_version" in first["kwargs"]
 
 
+def test_malformed_msgpack_rejects_handshake_and_resets_socket() -> None:
+    sock = _FakeSocket([b"\xc1"])
+    conn = _make_connection(sock)
+    conn._capabilities = frozenset({CAPABILITY})
+
+    with pytest.raises(ConnectionError, match="malformed handshake response"):
+        conn._ensure_handshaked()
+
+    assert sock.closed_with_linger == 0
+    assert conn._socket is None
+    assert conn._handshake_done is False
+    assert conn._capabilities == frozenset()
+
+
+@pytest.mark.parametrize("response", [[], "ok"])
+def test_non_mapping_response_rejects_handshake_and_resets_socket(response) -> None:
+    raw = msgpack.packb(response, use_bin_type=True)
+    sock = _FakeSocket([raw])
+    conn = _make_connection(sock)
+    conn._capabilities = frozenset({CAPABILITY})
+
+    with pytest.raises(ConnectionError, match="malformed handshake response"):
+        conn._ensure_handshaked()
+
+    assert sock.closed_with_linger == 0
+    assert conn._socket is None
+    assert conn._handshake_done is False
+    assert conn._capabilities == frozenset()
+
+
+@pytest.mark.parametrize("server_version", [None, "", 10, ["0.10.0"]])
+def test_malformed_server_version_rejects_handshake_and_resets_socket(
+    server_version,
+) -> None:
+    response = {"status": "ok"}
+    if server_version is not None:
+        response["server_version"] = server_version
+    raw = msgpack.packb(response, use_bin_type=True)
+    sock = _FakeSocket([raw])
+    conn = _make_connection(sock)
+    conn._capabilities = frozenset({CAPABILITY})
+
+    with pytest.raises(ConnectionError) as excinfo:
+        conn._ensure_handshaked()
+
+    message = str(excinfo.value)
+    assert "malformed server_version" in message
+    assert "matching client/server versions" in message
+    assert sock.closed_with_linger == 0
+    assert conn._socket is None
+    assert conn._handshake_done is False
+    assert conn._capabilities == frozenset()
+
+
+def test_mismatched_server_version_rejects_handshake_and_resets_socket() -> None:
+    server_version = "0.0.0"
+    raw = msgpack.packb(
+        {"status": "ok", "server_version": server_version}, use_bin_type=True
+    )
+    sock = _FakeSocket([raw])
+    conn = _make_connection(sock)
+    conn._capabilities = frozenset({CAPABILITY})
+
+    with pytest.raises(ConnectionError) as excinfo:
+        conn._ensure_handshaked()
+
+    message = str(excinfo.value)
+    assert _client_xyz() in message
+    assert server_version in message
+    assert "Install matching client/server versions" in message
+    assert sock.closed_with_linger == 0
+    assert conn._socket is None
+    assert conn._handshake_done is False
+    assert conn._capabilities == frozenset()
+
+
 def test_handshake_stores_capabilities() -> None:
     server_ok = msgpack.packb(
         {
             "status": "ok",
-            "server_version": "0.10.0",
+            "server_version": _client_xyz(),
             "capabilities": [CAPABILITY],
         },
         use_bin_type=True,
@@ -74,7 +158,7 @@ def test_handshake_stores_capabilities() -> None:
 
 def test_missing_capabilities_means_unsupported_peer() -> None:
     server_ok = msgpack.packb(
-        {"status": "ok", "server_version": "0.10.0"}, use_bin_type=True
+        {"status": "ok", "server_version": _client_xyz()}, use_bin_type=True
     )
     conn = _make_connection(_FakeSocket([server_ok]))
     conn._ensure_handshaked()
@@ -90,7 +174,7 @@ def test_malformed_capabilities_rejects_handshake(bad) -> None:
     server_ok = msgpack.packb(
         {
             "status": "ok",
-            "server_version": "0.10.0",
+            "server_version": _client_xyz(),
             "capabilities": bad,
         },
         use_bin_type=True,
@@ -134,7 +218,7 @@ def test_ensure_handshaked_mismatch_raises_connection_error():
 def test_ensure_handshaked_is_idempotent():
     """Calling _ensure_handshaked twice only sends one hello."""
     server_ok = msgpack.packb(
-        {"status": "ok", "server_version": "0.3.0"}, use_bin_type=True
+        {"status": "ok", "server_version": _client_xyz()}, use_bin_type=True
     )
     sock = _FakeSocket([server_ok])
     conn = _make_connection(sock)
@@ -147,7 +231,7 @@ def test_ensure_handshaked_is_idempotent():
 def test_send_recv_triggers_handshake_first():
     """The first send_recv on a fresh Connection performs the handshake."""
     server_ok_hello = msgpack.packb(
-        {"status": "ok", "server_version": "0.3.0"}, use_bin_type=True
+        {"status": "ok", "server_version": _client_xyz()}, use_bin_type=True
     )
     server_ok_op = msgpack.packb(
         {"status": "ok", "result": 42, "budget": 0, "comms_overhead_ns": 0},
