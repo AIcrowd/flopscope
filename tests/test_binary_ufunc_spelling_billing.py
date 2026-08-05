@@ -438,6 +438,58 @@ def test_explicit_signature_slots_are_resolved_once(spelling):
     assert resolved_dtype == "complex128"
 
 
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+@pytest.mark.filterwarnings("ignore:Casting complex values to real discards")
+@pytest.mark.parametrize(
+    ("name", "type_kwargs", "expected_dtype"),
+    (
+        ("add", {"dtype": np.bool_}, "bool"),
+        ("multiply", {"signature": "ff->f"}, "float32"),
+    ),
+)
+def test_constrained_binary_loop_honors_unsafe_casting(
+    spelling, name, type_kwargs, expected_dtype
+):
+    load_weights()
+    left = np.array([1 + 2j, 0 + 0j], dtype=np.complex64)
+    right = np.array([0 + 0j, 3 + 4j], dtype=np.complex64)
+    np_func = getattr(np, name)
+    expected_out = np.empty((2, 2), dtype=expected_dtype)
+    out = np.empty((2, 2), dtype=expected_dtype)
+    kwargs = {**type_kwargs, "casting": "unsafe"}
+    if spelling == "direct":
+        expected = np_func(left[:, None], right[None, :], out=expected_out, **kwargs)
+
+        def call():
+            return getattr(fnp, name)(
+                fnp.asarray(left[:, None]),
+                fnp.asarray(right[None, :]),
+                out=out,
+                **kwargs,
+            )
+
+    else:
+        expected = np_func.outer(left, right, out=expected_out, **kwargs)
+
+        def call():
+            return np_func.outer(
+                fnp.asarray(left), fnp.asarray(right), out=out, **kwargs
+            )
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            actual, bill, resolved_dtype = _delta(ctx, call)
+
+    expected_bill = 4 * get_weight(name) * get_dtype_rate(expected_dtype)
+    assert expected is expected_out
+    assert actual is out
+    assert np.array_equal(actual, expected)
+    assert actual.dtype == expected.dtype == np.dtype(expected_dtype)
+    assert bill == expected_bill
+    assert resolved_dtype == expected_dtype
+
+
 @pytest.mark.parametrize(
     ("name", "dtype"),
     (("hypot", np.float16), ("bitwise_and", np.int8)),

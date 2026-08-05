@@ -442,9 +442,9 @@ Worked consequences:
   `multiply(f64, f64, dtype=float32)` casts both operands on read and runs the float32
   loop, so a 1000-element call bills at the float32 rate (`1000`), not at the operands'
   float64 rate. A forced `signature=` (or its `sig=` alias) likewise prices the exact
-  loop NumPy executes, including a forced complex loop's registry complex factor. `out=`
-  is a separate participant: it cannot narrow compute, but a wider destination can raise
-  the bill. Thus
+  loop NumPy executes, including a forced complex loop's registry complex factor; an
+  explicit `casting=` mode participates in that same resolution. `out=` is a separate
+  participant: it cannot narrow compute, but a wider destination can raise the bill. Thus
   `multiply(f64, f64, out=float32_arr)` still computes and bills float64 (`2000`), while
   `multiply(f32, f32, out=float64_arr)` also bills `2000` because it materializes a
   genuine float64 buffer. This keeps `out=` casting at `astype` parity: a wider `out=`

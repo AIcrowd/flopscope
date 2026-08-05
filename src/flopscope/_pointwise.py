@@ -836,7 +836,9 @@ def _counted_binary(np_func, op_name: str):
         # operand. A dtype-like object's property can be stateful or mutate an
         # owning ndarray, so this one immutable value must govern both billing
         # snapshots and the real numpy call.
-        explicit_dtype, explicit_signature = _freeze_binary_ufunc_type_kwargs(kwargs)
+        explicit_dtype, explicit_signature, explicit_casting = (
+            _freeze_binary_ufunc_type_kwargs(kwargs)
+        )
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -876,6 +878,7 @@ def _counted_binary(np_func, op_name: str):
                 ufunc_resolver_operand(x_orig, x_view),
                 ufunc_resolver_operand(y_orig, y_view),
                 signature=loop_constraint,
+                casting=explicit_casting,
             )
             billing_dtypes = (heavier_billing_dtype(*loop_dtypes),)
         else:
@@ -887,6 +890,7 @@ def _counted_binary(np_func, op_name: str):
                 np_func,
                 ufunc_resolver_operand(x_orig, x_view),
                 ufunc_resolver_operand(y_orig, y_view),
+                casting=explicit_casting,
             )
             loop_billing_dtype = heavier_billing_dtype(*loop_dtypes)
             input_floor = resolve_billing_dtype(floor_operands)
@@ -1068,12 +1072,14 @@ def _counted_binary_multi(np_func, op_name: str):
 
 
 _UFUNC_SIGNATURE_MISSING = object()
+_UFUNC_CASTING_MISSING = object()
 
 
 def _ufunc_loop_signature(
     ufunc,
     *operand_dtypes: _np.dtype | type,
     signature: object = _UFUNC_SIGNATURE_MISSING,
+    casting: object = _UFUNC_CASTING_MISSING,
 ) -> tuple[_np.dtype, ...]:
     """The complete input/output dtype signature NumPy resolves for ``ufunc``.
 
@@ -1096,8 +1102,13 @@ def _ufunc_loop_signature(
         inputs: tuple = (first,)
     else:
         inputs = (first, rest[0] if rest else first)
+    resolve_kwargs = {}
+    if signature is not _UFUNC_SIGNATURE_MISSING:
+        resolve_kwargs["signature"] = signature
+    if casting is not _UFUNC_CASTING_MISSING:
+        resolve_kwargs["casting"] = casting
     try:
-        if signature is _UFUNC_SIGNATURE_MISSING:
+        if not resolve_kwargs:
             return tuple(ufunc.resolve_dtypes((*inputs, *([None] * ufunc.nout))))
         with _warnings.catch_warnings():
             # NumPy <=2.2 warns for legacy length-one signature forms. The
@@ -1106,7 +1117,7 @@ def _ufunc_loop_signature(
             _warnings.simplefilter("ignore", DeprecationWarning)
             return tuple(
                 ufunc.resolve_dtypes(
-                    (*inputs, *([None] * ufunc.nout)), signature=signature
+                    (*inputs, *([None] * ufunc.nout)), **resolve_kwargs
                 )
             )
     except (TypeError, ValueError):
@@ -1148,7 +1159,9 @@ def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
     return resolved
 
 
-def _freeze_binary_ufunc_type_kwargs(kwargs: dict) -> tuple[_np.dtype | None, object]:
+def _freeze_binary_ufunc_type_kwargs(
+    kwargs: dict,
+) -> tuple[_np.dtype | None, object, object]:
     """Freeze dtype/signature constraints before binary operand snapshots.
 
     NumPy treats ``sig`` as an alias of ``signature`` and rejects conflicts
@@ -1166,8 +1179,12 @@ def _freeze_binary_ufunc_type_kwargs(kwargs: dict) -> tuple[_np.dtype | None, ob
         raise TypeError("cannot specify both 'signature' and 'dtype'")
 
     explicit_dtype = _resolve_explicit_dtype_kwarg(kwargs)
+    casting: object = kwargs.get("casting", _UFUNC_CASTING_MISSING)
+    if isinstance(casting, str):
+        casting = str.__str__(casting)
+        kwargs["casting"] = casting
     if signature_key is None:
-        return explicit_dtype, _UFUNC_SIGNATURE_MISSING
+        return explicit_dtype, _UFUNC_SIGNATURE_MISSING, casting
 
     signature = kwargs[signature_key]
     if isinstance(signature, str):
@@ -1186,7 +1203,7 @@ def _freeze_binary_ufunc_type_kwargs(kwargs: dict) -> tuple[_np.dtype | None, ob
     else:
         raise TypeError("the signature object to ufunc must be a string or a tuple")
     kwargs[signature_key] = frozen_signature
-    return explicit_dtype, frozen_signature
+    return explicit_dtype, frozen_signature, casting
 
 
 def _implements_array_ufunc(x) -> bool:
@@ -1357,7 +1374,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # module's reordering guards against). Resolving it before either
     # operand's billing view exists closes that window structurally: there
     # is no stale pre-mutation snapshot left for it to race against.
-    explicit_dtype, explicit_signature = _freeze_binary_ufunc_type_kwargs(kwargs)
+    explicit_dtype, explicit_signature, explicit_casting = (
+        _freeze_binary_ufunc_type_kwargs(kwargs)
+    )
     # Symmetry tags live on the ORIGINAL ``SymmetricTensor`` instances --
     # read them BEFORE the stripping below, which (deliberately) discards
     # that subclass along with everything else.
@@ -1458,7 +1477,11 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         )
     if loop_constraint is not _UFUNC_SIGNATURE_MISSING:
         loop_dtypes = _ufunc_loop_signature(
-            ufunc, a_view.dtype, b_view.dtype, signature=loop_constraint
+            ufunc,
+            a_view.dtype,
+            b_view.dtype,
+            signature=loop_constraint,
+            casting=explicit_casting,
         )
         billing_dtypes: tuple = (heavier_billing_dtype(*loop_dtypes),)
     else:
@@ -1471,7 +1494,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         # inputs for mixed logical loops). The jointly promoted input dtype is
         # only a rate floor, so it can raise the rate but cannot replace that
         # loop kind on a tie.
-        loop_dtypes = _ufunc_loop_signature(ufunc, a_view.dtype, b_view.dtype)
+        loop_dtypes = _ufunc_loop_signature(
+            ufunc, a_view.dtype, b_view.dtype, casting=explicit_casting
+        )
         loop_billing_dtype = heavier_billing_dtype(*loop_dtypes)
         input_floor = resolve_billing_dtype((a_view.dtype, b_view.dtype))
         billing_dtype = (
