@@ -1265,10 +1265,9 @@ def _ufunc_loop_signature(
 
     The returned tuple includes every resolved input-loop slot followed by
     every output slot. Direct binary and ``outer`` billing inspect all slots:
-    predicates may return bool while still reading complex inputs, and mixed
-    logical loops may cast both inputs to object or bool regardless of their
-    declared operand kinds. Reduction/accumulator consumers use the first
-    output slot through :func:`_ufunc_loop_dtype`.
+    predicates may return bool while still reading complex inputs. Reduction/
+    accumulator consumers use the first output slot through
+    :func:`_ufunc_loop_dtype`.
 
     The input tuple retains the prior operand-repeat rule: a missing second
     operand of a binary ufunc repeats the first, matching reduce/accumulate/
@@ -1697,10 +1696,9 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         # ufunc's loop OUTPUT is bool, which for wide-int inputs would bill
         # NARROWER than the input -- never charge below it.
         # The full resolved signature keeps NumPy's actual loop kind first on
-        # rate ties (complex inputs for a complex predicate loop, object/bool
-        # inputs for mixed logical loops). The jointly promoted input dtype is
-        # only a rate floor, so it can raise the rate but cannot replace that
-        # loop kind on a tie.
+        # rate ties (for example, complex inputs for a complex predicate
+        # loop). The jointly promoted input dtype is only a rate floor, so it
+        # can raise the rate but cannot replace that loop kind on a tie.
         loop_dtypes = _ufunc_loop_signature(
             ufunc, a_view.dtype, b_view.dtype, casting=explicit_casting
         )

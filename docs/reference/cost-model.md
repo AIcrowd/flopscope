@@ -454,9 +454,9 @@ the array). Single-output binary pointwise ufuncs — and their `ufunc.outer` sp
 derive their compute price from NumPy's complete resolved loop signature, including every
 input and output slot. That complete signature also determines whether the registry's
 complex-arithmetic factor applies. The promoted operands provide an input-rate floor: it
-can raise only `dtype_rate`, and does not invent complex arithmetic when NumPy resolves
-every loop slot to `bool` or `object`. `out=` then joins as a separate participant under
-the widest-participating-buffer doctrine.
+can raise only `dtype_rate`, and does not invent complex arithmetic when NumPy resolves a
+non-complex numeric loop (for example, a predicate's boolean output). `out=` then joins
+as a separate participant under the widest-participating-buffer doctrine.
 
 Worked consequences:
 

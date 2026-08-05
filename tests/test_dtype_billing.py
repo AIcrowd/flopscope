@@ -267,6 +267,22 @@ def test_integer_to_float64_min_dtype_maps_all_ints_to_f64():
     assert f(np.dtype(np.complex128)) == np.dtype(np.complex128)
 
 
+def test_heavier_billing_dtype_propagates_forbidden_dtype_for_refusal():
+    from flopscope._dtype_billing import heavier_billing_dtype
+
+    load_weights()
+    timedelta = np.dtype("timedelta64[D]")
+    assert heavier_billing_dtype(timedelta, np.dtype(np.float64)) == timedelta
+    assert heavier_billing_dtype(np.dtype(object), np.dtype(np.complex128)) == np.dtype(
+        object
+    )
+
+    zero_itemsize = np.dtype([])
+    assert heavier_billing_dtype(zero_itemsize, np.dtype(np.float64)) == np.dtype(
+        np.float64
+    )
+
+
 def test_ufunc_resolver_operand_matches_installed_numpy_scalar_promotion():
     from flopscope._dtype_billing import ufunc_resolver_operand
 

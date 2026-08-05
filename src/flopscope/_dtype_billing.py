@@ -342,6 +342,14 @@ def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
 def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     """Return the operand dtype with the highest billing rate (ties -> first).
 
+    A forbidden non-numeric, nonzero-itemsize dtype is propagated before the
+    rate comparison so the eventual ``deduct`` call can refuse it with the
+    operation's name. Otherwise a higher-rate numeric participant could erase
+    it while collapsing a complete ufunc signature -- for example, the
+    ``timedelta64, float64 -> timedelta64`` loop would collapse to float64 and
+    bypass the numeric-only policy. Zero-itemsize dtypes retain the central
+    policy's explicit exception and continue through the normal comparison.
+
     Unlike ``np.result_type``, this never promotes to a *third* dtype. Use it
     where the billed cost is the MAX of the operand rates rather than the
     promoted-loop rate -- e.g. ``astype``, which reads the source and writes
@@ -351,6 +359,9 @@ def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     under-charges when the destination is pricier (``complex64 -> float64``).
     """
     dts = [_np.dtype(d) for d in dtypes]
+    for dtype in dts:
+        if dtype.kind not in _NUMERIC_KINDS and dtype.itemsize != 0:
+            return dtype
     return max(dts, key=rate_for)
 
 

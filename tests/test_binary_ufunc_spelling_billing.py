@@ -138,44 +138,6 @@ def test_complex64_predicates_preserve_input_kind_in_billing(name, explicit_bool
     assert direct_dtype == outer_dtype == "complex64"
 
 
-@pytest.mark.parametrize(
-    ("mixed_dtype", "expected_dtype"),
-    ((np.dtype(object), "object"), (np.dtype("timedelta64[D]"), "bool")),
-)
-@pytest.mark.parametrize("reverse_operands", (False, True))
-def test_logical_and_mixed_kind_bills_full_numpy_loop_signature(
-    mixed_dtype, expected_dtype, reverse_operands
-):
-    load_weights()
-    mixed = np.array([0, 1], dtype=mixed_dtype)
-    complex_values = np.array([0 + 0j, 1 + 2j], dtype=np.complex64)
-    left, right = (
-        (complex_values, mixed) if reverse_operands else (mixed, complex_values)
-    )
-    expected_direct = np.logical_and(left[:, None], right[None, :])
-    expected_outer = np.logical_and.outer(left, right)
-
-    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
-        direct, direct_bill, direct_dtype = _delta(
-            ctx,
-            lambda: fnp.logical_and(
-                fnp.asarray(left[:, None]), fnp.asarray(right[None, :])
-            ),
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            outer, outer_bill, outer_dtype = _delta(
-                ctx,
-                lambda: np.logical_and.outer(fnp.asarray(left), fnp.asarray(right)),
-            )
-
-    expected_bill = 4 * get_weight("logical_and")
-    assert np.array_equal(direct, expected_direct)
-    assert np.array_equal(outer, expected_outer)
-    assert direct_bill == outer_bill == expected_bill
-    assert direct_dtype == outer_dtype == expected_dtype
-
-
 @pytest.mark.parametrize("name", _AFFECTED)
 @pytest.mark.parametrize(("dtype", "expected_loop"), _NARROW.items())
 def test_narrow_binary_direct_matches_outer_spelling(name, dtype, expected_loop):
@@ -393,6 +355,32 @@ def test_forced_binary_signature_controls_billing(
     assert actual.dtype == expected.dtype == np.dtype(expected_dtype)
     assert bill == expected_bill
     assert resolved_dtype == expected_dtype
+
+
+@pytest.mark.parametrize("keyword", ("signature", "sig"))
+@pytest.mark.parametrize("spelling", ("direct", "outer"))
+def test_forced_object_signature_is_refused_without_charge(keyword, spelling):
+    from flopscope.errors import UnsupportedDtypeError
+
+    left = fnp.asarray(np.array([1.0, 2.0]))
+    right = fnp.asarray(np.array([2.0, 1.0]))
+    kwargs = {keyword: "OO->O", "casting": "unsafe"}
+
+    def call():
+        if spelling == "direct":
+            return fnp.divide(left[:, None], right[None, :], **kwargs)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            return np.divide.outer(left, right, **kwargs)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        before_flops = ctx.flops_used
+        before_ops = len(ctx.op_log)
+        with pytest.raises(UnsupportedDtypeError):
+            call()
+
+    assert ctx.flops_used == before_flops
+    assert len(ctx.op_log) == before_ops
 
 
 @pytest.mark.parametrize("spelling", ("direct", "outer"))
