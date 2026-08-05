@@ -59,6 +59,38 @@ def test_rollup_add_replace_remove_matches_scan() -> None:
     _assert_matches_scan(rollup, [])
 
 
+def test_rollup_retains_zero_call_timing_delta_until_merge() -> None:
+    staged = _op(backend=None, overhead=0.01)
+    final = staged._replace(
+        flopscope_backend_duration_s=0.25,
+        flopscope_overhead_duration_s=0.05,
+    )
+    delta = _SummaryRollup()
+
+    delta.apply_record(staged, final)
+
+    expected_operation = {
+        "flop_cost": 0,
+        "calls": 0,
+        "flopscope_backend_time_s": 0.25,
+        "flopscope_overhead_time_s": 0.04,
+    }
+    assert delta.operations_dict() == {"add": expected_operation}
+    namespace = delta.namespaces_dict()["predict"]
+    assert namespace == {
+        "flops_used": 0,
+        "calls": 0,
+        "flopscope_backend_time_s": 0.25,
+        "flopscope_overhead_time_s": 0.04,
+        "operations": {"add": expected_operation},
+    }
+
+    aggregate = _SummaryRollup()
+    aggregate.apply_record(None, staged)
+    aggregate.merge(delta)
+    _assert_matches_scan(aggregate, [final])
+
+
 def test_rollup_merge_does_not_alias_nested_buckets() -> None:
     left = _SummaryRollup()
     right = _SummaryRollup()
@@ -527,3 +559,204 @@ def test_summary_waits_for_complete_op_timing_transition(monkeypatch) -> None:
     assert not writer.is_alive()
     assert not reader.is_alive()
     assert reader_finished.is_set()
+
+
+def test_session_merge_consumes_only_unrecorded_rollup(monkeypatch) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+    ctx = BudgetContext(100, quiet=True)
+    with ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+        accumulator.record(ctx)
+        ctx.deduct("add", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+    result = accumulator.snapshot(by_namespace=True)
+    assert result["flops_used"] == 12
+    assert result["operations"]["add"]["flop_cost"] == 12
+    assert result["operations"]["add"]["calls"] == 2
+    assert [record.flops_used for record in accumulator._records] == [5, 7]
+
+
+def test_inflight_op_completion_merges_zero_call_timing_delta(monkeypatch) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True, namespace="train")
+    with ctx:
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+        accumulator.record(ctx)
+        first_generation = accumulator._generation
+        first_rollup_generation = accumulator._rollup_generation
+        accumulator._closed_snapshot_cache[False] = (first_generation, {})
+        accumulator._stable_rollup_cache[()] = ({}, None)
+
+        with timer:
+            timer._backend_duration_s = 2.0
+            now[0] = 3.0
+
+        accumulator.record(ctx)
+        result = accumulator.snapshot(by_namespace=True)
+
+    operation = result["operations"]["add"]
+    namespace = result["by_namespace"]["train"]
+    assert result["flops_used"] == 5
+    assert operation["calls"] == 1
+    assert operation["flop_cost"] == 5
+    assert operation["flopscope_backend_time_s"] == 2.0
+    assert operation["flopscope_overhead_time_s"] == 1.0
+    assert namespace["calls"] == 1
+    assert namespace["flops_used"] == 5
+    assert namespace["flopscope_backend_time_s"] == 2.0
+    assert namespace["flopscope_overhead_time_s"] == 1.0
+    assert namespace["operations"]["add"] == operation
+    assert result["flopscope_backend_time_s"] == 2.0
+    assert result["flopscope_overhead_time_s"] == 1.0
+    assert (
+        sum(
+            record.total_flopscope_backend_time or 0.0
+            for record in accumulator._records
+        )
+        == result["flopscope_backend_time_s"]
+    )
+    assert (
+        sum(
+            record.total_flopscope_overhead_time or 0.0
+            for record in accumulator._records
+        )
+        == result["flopscope_overhead_time_s"]
+    )
+    diagnostic_ops = [
+        operation for record in accumulator._records for operation in record.op_log
+    ]
+    assert _summarize_operations(diagnostic_ops) == result["operations"]
+    assert _summarize_by_namespace(diagnostic_ops) == result["by_namespace"]
+    assert accumulator._generation == first_generation + 2
+    assert accumulator._rollup_generation == first_rollup_generation + 1
+    assert accumulator._closed_snapshot_cache == {}
+    assert accumulator._stable_rollup_cache == {}
+
+
+def test_reset_drops_inflight_diagnostic_provenance_but_keeps_later_timing(
+    monkeypatch,
+) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True, namespace="train")
+    with ctx:
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+        accumulator.record(ctx)
+        detached_record = accumulator._records[0]
+        now[0] = 1.0
+        budget_module.budget_reset()
+
+        with timer:
+            timer._backend_duration_s = 2.0
+            now[0] = 4.0
+
+    result = accumulator.snapshot(by_namespace=True)
+    operation = result["operations"]["add"]
+    namespace = result["by_namespace"]["train"]
+    assert result["flops_used"] == 0
+    assert result["wall_time_s"] == 3.0
+    assert result["flopscope_backend_time_s"] == 2.0
+    assert result["flopscope_overhead_time_s"] == 1.0
+    assert operation["calls"] == 0
+    assert operation["flop_cost"] == 0
+    assert operation["flopscope_backend_time_s"] == 2.0
+    assert operation["flopscope_overhead_time_s"] == 1.0
+    assert namespace["calls"] == 0
+    assert namespace["flops_used"] == 0
+    assert namespace["operations"]["add"] == operation
+    assert [
+        operation.flopscope_backend_duration_s for operation in detached_record.op_log
+    ] == [None]
+    assert all(not record.op_log for record in accumulator._records)
+    assert accumulator.get_data(by_namespace=True) == result
+    assert budget_module.budget_summary_dict(by_namespace=True) == result
+
+
+def test_diagnostic_provenance_tracks_only_unfinished_operations(monkeypatch) -> None:
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetAccumulator, BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True)
+    with ctx:
+        for _ in range(10):
+            with ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=()):
+                pass
+        accumulator.record(ctx)
+        assert ctx not in accumulator._diagnostic_op_locations
+
+        timer = ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=())
+        unfinished_index = len(ctx.op_log) - 1
+        accumulator.record(ctx)
+        assert set(accumulator._diagnostic_op_locations[ctx]) == {unfinished_index}
+
+        with timer:
+            pass
+        accumulator.record(ctx)
+        assert ctx not in accumulator._diagnostic_op_locations
+
+
+def test_timing_only_delta_is_unrecorded_activity() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx._add_flopscope_overhead(0.1)
+    assert ctx._has_unrecorded_activity()
+
+
+def test_mark_recorded_rebases_unrecorded_rollup_to_new_mutations() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+
+    ctx._mark_recorded()
+
+    assert ctx._unrecorded_rollup.operations_dict() == {}
+    assert ctx._unrecorded_rollup.namespaces_dict() == {}
+    assert ctx._recorded_summary_generation == ctx._summary_generation
+
+    ctx.deduct("multiply", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+
+    new_records = ctx.op_log[ctx._recorded_op_count :]
+    assert [record.op_name for record in new_records] == ["multiply"]
+    _assert_matches_scan(ctx._unrecorded_rollup, new_records)
+
+
+def test_mark_reset_baseline_rebases_unrecorded_rollup_to_new_mutations() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+
+    ctx._mark_reset_baseline()
+
+    assert ctx._unrecorded_rollup.operations_dict() == {}
+    assert ctx._unrecorded_rollup.namespaces_dict() == {}
+    assert ctx._recorded_summary_generation == ctx._summary_generation
+
+    ctx.deduct("multiply", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+
+    new_records = ctx.op_log[ctx._recorded_op_count :]
+    assert [record.op_name for record in new_records] == ["multiply"]
+    _assert_matches_scan(ctx._unrecorded_rollup, new_records)
