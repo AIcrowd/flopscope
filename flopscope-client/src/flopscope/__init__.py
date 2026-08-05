@@ -158,12 +158,30 @@ _MSGPACK_OK = (
     msgpack.Timestamp,
 )
 
+_MSGPACK_SUBCLASS_BASES = (
+    builtins.list,
+    builtins.tuple,
+    builtins.dict,
+    builtins.str,
+)
+
 
 def _is_exact_msgpack_scalar(value: Any) -> bool:
     """Check msgpack scalar support without invoking participant hooks."""
     value_type = builtins.type(value)
     return builtins.any(
         value_type is supported_type for supported_type in _MSGPACK_OK
+    )
+
+
+def _has_msgpack_subclass_base(value: Any) -> bool:
+    """Recognize supported subclasses without invoking their protocols."""
+    return builtins.any(
+        mro_type is supported_type
+        for mro_type in builtins.type.__getattribute__(
+            builtins.type(value), "__mro__"
+        )
+        for supported_type in _MSGPACK_SUBCLASS_BASES
     )
 
 
@@ -195,6 +213,8 @@ def _describe_unserializable(args: Any, kwargs: Any) -> str:
                 bad = walk(item)
                 if bad is not None:
                     return bad
+            return None
+        if _has_msgpack_subclass_base(value):
             return None
         return _static_type_name(value)
 

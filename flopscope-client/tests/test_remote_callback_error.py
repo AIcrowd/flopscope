@@ -214,6 +214,36 @@ def test_proxy_preserves_msgpack_binary_buffer_forms(spec, monkeypatch):
     assert encoded == [("zeros", [[1]], {"dtype": spec})]
 
 
+def test_proxy_preserves_msgpack_container_and_string_subclasses(monkeypatch):
+    class L(list):
+        pass
+
+    class T(tuple):
+        pass
+
+    class D(dict):
+        pass
+
+    class S(str):
+        pass
+
+    class Encoded(Exception):
+        pass
+
+    encoded = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append((op_name, args, kwargs))
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    for spec in (L([1]), T((1,)), D(a=1), S("x")):
+        with pytest.raises(Encoded):
+            flopscope.zeros((1,), dtype=spec)
+        assert encoded[-1][0:2] == ("zeros", [[1]])
+        assert encoded[-1][2]["dtype"] is spec
+
+
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
 def test_callback_op_raises_remote_callback_error(op):
     fn = getattr(flopscope, op)
