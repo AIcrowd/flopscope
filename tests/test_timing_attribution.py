@@ -1,13 +1,632 @@
 """Timing-bucket attribution tests (issue: callback/data-movement misattribution)."""
 
+import cProfile
+import gc
+import sys
 import time
+import weakref
 
 import numpy as np
 import pytest
 
 import flopscope as flops
+import flopscope._budget as budget_module
 import flopscope.numpy as fnp
-from flopscope._budget import _call_user_code, _counted_wrapper, get_active_budget
+from flopscope._budget import (
+    _call_numpy,
+    _call_numpy_with_python_callbacks,
+    _call_user_code,
+    _counted_wrapper,
+    get_active_budget,
+)
+from flopscope._config import get_setting
+
+
+class _NumericSleepyUfuncDuck:
+    """Numeric duck whose ufunc protocol spends observable time in Python."""
+
+    def __init__(self, payload, *, sleep_s=0.04, before_return=None, raises=None):
+        self.payload = np.asarray(payload)
+        self.sleep_s = sleep_s
+        self.before_return = before_return
+        self.raises = raises
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray(self.payload, dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        time.sleep(self.sleep_s)
+        if self.raises is not None:
+            raise self.raises
+        if self.before_return is not None:
+            self.before_return()
+        raw_inputs = tuple(self.payload if value is self else value for value in inputs)
+        return getattr(ufunc, method)(*raw_inputs, **kwargs)
+
+
+class _NumericSleepyUfuncArray(np.ndarray):
+    """Foreign ndarray output whose ufunc protocol sleeps in Python."""
+
+    def __new__(cls, payload, *, sleep_s=0.04):
+        result = np.asarray(payload).view(cls)
+        result.sleep_s = sleep_s
+        result.calls = 0
+        return result
+
+    def __array_finalize__(self, original):
+        if original is not None:
+            self.sleep_s = getattr(original, "sleep_s", 0.04)
+            self.calls = getattr(original, "calls", 0)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        time.sleep(self.sleep_s)
+        raw_inputs = tuple(
+            np.asarray(value)
+            if isinstance(value, (flops.FlopscopeArray, _NumericSleepyUfuncArray))
+            else value
+            for value in inputs
+        )
+        if "out" in kwargs and kwargs["out"] is not None:
+            kwargs["out"] = tuple(
+                None if value is None else np.asarray(value) for value in kwargs["out"]
+            )
+        return getattr(ufunc, method)(*raw_inputs, **kwargs)
+
+
+def _run_callback_aware_add(duck):
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            result = _call_numpy_with_python_callbacks(
+                np.add, np.array([1.0, 2.0]), duck
+            )
+    return result, budget
+
+
+def test_numpy_protocol_callback_time_lands_in_residual_not_backend():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+
+    result, budget = _run_callback_aware_add(duck)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+@pytest.mark.parametrize(
+    "op_name, make_duck, invoke",
+    [
+        (
+            "add",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: fnp.add(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "add.outer",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: np.add.outer(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "subtract.reduce",
+            lambda: _NumericSleepyUfuncArray(0.0),
+            lambda duck: np.subtract.reduce(fnp.array([3.0, 4.0]), out=duck, axis=0),
+        ),
+        (
+            "subtract.accumulate",
+            lambda: _NumericSleepyUfuncArray([0.0, 0.0]),
+            lambda duck: np.subtract.accumulate(
+                fnp.array([3.0, 4.0]), out=duck, axis=0
+            ),
+        ),
+        (
+            "add.reduceat",
+            lambda: _NumericSleepyUfuncArray([0.0, 0.0]),
+            lambda duck: np.add.reduceat(
+                fnp.array([3.0, 4.0]), [0, 1], out=duck, axis=0
+            ),
+        ),
+        (
+            "add.at",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: np.add.at(fnp.zeros(2), [0, 1], duck),
+        ),
+    ],
+)
+def test_foreign_ufunc_protocol_time_lands_in_residual(op_name, make_duck, invoke):
+    duck = make_duck()
+    flops.budget_reset()
+    previous_callback_warnings = get_setting("callback_warnings")
+    flops.configure(callback_warnings=True)
+    try:
+        with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+            with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
+                invoke(duck)
+    finally:
+        flops.configure(callback_warnings=previous_callback_warnings)
+
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+@pytest.mark.parametrize(
+    "op_name, invoke",
+    [
+        ("negative", lambda duck: fnp.negative(duck)),
+        ("modf", lambda duck: fnp.modf(duck)),
+    ],
+)
+def test_unary_ufunc_protocol_time_lands_in_residual(op_name, invoke):
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
+            invoke(duck)
+
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    events = []
+
+    def prior_profile(frame, event, arg):
+        if frame.f_code.co_name == "__array_ufunc__":
+            events.append(event)
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert "call" in events
+    assert "return" in events
+
+
+def test_callback_helper_skips_non_callable_existing_profiler(monkeypatch):
+    profiler = object()
+    setprofile_calls = []
+    monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
+    monkeypatch.setattr(
+        budget_module._sys,
+        "setprofile",
+        lambda profile: setprofile_calls.append(profile),
+    )
+
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            result = _call_numpy_with_python_callbacks(
+                np.add, np.array([1.0, 2.0]), np.array([3.0, 4.0])
+            )
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((1,), ()),
+            dtypes=(np.float64,),
+        ):
+            with pytest.raises(TypeError):
+                _call_numpy_with_python_callbacks(np.add, np.array([1.0]), object())
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget_module._sys.getprofile() is profiler
+    assert setprofile_calls == []
+
+
+def test_callback_helper_preserves_active_cprofile_when_exposed():
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        if sys.getprofile() is None:
+            pytest.skip("this runtime does not expose the active cProfile object")
+        result, budget = _run_callback_aware_add(
+            _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+        )
+        assert sys.getprofile() is profiler
+    finally:
+        profiler.disable()
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget.flopscope_backend_time_s >= 0.0
+
+
+def _run_cprofiler_fallback_case(kind):
+    callback_sleep = 0.02
+    classified_sleep = 0.02
+
+    if kind == "nested_counted":
+
+        @_counted_wrapper
+        def classified_work():
+            budget = get_active_budget()
+            assert budget is not None
+            with budget.deduct(
+                "add",
+                flop_cost=2,
+                subscripts=None,
+                shapes=((2,), (2,)),
+                dtypes=(np.float64,),
+            ):
+                _call_numpy(time.sleep, classified_sleep)
+
+    elif kind == "same_timer":
+
+        def classified_work():
+            _call_numpy(time.sleep, classified_sleep)
+
+    else:
+        raise AssertionError(f"unknown fallback test kind: {kind}")
+
+    duck = _NumericSleepyUfuncDuck(
+        [3.0, 4.0], sleep_s=callback_sleep, before_return=classified_work
+    )
+    result, budget = _run_callback_aware_add(duck)
+    return result, budget
+
+
+def _assert_fallback_decomposition(budget):
+    summary = budget.summary_dict()
+    bucket_sum = (
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"]
+    )
+    assert bucket_sum <= summary["wall_time_s"] + 0.015, summary
+    assert bucket_sum == pytest.approx(summary["wall_time_s"], abs=0.015)
+    return summary
+
+
+@pytest.mark.parametrize("kind", ["nested_counted", "same_timer"])
+def test_non_callable_profiler_fallback_excludes_already_classified_work(
+    monkeypatch, kind
+):
+    profiler = object()
+    setprofile_calls = []
+    monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
+    monkeypatch.setattr(
+        budget_module._sys,
+        "setprofile",
+        lambda profile: setprofile_calls.append(profile),
+    )
+
+    result, budget = _run_cprofiler_fallback_case(kind)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget_module._sys.getprofile() is profiler
+    assert setprofile_calls == []
+    summary = _assert_fallback_decomposition(budget)
+    assert summary["flopscope_backend_time_s"] >= 0.015, summary
+    if kind == "nested_counted":
+        assert len(budget.op_log) == 2
+        nested_backend = budget.op_log[-1].flopscope_backend_duration_s
+        assert nested_backend is not None
+        assert nested_backend >= 0.015
+    else:
+        assert len(budget.op_log) == 1
+
+
+@pytest.mark.parametrize("kind", ["nested_counted", "same_timer"])
+def test_cprofile_fallback_excludes_already_classified_work_when_exposed(kind):
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        if sys.getprofile() is None:
+            pytest.skip("this runtime does not expose the active cProfile object")
+        result, budget = _run_cprofiler_fallback_case(kind)
+        assert sys.getprofile() is profiler
+    finally:
+        profiler.disable()
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    _assert_fallback_decomposition(budget)
+
+
+def test_numpy_protocol_callback_profiles_only_actual_callback_roots():
+    """Cleanup must not create frames mistaken for NumPy protocol callbacks."""
+
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    callback_roots = []
+
+    def prior_profile(frame, event, arg):
+        if (
+            event == "call"
+            and frame.f_back is not None
+            and frame.f_back.f_code.co_name == "_call_numpy_impl"
+            and sys.getprofile() is not prior_profile
+        ):
+            callback_roots.append(frame.f_code.co_name)
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert callback_roots == ["__array_ufunc__"]
+
+
+def test_numpy_protocol_callback_restores_profile_after_profile_hook_error():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+
+    def prior_profile(frame, event, arg):
+        if event == "call" and frame.f_code.co_name == "__array_ufunc__":
+            raise RuntimeError("profile callback boom")
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        with pytest.raises(RuntimeError, match="profile callback boom"):
+            _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+
+def test_numpy_protocol_callback_does_not_chain_hook_while_restoring_profile():
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
+    restore_events = []
+
+    def prior_profile(frame, event, arg):
+        if (
+            event == "c_call"
+            and arg is sys.setprofile
+            and frame.f_code.co_name == "_call_numpy_impl"
+        ):
+            restore_events.append(event)
+            if len(restore_events) == 2:
+                raise RuntimeError("profile restore boom")
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert restore_events == ["c_call"]
+
+
+@pytest.mark.parametrize("replacement_kind", ["none", "replacement"])
+def test_numpy_protocol_callback_reclaims_profile_after_prior_hook_mutation(
+    replacement_kind,
+):
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+    mutations = []
+
+    def replacement_profile(frame, event, arg):
+        pass
+
+    def prior_profile(frame, event, arg):
+        if event == "call" and frame.f_code.co_name == "__array_ufunc__":
+            mutations.append(event)
+            sys.setprofile(None if replacement_kind == "none" else replacement_profile)
+
+    original_profile = sys.getprofile()
+    sys.setprofile(prior_profile)
+    try:
+        result, budget = _run_callback_aware_add(duck)
+        assert sys.getprofile() is prior_profile
+    finally:
+        sys.setprofile(original_profile)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert mutations == ["call"]
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+def test_callback_tracker_does_not_retain_raw_call_arguments_without_gc():
+    def call_with_large_argument():
+        large = np.ones(1_000_000)
+        reference = weakref.ref(large)
+        duck = _NumericSleepyUfuncDuck([3.0], sleep_s=0.0)
+        flops.budget_reset()
+        with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+            with budget.deduct(
+                "add",
+                flop_cost=2,
+                subscripts=None,
+                shapes=(large.shape, (1,)),
+                dtypes=(np.float64,),
+            ):
+                _call_numpy_with_python_callbacks(np.add, large, duck)
+        return reference
+
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        reference = call_with_large_argument()
+        assert reference() is None
+    finally:
+        if was_enabled:
+            gc.enable()
+        gc.collect()
+
+
+def test_numpy_protocol_callback_exception_stays_residual_and_propagates():
+    error = RuntimeError("protocol boom")
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], raises=error)
+
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            with pytest.raises(RuntimeError, match="protocol boom") as raised:
+                _call_numpy_with_python_callbacks(np.add, np.array([1.0, 2.0]), duck)
+
+    assert raised.value is error
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+def test_numpy_protocol_callback_excludes_nested_flopscope_operation_from_residual():
+    def nested_op():
+        fnp.add(fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]))
+
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0], before_return=nested_op)
+
+    result, budget = _run_callback_aware_add(duck)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert duck.calls == 1
+    assert sum(record.op_name == "add" for record in budget.op_log) >= 2
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] >= 0.0, summary
+    assert summary["flopscope_overhead_time_s"] >= 0.0, summary
+    assert summary["wall_time_s"] == pytest.approx(
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"],
+        abs=0.01,
+    )
+
+
+def test_nested_callback_aware_calls_exclude_same_timer_backend_from_user_time(
+    monkeypatch,
+):
+    callback_sleep = 0.02
+    backend_sleep = 0.02
+    logical_clock = 0.0
+
+    def perf_counter():
+        return logical_clock
+
+    def sleep(duration):
+        nonlocal logical_clock
+        logical_clock += duration
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", perf_counter)
+    monkeypatch.setattr(time, "sleep", sleep)
+
+    inner = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=callback_sleep)
+
+    def same_timer_work():
+        _call_numpy(time.sleep, backend_sleep)
+        _call_numpy_with_python_callbacks(np.add, np.array([1.0, 2.0]), inner)
+
+    outer = _NumericSleepyUfuncDuck(
+        [3.0, 4.0], sleep_s=callback_sleep, before_return=same_timer_work
+    )
+
+    result, budget = _run_callback_aware_add(outer)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert (outer.calls, inner.calls) == (1, 1)
+    assert budget._total_user_code_time == pytest.approx(  # type: ignore[attr-defined]
+        2 * callback_sleep, abs=1e-12
+    )
+    summary = budget.summary_dict()
+    assert summary["flopscope_backend_time_s"] == pytest.approx(
+        backend_sleep, abs=1e-12
+    ), summary
+    assert summary["residual_wall_time_s"] == pytest.approx(
+        2 * callback_sleep, abs=1e-12
+    ), summary
+    assert summary["wall_time_s"] == pytest.approx(
+        2 * callback_sleep + backend_sleep, abs=1e-12
+    ), summary
+    assert summary["wall_time_s"] == pytest.approx(
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"],
+        abs=1e-12,
+    ), summary
+
+
+def test_nested_counted_callback_aware_call_is_not_double_counted_as_user_time(
+    monkeypatch,
+):
+    callback_sleep = 0.02
+    logical_clock = 0.0
+
+    def perf_counter():
+        return logical_clock
+
+    def sleep(duration):
+        nonlocal logical_clock
+        logical_clock += duration
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", perf_counter)
+    monkeypatch.setattr(time, "sleep", sleep)
+
+    inner = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=callback_sleep)
+
+    @_counted_wrapper
+    def nested_callback_op():
+        budget = get_active_budget()
+        assert budget is not None
+        with budget.deduct(
+            "add",
+            flop_cost=2,
+            subscripts=None,
+            shapes=((2,), (2,)),
+            dtypes=(np.float64,),
+        ):
+            _call_numpy_with_python_callbacks(np.add, np.array([1.0, 2.0]), inner)
+
+    outer = _NumericSleepyUfuncDuck(
+        [3.0, 4.0], sleep_s=callback_sleep, before_return=nested_callback_op
+    )
+
+    result, budget = _run_callback_aware_add(outer)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert (outer.calls, inner.calls) == (1, 1)
+    assert sum(record.op_name == "add" for record in budget.op_log) == 2
+    assert budget._total_user_code_time == pytest.approx(  # type: ignore[attr-defined]
+        2 * callback_sleep, abs=1e-12
+    )
+    summary = budget.summary_dict()
+    assert summary["flopscope_backend_time_s"] == pytest.approx(0.0, abs=1e-12), summary
+    assert summary["residual_wall_time_s"] == pytest.approx(
+        2 * callback_sleep, abs=1e-12
+    ), summary
+    assert summary["wall_time_s"] == pytest.approx(2 * callback_sleep, abs=1e-12), (
+        summary
+    )
+    assert summary["wall_time_s"] == pytest.approx(
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"],
+        abs=1e-12,
+    )
 
 
 def test_user_code_time_lands_in_residual_not_overhead():
