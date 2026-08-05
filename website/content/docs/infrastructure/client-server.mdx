@@ -60,6 +60,50 @@ The client-server model enforces this isolation:
 - **Default endpoint:** `ipc:///tmp/flopscope.sock` (configurable via `FLOPSCOPE_SERVER_URL`)
 - **Timeout:** 30 seconds per request
 
+## Authoritative budget summaries
+
+Local and remote summary dictionaries have the same public schema and
+accounting meaning. Remote summaries are read-only snapshots of authoritative
+server state. The global remote view is the current server summary epoch.
+Unsupported peers raise an actionable capability error rather than returning
+partial or zero-filled data.
+
+The one-participant-process epoch is a WHEST evaluator deployment contract. A
+conforming evaluator must launch the server with `--token-fd`, retain the minted
+token in its trusted control channel, perform a post-smoke, pre-scoring reset,
+and couple server replacement to participant-process replacement. Under that
+contract, smoke work is excluded and participant code cannot reset the epoch
+because it never receives the token. A standalone tokenless local/development
+server intentionally permits lifecycle control operations and is not a hardened
+participant boundary.
+
+The server builds a summary in `O(K)` time for the returned operation and
+optional namespace buckets, independent of historical call count. Flat and
+namespaced requests have identical totals; `by_namespace=True` adds only the
+namespace mapping. Plain and Rich `budget_summary()` output render the same
+mapping returned by `budget_summary_dict()`.
+
+A summary call's measured inspection overhead is committed after its snapshot
+and appears in the next snapshot or a later final-close snapshot. A final close
+response cannot include its own post-boundary serialization recursively.
+
+`BudgetContext.summary_dict()` returns the canonical empty mapping before first
+entry, performs an authoritative resource RPC while live, and returns a
+defensive copy of its cached final mapping after close. Live scalar timing
+properties deliberately preserve their established `None`/zero-until-close
+behavior. After close, all scalar timing properties are read from that same
+cached mapping.
+
+Global `budget_summary_dict()`/`budget_summary()` returns the unchanged
+authoritative server snapshot. A client-owned `BudgetContext` preserves its
+existing end-to-end timing meaning by replacing only the four top-level timing
+fields with a decomposition of library-owned local wall/dispatch spans and the
+server's cumulative compute metadata. The closed scalar timing properties are
+read from that same mapping, so the two public views cannot diverge. These
+client-only measurements are never sent to the server, cannot alter FLOPs,
+operations, namespaces, budgets, the session summary, or scoring, and are not
+participant claims accepted by the authority.
+
 ## API compatibility
 
 Code written for the local library works unchanged with the client:

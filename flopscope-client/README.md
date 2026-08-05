@@ -48,6 +48,48 @@ with flops.BudgetContext(flop_budget=1_000_000):
 
 On the first request, the client performs a version handshake with the server. A version mismatch raises `ConnectionError` with both versions in the error message — keep `flopscope-server` and `flopscope-client` on the same release.
 
+## Authoritative budget summaries
+
+Local and remote summary dictionaries have the same public schema and
+accounting meaning. On the client, global `budget_summary_dict()` and
+`budget_summary()` are read-only snapshots of the authoritative server summary
+epoch.
+
+The one-participant-process epoch is a WHEST evaluator deployment contract. A
+conforming evaluator must launch the server with `--token-fd`, retain the minted
+token only in its trusted control channel, perform a post-smoke, pre-scoring
+reset, and replace the participant whenever the server is replaced. Under those
+conditions, smoke work is excluded and participant code cannot reset the epoch
+because it never receives the control token. A standalone tokenless
+local/development server intentionally accepts lifecycle control operations and
+is not a hardened participant boundary. If the peer does not advertise
+authoritative summary support, the client raises an actionable compatibility
+error instead of returning partial or zero-filled data.
+
+The server constructs each snapshot in `O(K)` time for the returned operation
+and optional namespace buckets, independent of historical call count. A summary
+call's measured inspection overhead is committed after its snapshot and is
+therefore visible in the next snapshot or a later final-close snapshot. A final
+close response cannot recursively include its own post-boundary serialization.
+
+`BudgetContext.summary_dict()` returns a canonical empty mapping before first
+entry, an authoritative resource RPC while live, and a defensive copy of its
+cached final mapping after close. While live, scalar timing properties keep
+their existing `None`/zero-until-close behavior. After close, every scalar
+timing property comes from the same cached mapping. Formatted summary methods
+render these mappings, and `by_namespace=True` adds only the namespace
+breakdown.
+
+Global `budget_summary_dict()`/`budget_summary()` returns the unchanged
+authoritative server snapshot. A client-owned `BudgetContext` preserves its
+existing end-to-end timing meaning by replacing only the four top-level timing
+fields with a decomposition of library-owned local wall/dispatch spans and the
+server's cumulative compute metadata. The closed scalar timing properties are
+read from that same mapping, so the two public views cannot diverge. These
+client-only measurements are never sent to the server, cannot alter FLOPs,
+operations, namespaces, budgets, the session summary, or scoring, and are not
+participant claims accepted by the authority.
+
 ## Differences from NumPy
 
 The API mirrors NumPy, with one semantic difference worth knowing up front: **flopscope arrays are immutable** (like [JAX](https://docs.jax.dev/en/latest/notebooks/Common_Gotchas_in_JAX.html#in-place-updates)). Item assignment and indexed in-place updates raise `TypeError`:

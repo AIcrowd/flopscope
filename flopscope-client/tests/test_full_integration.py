@@ -72,17 +72,79 @@ def _start_server():
     proc.wait(timeout=5)
 
 
-@pytest.fixture(autouse=True)
-def _reset_client():
+def _raw_server_control(op: str) -> dict:
+    """Send a test-only lifecycle request outside the participant client."""
+    import msgpack
+    import zmq
+
+    context = zmq.Context.instance()
+    socket = context.socket(zmq.REQ)
+    socket.setsockopt(zmq.RCVTIMEO, 5_000)
+    socket.setsockopt(zmq.SNDTIMEO, 5_000)
+    socket.setsockopt(zmq.LINGER, 0)
+    try:
+        socket.connect(_SERVER_URL)
+        socket.send(
+            msgpack.packb(
+                {"op": op, "kwargs": {}},
+                use_bin_type=True,
+            )
+        )
+        return msgpack.unpackb(socket.recv(), raw=False)
+    finally:
+        socket.close()
+
+
+def _recover_remote_budget_context() -> None:
+    """Close a leaked test session, tolerating an already-clean server."""
+    response = _raw_server_control("budget_close")
+    if response.get("status") == "ok":
+        return
+    assert response.get("status") == "error", response
+    assert response.get("error_type") == "NoBudgetContextError", response
+
+
+def _clear_private_client_budget_state() -> None:
+    """Make local test proxies match the raw server-side close."""
     from flopscope._connection import reset_connection
 
-    from flopscope._budget import _reset_global_default
+    import flopscope._budget as budget_module
 
+    contexts = {
+        context
+        for context in (
+            budget_module._active_context,
+            budget_module._global_default,
+        )
+        if context is not None
+    }
+    for context in contexts:
+        context._is_open = False
+        context._previous_context = None
+    budget_module._active_context = None
+    budget_module._global_default = None
     reset_connection()
-    _reset_global_default()
+
+
+def _reset_remote_summary_epoch() -> None:
+    """Reset the test epoch without exposing a participant API."""
+    response = _raw_server_control("budget_summary_reset")
+    assert response.get("status") == "ok", response
+
+
+def _isolate_client_and_remote_summary_state() -> None:
+    try:
+        _recover_remote_budget_context()
+    finally:
+        _clear_private_client_budget_state()
+    _reset_remote_summary_epoch()
+
+
+@pytest.fixture(autouse=True)
+def _reset_client_and_remote_epoch():
+    _isolate_client_and_remote_summary_state()
     yield
-    reset_connection()
-    _reset_global_default()
+    _isolate_client_and_remote_summary_state()
 
 
 # ===========================================================================
@@ -475,3 +537,173 @@ class TestVersionHandshake:
         finally:
             flopscope.__version__ = original
             reset_connection()
+
+
+# ===========================================================================
+# Category 9: Authoritative budget summaries
+# ===========================================================================
+
+
+STABLE_KEYS = {
+    "flop_budget",
+    "flops_used",
+    "flops_remaining",
+    "operations",
+}
+
+
+def _stable(summary):
+    return {key: summary[key] for key in STABLE_KEYS}
+
+
+def _assert_timing_contract(summary):
+    wall = summary["wall_time_s"]
+    backend = summary["flopscope_backend_time_s"]
+    overhead = summary["flopscope_overhead_time_s"]
+    residual = summary["residual_wall_time_s"]
+    assert backend >= 0
+    assert overhead >= 0
+    if wall is None:
+        assert residual is None
+    else:
+        assert residual >= 0
+        assert wall == pytest.approx(backend + overhead + residual, abs=1e-9)
+
+
+def _charge_add(length: int = 1) -> None:
+    left = flops.array([1.0] * length)
+    right = flops.array([2.0] * length)
+    flops.add(left, right)
+
+
+def test_real_wire_session_accumulates_two_closed_contexts() -> None:
+    with flops.BudgetContext(100, namespace="first") as first:
+        _charge_add(1)
+    with flops.BudgetContext(100, namespace="second") as second:
+        _charge_add(2)
+    summary = flops.budget_summary_dict(by_namespace=True)
+    assert summary["flop_budget"] == 200
+    assert summary["flops_used"] == first.flops_used + second.flops_used
+    assert summary["operations"]["add"]["calls"] == 2
+    assert set(summary["by_namespace"]) == {"first", "second"}
+    _assert_timing_contract(summary)
+
+
+def test_real_wire_session_includes_active_context() -> None:
+    with flops.BudgetContext(100) as closed:
+        _charge_add(1)
+    with flops.BudgetContext(100) as active:
+        _charge_add(2)
+        active_summary = active.summary_dict()
+        session_summary = flops.budget_summary_dict()
+        assert session_summary["flops_used"] == (
+            closed.flops_used + active_summary["flops_used"]
+        )
+        _assert_timing_contract(active_summary)
+        _assert_timing_contract(session_summary)
+
+
+def test_real_wire_active_context_excludes_closed_history() -> None:
+    with flops.BudgetContext(100) as closed:
+        _charge_add(1)
+    with flops.BudgetContext(100) as active:
+        _charge_add(2)
+        active_summary = active.summary_dict()
+        session_summary = flops.budget_summary_dict()
+        assert active_summary["flops_used"] == active.flops_used
+        assert session_summary["flops_used"] > active_summary["flops_used"]
+        assert closed.flops_used == (
+            session_summary["flops_used"] - active_summary["flops_used"]
+        )
+
+
+def test_real_wire_namespace_flag_controls_only_optional_key() -> None:
+    with flops.BudgetContext(100, namespace="phase"):
+        _charge_add(1)
+    flat = flops.budget_summary_dict(False)
+    namespaced = flops.budget_summary_dict(True)
+    assert "by_namespace" not in flat
+    assert set(namespaced) == set(flat) | {"by_namespace"}
+    assert _stable(namespaced) == _stable(flat)
+    phase = namespaced["by_namespace"]["phase"]
+    assert phase["flops_used"] == namespaced["flops_used"]
+    assert phase["operations"] == namespaced["operations"]
+    assert phase["calls"] == sum(
+        operation["calls"] for operation in namespaced["operations"].values()
+    )
+
+
+def test_real_wire_closed_context_cache_survives_later_session() -> None:
+    with flops.BudgetContext(100, namespace="first") as first:
+        _charge_add(1)
+    cached = first.summary_dict(True)
+    with flops.BudgetContext(100, namespace="second"):
+        _charge_add(3)
+        assert first.summary_dict(True) == cached
+    assert first.summary_dict(True) == cached
+
+
+def test_real_wire_summary_after_budget_close() -> None:
+    with flops.BudgetContext(100, namespace="only") as context:
+        _charge_add(2)
+        live = context.summary_dict(True)
+    closed = context.summary_dict(True)
+    session = flops.budget_summary_dict(True)
+    assert _stable(closed) == _stable(live)
+    assert _stable(session) == _stable(closed)
+    assert session["by_namespace"] == closed["by_namespace"]
+    _assert_timing_contract(closed)
+    _assert_timing_contract(session)
+    assert closed["wall_time_s"] == context.wall_time_s
+    assert closed["flopscope_backend_time_s"] == context.flopscope_backend_time_s
+    assert closed["flopscope_overhead_time_s"] == context.flopscope_overhead_time_s
+    assert closed["residual_wall_time_s"] == context.residual_wall_time_s
+    # The open/op/close RPC spans make transport visibly part of the
+    # client-owned context overhead; this is not a server timing claim.
+    assert context.flopscope_overhead_time_s > 0
+
+
+def test_fixture_recovers_a_deliberately_failed_close(monkeypatch) -> None:
+    """Recovery is self-contained and clears local state on transport failure."""
+    import sys
+
+    from flopscope._connection import get_connection
+
+    import flopscope._budget as budget_module
+
+    context = flops.BudgetContext(100, namespace="deliberately-leaked")
+    context.__enter__()
+    _charge_add(1)
+    connection = get_connection()
+
+    def fail_close(_request: bytes):
+        raise TimeoutError("deliberate close failure")
+
+    monkeypatch.setattr(connection, "send_recv", fail_close)
+    with pytest.raises(TimeoutError, match="deliberate close failure"):
+        context.__exit__(None, None, None)
+    assert context._is_open is True
+
+    def fail_raw_close(_op: str):
+        raise TimeoutError("deliberate raw-close transport failure")
+
+    with monkeypatch.context() as raw_close_failure:
+        raw_close_failure.setattr(
+            sys.modules[__name__], "_raw_server_control", fail_raw_close
+        )
+        with pytest.raises(
+            TimeoutError, match="deliberate raw-close transport failure"
+        ):
+            _isolate_client_and_remote_summary_state()
+    assert context._is_open is False
+    assert budget_module._active_context is None
+    assert budget_module._global_default is None
+
+    # Once transport is available, the same fixture helper recovers the still-open
+    # server context, resets its epoch, and permits a fresh client context.
+    _isolate_client_and_remote_summary_state()
+    with flops.BudgetContext(100, namespace="after-recovery") as fresh:
+        _charge_add(1)
+    summary = flops.budget_summary_dict(True)
+    assert summary["flops_used"] == fresh.flops_used
+    assert set(summary["by_namespace"]) == {"after-recovery"}
