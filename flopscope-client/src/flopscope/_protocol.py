@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import msgpack
 
+AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY = "authoritative_budget_summary_v1"
+
 
 def encode_request(op: str, args=None, kwargs=None) -> bytes:
     """Msgpack-encode ``{"op": op, "args": args, "kwargs": kwargs}``."""

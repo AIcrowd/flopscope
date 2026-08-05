@@ -16,6 +16,8 @@ import msgpack
 
 from flopscope._registry import REGISTRY
 
+AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY = "authoritative_budget_summary_v1"
+
 # ---------------------------------------------------------------------------
 # Whitelist
 # ---------------------------------------------------------------------------
@@ -27,6 +29,7 @@ _PROTOCOL_OPS: frozenset[str] = frozenset(
         "budget_open",
         "budget_close",
         "budget_status",
+        "budget_summary",
         "fetch",
         "fetch_slice",
         "free",

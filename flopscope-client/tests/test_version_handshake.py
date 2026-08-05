@@ -6,6 +6,9 @@ import msgpack
 import pytest
 
 from flopscope import _connection, _protocol
+from flopscope.errors import FlopscopeServerError
+
+CAPABILITY = "authoritative_budget_summary_v1"
 
 
 def test_encode_hello_serializes_client_version():
@@ -29,6 +32,9 @@ class _FakeSocket:
     def recv(self) -> bytes:
         return self._recv_payloads.pop(0)
 
+    def close(self, *, linger: int = 0) -> None:
+        self.closed_with_linger = linger
+
 
 def _make_connection(socket: _FakeSocket) -> _connection.Connection:
     conn = _connection.Connection()
@@ -50,6 +56,60 @@ def test_ensure_handshaked_happy_path_sets_flag_and_sends_hello():
     first = msgpack.unpackb(sock.sent[0], raw=False)
     assert first["op"] == "hello"
     assert "client_version" in first["kwargs"]
+
+
+def test_handshake_stores_capabilities() -> None:
+    server_ok = msgpack.packb(
+        {
+            "status": "ok",
+            "server_version": "0.10.0",
+            "capabilities": [CAPABILITY],
+        },
+        use_bin_type=True,
+    )
+    conn = _make_connection(_FakeSocket([server_ok]))
+    conn._ensure_handshaked()
+    assert conn._capabilities == frozenset({CAPABILITY})
+
+
+def test_missing_capabilities_means_unsupported_peer() -> None:
+    server_ok = msgpack.packb(
+        {"status": "ok", "server_version": "0.10.0"}, use_bin_type=True
+    )
+    conn = _make_connection(_FakeSocket([server_ok]))
+    conn._ensure_handshaked()
+    with pytest.raises(
+        FlopscopeServerError,
+        match="requires authoritative remote-summary support",
+    ):
+        conn.require_capability(CAPABILITY)
+
+
+@pytest.mark.parametrize("bad", ["capability", [1], {"x": True}])
+def test_malformed_capabilities_rejects_handshake(bad) -> None:
+    server_ok = msgpack.packb(
+        {
+            "status": "ok",
+            "server_version": "0.10.0",
+            "capabilities": bad,
+        },
+        use_bin_type=True,
+    )
+    conn = _make_connection(_FakeSocket([server_ok]))
+    with pytest.raises(ConnectionError, match="malformed capabilities"):
+        conn._ensure_handshaked()
+    assert conn._handshake_done is False
+    assert conn._capabilities == frozenset()
+
+
+def test_socket_reset_and_close_clear_capabilities() -> None:
+    for method in ("_reset_socket", "close"):
+        conn = _make_connection(_FakeSocket([]))
+        conn._handshake_done = True
+        conn._capabilities = frozenset({CAPABILITY})
+        getattr(conn, method)()
+        assert conn._handshake_done is False
+        assert conn._capabilities == frozenset()
 
 
 def test_ensure_handshaked_mismatch_raises_connection_error():

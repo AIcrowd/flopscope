@@ -12,6 +12,7 @@ import zmq
 import flopscope
 from flopscope_server._connection_store import ConnectionStore
 from flopscope_server._protocol import (
+    AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
     InvalidRequestError,
     decode_request,
     encode_error_response,
@@ -326,7 +327,11 @@ class FlopscopeServer:
             )
 
         return msgpack.packb(
-            {"status": "ok", "server_version": server_xyz},
+            {
+                "status": "ok",
+                "server_version": server_xyz,
+                "capabilities": [AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY],
+            },
             use_bin_type=True,
         )
 

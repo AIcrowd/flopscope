@@ -36,6 +36,7 @@ class Connection:
         self._context: zmq.Context | None = None
         self._socket: zmq.Socket | None = None
         self._handshake_done: bool = False
+        self._capabilities: frozenset[str] = frozenset()
         self._flushing_frees: bool = False
 
     # ------------------------------------------------------------------
@@ -104,7 +105,30 @@ class Connection:
             raise ConnectionError(
                 f"unexpected handshake response from server: {response!r}"
             )
+        raw_capabilities = response.get("capabilities", [])
+        if not isinstance(raw_capabilities, list) or not all(
+            isinstance(value, str) for value in raw_capabilities
+        ):
+            self._reset_socket()
+            raise ConnectionError(
+                f"malformed capabilities in server handshake: {raw_capabilities!r}"
+            )
+        self._capabilities = frozenset(raw_capabilities)
         self._handshake_done = True
+
+    def require_capability(self, name: str) -> None:
+        """Raise an actionable error when the connected server lacks *name*."""
+        self._ensure_connected()
+        self._ensure_handshaked()
+        if name not in self._capabilities:
+            from flopscope.errors import FlopscopeServerError
+
+            raise FlopscopeServerError(
+                "budget_summary_dict() requires authoritative remote-summary "
+                "support. The connected FLOPScope server does not provide it; "
+                "install matching client/server versions or avoid this accessor "
+                "in prediction code."
+            )
 
     def _flush_pending_frees(self) -> None:
         """Release GC'd server handles, batched onto the current round-trip.
@@ -206,6 +230,7 @@ class Connection:
             self._socket.close(linger=0)
             self._socket = None
         self._handshake_done = False
+        self._capabilities = frozenset()
 
     def close(self) -> None:
         """Close the ZMQ socket, if open."""
@@ -213,6 +238,7 @@ class Connection:
             self._socket.close(linger=0)
             self._socket = None
         self._handshake_done = False
+        self._capabilities = frozenset()
 
 
 # ---------------------------------------------------------------------------
