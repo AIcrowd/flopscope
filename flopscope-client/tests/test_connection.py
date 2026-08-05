@@ -365,6 +365,32 @@ class TestSendRecv:
         assert "_response_bytes" in result
         assert result["_request_bytes"] == len(raw)
 
+    @pytest.mark.parametrize(
+        "raw_response",
+        [
+            b"\xc1",
+            msgpack.packb([], use_bin_type=True),
+        ],
+    )
+    def test_send_recv_rejects_malformed_or_nonmapping_response(self, raw_response):
+        from flopscope._connection import Connection
+        from flopscope._protocol import encode_request
+
+        from flopscope.errors import FlopscopeServerError
+
+        conn = Connection()
+        mock_socket = MagicMock()
+        mock_socket.recv.return_value = raw_response
+        conn._socket = mock_socket
+        conn._handshake_done = True
+
+        with pytest.raises(FlopscopeServerError, match="malformed response"):
+            conn.send_recv(encode_request("test_op"))
+
+        assert conn._socket is None
+        assert conn._handshake_done is False
+        mock_socket.close.assert_called_once_with(linger=0)
+
     def test_send_recv_raises_on_error_response(self):
         from flopscope._connection import Connection
         from flopscope._protocol import encode_request

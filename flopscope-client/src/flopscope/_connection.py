@@ -227,7 +227,19 @@ class Connection:
                 ) from err
             t1 = time.monotonic_ns()
 
-            response = decode_response(raw_response)
+            try:
+                response_obj: object = decode_response(raw_response)
+            except Exception as err:
+                self._reset_socket()
+                raise FlopscopeServerError(
+                    "malformed response from server: could not decode msgpack"
+                ) from err
+            if not isinstance(response_obj, dict):
+                self._reset_socket()
+                raise FlopscopeServerError(
+                    "malformed response from server: expected a mapping"
+                )
+            response = response_obj
             response["_round_trip_ns"] = t1 - t0
             response["_request_bytes"] = len(raw_request)
             response["_response_bytes"] = len(raw_response)

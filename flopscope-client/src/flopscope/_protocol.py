@@ -40,6 +40,14 @@ def encode_budget_status() -> bytes:
     return encode_request("budget_status")
 
 
+def encode_budget_summary(scope: str, *, by_namespace: bool = False) -> bytes:
+    """Encode an authoritative budget-summary request."""
+    return encode_request(
+        "budget_summary",
+        kwargs={"scope": scope, "by_namespace": by_namespace},
+    )
+
+
 def encode_fetch(handle_id: str) -> bytes:
     """Encode a fetch request."""
     return encode_request("fetch", kwargs={"handle_id": handle_id})

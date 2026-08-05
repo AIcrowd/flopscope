@@ -3,17 +3,182 @@
 from __future__ import annotations
 
 import time
+from copy import deepcopy
+from math import isfinite
+from typing import NoReturn, TypeGuard
 
 from flopscope._connection import get_connection
 from flopscope._dispatch import dispatch_span, total_dispatch_ns
 from flopscope._protocol import (
+    AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
     encode_budget_close,
     encode_budget_open,
     encode_budget_status,
+    encode_budget_summary,
 )
+
+_SUMMARY_KEYS = {
+    "flop_budget",
+    "flops_used",
+    "flops_remaining",
+    "operations",
+    "wall_time_s",
+    "flopscope_backend_time_s",
+    "flopscope_overhead_time_s",
+    "residual_wall_time_s",
+}
 
 # Module-level guard: only one BudgetContext can be active at a time.
 _active_context = None
+
+
+def _malformed(message: str) -> NoReturn:
+    from flopscope.errors import FlopscopeServerError
+
+    raise FlopscopeServerError(f"malformed budget_summary response: {message}")
+
+
+def _is_nonnegative_int(value: object) -> TypeGuard[int]:
+    return type(value) is int and value >= 0
+
+
+def _is_finite_nonnegative_numeric(value: object) -> bool:
+    if type(value) is int:
+        return value >= 0
+    return type(value) is float and isfinite(value) and value >= 0.0
+
+
+def _validate_operation_bucket(value: object) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "flop_cost",
+        "calls",
+        "flopscope_backend_time_s",
+        "flopscope_overhead_time_s",
+    }:
+        _malformed("invalid operation bucket")
+    if not _is_nonnegative_int(value["flop_cost"]) or not _is_nonnegative_int(
+        value["calls"]
+    ):
+        _malformed("operation counts must be non-negative integers")
+    if not all(
+        _is_finite_nonnegative_numeric(value[name])
+        for name in ("flopscope_backend_time_s", "flopscope_overhead_time_s")
+    ):
+        _malformed("operation timing must be finite and non-negative")
+
+
+def _validate_summary_mapping(value: object, *, by_namespace: bool) -> dict:
+    if not isinstance(value, dict):
+        _malformed("result must be a dict")
+    expected = _SUMMARY_KEYS | ({"by_namespace"} if by_namespace else set())
+    if set(value) != expected:
+        _malformed(f"result keys must be {sorted(expected)}")
+    for name in ("flop_budget", "flops_used", "flops_remaining"):
+        if not _is_nonnegative_int(value[name]):
+            _malformed(f"{name} must be a non-negative integer")
+    if not isinstance(value["operations"], dict):
+        _malformed("operations must be a dict")
+    for name, bucket in value["operations"].items():
+        if not isinstance(name, str):
+            _malformed("operation names must be strings")
+        _validate_operation_bucket(bucket)
+    for name in ("flopscope_backend_time_s", "flopscope_overhead_time_s"):
+        if not _is_finite_nonnegative_numeric(value[name]):
+            _malformed(f"{name} must be finite and non-negative")
+    for name in ("wall_time_s", "residual_wall_time_s"):
+        if value[name] is not None and not _is_finite_nonnegative_numeric(value[name]):
+            _malformed(f"{name} must be finite, non-negative, or None")
+    if by_namespace:
+        if not isinstance(value["by_namespace"], dict):
+            _malformed("by_namespace must be a dict")
+        for namespace, bucket in value["by_namespace"].items():
+            if namespace is not None and not isinstance(namespace, str):
+                _malformed("namespace keys must be strings or None")
+            if not isinstance(bucket, dict) or set(bucket) != {
+                "flops_used",
+                "calls",
+                "flopscope_backend_time_s",
+                "flopscope_overhead_time_s",
+                "operations",
+            }:
+                _malformed("invalid namespace bucket")
+            if not isinstance(bucket["operations"], dict):
+                _malformed("namespace operations must be a dict")
+            if not _is_nonnegative_int(bucket["flops_used"]) or not _is_nonnegative_int(
+                bucket["calls"]
+            ):
+                _malformed("namespace counts must be non-negative integers")
+            for timing_name in (
+                "flopscope_backend_time_s",
+                "flopscope_overhead_time_s",
+            ):
+                if not _is_finite_nonnegative_numeric(bucket[timing_name]):
+                    _malformed("namespace timing must be finite and non-negative")
+            for op_name, op_bucket in bucket["operations"].items():
+                if not isinstance(op_name, str):
+                    _malformed("namespace operation names must be strings")
+                _validate_operation_bucket(op_bucket)
+    return value
+
+
+def _validate_display_totals(value: object) -> dict:
+    if not isinstance(value, dict) or set(value) != {
+        "has_explicit_budget",
+        "budget",
+        "used",
+        "client_context_compute_ns",
+    }:
+        _malformed("invalid display_totals")
+    if not isinstance(value["has_explicit_budget"], bool):
+        _malformed("has_explicit_budget must be boolean")
+    if not _is_nonnegative_int(value["budget"]) or not _is_nonnegative_int(
+        value["used"]
+    ):
+        _malformed("display totals must be non-negative integers")
+    compute_ns = value["client_context_compute_ns"]
+    if compute_ns is not None and not _is_nonnegative_int(compute_ns):
+        _malformed("client context compute time must be a non-negative integer or null")
+    return value
+
+
+def _validate_budget_metadata(value: object) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "flop_budget",
+        "flops_used",
+        "flops_remaining",
+    }:
+        _malformed("invalid budget metadata")
+    if not all(_is_nonnegative_int(value[name]) for name in value):
+        _malformed("budget metadata must contain non-negative integers")
+
+
+def _validate_summary_response(
+    value: object, *, by_namespace: bool
+) -> tuple[dict, dict]:
+    if not isinstance(value, dict):
+        _malformed("response must be a dict")
+    required = {"status", "result", "display_totals", "comms_overhead_ns"}
+    optional = {
+        "budget",
+        "_round_trip_ns",
+        "_request_bytes",
+        "_response_bytes",
+    }
+    keys = set(value)
+    if not required <= keys or not keys <= required | optional:
+        _malformed("invalid response envelope keys")
+    if value["status"] != "ok":
+        _malformed("status must be 'ok'")
+    if type(value["comms_overhead_ns"]) is not int or value["comms_overhead_ns"] != 0:
+        _malformed("comms_overhead_ns must be the integer 0")
+    if "budget" in value:
+        _validate_budget_metadata(value["budget"])
+    for name in ("_round_trip_ns", "_request_bytes", "_response_bytes"):
+        if name in value and not _is_nonnegative_int(value[name]):
+            _malformed(f"{name} must be a non-negative integer")
+    summary = _validate_summary_mapping(value["result"], by_namespace=by_namespace)
+    display_totals = _validate_display_totals(value["display_totals"])
+    return summary, display_totals
 
 
 def _sync_active_context_from_response(response: object) -> None:
@@ -234,8 +399,10 @@ class BudgetContext:
         Parameters
         ----------
         budget_info:
-            Dict that may contain a ``"flops_used"`` key.  Missing key is
-            silently ignored.
+            Dict that may contain a ``"flops_used"`` key. Missing or malformed
+            values are silently ignored: this synchronization hook runs before
+            response errors are raised and therefore must never mask the
+            intended client-facing error.
 
         Spent FLOPs never come back, so the cache only ever moves up. Requests
         are synchronous, so in practice values arrive in order and the clamp
@@ -243,8 +410,9 @@ class BudgetContext:
         too, and a cache that could move down would be a way to read a budget
         as less spent than it is.
         """
-        if "flops_used" in budget_info:
-            self._flops_used = max(self._flops_used, int(budget_info["flops_used"]))
+        flops_used = budget_info.get("flops_used")
+        if _is_nonnegative_int(flops_used):
+            self._flops_used = max(self._flops_used, flops_used)
 
     # ------------------------------------------------------------------
     # Public API
@@ -439,9 +607,23 @@ def budget(flop_budget, quiet=False, namespace=None):
     )
 
 
+def _request_budget_summary(*, scope: str, by_namespace: bool) -> tuple[dict, dict]:
+    conn = get_connection()
+    with dispatch_span():
+        conn.require_capability(AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY)
+        response = conn.send_recv(
+            encode_budget_summary(scope, by_namespace=by_namespace)
+        )
+    summary, display_totals = _validate_summary_response(
+        response, by_namespace=by_namespace
+    )
+    return deepcopy(summary), deepcopy(display_totals)
+
+
 def budget_summary_dict(by_namespace=False):
-    """Return aggregated budget data across all recorded contexts."""
-    return _accumulator.get_data(by_namespace=by_namespace)
+    """Return the server-authoritative session budget summary."""
+    summary, _ = _request_budget_summary(scope="session", by_namespace=by_namespace)
+    return summary
 
 
 # Note: No budget_reset() in the client — participants must not clear usage.
