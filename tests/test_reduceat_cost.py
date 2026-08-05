@@ -182,15 +182,32 @@ def test_reduceat_output_floor_is_deducted_before_numpy(monkeypatch):
         "3-D axis-1",
     ],
 )
-def test_reduceat_whole_axis_single_segment_matches_reduce(shape, axis):
-    """``<ufunc>.reduceat(a, [0])`` over the whole axis performs exactly the
-    same work as ``<ufunc>.reduce(a, axis=axis)`` -- one full-axis
-    reduction per lane -- so it must bill exactly the same.
+def test_reduceat_whole_axis_non_singleton_segment_matches_reduce(shape, axis):
+    """A non-singleton whole-axis segment is arithmetic-dominated.
+
+    Both methods perform one full-axis reduction per lane, so ``reduceat``'s
+    produced-cell floor does not change the bill.
     """
     a = fnp.asarray(np.full(shape, 2, dtype=np.int64))
     reduceat_cost = billed(lambda: np.subtract.reduceat(a, [0], axis=axis))
     reduce_cost = billed(lambda: np.subtract.reduce(a, axis=axis))
     assert reduceat_cost == reduce_cost
+
+
+def test_reduceat_singleton_axis_bills_produced_cells_not_reduce_parity():
+    """The output floor intentionally dominates when the axis has length one."""
+    dtype = np.int64
+    lanes = 1000
+    a = fnp.asarray(np.full((1, lanes), 2, dtype=dtype))
+
+    reduceat_cost = billed(lambda: np.subtract.reduceat(a, [0], axis=0))
+    output_floor_cost = honest_reduceat_cost(
+        dtype, lanes=lanes, billed_units_per_lane=1
+    )
+    reduce_cost = billed(lambda: np.subtract.reduce(a, axis=0))
+
+    assert reduceat_cost == output_floor_cost
+    assert reduceat_cost > reduce_cost
 
 
 def test_indices_array_protocol_second_read_does_not_escape_the_snapshot():

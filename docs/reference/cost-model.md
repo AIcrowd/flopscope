@@ -505,7 +505,10 @@ invoking the ufunc; the final term retains a call-level minimum of one. The resu
 base cost is priced through the standard resolved accumulator dtype rate, complex
 factor, and inherited base-ufunc weight. Ordinary long segments remain
 arithmetic-dominated; a single whole-axis segment of 1000 elements bills 999
-applications. `ufunc.outer` is not itself an accumulating reduction, but an explicit
+applications. When the reduced axis has length one, the produced-cell term can make
+`reduceat(a, [0])` bill more than `reduce(a)`; this is intentional because `reduceat`
+retains its per-produced-cell floor even when the segment performs no arithmetic.
+`ufunc.outer` is not itself an accumulating reduction, but an explicit
 `dtype=` on it resolves through the same request-is-the-loop rule: the dtype names the
 loop numpy actually runs, not a discount, so
 `np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over the
