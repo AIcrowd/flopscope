@@ -737,10 +737,20 @@ class _RawReturnUfuncDuck:
 class _SymmetricOutProtocolDuck:
     """Foreign ufunc participant that records and optionally writes ``out``."""
 
-    def __init__(self, values, *, write=None, result=None):
+    def __init__(
+        self,
+        values,
+        *,
+        write=None,
+        result=None,
+        ignore_out=False,
+        expected_out=None,
+    ):
         self.values = np.asarray(values)
         self.write = write
         self.result = result
+        self.ignore_out = ignore_out
+        self.expected_out = expected_out
         self.seen_out = None
 
     def __array__(self, dtype=None, copy=None):
@@ -748,6 +758,21 @@ class _SymmetricOutProtocolDuck:
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         self.seen_out = kwargs.get("out")
+        if self.expected_out is not None:
+            assert type(self.seen_out) is tuple and len(self.seen_out) == 1
+            actual = self.seen_out[0]
+            expected = self.expected_out
+            assert type(actual) is np.ndarray
+            assert actual.shape == expected.shape
+            assert actual.dtype == expected.dtype
+            assert actual.strides == expected.strides
+            assert actual.flags.writeable is expected.flags.writeable
+            assert not np.shares_memory(actual, np.asarray(expected))
+            assert actual.tobytes(order="C") == np.asarray(expected).tobytes(
+                order="C"
+            )
+        if self.ignore_out:
+            return self.result
         raw_inputs = tuple(
             self.values if value is self else np.asarray(value) for value in inputs
         )
@@ -762,6 +787,34 @@ class _SymmetricOutProtocolDuck:
 
 class _ForeignTuple(tuple):
     pass
+
+
+def _strided_symmetric_out(layout):
+    if layout == "positive":
+        backing = np.zeros((6, 6), dtype=np.float64)
+        view = backing[::2, ::2]
+        written = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]])
+    elif layout == "negative":
+        backing = np.zeros((3, 3), dtype=np.float64)
+        view = backing[::-1, ::-1]
+        written = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]])
+    elif layout == "zero":
+        backing = np.zeros(1, dtype=np.float64)
+        view = np.ndarray((3, 3), dtype=np.float64, buffer=backing, strides=(0, 0))
+        written = np.full((3, 3), -0.0)
+    elif layout == "overlapping":
+        backing = np.zeros(5, dtype=np.float64)
+        view = np.ndarray(
+            (3, 3), dtype=np.float64, buffer=backing, strides=(8, 8)
+        )
+        written = np.add.outer(np.arange(3.0), np.arange(3.0)) + 1.0
+    else:
+        raise AssertionError(f"unknown layout: {layout}")
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        out = flops.as_symmetric(view, symmetry=symmetry)
+    return out, written
 
 
 def test_metaclass_protocol_lookup_matches_raw_numpy_once():
@@ -947,9 +1000,75 @@ def test_foreign_ufunc_writes_and_returns_symmetric_out():
 
     assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
     assert type(duck.seen_out[0]) is np.ndarray
-    assert duck.seen_out[0] is not np.asarray(out)
+    assert not np.shares_memory(duck.seen_out[0], np.asarray(out))
     assert result is out
     np.testing.assert_array_equal(np.asarray(out), np.asarray(symmetric_input) + 10.0)
+
+
+@pytest.mark.parametrize("layout", ["positive", "negative", "zero", "overlapping"])
+def test_foreign_ufunc_preserves_symmetric_out_layout(layout):
+    out, written = _strided_symmetric_out(layout)
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(fnp.zeros((3, 3)), symmetry=symmetry)
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=written,
+        expected_out=out,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(symmetric_input, duck, out=out)
+
+    assert result is out
+    np.testing.assert_array_equal(np.asarray(out), written)
+    assert np.asarray(out).tobytes(order="C") == written.tobytes(order="C")
+
+
+def test_foreign_ufunc_ignored_readonly_symmetric_out_preserves_sentinel():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(
+        fnp.array([[4.0, -0.0], [-0.0, 5.0]]), symmetry=symmetry
+    )
+    out.flags.writeable = False
+    before = np.asarray(out).tobytes()
+    sentinel = object()
+    duck = _SymmetricOutProtocolDuck(
+        10.0,
+        result=sentinel,
+        ignore_out=True,
+        expected_out=out,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(symmetric_input, duck, out=out)
+
+    assert result is sentinel
+    assert np.asarray(out).tobytes() == before
+    assert out.flags.writeable is False
+
+
+def test_foreign_ufunc_write_to_readonly_symmetric_out_fails_before_commit():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.full((2, 2), 7.0), symmetry=symmetry)
+    out.flags.writeable = False
+    before = np.asarray(out).tobytes()
+    duck = _SymmetricOutProtocolDuck(10.0, expected_out=out)
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            with pytest.raises(ValueError, match="read-only"):
+                fnp.add(symmetric_input, duck, out=out)
+
+    assert np.asarray(out).tobytes() == before
+    assert out.flags.writeable is False
 
 
 def test_foreign_ufunc_rejects_asymmetric_scratch_without_mutating_out():

@@ -601,13 +601,40 @@ def _call_with_optional_out(
 
 
 def _symmetric_out_scratch(out: SymmetricTensor) -> _np.ndarray:
-    """Return an isolated plain-array destination for a symmetric write."""
-    return _np.array(
-        _to_base_ndarray(out),
-        copy=True,
-        order="K",
-        subok=False,
+    """Copy ``out`` into isolated storage while preserving its exact layout."""
+    source = _to_base_ndarray(out)
+    if source.size == 0:
+        min_offset = 0
+        storage_nbytes = 0
+    else:
+        byte_extents = tuple(
+            (dimension - 1) * stride
+            for dimension, stride in zip(source.shape, source.strides, strict=True)
+        )
+        min_offset = _builtins.sum(
+            _builtins.min(0, extent) for extent in byte_extents
+        )
+        max_offset = _builtins.sum(
+            _builtins.max(0, extent) for extent in byte_extents
+        )
+        storage_nbytes = max_offset - min_offset + source.dtype.itemsize
+    backing = _np.empty(storage_nbytes, dtype=_np.uint8)
+    scratch = _np.ndarray(
+        shape=source.shape,
+        dtype=source.dtype,
+        buffer=backing,
+        offset=-min_offset,
+        strides=source.strides,
     )
+    _np.copyto(scratch, source, casting="no")
+    if not source.flags.writeable:
+        scratch.flags.writeable = False
+    return scratch
+
+
+def _logical_array_bytes(array: _np.ndarray) -> bytes:
+    """Snapshot logical element bytes independent of strides and aliasing."""
+    return array.tobytes(order="C")
 
 
 def _call_with_optional_multi_out(
@@ -803,11 +830,14 @@ def _counted_unary(np_func, op_name: str):
             shapes=(x.shape,),
             dtypes=billing_dtypes,
         ):
-            out_for_np = (
-                _symmetric_out_scratch(out)
-                if isinstance(out, SymmetricTensor)
-                else out
-            )
+            scratch = None
+            out_before = None
+            if isinstance(out, SymmetricTensor):
+                scratch = _symmetric_out_scratch(out)
+                out_before = _logical_array_bytes(scratch)
+                out_for_np = scratch
+            else:
+                out_for_np = out
             result = _call_with_optional_out(
                 np_func,
                 x_fwd,
@@ -818,8 +848,10 @@ def _counted_unary(np_func, op_name: str):
             )
         if is_ufunc and isinstance(result, _ForeignUfuncResult):
             if isinstance(out, SymmetricTensor):
-                _wrap_result(out_for_np, out=out, symmetry=symmetry)
-                return out if result.value is out_for_np else result.value
+                assert scratch is not None and out_before is not None
+                if _logical_array_bytes(scratch) != out_before:
+                    _wrap_result(scratch, out=out, symmetry=symmetry)
+                return out if result.value is scratch else result.value
             return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -1113,11 +1145,14 @@ def _counted_binary(np_func, op_name: str):
         ):
             # Forward originals when their NumPy protocol semantics matter,
             # while retaining exact Python-scalar weak promotion (NEP 50).
-            out_for_np = (
-                _symmetric_out_scratch(out)
-                if isinstance(out, SymmetricTensor)
-                else out
-            )
+            scratch = None
+            out_before = None
+            if isinstance(out, SymmetricTensor):
+                scratch = _symmetric_out_scratch(out)
+                out_before = _logical_array_bytes(scratch)
+                out_for_np = scratch
+            else:
+                out_for_np = out
             result = _call_with_optional_out(
                 np_func,
                 x_fwd,
@@ -1129,8 +1164,10 @@ def _counted_binary(np_func, op_name: str):
             )
         if isinstance(result, _ForeignUfuncResult):
             if isinstance(out, SymmetricTensor):
-                _wrap_result(out_for_np, out=out, symmetry=out_symmetry)
-                return out if result.value is out_for_np else result.value
+                assert scratch is not None and out_before is not None
+                if _logical_array_bytes(scratch) != out_before:
+                    _wrap_result(scratch, out=out, symmetry=out_symmetry)
+                return out if result.value is scratch else result.value
             return result.value
         maybe_check_nan_inf(result, op_name)
         if out_symmetry is not None:
