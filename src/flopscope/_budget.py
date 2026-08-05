@@ -9,6 +9,7 @@ import threading
 import time
 import weakref
 from dataclasses import dataclass, field
+from functools import wraps
 from typing import Any, Literal, NamedTuple
 
 import numpy as _np
@@ -124,10 +125,15 @@ class _OpTimer:
             self._budget._total_flopscope_overhead_time += in_block_overhead
 
             op = self._budget._op_log[self._op_index]
-            self._budget._op_log[self._op_index] = op._replace(
-                flopscope_backend_duration_s=self._backend_duration_s,
-                flopscope_overhead_duration_s=(op.flopscope_overhead_duration_s or 0.0)
-                + in_block_overhead,
+            self._budget._replace_op_record(
+                self._op_index,
+                op._replace(
+                    flopscope_backend_duration_s=self._backend_duration_s,
+                    flopscope_overhead_duration_s=(
+                        op.flopscope_overhead_duration_s or 0.0
+                    )
+                    + in_block_overhead,
+                ),
             )
 
             # Post-op deadline check (preserves existing behavior)
@@ -823,11 +829,14 @@ def _counted_wrapper(fn):
                 per_op = wrapper_own_overhead / len(ops_added)
                 for idx in ops_added:
                     op = budget._op_log[idx]
-                    budget._op_log[idx] = op._replace(
-                        flopscope_overhead_duration_s=(
-                            op.flopscope_overhead_duration_s or 0.0
+                    budget._replace_op_record(
+                        idx,
+                        op._replace(
+                            flopscope_overhead_duration_s=(
+                                op.flopscope_overhead_duration_s or 0.0
+                            )
+                            + per_op,
                         )
-                        + per_op
                     )
 
     return wrapped
@@ -1143,6 +1152,15 @@ def _timing_summary(
     return wall_time_s, backend, overhead, max(residual, 0.0)
 
 
+def _summary_locked(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._summary_lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
 class BudgetContext:
     """Context manager for FLOP budget enforcement.
 
@@ -1191,6 +1209,15 @@ class BudgetContext:
         self._flop_budget = flop_budget
         self._flops_used = 0
         self._op_log: list[OpRecord] = []
+        self._summary_rollup = _SummaryRollup()
+        self._unrecorded_rollup = _SummaryRollup()
+        self._summary_lock = threading.RLock()
+        self._summary_generation = 0
+        self._rollup_generation = 0
+        self._recorded_summary_generation = 0
+        self._rollup_mapping_cache: dict[
+            bool, tuple[int, dict[str, dict], dict[str | None, dict] | None]
+        ] = {}
         self._quiet = quiet
         self._root_namespace = namespace
         self._namespace_stack: list[str] = []
@@ -1307,6 +1334,29 @@ class BudgetContext:
             return 0.0
         return max(residual, 0.0)
 
+    def _advance_summary_generation(self, *, rollup_changed: bool = False) -> None:
+        self._summary_generation += 1
+        if rollup_changed:
+            self._rollup_generation += 1
+            self._rollup_mapping_cache.clear()
+
+    @_summary_locked
+    def _append_op_record(self, record: OpRecord) -> int:
+        self._op_log.append(record)
+        self._summary_rollup.apply_record(None, record)
+        self._unrecorded_rollup.apply_record(None, record)
+        self._advance_summary_generation(rollup_changed=True)
+        return len(self._op_log) - 1
+
+    @_summary_locked
+    def _replace_op_record(self, index: int, record: OpRecord) -> None:
+        old = self._op_log[index]
+        self._op_log[index] = record
+        self._summary_rollup.apply_record(old, record)
+        self._unrecorded_rollup.apply_record(old, record)
+        self._advance_summary_generation(rollup_changed=True)
+
+    @_summary_locked
     def _charge_op(
         self,
         op_name: str,
@@ -1362,7 +1412,7 @@ class BudgetContext:
         self._flops_used += adjusted_cost
         now = time.perf_counter()
         offset = now - self._start_time if self._start_time is not None else None
-        self._op_log.append(
+        self._append_op_record(
             OpRecord(
                 op_name=op_name,
                 subscripts=subscripts,
@@ -1421,11 +1471,14 @@ class BudgetContext:
             self._total_flopscope_overhead_time += deduct_body_time
             if len(self._op_log) > n0:
                 op = self._op_log[-1]
-                self._op_log[-1] = op._replace(
-                    flopscope_overhead_duration_s=(
-                        op.flopscope_overhead_duration_s or 0.0
-                    )
-                    + deduct_body_time
+                self._replace_op_record(
+                    len(self._op_log) - 1,
+                    op._replace(
+                        flopscope_overhead_duration_s=(
+                            op.flopscope_overhead_duration_s or 0.0
+                        )
+                        + deduct_body_time
+                    ),
                 )
 
     def deduct_after(
@@ -1459,6 +1512,7 @@ class BudgetContext:
             complex_factor_override=complex_factor_override,
         )
 
+    @_summary_locked
     def summary_dict(self, by_namespace: bool = False) -> dict:
         """Return structured summary data for this budget context.
 
@@ -1545,9 +1599,11 @@ class BudgetContext:
             total_flopscope_overhead_time=max(overhead_delta, 0.0),
         )
 
+    @_summary_locked
     def _has_unrecorded_activity(self) -> bool:
         return self._flops_used > self._recorded_flops_used
 
+    @_summary_locked
     def _mark_recorded(self) -> None:
         self._recorded_flops_used = self._flops_used
         self._recorded_op_count = len(self._op_log)
@@ -1555,6 +1611,7 @@ class BudgetContext:
         self._recorded_overhead_time = self._total_flopscope_overhead_time
         self._budget_recorded = True
 
+    @_summary_locked
     def _mark_reset_baseline(self) -> None:
         self._recorded_flops_used = self._flops_used
         self._recorded_op_count = len(self._op_log)
@@ -1562,6 +1619,7 @@ class BudgetContext:
         self._recorded_overhead_time = self._total_flopscope_overhead_time
         self._budget_recorded = False
 
+    @_summary_locked
     def __enter__(self) -> BudgetContext:
         current = get_active_budget()
         if current is not None and current is not _global_default:

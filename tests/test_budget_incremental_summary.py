@@ -130,3 +130,51 @@ def test_rollup_merge_keeps_source_and_destination_independent() -> None:
 
     destination.apply_record(first, None)
     _assert_matches_scan(source, [first, second])
+
+
+def test_context_rollup_tracks_staged_record_replacement() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    with ctx:
+        timer = ctx.deduct(
+            "add", flop_cost=5, subscripts=None, shapes=(), dtypes=()
+        )
+        before = ctx._summary_rollup.operations_dict()
+        with timer:
+            pass
+        after = ctx._summary_rollup.operations_dict()
+
+    assert before["add"]["calls"] == 1
+    assert after == _summarize_operations(ctx.op_log)
+    assert after["add"]["flopscope_overhead_time_s"] >= 0.0
+
+
+def test_public_op_log_keeps_existing_backing_list_contract() -> None:
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    assert ctx.op_log is ctx._op_log
+
+
+def test_cross_thread_summary_waits_for_context_snapshot_lock() -> None:
+    import threading
+
+    from flopscope._budget import BudgetContext
+
+    ctx = BudgetContext(100, quiet=True)
+    started = threading.Event()
+    finished = threading.Event()
+
+    def inspect() -> None:
+        started.set()
+        ctx.summary_dict(by_namespace=True)
+        finished.set()
+
+    with ctx._summary_lock:
+        thread = threading.Thread(target=inspect)
+        thread.start()
+        assert started.wait(timeout=1.0)
+        assert not finished.wait(timeout=0.05)
+    thread.join(timeout=1.0)
+    assert finished.is_set()
