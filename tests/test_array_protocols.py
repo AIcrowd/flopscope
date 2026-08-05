@@ -647,6 +647,153 @@ class _SuccessfulProtocolDuck:
         return getattr(ufunc, method)(*raw_inputs, **kwargs)
 
 
+class _UnaryProtocolDuck:
+    """Unary protocol participant with both NumPy dispatch mechanisms."""
+
+    def __init__(self, values, *, raises=None, decline=False):
+        self.values = np.asarray(values)
+        self.raises = raises
+        self.decline = decline
+        self.ufunc_calls = []
+        self.function_calls = []
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray(self.values, dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.ufunc_calls.append((ufunc.__name__, method))
+        if self.raises is not None:
+            raise self.raises
+        if self.decline:
+            return NotImplemented
+        inputs = tuple(self.values if value is self else value for value in inputs)
+        return getattr(ufunc, method)(*inputs, **kwargs)
+
+    def __array_function__(self, function, types, args, kwargs):
+        self.function_calls.append(function.__name__)
+        if function is np.real:
+            return np.real(self.values)
+        return NotImplemented
+
+
+class _StatefulProtocolMeta(type):
+    protocol_lookups = 0
+
+    def __getattribute__(cls, name):
+        if name == "__array_ufunc__":
+            _StatefulProtocolMeta.protocol_lookups += 1
+        return super().__getattribute__(name)
+
+
+class _MetaclassProtocolDuck(metaclass=_StatefulProtocolMeta):
+    def __init__(self):
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray([4.0, 6.0], dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        return np.asarray([99.0, 99.0])
+
+
+def test_metaclass_protocol_lookup_matches_raw_numpy_once():
+    _StatefulProtocolMeta.protocol_lookups = 0
+    raw_duck = _MetaclassProtocolDuck()
+    expected = np.negative(raw_duck)
+    raw_lookups = _StatefulProtocolMeta.protocol_lookups
+
+    _StatefulProtocolMeta.protocol_lookups = 0
+    duck = _MetaclassProtocolDuck()
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = fnp.negative(duck)
+
+    np.testing.assert_array_equal(actual, expected)
+    assert (raw_lookups, raw_duck.calls) == (1, 1)
+    assert (_StatefulProtocolMeta.protocol_lookups, duck.calls) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    "name, raw_call, flops_call, expected_protocol",
+    [
+        (
+            "negative",
+            lambda duck: np.negative(duck),
+            lambda duck: fnp.negative(duck),
+            ("negative", "__call__"),
+        ),
+        (
+            "modf",
+            lambda duck: np.modf(duck),
+            lambda duck: fnp.modf(duck),
+            ("modf", "__call__"),
+        ),
+    ],
+)
+def test_unary_ufunc_protocol_matches_raw_numpy(
+    name, raw_call, flops_call, expected_protocol
+):
+    raw_duck = _UnaryProtocolDuck([1.5, -2.5])
+    expected = raw_call(raw_duck)
+    duck = _UnaryProtocolDuck([1.5, -2.5])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = flops_call(duck)
+
+    assert raw_duck.ufunc_calls == duck.ufunc_calls == [expected_protocol], name
+    if isinstance(expected, tuple):
+        for actual_part, expected_part in zip(actual, expected, strict=True):
+            np.testing.assert_array_equal(actual_part, expected_part)
+    else:
+        np.testing.assert_array_equal(actual, expected)
+
+
+def test_free_unary_protocol_matches_raw_numpy():
+    raw_duck = _UnaryProtocolDuck([1.0 + 2.0j])
+    expected = np.real(raw_duck)
+    duck = _UnaryProtocolDuck([1.0 + 2.0j])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = fnp.real(duck)
+
+    assert raw_duck.function_calls == duck.function_calls == ["real"]
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call",
+    [
+        (lambda duck: np.negative(duck), lambda duck: fnp.negative(duck)),
+        (lambda duck: np.modf(duck), lambda duck: fnp.modf(duck)),
+    ],
+)
+def test_unary_ufunc_protocol_exception_identity_matches_raw_numpy(
+    raw_call, flops_call
+):
+    error = RuntimeError("unary protocol boom")
+    raw_duck = _UnaryProtocolDuck([1.5, -2.5], raises=error)
+    with pytest.raises(RuntimeError) as raw_raised:
+        raw_call(raw_duck)
+
+    duck = _UnaryProtocolDuck([1.5, -2.5], raises=error)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.raises(RuntimeError) as raised:
+            flops_call(duck)
+    assert raw_raised.value is raised.value is error
+    assert raw_duck.ufunc_calls == duck.ufunc_calls
+
+
+@pytest.mark.parametrize("call", [lambda duck: fnp.negative(duck), lambda duck: fnp.modf(duck)])
+def test_unary_ufunc_protocol_notimplemented_matches_raw_numpy(call):
+    raw_duck = _UnaryProtocolDuck([1.5, -2.5], decline=True)
+    with pytest.raises(TypeError):
+        call(raw_duck)
+
+    duck = _UnaryProtocolDuck([1.5, -2.5], decline=True)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.raises(TypeError):
+            call(duck)
+    assert raw_duck.ufunc_calls == duck.ufunc_calls
+
+
 @pytest.mark.parametrize(
     "op_name,call",
     [

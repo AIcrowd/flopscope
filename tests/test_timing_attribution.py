@@ -161,6 +161,26 @@ def test_foreign_ufunc_protocol_time_lands_in_residual(op_name, make_duck, invok
     assert summary["flopscope_backend_time_s"] < 0.02, summary
 
 
+@pytest.mark.parametrize(
+    "op_name, invoke",
+    [
+        ("negative", lambda duck: fnp.negative(duck)),
+        ("modf", lambda duck: fnp.modf(duck)),
+    ],
+)
+def test_unary_ufunc_protocol_time_lands_in_residual(op_name, invoke):
+    duck = _NumericSleepyUfuncDuck([3.0, 4.0])
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
+            invoke(duck)
+
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
 def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
     duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
     events = []

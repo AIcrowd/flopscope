@@ -480,11 +480,9 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
 
 def _has_foreign_array_ufunc(value) -> bool:
     """Whether *value* can dispatch a raw ufunc call to foreign Python code."""
-    if isinstance(value, (tuple, list)):
-        return _builtins.any(_has_foreign_array_ufunc(item) for item in value)
     if isinstance(value, FlopscopeArray):
         return False
-    implementation = getattr(type(value), "__array_ufunc__", None)
+    implementation = _inspect.getattr_static(type(value), "__array_ufunc__", None)
     return implementation is not None and implementation is not _np.ndarray.__array_ufunc__
 
 
@@ -500,7 +498,14 @@ def _call_ufunc_with_protocol_timing(
     return _call_numpy(fn, *args, **kwargs)
 
 
-def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwargs):
+def _call_with_optional_out(
+    np_func,
+    *args,
+    out=None,
+    supports_out=False,
+    callback_op_name=None,
+    **kwargs,
+):
     # Strip flopscope subclasses (FlopscopeArray / SymmetricTensor) from arrays so
     # the raw NumPy call does not re-dispatch through ``__array_ufunc__`` /
     # ``__array_function__`` and recurse infinitely. Python scalars and
@@ -522,17 +527,17 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
     if out is None:
         if isinstance(np_func, _np.ufunc):
             return _call_ufunc_with_protocol_timing(
-                np_func.__name__,
+                callback_op_name or np_func.__name__,
                 np_func,
                 *args,
-                protocol_operands=protocol_operands,
+                protocol_operands=args,
                 **kwargs,
             )
         return _call_numpy(np_func, *args, **kwargs)
     if supports_out:
         if isinstance(np_func, _np.ufunc):
             return _call_ufunc_with_protocol_timing(
-                np_func.__name__,
+                callback_op_name or np_func.__name__,
                 np_func,
                 *args,
                 out=out_stripped,
@@ -549,7 +554,9 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
     return out
 
 
-def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
+def _call_with_optional_multi_out(
+    np_func, *args, out=None, nout, callback_op_name=None, **kwargs
+):
     """Multi-output sibling of :func:`_call_with_optional_out`.
 
     ``out`` is either ``None`` (numpy allocates all outputs) or a tuple of
@@ -562,7 +569,7 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
     slots are filled with the freshly-allocated plain ndarray that numpy
     returned.
     """
-    protocol_operands = (*args, out)
+    protocol_args = args
     args = tuple(_to_base_ndarray(a) for a in args)
     for k, v in list(kwargs.items()):
         if isinstance(v, _np.ndarray):
@@ -572,10 +579,10 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
     if out is None:
         if isinstance(np_func, _np.ufunc):
             return _call_ufunc_with_protocol_timing(
-                np_func.__name__,
+                callback_op_name or np_func.__name__,
                 np_func,
                 *args,
-                protocol_operands=protocol_operands,
+                protocol_operands=protocol_args,
                 **kwargs,
             )
         return _call_numpy(np_func, *args, **kwargs)
@@ -586,10 +593,11 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
             f"out= to be a tuple of length {nout}; got "
             f"{type(out).__name__} of length {length_repr}"
         )
+    protocol_operands = (*protocol_args, *out)
     stripped = tuple(_to_base_ndarray(o) if o is not None else None for o in out)
     if isinstance(np_func, _np.ufunc):
         result = _call_ufunc_with_protocol_timing(
-            np_func.__name__,
+            callback_op_name or np_func.__name__,
             np_func,
             *args,
             out=stripped,
@@ -694,9 +702,8 @@ def _counted_unary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        x, x_fwd = _resolve_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
@@ -728,9 +735,10 @@ def _counted_unary(np_func, op_name: str):
         ):
             result = _call_with_optional_out(
                 np_func,
-                x,
+                x_fwd,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
         maybe_check_nan_inf(result, op_name)
@@ -764,9 +772,8 @@ def _free_unary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        x, x_fwd = _resolve_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
         billing_dtypes: tuple = (x.dtype,)
         if kwargs.get("dtype") is not None:
@@ -782,9 +789,10 @@ def _free_unary(np_func, op_name: str):
         ):
             result = _call_with_optional_out(
                 np_func,
-                x,
+                x_fwd,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
         maybe_check_nan_inf(result, op_name)
@@ -837,9 +845,8 @@ def _counted_unary_multi(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name, nout=nout)
-        if not isinstance(x, _np.ndarray):
-            x = _np.asarray(x)
         symmetry = _symmetry_of(x)
+        x, x_fwd = _resolve_ufunc_data_operand(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
@@ -874,9 +881,10 @@ def _counted_unary_multi(np_func, op_name: str):
         ):
             result = _call_with_optional_multi_out(
                 np_func,
-                x,
+                x_fwd,
                 out=out,
                 nout=nout,
+                callback_op_name=op_name,
                 **kwargs,
             )
         return _wrap_multi_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -973,6 +981,7 @@ def _counted_binary(np_func, op_name: str):
                 y_orig,
                 out=None if isinstance(out, SymmetricTensor) else out,
                 supports_out=supports_out,
+                callback_op_name=op_name,
                 **kwargs,
             )
         maybe_check_nan_inf(result, op_name)
@@ -1081,6 +1090,7 @@ def _counted_binary_multi(np_func, op_name: str):
                 y_orig,
                 out=out,
                 nout=nout,
+                callback_op_name=op_name,
                 **kwargs,
             )
         # Symmetry-loss warnings (parity with _counted_binary).
@@ -1192,7 +1202,7 @@ def _implements_array_ufunc(x) -> bool:
     through to the plain array-like branch instead, exactly as it did before
     this rule existed.
     """
-    return getattr(type(x), "__array_ufunc__", None) is not None
+    return _inspect.getattr_static(type(x), "__array_ufunc__", None) is not None
 
 
 def _resolve_ufunc_data_operand(x):
