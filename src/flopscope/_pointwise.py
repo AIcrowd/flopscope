@@ -482,6 +482,15 @@ _ARRAY_UFUNC_MISSING = object()
 _UFUNC_KWARG_MISSING = object()
 
 
+class _ForeignUfuncResult:
+    """Raw result of a call whose dispatch involved foreign NEP 13 code."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
 def _static_array_ufunc_implementation(value):
     """Read a type's NEP 13 implementation without invoking its metaclass."""
     return _inspect.getattr_static(
@@ -508,6 +517,13 @@ def _with_where_protocol_operand(operands: tuple, where):
     return (*operands, where)
 
 
+def _flatten_ufunc_out_slots(out) -> tuple:
+    """Flatten only true ufunc output slots, never arbitrary sequences."""
+    if isinstance(out, tuple):
+        return out
+    return (out,)
+
+
 def _call_ufunc_with_protocol_timing(
     op_name, fn, *args, protocol_operands=(), **kwargs
 ):
@@ -516,7 +532,9 @@ def _call_ufunc_with_protocol_timing(
         _has_foreign_array_ufunc(value) for value in protocol_operands
     ):
         _warn_remote_callback(op_name)
-        return _call_numpy_with_python_callbacks(fn, *args, **kwargs)
+        return _ForeignUfuncResult(
+            _call_numpy_with_python_callbacks(fn, *args, **kwargs)
+        )
     return _call_numpy(fn, *args, **kwargs)
 
 
@@ -638,6 +656,8 @@ def _call_with_optional_multi_out(
         )
     else:
         result = _call_numpy(np_func, *args, out=stripped, **kwargs)
+    if isinstance(result, _ForeignUfuncResult):
+        return result
     # Numpy returns a tuple of the stripped buffers (or fresh allocations
     # for None slots). Replace each non-None slot with the caller's
     # original to preserve object identity.
@@ -734,6 +754,13 @@ def _counted_unary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
+        _preflight_ufunc_opt_out(
+            x,
+            *_flatten_ufunc_out_slots(out),
+            *_with_where_protocol_operand(
+                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+            ),
+        )
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
@@ -773,6 +800,8 @@ def _counted_unary(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
@@ -804,6 +833,13 @@ def _free_unary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
+        _preflight_ufunc_opt_out(
+            x,
+            *_flatten_ufunc_out_slots(out),
+            *_with_where_protocol_operand(
+                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+            ),
+        )
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
         symmetry = _prepare_symmetric_out(out, symmetry)
@@ -827,6 +863,8 @@ def _free_unary(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
@@ -877,6 +915,13 @@ def _counted_unary_multi(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name, nout=nout)
+        _preflight_ufunc_opt_out(
+            x,
+            *_flatten_ufunc_out_slots(out),
+            *_with_where_protocol_operand(
+                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+            ),
+        )
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
@@ -919,6 +964,8 @@ def _counted_unary_multi(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         return _wrap_multi_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
 
     wrapper.__name__ = op_name
@@ -941,6 +988,14 @@ def _counted_binary(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name)
+        _preflight_ufunc_opt_out(
+            x,
+            y,
+            *_flatten_ufunc_out_slots(out),
+            *_with_where_protocol_operand(
+                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+            ),
+        )
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -1016,6 +1071,8 @@ def _counted_binary(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         maybe_check_nan_inf(result, op_name)
         if out_symmetry is not None:
             lost = []
@@ -1067,6 +1124,14 @@ def _counted_binary_multi(np_func, op_name: str):
         # symmetry check, and what gets returned -- and above the deduct,
         # so a refused form costs nothing.
         out = _normalize_out(out, op_name, nout=nout)
+        _preflight_ufunc_opt_out(
+            x,
+            y,
+            *_flatten_ufunc_out_slots(out),
+            *_with_where_protocol_operand(
+                (), kwargs.get("where", _UFUNC_KWARG_MISSING)
+            ),
+        )
         # Preserve original (possibly Python-scalar) values for the actual
         # numpy call so that NEP 50 weak-typing rules apply correctly. We
         # only need ndarray views for shape and symmetry inspection below.
@@ -1125,6 +1190,8 @@ def _counted_binary_multi(np_func, op_name: str):
                 callback_op_name=op_name,
                 **kwargs,
             )
+        if isinstance(result, _ForeignUfuncResult):
+            return result.value
         # Symmetry-loss warnings (parity with _counted_binary).
         if out_symmetry is not None:
             lost = []
@@ -1239,6 +1306,20 @@ def _raise_ufunc_opt_out(x) -> None:
     raise TypeError(
         f"operand '{type_name}' does not support ufuncs (__array_ufunc__=None)"
     )
+
+
+def _preflight_ufunc_opt_out(*operands) -> None:
+    """Reject top-level ufunc operands that explicitly opt out of NEP 13.
+
+    NumPy raises before it materializes any operand or executes a ufunc loop
+    when a participating type defines ``__array_ufunc__ = None``.  Callers
+    pass data operands directly, flatten only real ``out=`` slots, and append
+    a top-level accepted ``where=`` value; unrelated kwargs and index
+    sequences are deliberately excluded.
+    """
+    for operand in operands:
+        if _static_array_ufunc_implementation(operand) is None:
+            _raise_ufunc_opt_out(operand)
 
 
 def _resolve_ufunc_data_operand(x):
@@ -1390,6 +1471,12 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.outer", nout=ufunc.nout)
+    _preflight_ufunc_opt_out(
+        a,
+        b,
+        *_flatten_ufunc_out_slots(out),
+        *_with_where_protocol_operand((), protocol_where),
+    )
     # Resolved here, BEFORE ``a``/``b`` are read for billing below, not
     # down where it is USED. ``np.dtype()`` accepts any object exposing a
     # ``.dtype`` attribute, and that attribute can be a Python property --
@@ -1536,6 +1623,8 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
             ),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1619,6 +1708,11 @@ def _counted_ufunc_reduce_generic(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduce", nout=ufunc.nout)
+    _preflight_ufunc_opt_out(
+        a,
+        *_flatten_ufunc_out_slots(out),
+        *_with_where_protocol_operand((), protocol_where),
+    )
     # Resolved here, BEFORE ``a`` is read for billing below -- see
     # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
     # early (it never needs anything off ``a``). A caller-supplied ``axis``
@@ -1705,6 +1799,8 @@ def _counted_ufunc_reduce_generic(
             ),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1724,6 +1820,7 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.accumulate", nout=ufunc.nout)
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     # Resolved here, BEFORE ``a`` is read for billing below -- see
     # ``_resolve_generic_reduce_axis``'s docstring for why it can run this
     # early (it never needs anything off ``a``). A caller-supplied ``axis``
@@ -1802,6 +1899,8 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
             protocol_operands=(a_fwd, out),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=out_sym)
 
 
@@ -1958,6 +2057,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, f"{ufunc.__name__}.reduceat", nout=ufunc.nout)
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     # Resolved here, BEFORE ``a`` is read for billing below, for the same
     # reason as ``_counted_ufunc_reduce_generic``: ``np.dtype()`` honours an
     # arbitrary object's ``.dtype`` PROPERTY, which can mutate ``a`` as a
@@ -2139,6 +2239,8 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
             protocol_operands=(a_fwd, out_fwd),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     return _wrap_result(result, out=out, symmetry=None)
 
 
@@ -2326,6 +2428,7 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             f"np.{ufunc.__name__}.at(...)."
         )
     budget = require_budget()
+    _preflight_ufunc_opt_out(a, *args)
     # ``indices`` can be many things: int, list of ints, ndarray, slice,
     # Ellipsis, or a tuple thereof (for multi-axis fancy indexing).
     # ``ufunc.at`` accepts all of these. ``_canonical_index`` resolves every
@@ -2486,15 +2589,7 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         shapes=(a_view.shape,) if hasattr(a_view, "shape") else (),
         dtypes=billing_dtypes,
     ):
-        # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
-        # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
-        # cannot list it either -- that set holds module-level function objects
-        # and ``at`` is a fresh bound method per ufunc. Record the write here.
-        # The refusal above keeps a tagged SymmetricTensor out of this path, but
-        # a plain alias of a tagged buffer reaches it, which is exactly the case
-        # a guard on tagged arrays cannot cover.
-        note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
-        _call_ufunc_with_protocol_timing(
+        result = _call_ufunc_with_protocol_timing(
             f"{ufunc.__name__}.at",
             ufunc.at,
             _to_base_ndarray(a),
@@ -2503,6 +2598,17 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
             protocol_operands=(a, *forward_args),
             **kwargs,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
+    # ``ufunc.at`` writes into its FIRST argument, not into an ``out=``, so
+    # _call_numpy's out= hook cannot see it and its _MUTATES_FIRST_ARG set
+    # cannot list it either -- that set holds module-level function objects
+    # and ``at`` is a fresh bound method per ufunc. Record the write after the
+    # call confirms that foreign dispatch did not bypass NumPy's write path.
+    # The refusal above keeps a tagged SymmetricTensor out of this path, but a
+    # plain alias of a tagged buffer reaches it, which is exactly the case a
+    # guard on tagged arrays cannot cover.
+    note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
 
 
@@ -2777,6 +2883,7 @@ def around(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, "around")
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -2800,6 +2907,8 @@ def around(
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     maybe_check_nan_inf(result, "around")
     if (
         a_is_scalar
@@ -2891,6 +3000,7 @@ def round(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, "round")
+    _preflight_ufunc_opt_out(a, *_flatten_ufunc_out_slots(out))
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -2914,6 +3024,8 @@ def round(
             out=None if isinstance(out, SymmetricTensor) else out,
             supports_out=True,
         )
+    if isinstance(result, _ForeignUfuncResult):
+        return result.value
     maybe_check_nan_inf(result, "round")
     if (
         a_is_scalar

@@ -720,6 +720,25 @@ class _NonNdarrayUfuncOptOut(metaclass=_OptOutProtocolMeta):
         raise AssertionError("__array__ must not be called for a ufunc opt-out")
 
 
+class _NdarrayUfuncOptOut(np.ndarray):
+    __array_ufunc__ = None
+
+
+class _RawReturnUfuncDuck:
+    """Foreign NEP 13 participant that deliberately bypasses NumPy outputs."""
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray([1.0, 2.0], dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        return self.result
+
+
 def test_metaclass_protocol_lookup_matches_raw_numpy_once():
     _StatefulProtocolMeta.protocol_lookups = 0
     raw_duck = _MetaclassProtocolDuck()
@@ -763,6 +782,100 @@ def test_non_ndarray_ufunc_opt_out_matches_raw_numpy_without_materializing(
     assert value.protocol_calls == raw_value.protocol_calls == 0
     assert _OptOutProtocolMeta.name_lookups == raw_name_lookups
     assert budget.flops_used == 0
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call",
+    [
+        (
+            lambda value: np.add(np.array([1.0, 2.0]), value),
+            lambda value, a, _b: fnp.add(a, value),
+        ),
+        (
+            lambda value: np.divmod(np.array([5.0, 6.0]), value),
+            lambda value, a, _b: fnp.divmod(a, value),
+        ),
+        (
+            lambda value: np.add(
+                np.array([1.0, 2.0]), np.array([3.0, 4.0]), where=value
+            ),
+            lambda value, a, b: fnp.add(a, b, where=value),
+        ),
+    ],
+)
+def test_non_ndarray_ufunc_opt_out_preflights_before_billing(
+    raw_call, flops_call
+):
+    raw_value = _NonNdarrayUfuncOptOut()
+    with pytest.raises(TypeError) as raw_raised:
+        raw_call(raw_value)
+
+    value = _NonNdarrayUfuncOptOut()
+    a = fnp.array([1.0, 2.0])
+    b = fnp.array([3.0, 4.0])
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            flops_call(value, a, b)
+
+    assert str(raised.value) == str(raw_raised.value)
+    assert value.array_calls == raw_value.array_calls == 0
+    assert value.protocol_calls == raw_value.protocol_calls == 0
+    assert budget.flops_used == 0
+
+
+def test_ndarray_ufunc_opt_out_out_preflights_before_billing():
+    raw_out = np.zeros(2).view(_NdarrayUfuncOptOut)
+    with pytest.raises(TypeError) as raw_raised:
+        np.add(np.array([1.0, 2.0]), np.array([3.0, 4.0]), out=raw_out)
+
+    left = fnp.array([1.0, 2.0])
+    right = fnp.array([3.0, 4.0])
+    out = fnp.zeros(2).view(_NdarrayUfuncOptOut)
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            fnp.add(left, right, out=out)
+
+    assert str(raised.value) == str(raw_raised.value)
+    assert budget.flops_used == 0
+
+
+@pytest.mark.parametrize(
+    "raw_call, flops_call",
+    [
+        (
+            lambda duck: np.add(np.array([3.0, 4.0]), duck),
+            lambda duck: fnp.add(fnp.array([3.0, 4.0]), duck),
+        ),
+        (lambda duck: np.negative(duck), lambda duck: fnp.negative(duck)),
+        (lambda duck: np.modf(duck), lambda duck: fnp.modf(duck)),
+        (
+            lambda duck: np.negative(duck, out=np.zeros(2)),
+            lambda duck: fnp.negative(duck, out=fnp.zeros(2)),
+        ),
+        (
+            lambda duck: np.add.outer(np.array([3.0, 4.0]), duck),
+            lambda duck: np.add.outer(fnp.array([3.0, 4.0]), duck),
+        ),
+        (
+            lambda duck: np.add.at(np.zeros(2), [0, 1], duck),
+            lambda duck: np.add.at(fnp.zeros(2), [0, 1], duck),
+        ),
+    ],
+    ids=["call", "unary", "multi", "out", "outer", "at"],
+)
+def test_foreign_ufunc_return_preserves_raw_result_identity(raw_call, flops_call):
+    raw_sentinel = object()
+    raw_duck = _RawReturnUfuncDuck(raw_sentinel)
+    expected = raw_call(raw_duck)
+
+    sentinel = object()
+    duck = _RawReturnUfuncDuck(sentinel)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = flops_call(duck)
+
+    assert expected is raw_sentinel
+    assert actual is sentinel
+    assert raw_duck.calls == duck.calls == 1
 
 
 @pytest.mark.parametrize(
