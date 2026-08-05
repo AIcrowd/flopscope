@@ -215,6 +215,27 @@ def test_proxy_preserves_msgpack_binary_buffer_forms(spec, monkeypatch):
     assert encoded == [("zeros", [[1]], {"dtype": spec})]
 
 
+def test_proxy_preserves_exact_msgpack_extension_values(monkeypatch):
+    class Encoded(Exception):
+        pass
+
+    extension = msgpack.ExtType(7, b"dtype")
+    encoded = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append((kwargs["dtype"], encode_request(op_name, args, kwargs)))
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    with pytest.raises(Encoded):
+        flopscope.zeros((1,), dtype=extension)
+
+    encoded_extension, wire = encoded[0]
+    assert encoded_extension is extension
+    decoded = msgpack.unpackb(wire, raw=False)
+    assert decoded["kwargs"]["dtype"] == extension
+
+
 def test_proxy_preserves_msgpack_container_and_string_subclasses(monkeypatch):
     class L(list):
         pass

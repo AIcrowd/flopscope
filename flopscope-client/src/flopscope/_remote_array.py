@@ -14,6 +14,8 @@ import types
 import weakref
 from typing import Any, cast
 
+import msgpack
+
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
 from flopscope.errors import RemoteCallbackError, RemoteSerializationError
@@ -1496,6 +1498,8 @@ def _encode_arg(arg):
 
     if type(arg) is SymmetryGroup:
         return {"__symmetry_group__": SymmetryGroup.to_payload(arg)}
+    if type(arg) is msgpack.ExtType:
+        return arg
     if _has_proxy_base(arg, list):
         return [_encode_arg(item) for item in list.__iter__(arg)]
     if _has_proxy_base(arg, tuple):
