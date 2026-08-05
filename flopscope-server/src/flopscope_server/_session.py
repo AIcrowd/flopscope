@@ -167,6 +167,12 @@ class Session:
             "flops_remaining": self._budget_ctx.flops_remaining,
         }
 
+    def budget_summary_dict(self, *, by_namespace: bool) -> dict:
+        """Return the active context's authoritative structured summary."""
+        if not self._is_open:
+            raise flops.NoBudgetContextError
+        return self.budget_context.summary_dict(by_namespace=by_namespace)
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------

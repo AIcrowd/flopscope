@@ -15,12 +15,46 @@ from flopscope_server._protocol import (
     AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
     InvalidRequestError,
     decode_request,
+    encode_budget_summary_response,
     encode_error_response,
     encode_response,
     validate_request,
 )
 from flopscope_server._request_handler import RequestHandler
 from flopscope_server._session import Session
+
+
+def _decode_budget_summary_kwargs(msg: dict) -> tuple[str, bool]:
+    """Validate and decode the exact public ``budget_summary`` request."""
+    required = {"op", "kwargs"}
+    allowed = required | {"args"}
+    if not required.issubset(msg) or set(msg) - allowed:
+        raise InvalidRequestError(
+            "budget_summary requires op and kwargs and rejects unknown "
+            f"top-level fields; got {sorted(map(str, msg))}"
+        )
+    args = msg.get("args")
+    if args not in (None, []):
+        raise InvalidRequestError("budget_summary args must be absent, null, or []")
+    kwargs = msg.get("kwargs")
+    if not isinstance(kwargs, dict):
+        raise InvalidRequestError("budget_summary kwargs must be a dict")
+    expected = {"scope", "by_namespace"}
+    actual = set(kwargs)
+    if actual != expected:
+        raise InvalidRequestError(
+            "budget_summary kwargs must contain exactly scope and by_namespace; "
+            f"got {sorted(map(str, actual))}"
+        )
+    scope = kwargs["scope"]
+    by_namespace = kwargs["by_namespace"]
+    if scope not in ("session", "active_context"):
+        raise InvalidRequestError(
+            "budget_summary scope must be 'session' or 'active_context'"
+        )
+    if not isinstance(by_namespace, bool):
+        raise InvalidRequestError("budget_summary by_namespace must be boolean")
+    return scope, by_namespace
 
 
 class FlopscopeServer:
@@ -127,6 +161,9 @@ class FlopscopeServer:
                 return self._handle_budget_open(msg, t0, t1)
             return self._handle_budget_close(t0, t1)
 
+        if op == "budget_summary":
+            return self._handle_budget_summary(raw, msg, t0, t1)
+
         # --- Require active session for everything else ---
         if self._session is None:
             return encode_error_response(
@@ -201,6 +238,55 @@ class FlopscopeServer:
 
         self._last_activity = monotonic()
         return response_bytes
+
+    def _handle_budget_summary(
+        self, raw: bytes, msg: dict, t0_ns: int, t1_ns: int
+    ) -> bytes:
+        """Return a validated authoritative session or active-context snapshot."""
+        try:
+            scope, by_namespace = _decode_budget_summary_kwargs(msg)
+        except InvalidRequestError as exc:
+            return encode_error_response("InvalidRequestError", str(exc))
+
+        if scope == "active_context" and self._session is None:
+            return encode_error_response(
+                "NoBudgetContextError",
+                "no active budget context for active_context summary",
+            )
+
+        try:
+            if scope == "session":
+                result = flopscope.budget_summary_dict(by_namespace=by_namespace)
+                display_totals = flopscope._budget._budget_display_totals()
+            else:
+                assert self._session is not None
+                result = self._session.budget_summary_dict(by_namespace=by_namespace)
+                display_totals = {
+                    "has_explicit_budget": True,
+                    "budget": result["flop_budget"],
+                    "used": result["flops_used"],
+                }
+            display_totals["client_context_compute_ns"] = (
+                self._session.comms_tracker.summary()["total_compute_time_ns"]
+                if self._session is not None
+                else None
+            )
+            budget = (
+                self._session.budget_status() if self._session is not None else None
+            )
+            response = encode_budget_summary_response(
+                result,
+                display_totals=display_totals,
+                budget=budget,
+            )
+        except Exception as exc:
+            response = encode_error_response(
+                "FlopscopeServerError",
+                f"failed to construct budget summary: {type(exc).__name__}",
+            )
+
+        self._last_activity = monotonic()
+        return response
 
     # ------------------------------------------------------------------
     # Token gate
