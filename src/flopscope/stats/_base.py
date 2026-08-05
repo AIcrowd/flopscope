@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import math as _math
+import warnings as _warnings
 
 import numpy as _np
 
 from flopscope._budget import _counted_wrapper, refuse_non_numeric_source
 from flopscope._ndarray import _asflopscope
 from flopscope._validation import require_budget
+from flopscope.errors import FlopscopeWarning, _user_stacklevel
+
+
+def _warn_float64_promotion(op_name: str, source_dtype: _np.dtype) -> None:
+    """Warn that a narrow real floating input will be promoted to float64."""
+    dtype_name = source_dtype.name
+    _warnings.warn(
+        f"{op_name} promoted its {dtype_name} input to float64 to match "
+        "scipy.stats. If float64 output was not intended, cast the result back "
+        f"with result.astype(np.{dtype_name}) before downstream operations; "
+        f"float64 operations are billed at twice the {dtype_name} dtype rate.",
+        FlopscopeWarning,
+        stacklevel=_user_stacklevel(),
+    )
 
 
 class ContinuousDistribution:
@@ -74,11 +89,16 @@ class ContinuousDistribution:
         # pure-numpy _compute_* kernel -- both cast/coerce a payload's
         # __float__ per element with nothing billed for it. Probe each one
         # first; a probe never casts.
-        refuse_non_numeric_source(op_name, x)
+        source_dtype = refuse_non_numeric_source(op_name, x)
         for _v in args:
             refuse_non_numeric_source(op_name, _v)
         for _v in kwargs.values():
             refuse_non_numeric_source(op_name, _v)
+        if (
+            source_dtype.kind == "f"
+            and source_dtype.itemsize < _np.dtype(_np.float64).itemsize
+        ):
+            _warn_float64_promotion(op_name, source_dtype)
         x = _np.asarray(x, dtype=_np.float64)
         param_shapes = tuple(
             _np.shape(v) for v in (*args, *kwargs.values()) if v is not None
