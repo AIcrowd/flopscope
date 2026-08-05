@@ -1616,6 +1616,18 @@ class BudgetContext:
     def summary_dict(self, by_namespace: bool = False) -> dict:
         """Return structured summary data for this budget context.
 
+        The structured ``summary_dict()`` and ``budget_summary_dict()`` accessors do
+        not scan raw call history. At fixed rollup cardinality, cost is independent of
+        raw historical-call count and scales with distinct operation/namespace buckets
+        aggregated, plus the defensive copy returned. Live contexts recompute wall and
+        residual timing for each snapshot.
+
+        When either accessor runs inside an active budget context, its instrumentation
+        overhead is billed to the calling thread's active context, not necessarily the
+        context being inspected, after the snapshot boundary. It therefore appears in
+        that active context's next snapshot or final close. A closed-context read
+        outside an active budget context commits no budget overhead.
+
         Returns a dict with keys ``flop_budget``, ``flops_used``,
         ``flops_remaining``, ``operations``, ``wall_time_s``,
         ``flopscope_backend_time_s``, ``flopscope_overhead_time_s``,
@@ -2251,6 +2263,18 @@ def _budget_display_totals() -> dict:
 
 def budget_summary_dict(by_namespace: bool = False) -> dict:
     """Return aggregated budget data across all recorded contexts.
+
+    The structured ``summary_dict()`` and ``budget_summary_dict()`` accessors do not
+    scan raw call history. At fixed rollup cardinality, cost is independent of raw
+    historical-call count and scales with distinct operation/namespace buckets
+    aggregated, plus the defensive copy returned. Live contexts recompute wall and
+    residual timing for each snapshot.
+
+    When either accessor runs inside an active budget context, its instrumentation
+    overhead is billed to the calling thread's active context, not necessarily the
+    context being inspected, after the snapshot boundary. It therefore appears in
+    that active context's next snapshot or final close. A closed-context read outside
+    an active budget context commits no budget overhead.
 
     Parameters
     ----------
