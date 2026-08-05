@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
+
 from flopscope._budget import (
     OpRecord,
     _summarize_by_namespace,
     _summarize_operations,
     _SummaryRollup,
+    _timing_summary,
 )
 
 
@@ -18,6 +23,43 @@ class _PoisonedHistory(list):
         if isinstance(index, slice):
             raise AssertionError("summary sliced historical operation records")
         return super().__getitem__(index)
+
+
+class _ScriptedClock:
+    def __init__(self, now: float) -> None:
+        self.now = now
+        self._scripted = False
+        self._values: list[float] = []
+
+    def __call__(self) -> float:
+        if not self._scripted:
+            return self.now
+        if not self._values:
+            raise AssertionError("accessor made an unexpected perf_counter call")
+        self.now = self._values.pop(0)
+        return self.now
+
+    def advance(self, duration: float) -> None:
+        assert not self._scripted
+        self.now += duration
+
+    def begin_accessor(self, *, sample_calls: int, overhead: float | None) -> None:
+        assert not self._scripted
+        started = self.now
+        self._values = [started] * (1 + sample_calls)
+        if overhead is not None:
+            self._values.append(started + overhead)
+        self._scripted = True
+
+    def end_accessor(self) -> None:
+        was_scripted = self._scripted
+        remaining = tuple(self._values)
+        self._values.clear()
+        self._scripted = False
+        assert was_scripted
+        assert not remaining, (
+            f"accessor skipped {len(remaining)} expected perf_counter call(s)"
+        )
 
 
 def _op(
@@ -40,9 +82,481 @@ def _op(
     )
 
 
+def test_scripted_clock_recovers_after_incomplete_accessor() -> None:
+    clock = _ScriptedClock(10.0)
+    clock.begin_accessor(sample_calls=1, overhead=0.5)
+    clock()
+
+    with pytest.raises(AssertionError, match="skipped 2 expected"):
+        clock.end_accessor()
+
+    assert not clock._scripted
+    assert clock._values == []
+    clock.advance(1.0)
+    assert clock() == 11.0
+
+
 def _assert_matches_scan(rollup: _SummaryRollup, records: list[OpRecord]) -> None:
-    assert rollup.operations_dict() == _summarize_operations(records)
-    assert rollup.namespaces_dict() == _summarize_by_namespace(records)
+    _assert_bucket_mapping_matches(
+        rollup.operations_dict(), _summarize_operations(records)
+    )
+    _assert_bucket_mapping_matches(
+        rollup.namespaces_dict(), _summarize_by_namespace(records)
+    )
+
+
+def _merge_bucket_mapping(target: dict, source: dict) -> None:
+    for key, value in source.items():
+        if isinstance(value, dict):
+            _merge_bucket_mapping(target.setdefault(key, {}), value)
+        else:
+            target[key] = target.get(key, 0) + value
+
+
+def _scan_namespace_records(
+    records,
+    by_namespace: bool,
+    *,
+    orphan_operations: dict | None = None,
+    orphan_namespaces: dict | None = None,
+) -> dict:
+    total_budget = 0
+    total_used = 0
+    total_wall: float | None = None
+    total_backend = 0.0
+    total_overhead = 0.0
+    operations: dict = {}
+    namespaces: dict = {}
+    for record in records:
+        total_budget += record.flop_budget
+        total_used += record.flops_used
+        record_operations = _summarize_operations(record.op_log)
+        record_namespaces = _summarize_by_namespace(record.op_log)
+        _merge_bucket_mapping(operations, record_operations)
+        _merge_bucket_mapping(namespaces, record_namespaces)
+        if record.wall_time_s is not None:
+            total_wall = (total_wall or 0.0) + record.wall_time_s
+        total_backend += record.total_flopscope_backend_time or 0.0
+        total_overhead += record.total_flopscope_overhead_time or 0.0
+    if orphan_operations is not None:
+        _merge_bucket_mapping(operations, orphan_operations)
+    if orphan_namespaces is not None:
+        _merge_bucket_mapping(namespaces, orphan_namespaces)
+    wall, backend, overhead, residual = _timing_summary(
+        total_wall, total_backend, total_overhead
+    )
+    result = {
+        "flop_budget": total_budget,
+        "flops_used": total_used,
+        "flops_remaining": total_budget - total_used,
+        "operations": operations,
+        "wall_time_s": wall,
+        "flopscope_backend_time_s": backend,
+        "flopscope_overhead_time_s": overhead,
+        "residual_wall_time_s": residual,
+    }
+    if by_namespace:
+        result["by_namespace"] = namespaces
+    return result
+
+
+def _assert_bucket_mapping_matches(actual: dict, expected: dict) -> None:
+    assert actual.keys() == expected.keys()
+    for key in actual:
+        if isinstance(actual[key], dict):
+            _assert_bucket_mapping_matches(actual[key], expected[key])
+        elif isinstance(actual[key], float):
+            assert actual[key] == pytest.approx(expected[key], abs=1e-9)
+        else:
+            assert actual[key] == expected[key]
+
+
+def _scan_context(ctx, by_namespace: bool, *, now: float | None = None) -> dict:
+    wall = ctx.wall_time_s
+    if wall is None and ctx._start_time is not None:
+        wall = ctx.elapsed_s if now is None else now - ctx._start_time
+    wall, backend, overhead, residual = _timing_summary(
+        wall,
+        ctx._total_flopscope_backend_time,
+        ctx._total_flopscope_overhead_time,
+    )
+    result = {
+        "flop_budget": ctx.flop_budget,
+        "flops_used": ctx.flops_used,
+        "flops_remaining": ctx.flops_remaining,
+        "operations": _summarize_operations(ctx.op_log),
+        "wall_time_s": wall,
+        "flopscope_backend_time_s": backend,
+        "flopscope_overhead_time_s": overhead,
+        "residual_wall_time_s": residual,
+    }
+    if by_namespace:
+        result["by_namespace"] = _summarize_by_namespace(ctx.op_log)
+    return result
+
+
+def _scan_global(
+    by_namespace: bool,
+    *,
+    orphan_operations: dict | None = None,
+    orphan_namespaces: dict | None = None,
+) -> dict:
+    import flopscope._budget as budget_module
+
+    records = list(budget_module._accumulator._records)
+    active = budget_module.get_active_budget()
+    global_default = budget_module._global_default
+    if global_default is not None and global_default._has_unrecorded_activity():
+        records.append(global_default._snapshot_record())
+    if active is not None and active is not global_default:
+        # Active explicit contexts contribute their budget even before their
+        # first operation, so presence cannot be gated on recorded activity.
+        records.append(active._snapshot_record())
+    return _scan_namespace_records(
+        records,
+        by_namespace,
+        orphan_operations=orphan_operations,
+        orphan_namespaces=orphan_namespaces,
+    )
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    st.lists(
+        st.tuples(
+            st.sampled_from(["add", "mul", "einsum"]),
+            st.integers(min_value=0, max_value=10_000),
+            st.one_of(st.none(), st.sampled_from(["a", "a.b", "x"])),
+            st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+            st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+        ),
+        max_size=100,
+    )
+)
+def test_rollup_matches_scan_for_generated_records(specs) -> None:
+    records = [
+        _op(name, cost=cost, namespace=namespace, backend=backend, overhead=overhead)
+        for name, cost, namespace, backend, overhead in specs
+    ]
+    rollup = _SummaryRollup()
+    for record in records:
+        rollup.apply_record(None, record)
+    _assert_matches_scan(rollup, records)
+
+
+@settings(max_examples=200, deadline=None)
+@example(events=["reenter"], by_namespace=False)
+@example(events=["close", "reenter"], by_namespace=True)
+@example(events=["default", "reenter"], by_namespace=True)
+@example(events=["inflight", "reset", "inflight"], by_namespace=True)
+@example(events=["inflight", "reset", "reset", "inflight"], by_namespace=True)
+@given(
+    st.lists(
+        st.sampled_from(
+            [
+                "immediate",
+                "deferred",
+                "exception",
+                "namespace",
+                "inflight",
+                "close",
+                "reenter",
+                "reset",
+                "default",
+            ]
+        ),
+        min_size=1,
+        max_size=30,
+    ),
+    st.booleans(),
+)
+def test_generated_context_and_session_transitions_match_scan(
+    events, by_namespace
+) -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+
+    budget_module._reset_global_default()
+    flops.budget_reset()
+    context_accessor_overhead = 0.01
+    global_accessor_overhead = 0.02
+    clock = _ScriptedClock(100.0)
+    real_perf_counter = budget_module.time.perf_counter
+    budget_module.time.perf_counter = clock
+    ctx = budget_module.BudgetContext(1_000_000, namespace="explicit", quiet=True)
+    ctx.__enter__()
+    entered = True
+    inflight = None
+    inflight_started_at: float | None = None
+    inflight_namespace: str | None = None
+    inflight_reset_epoch: int | None = None
+    reset_epoch = 0
+    orphan_operations: dict = {}
+    orphan_namespaces: dict = {}
+
+    def ensure_entered() -> None:
+        nonlocal entered
+        if not entered:
+            ctx.__enter__()
+            entered = True
+
+    def finish_inflight() -> None:
+        nonlocal inflight, inflight_namespace, inflight_reset_epoch
+        nonlocal inflight_started_at
+        if inflight is not None:
+            assert inflight_started_at is not None
+            assert inflight_reset_epoch is not None
+            duration = clock.now - inflight_started_at
+            inflight.__exit__(None, None, None)
+            if inflight_reset_epoch != reset_epoch:
+                operation_delta = {
+                    "inflight_add": {
+                        "flop_cost": 0,
+                        "calls": 0,
+                        "flopscope_backend_time_s": 0.0,
+                        "flopscope_overhead_time_s": duration,
+                    }
+                }
+                namespace_delta = {
+                    inflight_namespace: {
+                        "flops_used": 0,
+                        "calls": 0,
+                        "flopscope_backend_time_s": 0.0,
+                        "flopscope_overhead_time_s": duration,
+                        "operations": operation_delta,
+                    }
+                }
+                _merge_bucket_mapping(orphan_operations, operation_delta)
+                _merge_bucket_mapping(orphan_namespaces, namespace_delta)
+            inflight = None
+            inflight_started_at = None
+            inflight_namespace = None
+            inflight_reset_epoch = None
+
+    try:
+        for event in events:
+            clock.advance(0.001)
+            if event == "close" and entered:
+                finish_inflight()
+                ctx.__exit__(None, None, None)
+                entered = False
+            elif event == "reenter":
+                ensure_entered()
+            elif event == "reset":
+                flops.budget_reset()
+                reset_epoch += 1
+                orphan_operations.clear()
+                orphan_namespaces.clear()
+            elif event == "default":
+                finish_inflight()
+                if entered:
+                    ctx.__exit__(None, None, None)
+                    entered = False
+                default = budget_module._get_global_default()
+                with default.deduct(
+                    "default_add",
+                    flop_cost=1,
+                    subscripts=None,
+                    shapes=(),
+                    dtypes=(),
+                ):
+                    pass
+            else:
+                ensure_entered()
+                if event == "immediate":
+                    with ctx.deduct(
+                        "add", flop_cost=2, subscripts=None, shapes=(), dtypes=()
+                    ):
+                        pass
+                elif event == "deferred":
+                    with ctx.deduct_after(
+                        "take", subscripts=None, shapes=(), dtypes=()
+                    ) as timer:
+                        timer.set_cost(3)
+                elif event == "exception":
+                    with pytest.raises(RuntimeError):
+                        with ctx.deduct(
+                            "mul",
+                            flop_cost=4,
+                            subscripts=None,
+                            shapes=(),
+                            dtypes=(),
+                        ):
+                            raise RuntimeError("expected")
+                elif event == "namespace":
+                    with flops.namespace("nested"):
+                        with ctx.deduct(
+                            "sum",
+                            flop_cost=5,
+                            subscripts=None,
+                            shapes=(),
+                            dtypes=(),
+                        ):
+                            pass
+                elif event == "inflight":
+                    if inflight is None:
+                        inflight = ctx.deduct(
+                            "inflight_add",
+                            flop_cost=6,
+                            subscripts=None,
+                            shapes=(),
+                            dtypes=(),
+                        )
+                        inflight.__enter__()
+                        inflight_started_at = clock.now
+                        inflight_namespace = ctx.namespace
+                        inflight_reset_epoch = reset_epoch
+                    else:
+                        finish_inflight()
+
+            expected_context = _scan_context(ctx, by_namespace, now=clock.now)
+            active_during_context_summary = budget_module.get_active_budget()
+            active_overhead_before_context_summary = (
+                active_during_context_summary._total_flopscope_overhead_time
+                if active_during_context_summary is not None
+                else None
+            )
+            context_sample_calls = int(
+                ctx.wall_time_s is None and ctx._start_time is not None
+            )
+            clock.begin_accessor(
+                sample_calls=context_sample_calls,
+                overhead=(
+                    context_accessor_overhead
+                    if active_during_context_summary is not None
+                    else None
+                ),
+            )
+            try:
+                actual_context = ctx.summary_dict(by_namespace=by_namespace)
+            finally:
+                clock.end_accessor()
+            _assert_bucket_mapping_matches(actual_context, expected_context)
+            if active_during_context_summary is not None:
+                assert active_overhead_before_context_summary is not None
+                assert active_during_context_summary._total_flopscope_overhead_time == (
+                    pytest.approx(
+                        active_overhead_before_context_summary
+                        + context_accessor_overhead,
+                        abs=1e-12,
+                    )
+                )
+                if active_during_context_summary is ctx:
+                    next_context = _scan_context(ctx, by_namespace, now=clock.now)
+                    assert next_context["flopscope_overhead_time_s"] == pytest.approx(
+                        expected_context["flopscope_overhead_time_s"]
+                        + context_accessor_overhead,
+                        abs=1e-12,
+                    )
+
+            expected_global = _scan_global(
+                by_namespace,
+                orphan_operations=orphan_operations,
+                orphan_namespaces=orphan_namespaces,
+            )
+            active_during_global_summary = budget_module.get_active_budget()
+            active_overhead_before_global_summary = (
+                active_during_global_summary._total_flopscope_overhead_time
+                if active_during_global_summary is not None
+                else None
+            )
+            global_default = budget_module._global_default
+            global_sample_calls = 0
+            if (
+                global_default is not None
+                and global_default._has_unrecorded_activity()
+                and global_default._wall_time_s is None
+                and global_default._start_time is not None
+            ):
+                global_sample_calls += 1
+            if (
+                active_during_global_summary is not None
+                and active_during_global_summary is not global_default
+                and active_during_global_summary._wall_time_s is None
+                and active_during_global_summary._start_time is not None
+            ):
+                global_sample_calls += 1
+            clock.begin_accessor(
+                sample_calls=global_sample_calls,
+                overhead=(
+                    global_accessor_overhead
+                    if active_during_global_summary is not None
+                    else None
+                ),
+            )
+            try:
+                actual_global = flops.budget_summary_dict(by_namespace=by_namespace)
+            finally:
+                clock.end_accessor()
+            _assert_bucket_mapping_matches(actual_global, expected_global)
+            if active_during_global_summary is not None:
+                assert active_overhead_before_global_summary is not None
+                assert active_during_global_summary._total_flopscope_overhead_time == (
+                    pytest.approx(
+                        active_overhead_before_global_summary
+                        + global_accessor_overhead,
+                        abs=1e-12,
+                    )
+                )
+                next_global = _scan_global(
+                    by_namespace,
+                    orphan_operations=orphan_operations,
+                    orphan_namespaces=orphan_namespaces,
+                )
+                assert next_global["flopscope_overhead_time_s"] == pytest.approx(
+                    expected_global["flopscope_overhead_time_s"]
+                    + global_accessor_overhead,
+                    abs=1e-12,
+                )
+    finally:
+        try:
+            try:
+                finish_inflight()
+            finally:
+                if entered:
+                    ctx.__exit__(None, None, None)
+        finally:
+            budget_module.time.perf_counter = real_perf_counter
+            try:
+                try:
+                    budget_module._reset_global_default()
+                finally:
+                    flops.budget_reset()
+            finally:
+                budget_module._thread_local.active_budget = None
+
+
+def test_global_accessor_overhead_is_deferred_until_next_public_snapshot(
+    monkeypatch,
+) -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+
+    accessor_overhead = 0.02
+    clock = _ScriptedClock(100.0)
+    monkeypatch.setattr(budget_module.time, "perf_counter", clock)
+
+    def public_snapshot() -> dict:
+        clock.begin_accessor(sample_calls=1, overhead=accessor_overhead)
+        try:
+            return flops.budget_summary_dict()
+        finally:
+            clock.end_accessor()
+
+    with budget_module.BudgetContext(100, quiet=True) as ctx:
+        before = ctx.flopscope_overhead_time_s
+        first = public_snapshot()
+        after_first = ctx.flopscope_overhead_time_s
+        second = public_snapshot()
+        after_second = ctx.flopscope_overhead_time_s
+
+    assert first["flopscope_overhead_time_s"] == before
+    assert after_first == pytest.approx(before + accessor_overhead, abs=1e-12)
+    assert second["flopscope_overhead_time_s"] == pytest.approx(after_first, abs=1e-12)
+    assert after_second == pytest.approx(
+        second["flopscope_overhead_time_s"] + accessor_overhead,
+        abs=1e-12,
+    )
 
 
 def test_rollup_add_replace_remove_matches_scan() -> None:
