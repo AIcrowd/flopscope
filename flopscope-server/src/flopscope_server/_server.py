@@ -323,12 +323,14 @@ class FlopscopeServer:
         the server's own test suite), control is unrestricted. Production always
         configures one via ``--token-fd``.
         """
+        kwargs = msg.get("kwargs")
+        if kwargs is not None and not isinstance(kwargs, dict):
+            return False
         if self._control_token is None:
             return True
         token = msg.get("control_token")
         if token is None:
-            kwargs = msg.get("kwargs") or {}
-            token = kwargs.get("control_token")
+            token = kwargs.get("control_token") if kwargs is not None else None
         # _normalize_arg only ASCII-decodes byte strings of length ≤ 32; a
         # 64-char token_hex(32) exceeds that threshold and stays as bytes even
         # after _normalize_msg.  Decode it here so compare_digest gets two strs.

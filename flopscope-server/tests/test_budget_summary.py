@@ -281,10 +281,49 @@ def test_reset_requires_control_token(closed_token_server) -> None:
     assert after["flops_used"] == before["flops_used"]
 
 
+def test_reset_rejects_wrong_control_token_without_mutating_summary(
+    closed_token_server,
+) -> None:
+    before = _request(closed_token_server, scope="session")["result"]
+
+    rejected = _reset_request(closed_token_server, "wrong-token")
+
+    after = _request(closed_token_server, scope="session")["result"]
+    assert rejected["error_type"] == "UnauthorizedControlError"
+    assert after["flops_used"] == before["flops_used"]
+
+
+@pytest.mark.parametrize("malformed_kwargs", ["not-a-dict", ["not-a-dict"]])
+def test_reset_rejects_malformed_kwargs_without_mutating_summary(
+    closed_token_server,
+    malformed_kwargs,
+) -> None:
+    before = _request(closed_token_server, scope="session")["result"]
+    raw = msgpack.packb(
+        {"op": "budget_summary_reset", "kwargs": malformed_kwargs},
+        use_bin_type=True,
+    )
+
+    rejected = msgpack.unpackb(
+        closed_token_server._process_request(raw),
+        raw=False,
+    )
+
+    after = _request(closed_token_server, scope="session")["result"]
+    assert rejected["status"] == "error"
+    assert rejected["error_type"] == "UnauthorizedControlError"
+    assert after["flops_used"] == before["flops_used"]
+
+
 def test_reset_rejects_server_session_even_with_token(active_token_server) -> None:
+    before = _request(active_token_server, scope="session")["result"]
+
     response = _reset_request(active_token_server, TOKEN)
+
+    after = _request(active_token_server, scope="session")["result"]
     assert response["error_type"] == "RuntimeError"
     assert "active" in response["message"]
+    assert after["flops_used"] == before["flops_used"]
 
 
 def test_reset_rejects_non_session_core_context() -> None:
@@ -308,6 +347,36 @@ def test_authorized_reset_returns_single_envelope_and_zeros_epoch(
     assert summary["flop_budget"] == 0
     assert summary["flops_used"] == 0
     assert summary["operations"] == {}
+
+
+def test_authorized_reset_accepts_byte_control_token(closed_token_server) -> None:
+    response = _reset_request(closed_token_server, TOKEN.encode())
+
+    assert response["status"] == "ok"
+    summary = _request(closed_token_server, scope="session")["result"]
+    assert summary["flops_used"] == 0
+
+
+def test_authorized_reset_accepts_top_level_control_token(
+    closed_token_server,
+) -> None:
+    raw = msgpack.packb(
+        {
+            "op": "budget_summary_reset",
+            "kwargs": {},
+            "control_token": TOKEN,
+        },
+        use_bin_type=True,
+    )
+
+    response = msgpack.unpackb(
+        closed_token_server._process_request(raw),
+        raw=False,
+    )
+
+    assert response["status"] == "ok"
+    summary = _request(closed_token_server, scope="session")["result"]
+    assert summary["flops_used"] == 0
 
 
 def test_authorized_reset_allows_stale_closed_server_session(
