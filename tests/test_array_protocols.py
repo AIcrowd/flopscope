@@ -19,7 +19,7 @@ import pytest
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._ndarray import FlopscopeArray
-from flopscope.errors import SymmetryLossWarning
+from flopscope.errors import RemoteCallbackWarning, SymmetryLossWarning
 
 # ----- __array_ufunc__: ufunc.__call__ -----
 
@@ -734,6 +734,32 @@ class _RawReturnUfuncDuck:
         return self.result
 
 
+class _SymmetricOutProtocolDuck:
+    """Foreign ufunc participant that records and optionally writes ``out``."""
+
+    def __init__(self, values, *, write=None, result=None):
+        self.values = np.asarray(values)
+        self.write = write
+        self.result = result
+        self.seen_out = None
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray(self.values, dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.seen_out = kwargs.get("out")
+        raw_inputs = tuple(
+            self.values if value is self else np.asarray(value) for value in inputs
+        )
+        if self.write is None:
+            return getattr(ufunc, method)(*raw_inputs, **kwargs)
+        assert type(self.seen_out) is tuple and len(self.seen_out) == 1
+        np.copyto(self.seen_out[0], np.asarray(self.write), casting="unsafe")
+        if self.result is None:
+            return self.seen_out[0]
+        return self.result
+
+
 class _ForeignTuple(tuple):
     pass
 
@@ -905,6 +931,86 @@ def test_foreign_ufunc_delegation_preserves_flopscope_out_identity(
         assert raw_result is raw_out
         assert result is out
     np.testing.assert_array_equal(np.asarray(out), np.asarray(raw_out))
+
+
+def test_foreign_ufunc_writes_and_returns_symmetric_out():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    duck = _SymmetricOutProtocolDuck(10.0)
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(symmetric_input, duck, out=out)
+
+    assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
+    assert type(duck.seen_out[0]) is np.ndarray
+    assert duck.seen_out[0] is not np.asarray(out)
+    assert result is out
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(symmetric_input) + 10.0)
+
+
+def test_foreign_ufunc_rejects_asymmetric_scratch_without_mutating_out():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.full((2, 2), 7.0), symmetry=symmetry)
+    before = np.asarray(out).tobytes()
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=np.array([[1.0, 2.0], [3.0, 4.0]]),
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            with pytest.raises(flops.errors.SymmetryError):
+                fnp.add(symmetric_input, duck, out=out)
+
+    assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
+    assert np.asarray(out).tobytes() == before
+
+
+def test_foreign_ufunc_preserves_sentinel_while_committing_safe_out_write():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    sentinel = object()
+    written = np.asarray(symmetric_input) + 20.0
+    duck = _SymmetricOutProtocolDuck(0.0, write=written, result=sentinel)
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(symmetric_input, duck, out=out)
+
+    assert result is sentinel
+    np.testing.assert_array_equal(np.asarray(out), written)
+
+
+# Both operations are currently registered through ``_counted_unary``;
+# parametrization covers numeric-output and boolean-output ufunc loops.
+@pytest.mark.parametrize("operation", [fnp.negative, fnp.signbit])
+def test_foreign_unary_ufunc_writes_inferred_symmetric_out(operation):
+    values = np.array([[1.0, -2.0], [3.0, 4.0]])
+    expected = getattr(np, operation.__name__)(values)
+    out = fnp.zeros_like(expected)
+    assert isinstance(out, flops.SymmetricTensor)
+    assert out._symmetry_inferred is True
+    duck = _SymmetricOutProtocolDuck(values)
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = operation(duck, out=out)
+
+    assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
+    assert type(duck.seen_out[0]) is np.ndarray
+    assert result is out
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    assert out.symmetry is None
 
 
 def test_foreign_ufunc_at_callback_records_successful_write():

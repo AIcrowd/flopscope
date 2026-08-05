@@ -600,6 +600,16 @@ def _call_with_optional_out(
     return out
 
 
+def _symmetric_out_scratch(out: SymmetricTensor) -> _np.ndarray:
+    """Return an isolated plain-array destination for a symmetric write."""
+    return _np.array(
+        _to_base_ndarray(out),
+        copy=True,
+        order="K",
+        subok=False,
+    )
+
+
 def _call_with_optional_multi_out(
     np_func, *args, out=None, nout, callback_op_name=None, **kwargs
 ):
@@ -793,15 +803,23 @@ def _counted_unary(np_func, op_name: str):
             shapes=(x.shape,),
             dtypes=billing_dtypes,
         ):
+            out_for_np = (
+                _symmetric_out_scratch(out)
+                if isinstance(out, SymmetricTensor)
+                else out
+            )
             result = _call_with_optional_out(
                 np_func,
                 x_fwd,
-                out=None if isinstance(out, SymmetricTensor) else out,
+                out=out_for_np,
                 supports_out=supports_out,
                 callback_op_name=op_name,
                 **kwargs,
             )
         if is_ufunc and isinstance(result, _ForeignUfuncResult):
+            if isinstance(out, SymmetricTensor):
+                _wrap_result(out_for_np, out=out, symmetry=symmetry)
+                return out if result.value is out_for_np else result.value
             return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -1095,16 +1113,24 @@ def _counted_binary(np_func, op_name: str):
         ):
             # Forward originals when their NumPy protocol semantics matter,
             # while retaining exact Python-scalar weak promotion (NEP 50).
+            out_for_np = (
+                _symmetric_out_scratch(out)
+                if isinstance(out, SymmetricTensor)
+                else out
+            )
             result = _call_with_optional_out(
                 np_func,
                 x_fwd,
                 y_fwd,
-                out=None if isinstance(out, SymmetricTensor) else out,
+                out=out_for_np,
                 supports_out=supports_out,
                 callback_op_name=op_name,
                 **kwargs,
             )
         if isinstance(result, _ForeignUfuncResult):
+            if isinstance(out, SymmetricTensor):
+                _wrap_result(out_for_np, out=out, symmetry=out_symmetry)
+                return out if result.value is out_for_np else result.value
             return result.value
         maybe_check_nan_inf(result, op_name)
         if out_symmetry is not None:
