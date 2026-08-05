@@ -8,6 +8,8 @@ import sys as _sys
 import threading
 import time
 import weakref
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Literal, NamedTuple
@@ -121,20 +123,21 @@ class _OpTimer:
                 block_duration - self._backend_duration_s - nested - user_code, 0.0
             )
 
-            self._budget._total_flopscope_backend_time += self._backend_duration_s
-            self._budget._total_flopscope_overhead_time += in_block_overhead
+            with self._budget._summary_lock:
+                self._budget._add_flopscope_backend(self._backend_duration_s)
+                self._budget._add_flopscope_overhead(in_block_overhead)
 
-            op = self._budget._op_log[self._op_index]
-            self._budget._replace_op_record(
-                self._op_index,
-                op._replace(
-                    flopscope_backend_duration_s=self._backend_duration_s,
-                    flopscope_overhead_duration_s=(
-                        op.flopscope_overhead_duration_s or 0.0
-                    )
-                    + in_block_overhead,
-                ),
-            )
+                op = self._budget._op_log[self._op_index]
+                self._budget._replace_op_record(
+                    self._op_index,
+                    op._replace(
+                        flopscope_backend_duration_s=self._backend_duration_s,
+                        flopscope_overhead_duration_s=(
+                            op.flopscope_overhead_duration_s or 0.0
+                        )
+                        + in_block_overhead,
+                    ),
+                )
 
             # Post-op deadline check (preserves existing behavior)
             if (
@@ -253,25 +256,26 @@ class _DeferredOpTimer:
         # Pop first so a nested _call_numpy after this block attributes to the
         # restored (outer) timer, not this exited one.
         self._budget._current_op_timer = self._prev_timer
-        # Attribute the measured time regardless of how we exit.
-        self._budget._total_flopscope_backend_time += self._backend_duration_s
-        self._budget._total_flopscope_overhead_time += in_block_overhead
-        if exc_type is not None:
-            return False  # propagate; nothing charged or recorded
-        if self._cost is None:
-            raise RuntimeError(
-                f"deduct_after({self._op_name!r}): set_cost() was never called"
+        with self._budget._summary_lock:
+            # Attribute the measured time regardless of how we exit.
+            self._budget._add_flopscope_backend(self._backend_duration_s)
+            self._budget._add_flopscope_overhead(in_block_overhead)
+            if exc_type is not None:
+                return False  # propagate; nothing charged or recorded
+            if self._cost is None:
+                raise RuntimeError(
+                    f"deduct_after({self._op_name!r}): set_cost() was never called"
+                )
+            self._budget._charge_op(
+                self._op_name,
+                self._cost,
+                self._subscripts,
+                self._shapes,
+                dtypes=self._dtypes,
+                complex_factor_override=self._complex_factor_override,
+                backend_duration_s=self._backend_duration_s,
+                overhead_duration_s=in_block_overhead,
             )
-        self._budget._charge_op(
-            self._op_name,
-            self._cost,
-            self._subscripts,
-            self._shapes,
-            dtypes=self._dtypes,
-            complex_factor_override=self._complex_factor_override,
-            backend_duration_s=self._backend_duration_s,
-            overhead_duration_s=in_block_overhead,
-        )
         return False
 
 
@@ -823,21 +827,22 @@ def _counted_wrapper(fn):
             wrapper_own_overhead = max(
                 wall - backend_delta - overhead_delta - usercode_delta, 0.0
             )
-            budget._total_flopscope_overhead_time += wrapper_own_overhead
-            ops_added = list(range(ops_before, len(budget._op_log)))
-            if ops_added and wrapper_own_overhead > 0:
-                per_op = wrapper_own_overhead / len(ops_added)
-                for idx in ops_added:
-                    op = budget._op_log[idx]
-                    budget._replace_op_record(
-                        idx,
-                        op._replace(
-                            flopscope_overhead_duration_s=(
-                                op.flopscope_overhead_duration_s or 0.0
+            with budget._summary_lock:
+                budget._add_flopscope_overhead(wrapper_own_overhead)
+                ops_added = list(range(ops_before, len(budget._op_log)))
+                if ops_added and wrapper_own_overhead > 0:
+                    per_op = wrapper_own_overhead / len(ops_added)
+                    for idx in ops_added:
+                        op = budget._op_log[idx]
+                        budget._replace_op_record(
+                            idx,
+                            op._replace(
+                                flopscope_overhead_duration_s=(
+                                    op.flopscope_overhead_duration_s or 0.0
+                                )
+                                + per_op,
                             )
-                            + per_op,
                         )
-                    )
 
     return wrapped
 
@@ -895,6 +900,21 @@ def get_active_budget() -> BudgetContext | None:
     return getattr(_thread_local, "active_budget", None)
 
 
+@contextmanager
+def _measure_summary_overhead() -> Iterator[None]:
+    depth = getattr(_thread_local, "summary_overhead_depth", 0)
+    _thread_local.summary_overhead_depth = depth + 1
+    started = time.perf_counter() if depth == 0 else None
+    try:
+        yield
+    finally:
+        _thread_local.summary_overhead_depth = depth
+        if started is not None:
+            budget = get_active_budget()
+            if budget is not None:
+                budget._add_flopscope_overhead(time.perf_counter() - started)
+
+
 class _NamespaceScope:
     __slots__ = ("_budget", "_segment")
 
@@ -908,7 +928,7 @@ class _NamespaceScope:
             self._budget._push_namespace(self._segment)
             return self._budget
         finally:
-            self._budget._total_flopscope_overhead_time += time.perf_counter() - fs_t0
+            self._budget._add_flopscope_overhead(time.perf_counter() - fs_t0)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         fs_t0 = time.perf_counter()
@@ -916,7 +936,7 @@ class _NamespaceScope:
             self._budget._pop_namespace(self._segment)
             return False
         finally:
-            self._budget._total_flopscope_overhead_time += time.perf_counter() - fs_t0
+            self._budget._add_flopscope_overhead(time.perf_counter() - fs_t0)
 
 
 def _validate_namespace_segment(name: str) -> str:
@@ -1341,6 +1361,16 @@ class BudgetContext:
             self._rollup_mapping_cache.clear()
 
     @_summary_locked
+    def _add_flopscope_backend(self, duration_s: float) -> None:
+        self._total_flopscope_backend_time += duration_s
+        self._advance_summary_generation()
+
+    @_summary_locked
+    def _add_flopscope_overhead(self, duration_s: float) -> None:
+        self._total_flopscope_overhead_time += duration_s
+        self._advance_summary_generation()
+
+    @_summary_locked
     def _append_op_record(self, record: OpRecord) -> int:
         self._op_log.append(record)
         self._summary_rollup.apply_record(None, record)
@@ -1456,30 +1486,31 @@ class BudgetContext:
         refuse_non_numeric_dtype(op_name, *dtypes)
         fs_t0 = time.perf_counter()
         n0 = len(self._op_log)
-        try:
-            self._charge_op(
-                op_name,
-                flop_cost,
-                subscripts,
-                shapes,
-                dtypes=dtypes,
-                complex_factor_override=complex_factor_override,
-            )
-            return _OpTimer(self, op_index=len(self._op_log) - 1)
-        finally:
-            deduct_body_time = time.perf_counter() - fs_t0
-            self._total_flopscope_overhead_time += deduct_body_time
-            if len(self._op_log) > n0:
-                op = self._op_log[-1]
-                self._replace_op_record(
-                    len(self._op_log) - 1,
-                    op._replace(
-                        flopscope_overhead_duration_s=(
-                            op.flopscope_overhead_duration_s or 0.0
-                        )
-                        + deduct_body_time
-                    ),
+        with self._summary_lock:
+            try:
+                self._charge_op(
+                    op_name,
+                    flop_cost,
+                    subscripts,
+                    shapes,
+                    dtypes=dtypes,
+                    complex_factor_override=complex_factor_override,
                 )
+                return _OpTimer(self, op_index=len(self._op_log) - 1)
+            finally:
+                deduct_body_time = time.perf_counter() - fs_t0
+                self._add_flopscope_overhead(deduct_body_time)
+                if len(self._op_log) > n0:
+                    op = self._op_log[-1]
+                    self._replace_op_record(
+                        len(self._op_log) - 1,
+                        op._replace(
+                            flopscope_overhead_duration_s=(
+                                op.flopscope_overhead_duration_s or 0.0
+                            )
+                            + deduct_body_time
+                        ),
+                    )
 
     def deduct_after(
         self,
@@ -1512,7 +1543,6 @@ class BudgetContext:
             complex_factor_override=complex_factor_override,
         )
 
-    @_summary_locked
     def summary_dict(self, by_namespace: bool = False) -> dict:
         """Return structured summary data for this budget context.
 
@@ -1526,41 +1556,46 @@ class BudgetContext:
         + flopscope_overhead_time_s + residual_wall_time_s`` (within numerical
         tolerance).
         """
-        wall_time = self._wall_time_s
-        if wall_time is None and self._start_time is not None:
-            wall_time = self.elapsed_s
-        wall_time, backend_time, overhead_time, residual_wall_time_s = _timing_summary(
-            wall_time,
-            self._total_flopscope_backend_time,
-            self._total_flopscope_overhead_time,
-        )
+        with _measure_summary_overhead():
+            with self._summary_lock:
+                wall_time = self._wall_time_s
+                if wall_time is None and self._start_time is not None:
+                    wall_time = self.elapsed_s
+                wall_time, backend_time, overhead_time, residual_wall_time_s = (
+                    _timing_summary(
+                        wall_time,
+                        self._total_flopscope_backend_time,
+                        self._total_flopscope_overhead_time,
+                    )
+                )
 
-        result = {
-            "flop_budget": self._flop_budget,
-            "flops_used": self._flops_used,
-            "flops_remaining": self.flops_remaining,
-            "operations": _summarize_operations(self._op_log),
-            "wall_time_s": wall_time,
-            "flopscope_backend_time_s": backend_time,
-            "flopscope_overhead_time_s": overhead_time,
-            "residual_wall_time_s": residual_wall_time_s,
-        }
-        if by_namespace:
-            result["by_namespace"] = _summarize_by_namespace(self._op_log)
-        return result
+                result = {
+                    "flop_budget": self._flop_budget,
+                    "flops_used": self._flops_used,
+                    "flops_remaining": self.flops_remaining,
+                    "operations": _summarize_operations(self._op_log),
+                    "wall_time_s": wall_time,
+                    "flopscope_backend_time_s": backend_time,
+                    "flopscope_overhead_time_s": overhead_time,
+                    "residual_wall_time_s": residual_wall_time_s,
+                }
+                if by_namespace:
+                    result["by_namespace"] = _summarize_by_namespace(self._op_log)
+                return result
 
     def summary(self, by_namespace: bool = False) -> str:
         """Return a pretty-printed FLOP budget summary."""
-        from flopscope._display import _format_budget_summary_text
+        with _measure_summary_overhead():
+            from flopscope._display import _format_budget_summary_text
 
-        header = "flopscope FLOP Budget Summary"
-        if self.namespace:
-            header += f" [{self.namespace}]"
-        return _format_budget_summary_text(
-            self.summary_dict(by_namespace=by_namespace),
-            by_namespace=by_namespace,
-            header=header,
-        )
+            header = "flopscope FLOP Budget Summary"
+            if self.namespace:
+                header += f" [{self.namespace}]"
+            return _format_budget_summary_text(
+                self.summary_dict(by_namespace=by_namespace),
+                by_namespace=by_namespace,
+                header=header,
+            )
 
     def _push_namespace(self, segment: str) -> None:
         self._namespace_stack.append(segment)

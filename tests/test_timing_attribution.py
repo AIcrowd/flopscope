@@ -885,6 +885,7 @@ def test_ufunc_methods_bill_to_backend(invoke):
     (pinned in ``test_symmetry_tag_forgery``); this is the timing half.
     """
     big = flops.numpy.array(np.random.randn(2000, 2000))
+    invoke(big)
     flops.budget_reset()
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
         invoke(big)
