@@ -379,11 +379,27 @@ class FlopscopeServer:
         # flop_budget may be top-level or nested in kwargs. There is no
         # multiplier: the server never scales op costs by a client-supplied
         # factor (that was the budget-bypass vector). Cost = flop_cost × weight.
+        raw_kwargs = msg.get("kwargs")
+        kwargs = {} if raw_kwargs is None else raw_kwargs
+        if not isinstance(kwargs, dict):
+            return encode_error_response(
+                "InvalidRequestError",
+                "budget_open kwargs must be a dict",
+            )
         flop_budget = msg.get("flop_budget")
         if flop_budget is None:
-            kwargs = msg.get("kwargs") or {}
             flop_budget = kwargs.get("flop_budget", 1_000_000)
-        self._session = Session(flop_budget=flop_budget, conn_store=self._conn_store)
+        namespace = kwargs.get("namespace")
+        if namespace is not None and not isinstance(namespace, str):
+            return encode_error_response(
+                "InvalidRequestError",
+                "budget_open namespace must be a string or null",
+            )
+        self._session = Session(
+            flop_budget=flop_budget,
+            conn_store=self._conn_store,
+            namespace=namespace,
+        )
         self._handler = RequestHandler(self._session)
         self._last_activity = monotonic()
 

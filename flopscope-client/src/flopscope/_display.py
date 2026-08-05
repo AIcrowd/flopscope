@@ -34,6 +34,98 @@ def _usage_color(used: int, total: int) -> str:
     return "red"
 
 
+def _namespace_label(namespace: str | None) -> str:
+    return namespace if namespace is not None else "(unlabeled)"
+
+
+def _call_label(calls: int) -> str:
+    return f"{calls} call{'s' if calls != 1 else ''}"
+
+
+def _sorted_namespace_rows(
+    by_namespace: dict[str | None, dict],
+) -> list[tuple[str | None, dict]]:
+    return sorted(
+        by_namespace.items(),
+        key=lambda item: (
+            -item[1]["flops_used"],
+            _namespace_label(item[0]),
+        ),
+    )
+
+
+def _format_budget_summary_text(
+    data: dict,
+    *,
+    by_namespace: bool = False,
+    header: str = "flopscope FLOP Budget Summary",
+) -> str:
+    if data["flops_used"] == 0 and not data.get("operations"):
+        return "No budget data recorded yet."
+
+    lines = [
+        header,
+        "=" * len(header),
+        f"  Total budget:    {_format_flops(data['flop_budget']):>20}",
+        f"  Used:            {_format_flops(data['flops_used']):>20}  ({_pct(data['flops_used'], data['flop_budget'])})",
+        f"  Remaining:       {_format_flops(data['flops_remaining']):>20}  ({_pct(data['flops_remaining'], data['flop_budget'])})",
+    ]
+    if by_namespace and data.get("by_namespace"):
+        lines += ["", "  By namespace:"]
+        for namespace, bucket in _sorted_namespace_rows(data["by_namespace"]):
+            lines.append(
+                f"    {_namespace_label(namespace):<24} "
+                f"{_format_flops(bucket['flops_used']):>12}  "
+                f"({_pct(bucket['flops_used'], data['flops_used']):>6})  "
+                f"[{_call_label(bucket['calls'])}]  "
+                f"Backend {bucket['flopscope_backend_time_s']:.3f}s  "
+                f"Overhead {bucket['flopscope_overhead_time_s']:.3f}s"
+            )
+
+    operations = data.get("operations", {})
+    if operations:
+        lines += ["", "  By operation:"]
+        for op_name, op_info in sorted(
+            operations.items(), key=lambda item: -item[1]["flop_cost"]
+        ):
+            lines.append(
+                f"    {op_name:<20} "
+                f"{_format_flops(op_info['flop_cost']):>12}  "
+                f"({_pct(op_info['flop_cost'], data['flops_used']):>6})  "
+                f"[{_call_label(op_info['calls'])}]"
+            )
+
+    wall_time = data.get("wall_time_s")
+    backend_time = data.get("flopscope_backend_time_s", 0.0)
+    overhead_time = data.get("flopscope_overhead_time_s", 0.0)
+    residual_time = data.get("residual_wall_time_s")
+    if wall_time is not None and residual_time is not None:
+        lines += [
+            "",
+            f"  Total Wall Time:     {wall_time:.3f}s",
+            f"  Flopscope Backend:   {backend_time:.3f}s  ({_pct(backend_time, wall_time)})",
+            f"  Flopscope Overhead:  {overhead_time:.3f}s  ({_pct(overhead_time, wall_time)})",
+            f"  Residual Wall Time:  {residual_time:.3f}s  ({_pct(residual_time, wall_time)})",
+        ]
+
+    op_backend_times = {
+        op_name: op_info["flopscope_backend_time_s"]
+        for op_name, op_info in operations.items()
+        if op_info.get("flopscope_backend_time_s", 0.0) > 0
+    }
+    if backend_time > 0 and op_backend_times:
+        lines += ["", "  By operation (time):"]
+        for op_name, op_backend_time in sorted(
+            op_backend_times.items(), key=lambda item: -item[1]
+        ):
+            lines.append(
+                f"    {op_name:<20} {op_backend_time:.3f}s  "
+                f"({_pct(op_backend_time, backend_time):>6})  "
+                f"[{_call_label(operations[op_name]['calls'])}]"
+            )
+    return "\n".join(lines)
+
+
 def _plain_text_summary() -> str:
     """Render a plain-text budget summary across all namespaces."""
     data = budget_summary_dict(by_namespace=True)

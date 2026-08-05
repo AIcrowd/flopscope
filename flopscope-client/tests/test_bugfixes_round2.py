@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 import msgpack
 import pytest
 
+from tests.test_authoritative_budget_summary import _canonical_summary
+
 # =========================================================================
 # Helpers
 # =========================================================================
@@ -22,6 +24,17 @@ def _make_mock_conn(response):
     conn = MagicMock()
     conn.send_recv.return_value = response
     return conn
+
+
+def _close_response(used: int) -> dict:
+    return {
+        "status": "ok",
+        "result": {
+            "budget_breakdown": _canonical_summary(flops_used=used, by_namespace=True),
+            "budget_summary": "summary",
+            "comms_summary": {},
+        },
+    }
 
 
 # =========================================================================
@@ -204,7 +217,11 @@ class TestFix7NestedBudgetGuard:
         import flopscope._budget as bmod
         from flopscope._budget import BudgetContext
 
-        mock_conn = _make_mock_conn({"status": "ok", "flops_used": 0})
+        mock_conn = MagicMock()
+        mock_conn.send_recv.side_effect = [
+            {"status": "ok", "flops_used": 0},
+            _close_response(0),
+        ]
         old = bmod._active_context
         bmod._active_context = None
 
@@ -227,7 +244,7 @@ class TestFix7NestedBudgetGuard:
 
         responses = [
             {"status": "ok", "flops_used": 0},
-            {"status": "ok", "flops_used": 100},
+            _close_response(100),
         ]
         mock_conn = MagicMock()
         mock_conn.send_recv.side_effect = responses

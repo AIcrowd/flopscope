@@ -13,7 +13,6 @@ from flopscope._protocol import (
     AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
     encode_budget_close,
     encode_budget_open,
-    encode_budget_status,
     encode_budget_summary,
 )
 
@@ -206,8 +205,7 @@ def _extract_compute_ns(close_response: object) -> int:
     """Pull total server compute (ns) out of a ``budget_close`` response.
 
     Returns 0 if the ``result.comms_summary.total_compute_time_ns`` path is
-    absent or unparseable (defensive; the version handshake makes it present in
-    practice).
+    absent. A present value must be an exact non-negative integer.
     """
     if not isinstance(close_response, dict):
         return 0
@@ -217,28 +215,23 @@ def _extract_compute_ns(close_response: object) -> int:
     comms = result.get("comms_summary")
     if not isinstance(comms, dict):
         return 0
-    try:
-        return int(comms.get("total_compute_time_ns", 0))
-    except (TypeError, ValueError):
+    if "total_compute_time_ns" not in comms:
         return 0
+    compute_ns = comms["total_compute_time_ns"]
+    if not _is_nonnegative_int(compute_ns):
+        _malformed("client context compute time must be a non-negative integer")
+    return compute_ns
 
 
-def _extract_close_budget(close_response: object) -> dict:
-    """Pull the ``budget_breakdown`` dict (which carries ``flops_used``) out of a
-    ``budget_close`` response.
-
-    The authoritative FLOP count is nested at ``result.budget_breakdown`` —
-    unlike ``budget_status``, which exposes ``flops_used`` directly under
-    ``result``. Returns ``{}`` if the path is absent (defensive; the version
-    handshake makes it present in practice).
-    """
-    if not isinstance(close_response, dict):
-        return {}
-    result = close_response.get("result")
+def _validated_close_summary(response: object) -> dict:
+    if not isinstance(response, dict):
+        _malformed("budget_close response must be a dict")
+    if response.get("status") != "ok":
+        _malformed("budget_close status must be 'ok'")
+    result = response.get("result")
     if not isinstance(result, dict):
-        return {}
-    breakdown = result.get("budget_breakdown")
-    return breakdown if isinstance(breakdown, dict) else {}
+        _malformed("budget_close result must be a dict")
+    return _validate_summary_mapping(result.get("budget_breakdown"), by_namespace=True)
 
 
 def _decompose_timing(
@@ -317,7 +310,7 @@ class BudgetContext:
         self._quiet = quiet
         self._namespace = namespace
         self._flops_used: int = 0
-        self._close_summary: str | None = None
+        self._closed_summary: dict | None = None
         self._is_open: bool = False
         self._previous_context = None
         # Timing split — populated on __exit__. None until then for wall/residual,
@@ -414,30 +407,90 @@ class BudgetContext:
         if _is_nonnegative_int(flops_used):
             self._flops_used = max(self._flops_used, flops_used)
 
+    def _empty_summary(self, *, by_namespace: bool) -> dict:
+        result = {
+            "flop_budget": self._flop_budget,
+            "flops_used": 0,
+            "flops_remaining": self._flop_budget,
+            "operations": {},
+            "wall_time_s": None,
+            "flopscope_backend_time_s": 0.0,
+            "flopscope_overhead_time_s": 0.0,
+            "residual_wall_time_s": None,
+        }
+        if by_namespace:
+            result["by_namespace"] = {}
+        return result
+
+    def _update_live_from_summary(self, summary: dict) -> None:
+        self._flops_used = int(summary["flops_used"])
+
+    def _install_closed_summary(self, summary: dict) -> None:
+        # ``_normalize_context_timing`` returns a fresh defensive mapping.
+        # Take ownership so close does not perform a second unbounded copy.
+        self._closed_summary = summary
+        self._flops_used = int(summary["flops_used"])
+        self._wall_time_s = summary["wall_time_s"]
+        self._flopscope_backend_time = summary["flopscope_backend_time_s"]
+        self._flopscope_overhead_time = summary["flopscope_overhead_time_s"]
+        self._residual_wall_time = summary["residual_wall_time_s"]
+
+    def _normalize_context_timing(self, summary: dict, *, kernel_ns: int) -> dict:
+        """Return one client-context timing view without changing server state."""
+        with dispatch_span():
+            result = deepcopy(summary)
+        if self._wall_start_ns is None:
+            return result
+        wall_ns = max(time.perf_counter_ns() - self._wall_start_ns, 0)
+        dispatch_ns = max(total_dispatch_ns() - self._dispatch_baseline_ns, 0)
+        wall, backend, overhead, residual = _decompose_timing(
+            wall_ns, dispatch_ns, kernel_ns
+        )
+        result.update(
+            wall_time_s=wall,
+            flopscope_backend_time_s=backend,
+            flopscope_overhead_time_s=overhead,
+            residual_wall_time_s=residual,
+        )
+        return result
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def summary(self) -> str:
-        """Query the server for current budget status and return a formatted string.
-
-        Also updates the local ``flops_used`` cache.
-
-        Returns
-        -------
-        str
-            Human-readable summary of budget usage.
-        """
-        conn = get_connection()
+    def summary_dict(self, by_namespace: bool = False) -> dict:
+        if self._is_open:
+            summary, metadata = _request_budget_summary(
+                scope="active_context", by_namespace=by_namespace
+            )
+            summary = self._normalize_context_timing(
+                summary,
+                kernel_ns=metadata["client_context_compute_ns"] or 0,
+            )
+            self._update_live_from_summary(summary)
+            return summary
+        if self._closed_summary is not None:
+            with dispatch_span():
+                result = deepcopy(self._closed_summary)
+                if not by_namespace:
+                    result.pop("by_namespace", None)
+            return result
         with dispatch_span():
-            response = conn.send_recv(encode_budget_status())
-        # Budget status is nested inside "result" key
-        result = response.get("result", {})
-        self._update_budget(result)
-        budget = result.get("flop_budget", self._flop_budget)
-        used = self._flops_used
-        remaining = int(budget) - used
-        return f"BudgetContext: {used}/{budget} FLOPs used ({remaining} remaining)"
+            return deepcopy(self._empty_summary(by_namespace=by_namespace))
+
+    def summary(self, by_namespace: bool = False) -> str:
+        data = self.summary_dict(by_namespace=by_namespace)
+        with dispatch_span():
+            from flopscope._display import _format_budget_summary_text
+
+            header = "flopscope FLOP Budget Summary"
+            if self.namespace:
+                header += f" [{self.namespace}]"
+            return _format_budget_summary_text(
+                data,
+                by_namespace=by_namespace,
+                header=header,
+            )
 
     # ------------------------------------------------------------------
     # Decorator support
@@ -468,11 +521,18 @@ class BudgetContext:
             )
         self._previous_context = _active_context
         conn = get_connection()
-        self._wall_start_ns = time.perf_counter_ns()
-        self._dispatch_baseline_ns = total_dispatch_ns()
+        wall_start_ns = time.perf_counter_ns()
+        dispatch_baseline_ns = total_dispatch_ns()
         with dispatch_span():
-            response = conn.send_recv(encode_budget_open(self._flop_budget))
-            self._update_budget(response)
+            conn.send_recv(encode_budget_open(self._flop_budget, self._namespace))
+        self._wall_start_ns = wall_start_ns
+        self._dispatch_baseline_ns = dispatch_baseline_ns
+        self._flops_used = 0
+        self._closed_summary = None
+        self._wall_time_s = None
+        self._flopscope_backend_time = 0.0
+        self._flopscope_overhead_time = 0.0
+        self._residual_wall_time = None
         self._is_open = True
         _active_context = self
         return self
@@ -482,34 +542,25 @@ class BudgetContext:
         global _active_context
         if self._is_open:
             conn = get_connection()
-            with dispatch_span():
-                response = conn.send_recv(encode_budget_close())
-                # flops_used is nested at result.budget_breakdown in the close
-                # response; refresh the cache from there so a plain `with` block
-                # reports the server's count without a separate summary() call.
-                self._update_budget(_extract_close_budget(response))
-            # _wall_start_ns is always set by __enter__ before _is_open=True; the
-            # fallback only guards the never-exercised "exit without enter" path.
-            start_ns = (
-                self._wall_start_ns
-                if self._wall_start_ns is not None
-                else time.perf_counter_ns()
-            )
-            wall_ns = time.perf_counter_ns() - start_ns
-            dispatch_ns = total_dispatch_ns() - self._dispatch_baseline_ns
-            kernel_ns = _extract_compute_ns(response)
-            (
-                self._wall_time_s,
-                self._flopscope_backend_time,
-                self._flopscope_overhead_time,
-                self._residual_wall_time,
-            ) = _decompose_timing(wall_ns, dispatch_ns, kernel_ns)
-            self._close_summary = (
-                f"BudgetContext closed: {self._flops_used}/{self._flop_budget} "
-                f"FLOPs used"
-            )
-            self._is_open = False
-            _accumulator.record(self)
+            close_acknowledged = False
+            try:
+                with dispatch_span():
+                    response = conn.send_recv(encode_budget_close())
+                    close_acknowledged = (
+                        isinstance(response, dict) and response.get("status") == "ok"
+                    )
+                    summary = _validated_close_summary(response)
+                    kernel_ns = _extract_compute_ns(response)
+                summary = self._normalize_context_timing(
+                    summary,
+                    kernel_ns=kernel_ns,
+                )
+                self._install_closed_summary(summary)
+            finally:
+                if close_acknowledged:
+                    self._is_open = False
+                    _active_context = self._previous_context
+            return
         _active_context = self._previous_context
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -517,85 +568,6 @@ class BudgetContext:
             f"BudgetContext(flop_budget={self._flop_budget}, "
             f"flops_used={self._flops_used})"
         )
-
-
-# ------------------------------------------------------------------
-# Accumulator
-# ------------------------------------------------------------------
-
-
-class NamespaceRecord:
-    """Snapshot of a BudgetContext's state at close time."""
-
-    def __init__(
-        self,
-        namespace,
-        flop_budget,
-        flops_used,
-        wall_time_s=0.0,
-        backend_time_s=0.0,
-        overhead_time_s=0.0,
-        residual_time_s=0.0,
-    ):
-        self.namespace = namespace
-        self.flop_budget = flop_budget
-        self.flops_used = flops_used
-        self.wall_time_s = wall_time_s
-        self.backend_time_s = backend_time_s
-        self.overhead_time_s = overhead_time_s
-        self.residual_time_s = residual_time_s
-
-
-class BudgetAccumulator:
-    """Collects budget records across multiple BudgetContext sessions."""
-
-    def __init__(self):
-        self._records = []
-
-    def record(self, ctx):
-        # `or 0.0` coerces the Optional timing fields (wall_time_s /
-        # residual_wall_time_s are None on a never-closed context) to 0.0.
-        self._records.append(
-            NamespaceRecord(
-                namespace=ctx.namespace,
-                flop_budget=ctx.flop_budget,
-                flops_used=ctx.flops_used,
-                wall_time_s=getattr(ctx, "wall_time_s", 0.0) or 0.0,
-                backend_time_s=getattr(ctx, "flopscope_backend_time_s", 0.0) or 0.0,
-                overhead_time_s=getattr(ctx, "flopscope_overhead_time_s", 0.0) or 0.0,
-                residual_time_s=getattr(ctx, "residual_wall_time_s", 0.0) or 0.0,
-            )
-        )
-
-    def get_data(self, by_namespace=False):
-        total_budget = sum(r.flop_budget for r in self._records)
-        total_used = sum(r.flops_used for r in self._records)
-        result = {
-            "flop_budget": total_budget,
-            "flops_used": total_used,
-            "flops_remaining": total_budget - total_used,
-            "operations": {},
-            "wall_time_s": sum(r.wall_time_s for r in self._records),
-            "flopscope_backend_time_s": sum(r.backend_time_s for r in self._records),
-            "flopscope_overhead_time_s": sum(r.overhead_time_s for r in self._records),
-            "residual_wall_time_s": sum(r.residual_time_s for r in self._records),
-        }
-        if by_namespace:
-            by_ns = {}
-            for r in self._records:
-                ns = r.namespace
-                if ns not in by_ns:
-                    by_ns[ns] = {"flop_budget": 0, "flops_used": 0, "operations": {}}
-                by_ns[ns]["flop_budget"] += r.flop_budget
-                by_ns[ns]["flops_used"] += r.flops_used
-            result["by_namespace"] = by_ns
-        return result
-
-    def reset(self):
-        self._records.clear()
-
-
-_accumulator = BudgetAccumulator()
 
 
 def budget(flop_budget, quiet=False, namespace=None):
@@ -614,10 +586,12 @@ def _request_budget_summary(*, scope: str, by_namespace: bool) -> tuple[dict, di
         response = conn.send_recv(
             encode_budget_summary(scope, by_namespace=by_namespace)
         )
-    summary, display_totals = _validate_summary_response(
-        response, by_namespace=by_namespace
-    )
-    return deepcopy(summary), deepcopy(display_totals)
+        summary, display_totals = _validate_summary_response(
+            response, by_namespace=by_namespace
+        )
+        summary = deepcopy(summary)
+        display_totals = deepcopy(display_totals)
+    return summary, display_totals
 
 
 def budget_summary_dict(by_namespace=False):

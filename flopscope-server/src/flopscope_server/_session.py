@@ -25,10 +25,15 @@ class Session:
         (issue #107). When ``None`` (standalone / unit-test use) a private
         ``ConnectionStore`` is created so a bare ``Session`` still works in
         isolation.
+    namespace : str | None
+        Optional literal root namespace for the session budget context.
     """
 
     def __init__(
-        self, flop_budget: int, conn_store: ConnectionStore | None = None
+        self,
+        flop_budget: int,
+        conn_store: ConnectionStore | None = None,
+        namespace: str | None = None,
     ) -> None:
         # The array + generator stores live for the CONNECTION, not the budget
         # session. The server injects one shared ConnectionStore across all MLPs
@@ -40,6 +45,7 @@ class Session:
         self._budget_ctx = flops.BudgetContext(
             flop_budget=flop_budget,
             quiet=True,
+            namespace=namespace,
         )
         self._budget_ctx.__enter__()
         self._is_open = True

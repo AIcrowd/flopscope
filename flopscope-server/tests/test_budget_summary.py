@@ -54,10 +54,12 @@ def _open_direct(
     server: FlopscopeServer,
     *,
     flop_budget: int = 100,
+    namespace: str | None = None,
 ) -> None:
     server._session = Session(
         flop_budget=flop_budget,
         conn_store=server._conn_store,
+        namespace=namespace,
     )
     server._handler = RequestHandler(server._session)
 
@@ -81,6 +83,51 @@ def _close_direct(server: FlopscopeServer) -> None:
         strict_map_key=False,
     )
     assert response["status"] == "ok"
+
+
+@pytest.mark.parametrize("namespace", [None, "phase", "predict..raw"])
+def test_budget_open_accepts_literal_root_namespace(namespace) -> None:
+    server = FlopscopeServer()
+    raw = msgpack.packb(
+        {
+            "op": "budget_open",
+            "kwargs": {"flop_budget": 100, "namespace": namespace},
+        },
+        use_bin_type=True,
+    )
+    response = msgpack.unpackb(server._process_request(raw), raw=False)
+    assert response["status"] == "ok"
+    assert server._session is not None
+    assert server._session.budget_context.namespace == namespace
+    _close_direct(server)
+
+
+@pytest.mark.parametrize("namespace", [1, False, [], {}])
+def test_budget_open_rejects_non_string_namespace(namespace) -> None:
+    server = FlopscopeServer()
+    raw = msgpack.packb(
+        {
+            "op": "budget_open",
+            "kwargs": {"flop_budget": 100, "namespace": namespace},
+        },
+        use_bin_type=True,
+    )
+    response = msgpack.unpackb(server._process_request(raw), raw=False)
+    assert response["status"] == "error"
+    assert response["error_type"] == "InvalidRequestError"
+    assert server._session is None
+
+
+@pytest.mark.parametrize("kwargs", [[], False, 0, ""])
+def test_budget_open_rejects_falsy_non_dict_kwargs(kwargs) -> None:
+    server = FlopscopeServer()
+    response = msgpack.unpackb(
+        server._handle_budget_open({"op": "budget_open", "kwargs": kwargs}, 0, 0),
+        raw=False,
+    )
+    assert response["status"] == "error"
+    assert response["error_type"] == "InvalidRequestError"
+    assert server._session is None
 
 
 @pytest.fixture

@@ -25,9 +25,12 @@ def encode_create_from_data(data: bytes, shape: list, dtype: str) -> bytes:
     return encode_request("create_from_data", args=[data, shape, dtype])
 
 
-def encode_budget_open(flop_budget: int) -> bytes:
+def encode_budget_open(flop_budget: int, namespace: str | None = None) -> bytes:
     """Encode a budget_open request."""
-    return encode_request("budget_open", kwargs={"flop_budget": flop_budget})
+    return encode_request(
+        "budget_open",
+        kwargs={"flop_budget": flop_budget, "namespace": namespace},
+    )
 
 
 def encode_budget_close() -> bytes:
