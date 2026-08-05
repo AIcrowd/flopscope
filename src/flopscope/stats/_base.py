@@ -94,9 +94,10 @@ class ContinuousDistribution:
             refuse_non_numeric_source(op_name, _v)
         for _v in kwargs.values():
             refuse_non_numeric_source(op_name, _v)
-        if source_dtype.kind == "f" and source_dtype.itemsize < _np.dtype(
-            _np.float64
-        ).itemsize:
+        if (
+            source_dtype.kind == "f"
+            and source_dtype.itemsize < _np.dtype(_np.float64).itemsize
+        ):
             _warn_float64_promotion(op_name, source_dtype)
         x = _np.asarray(x, dtype=_np.float64)
         param_shapes = tuple(
