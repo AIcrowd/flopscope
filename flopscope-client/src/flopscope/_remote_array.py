@@ -16,7 +16,7 @@ from typing import Any, cast
 
 from flopscope._dispatch import timed_dispatch
 from flopscope._math_compat import prod as _prod
-from flopscope.errors import RemoteCallbackError
+from flopscope.errors import RemoteCallbackError, RemoteSerializationError
 
 # ---------------------------------------------------------------------------
 # dtype helpers  (NO numpy -- pure struct)
@@ -70,6 +70,8 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
 }
 
 _MISSING_DTYPE_ATTR = object()
+
+_SAFE_WIRE_KEY_TYPES = (type(None), bool, int, float, str, bytes, memoryview)
 
 
 def _trusted_client_dtype_name(spec: Any) -> str | None:
@@ -1453,7 +1455,19 @@ def _proxy_slot_value(value: Any, proxy_type: type, slot: str) -> Any:
     descriptor = vars(proxy_type).get(slot)
     if type(descriptor) is not types.MemberDescriptorType:
         raise AssertionError(f"{proxy_type.__name__}.{slot} must be a slot")
-    return types.MemberDescriptorType.__get__(descriptor, value, type(value))
+    try:
+        return types.MemberDescriptorType.__get__(descriptor, value, type(value))
+    except AttributeError as exc:
+        raise RemoteSerializationError(
+            "Cannot serialize an uninitialized remote proxy to the "
+            "client/server backend"
+        ) from exc
+
+
+def _is_safe_wire_key(value: Any) -> bool:
+    """Whether inserting *value* into an encoded mapping cannot run user code."""
+    value_type = type(value)
+    return any(value_type is safe_type for safe_type in _SAFE_WIRE_KEY_TYPES)
 
 
 def _encode_arg(arg):
@@ -1487,10 +1501,16 @@ def _encode_arg(arg):
     if _has_proxy_base(arg, tuple):
         return [_encode_arg(item) for item in tuple.__iter__(arg)]
     if _has_proxy_base(arg, dict):
-        return {
-            _encode_arg(key): _encode_arg(value)
-            for key, value in dict.items(arg)
-        }
+        encoded: dict[Any, Any] = {}
+        for key, value in dict.items(arg):
+            encoded_key = _encode_arg(key)
+            if not _is_safe_wire_key(encoded_key):
+                raise RemoteSerializationError(
+                    "Cannot serialize a dictionary key that is not a safe "
+                    "wire scalar to the client/server backend"
+                )
+            encoded[encoded_key] = _encode_arg(value)
+        return encoded
     if type(arg) is bool:
         return arg
     if type(arg) is not bytes and _has_proxy_base(arg, bytes):
@@ -1507,6 +1527,8 @@ def _encode_arg(arg):
     # through unchanged below (the server accepts dtype strings directly).
     if type(arg) is str:
         return arg
+    if _has_proxy_base(arg, str):
+        return str.__str__(cast(str, arg))
     _wire = _resolve_dtype_wire_name(arg)
     if _wire is not None:
         return _wire

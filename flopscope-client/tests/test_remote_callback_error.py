@@ -326,6 +326,81 @@ def test_container_subclass_with_unsupported_value_is_serialization_error(monkey
     assert network_calls == 0
 
 
+def test_dict_normalization_rejects_armed_custom_key_without_rehash(monkeypatch):
+    class ArmedKey:
+        def __init__(self):
+            self.armed = False
+            self.hash_calls = 0
+            self.eq_calls = 0
+
+        def __hash__(self):
+            if self.armed:
+                self.hash_calls += 1
+                raise AssertionError("participant key hash executed")
+            return 1
+
+        def __eq__(self, other):
+            if self.armed:
+                self.eq_calls += 1
+                raise AssertionError("participant key equality executed")
+            return self is other
+
+    key = ArmedKey()
+    spec = {key: 1}
+    key.armed = True
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteSerializationError, match="dictionary key"):
+        flopscope.zeros((1,), dtype=spec)
+    assert key.hash_calls == 0
+    assert key.eq_calls == 0
+    assert network_calls == 0
+
+
+def test_dict_normalization_preserves_safe_keys_and_normalizes_string_subclass(
+    monkeypatch,
+):
+    class StringKey(str):
+        def __new__(cls, value):
+            result = super().__new__(cls, value)
+            result.armed = False
+            result.hash_calls = 0
+            return result
+
+        def __hash__(self):
+            if self.armed:
+                self.hash_calls += 1
+                raise AssertionError("participant string-key hash executed")
+            return super().__hash__()
+
+    key = StringKey("subclass")
+    spec = {"text": 1, 2: "int", 2.5: "float", b"bytes": "binary", key: 3}
+    key.armed = True
+
+    class Encoded(Exception):
+        pass
+
+    encoded = []
+
+    def capture_encode_request(op_name, args, kwargs):
+        encoded.append(kwargs["dtype"])
+        raise Encoded
+
+    monkeypatch.setattr(flopscope, "encode_request", capture_encode_request)
+    with pytest.raises(Encoded):
+        flopscope.zeros((1,), dtype=spec)
+    assert encoded == [
+        {"text": 1, 2: "int", 2.5: "float", b"bytes": "binary", "subclass": 3}
+    ]
+    assert key.hash_calls == 0
+
+
 def test_proxy_normalizes_msgpack_scalar_subclasses_without_hooks(monkeypatch):
     class B(bytes):
         def __init__(self, *args):
@@ -406,6 +481,25 @@ def test_unset_dtype_slot_is_not_a_raw_attribute_error(monkeypatch):
     monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
     with pytest.raises(TypeError, match="Cannot interpret dtype"):
         flopscope.array([1.0], dtype=UnsetDtype())
+    assert network_calls == 0
+
+
+@pytest.mark.parametrize("proxy_type", [flopscope.RemoteScalar, flopscope.RemoteArray])
+def test_uninitialized_proxy_subclass_raises_serialization_error(proxy_type, monkeypatch):
+    class ProxySubclass(proxy_type):
+        pass
+
+    proxy = ProxySubclass.__new__(ProxySubclass)
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteSerializationError, match="uninitialized remote proxy"):
+        flopscope.zeros((1,), dtype=proxy)
     assert network_calls == 0
 
 
