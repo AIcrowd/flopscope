@@ -133,6 +133,21 @@ def _flops_used(srv):
     return r["result"]["flops_used"]
 
 
+def _session_summary(srv):
+    """Query the authoritative summary epoch outside an active session."""
+    return _resp(
+        srv._process_request(
+            msgpack.packb(
+                {
+                    "op": "budget_summary",
+                    "kwargs": {"scope": "session", "by_namespace": False},
+                },
+                use_bin_type=True,
+            )
+        )
+    )["result"]
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -219,6 +234,38 @@ def test_close_requires_token():
     assert used >= 1000, (
         f"session should be intact after rejected close; got flops_used={used}"
     )
+
+
+def test_participant_cannot_reset_authoritative_summary_history():
+    """A participant-sent reset without the grader token cannot erase cost."""
+    srv = _server_with_token()
+    opened = _open_budget(srv, control_token=TOKEN)
+    assert opened["status"] == "ok"
+    _add_cost(srv)
+    closed = _resp(
+        srv._process_request(
+            msgpack.packb(
+                {"op": "budget_close", "kwargs": {"control_token": TOKEN}},
+                use_bin_type=True,
+            )
+        )
+    )
+    assert closed["status"] == "ok"
+    before = _session_summary(srv)
+
+    rejected = _resp(
+        srv._process_request(
+            msgpack.packb(
+                {"op": "budget_summary_reset", "kwargs": {}},
+                use_bin_type=True,
+            )
+        )
+    )
+    after = _session_summary(srv)
+
+    assert rejected["status"] == "error"
+    assert rejected["error_type"] == "UnauthorizedControlError"
+    assert after["flops_used"] == before["flops_used"]
 
 
 def test_token_fd_delivery():

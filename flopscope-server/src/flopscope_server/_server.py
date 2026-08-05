@@ -10,6 +10,7 @@ import msgpack
 import zmq
 
 import flopscope
+from flopscope._budget import get_active_budget
 from flopscope_server._connection_store import ConnectionStore
 from flopscope_server._protocol import (
     AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
@@ -150,6 +151,24 @@ class FlopscopeServer:
             return self._handle_hello(msg)
 
         # --- Session lifecycle ops (privileged: require the control token) ---
+        if op == "budget_summary_reset":
+            if not self._control_token_ok(msg):
+                return encode_error_response(
+                    "UnauthorizedControlError",
+                    "summary lifecycle is grader-controlled; participant code "
+                    "cannot reset budget summary history",
+                )
+            if (
+                self._session is not None and self._session.is_open
+            ) or get_active_budget() is not None:
+                return encode_error_response(
+                    "RuntimeError",
+                    "cannot reset budget summary history while a budget context "
+                    "is active",
+                )
+            flopscope.budget_reset()
+            return encode_response(None, budget=0, comms_overhead_ns=0)
+
         if op in ("budget_open", "budget_close"):
             if not self._control_token_ok(msg):
                 return encode_error_response(
