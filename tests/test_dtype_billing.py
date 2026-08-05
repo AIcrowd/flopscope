@@ -267,14 +267,32 @@ def test_integer_to_float64_min_dtype_maps_all_ints_to_f64():
     assert f(np.dtype(np.complex128)) == np.dtype(np.complex128)
 
 
-def test_ufunc_resolver_operand_preserves_python_scalar_weak_types():
+def test_ufunc_resolver_operand_matches_installed_numpy_scalar_promotion():
     from flopscope._dtype_billing import ufunc_resolver_operand
 
     class One(IntEnum):
         VALUE = 1
 
-    array = np.ones(2, dtype=np.int8)
-    for scalar in (True, 1, 1.0, 1.0j, One.VALUE):
+    class IntSubclass(int):
+        pass
+
+    class FloatSubclass(float):
+        pass
+
+    class ComplexSubclass(complex):
+        pass
+
+    cases = (
+        (np.ones(2, dtype=np.int8), True),
+        (np.ones(2, dtype=np.int8), 1),
+        (np.ones(2, dtype=np.float32), 1.0),
+        (np.ones(2, dtype=np.complex64), 1.0j),
+        (np.ones(2, dtype=np.int8), One.VALUE),
+        (np.ones(2, dtype=np.int8), IntSubclass(1)),
+        (np.ones(2, dtype=np.float32), FloatSubclass(1.0)),
+        (np.ones(2, dtype=np.complex64), ComplexSubclass(1.0j)),
+    )
+    for array, scalar in cases:
         resolver_operand = ufunc_resolver_operand(scalar, np.asarray(scalar))
         assert np.add.resolve_dtypes((array.dtype, resolver_operand, None))[-1] == (
             np.add(array, scalar).dtype
@@ -288,9 +306,6 @@ def test_ufunc_resolver_operand_preserves_python_scalar_weak_types():
     strong_scalar = np.int16(1)
     assert ufunc_resolver_operand(strong_scalar, np.asarray(strong_scalar)) == np.dtype(
         np.int16
-    )
-    assert ufunc_resolver_operand(One.VALUE, np.asarray(One.VALUE)) == np.dtype(
-        np.int64
     )
     float_array = np.ones(2, dtype=np.float32)
     assert ufunc_resolver_operand(float_array, float_array) == np.dtype(np.float32)

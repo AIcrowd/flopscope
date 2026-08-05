@@ -36,6 +36,39 @@ from flopscope._weights import _UFUNC_METHOD_SUFFIXES, get_dtype_rate
 from flopscope.errors import UnsupportedDtypeError
 
 
+def _weak_numeric_subclass_types() -> frozenset[type]:
+    """Built-in scalar families whose subclasses NumPy still promotes weakly.
+
+    NumPy 2.0 treats subclasses of Python's numeric scalar types as weak,
+    while NumPy 2.1 and later treat them as concrete scalars. Probe the public
+    ``result_type`` behavior so resolver operands track the installed NumPy
+    instead of encoding that version boundary here.
+    """
+
+    class IntSubclass(int):
+        pass
+
+    class FloatSubclass(float):
+        pass
+
+    class ComplexSubclass(complex):
+        pass
+
+    cases = (
+        (int, IntSubclass(1), _np.dtype(_np.int8)),
+        (float, FloatSubclass(1.0), _np.dtype(_np.float32)),
+        (complex, ComplexSubclass(1.0j), _np.dtype(_np.complex64)),
+    )
+    return frozenset(
+        scalar_type
+        for scalar_type, probe, narrow_dtype in cases
+        if _np.result_type(narrow_dtype, probe) == narrow_dtype
+    )
+
+
+_WEAK_NUMERIC_SUBCLASS_TYPES = _weak_numeric_subclass_types()
+
+
 def billing_operand(orig, coerced):
     """Result-type operand for billing.
 
@@ -54,11 +87,16 @@ def ufunc_resolver_operand(orig, coerced) -> _np.dtype | type:
     """Operand form accepted by ``ufunc.resolve_dtypes``.
 
     Exact built-in int, float, and complex scalars contribute their bare type
-    so NumPy applies NEP 50 weak promotion. Bool, NumPy scalars, numeric
-    subclasses, and arrays contribute their concrete dtype.
+    so NumPy applies NEP 50 weak promotion. Numeric subclasses follow the
+    installed NumPy's promotion behavior. Bool, NumPy scalars, and arrays
+    contribute their concrete dtype.
     """
     if type(orig) in (int, float, complex):
         return type(orig)
+    if type(orig) is not bool and not isinstance(orig, _np.generic):
+        for scalar_type in _WEAK_NUMERIC_SUBCLASS_TYPES:
+            if isinstance(orig, scalar_type):
+                return scalar_type
     return coerced.dtype
 
 
