@@ -546,6 +546,7 @@ def _call_with_optional_out(
     out=None,
     supports_out=False,
     callback_op_name=None,
+    defer_out_write_tracking=False,
     **kwargs,
 ):
     # Strip flopscope subclasses (FlopscopeArray / SymmetricTensor) from arrays so
@@ -578,15 +579,26 @@ def _call_with_optional_out(
         return _call_numpy(np_func, *args, **kwargs)
     if supports_out:
         if isinstance(np_func, _np.ufunc):
-            return _restore_foreign_ufunc_out_identity(
-                _call_ufunc_with_protocol_timing(
+            if defer_out_write_tracking:
+                call_result = _call_ufunc_with_protocol_timing(
+                    callback_op_name or np_func.__name__,
+                    np_func,
+                    *args,
+                    out_stripped,
+                    protocol_operands=(*protocol_args, out),
+                    **kwargs,
+                )
+            else:
+                call_result = _call_ufunc_with_protocol_timing(
                     callback_op_name or np_func.__name__,
                     np_func,
                     *args,
                     out=out_stripped,
                     protocol_operands=(*protocol_args, out),
                     **kwargs,
-                ),
+                )
+            return _restore_foreign_ufunc_out_identity(
+                call_result,
                 out,
                 out_stripped,
             )
@@ -600,41 +612,49 @@ def _call_with_optional_out(
     return out
 
 
-def _symmetric_out_scratch(out: SymmetricTensor) -> _np.ndarray:
-    """Copy ``out`` into isolated storage while preserving its exact layout."""
-    source = _to_base_ndarray(out)
-    if source.size == 0:
-        min_offset = 0
-        storage_nbytes = 0
-    else:
-        byte_extents = tuple(
-            (dimension - 1) * stride
-            for dimension, stride in zip(source.shape, source.strides, strict=True)
-        )
-        min_offset = _builtins.sum(
-            _builtins.min(0, extent) for extent in byte_extents
-        )
-        max_offset = _builtins.sum(
-            _builtins.max(0, extent) for extent in byte_extents
-        )
-        storage_nbytes = max_offset - min_offset + source.dtype.itemsize
-    backing = _np.empty(storage_nbytes, dtype=_np.uint8)
-    scratch = _np.ndarray(
-        shape=source.shape,
-        dtype=source.dtype,
-        buffer=backing,
-        offset=-min_offset,
-        strides=source.strides,
-    )
-    _np.copyto(scratch, source, casting="no")
-    if not source.flags.writeable:
-        scratch.flags.writeable = False
-    return scratch
-
-
 def _logical_array_bytes(array: _np.ndarray) -> bytes:
     """Snapshot logical element bytes independent of strides and aliasing."""
     return array.tobytes(order="C")
+
+
+def _snapshot_symmetric_out(
+    out: SymmetricTensor,
+) -> tuple[_np.ndarray, bytes, _np.ndarray, object, bool]:
+    """Capture transaction state before exposing a real output to a callback."""
+    base = _to_base_ndarray(out)
+    return (
+        base,
+        _logical_array_bytes(base),
+        _np.array(base, copy=True, order="C", subok=False),
+        out.symmetry,
+        out._symmetry_inferred,
+    )
+
+
+def _finish_foreign_symmetric_out(
+    out: SymmetricTensor,
+    *,
+    base: _np.ndarray,
+    before: bytes,
+    saved_data: _np.ndarray,
+    target_symmetry,
+    previous_symmetry,
+    previous_inferred: bool,
+) -> None:
+    """Validate a changed callback output, rolling back invalid mutations."""
+    if _logical_array_bytes(base) == before:
+        return
+    try:
+        verified = _validate_result_symmetry(base, target_symmetry)
+    except SymmetryError:
+        _np.copyto(base, saved_data, casting="no")
+        note_write(out)
+        out._symmetry = previous_symmetry
+        out._symmetry_inferred = previous_inferred
+        raise
+    note_write(out)
+    if verified:
+        out._symmetry = target_symmetry
 
 
 def _call_with_optional_multi_out(
@@ -830,28 +850,51 @@ def _counted_unary(np_func, op_name: str):
             shapes=(x.shape,),
             dtypes=billing_dtypes,
         ):
-            scratch = None
-            out_before = None
-            if isinstance(out, SymmetricTensor):
-                scratch = _symmetric_out_scratch(out)
-                out_before = _logical_array_bytes(scratch)
-                out_for_np = scratch
+            foreign_symmetric_out = (
+                is_ufunc
+                and isinstance(out, SymmetricTensor)
+                and _has_foreign_array_ufunc(x_fwd)
+            )
+            transaction = None
+            if foreign_symmetric_out:
+                assert isinstance(out, SymmetricTensor)
+                transaction = _snapshot_symmetric_out(out)
+                out_for_np = out
+            elif isinstance(out, SymmetricTensor):
+                out_for_np = None
             else:
                 out_for_np = out
-            result = _call_with_optional_out(
-                np_func,
-                x_fwd,
-                out=out_for_np,
-                supports_out=supports_out,
-                callback_op_name=op_name,
-                **kwargs,
-            )
+            try:
+                result = _call_with_optional_out(
+                    np_func,
+                    x_fwd,
+                    out=out_for_np,
+                    supports_out=supports_out,
+                    callback_op_name=op_name,
+                    defer_out_write_tracking=foreign_symmetric_out,
+                    **kwargs,
+                )
+            except BaseException:
+                if transaction is not None:
+                    base, before, *_ = transaction
+                    if _logical_array_bytes(base) != before:
+                        note_write(out)
+                raise
         if is_ufunc and isinstance(result, _ForeignUfuncResult):
-            if isinstance(out, SymmetricTensor):
-                assert scratch is not None and out_before is not None
-                if _logical_array_bytes(scratch) != out_before:
-                    _wrap_result(scratch, out=out, symmetry=symmetry)
-                return out if result.value is scratch else result.value
+            if transaction is not None:
+                assert isinstance(out, SymmetricTensor)
+                base, before, saved_data, previous_symmetry, previous_inferred = (
+                    transaction
+                )
+                _finish_foreign_symmetric_out(
+                    out,
+                    base=base,
+                    before=before,
+                    saved_data=saved_data,
+                    target_symmetry=symmetry,
+                    previous_symmetry=previous_symmetry,
+                    previous_inferred=previous_inferred,
+                )
             return result.value
         maybe_check_nan_inf(result, op_name)
         return _wrap_result(result, out=out, symmetry=symmetry)  # type: ignore[return-value]
@@ -1145,29 +1188,50 @@ def _counted_binary(np_func, op_name: str):
         ):
             # Forward originals when their NumPy protocol semantics matter,
             # while retaining exact Python-scalar weak promotion (NEP 50).
-            scratch = None
-            out_before = None
-            if isinstance(out, SymmetricTensor):
-                scratch = _symmetric_out_scratch(out)
-                out_before = _logical_array_bytes(scratch)
-                out_for_np = scratch
+            foreign_symmetric_out = isinstance(out, SymmetricTensor) and _builtins.any(
+                _has_foreign_array_ufunc(value) for value in (x_fwd, y_fwd)
+            )
+            transaction = None
+            if foreign_symmetric_out:
+                assert isinstance(out, SymmetricTensor)
+                transaction = _snapshot_symmetric_out(out)
+                out_for_np = out
+            elif isinstance(out, SymmetricTensor):
+                out_for_np = None
             else:
                 out_for_np = out
-            result = _call_with_optional_out(
-                np_func,
-                x_fwd,
-                y_fwd,
-                out=out_for_np,
-                supports_out=supports_out,
-                callback_op_name=op_name,
-                **kwargs,
-            )
+            try:
+                result = _call_with_optional_out(
+                    np_func,
+                    x_fwd,
+                    y_fwd,
+                    out=out_for_np,
+                    supports_out=supports_out,
+                    callback_op_name=op_name,
+                    defer_out_write_tracking=foreign_symmetric_out,
+                    **kwargs,
+                )
+            except BaseException:
+                if transaction is not None:
+                    base, before, *_ = transaction
+                    if _logical_array_bytes(base) != before:
+                        note_write(out)
+                raise
         if isinstance(result, _ForeignUfuncResult):
-            if isinstance(out, SymmetricTensor):
-                assert scratch is not None and out_before is not None
-                if _logical_array_bytes(scratch) != out_before:
-                    _wrap_result(scratch, out=out, symmetry=out_symmetry)
-                return out if result.value is scratch else result.value
+            if transaction is not None:
+                assert isinstance(out, SymmetricTensor)
+                base, before, saved_data, previous_symmetry, previous_inferred = (
+                    transaction
+                )
+                _finish_foreign_symmetric_out(
+                    out,
+                    base=base,
+                    before=before,
+                    saved_data=saved_data,
+                    target_symmetry=out_symmetry,
+                    previous_symmetry=previous_symmetry,
+                    previous_inferred=previous_inferred,
+                )
             return result.value
         maybe_check_nan_inf(result, op_name)
         if out_symmetry is not None:

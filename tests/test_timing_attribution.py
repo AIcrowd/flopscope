@@ -161,6 +161,30 @@ def test_foreign_ufunc_protocol_time_lands_in_residual(op_name, make_duck, invok
     assert summary["flopscope_backend_time_s"] < 0.02, summary
 
 
+def test_foreign_ufunc_symmetric_out_callback_time_lands_in_residual():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    duck = _NumericSleepyUfuncDuck(10.0)
+
+    flops.budget_reset()
+    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+        with pytest.warns(flops.errors.RemoteCallbackWarning, match="add") as caught:
+            result = fnp.add(symmetric_input, duck, out=out)
+
+    assert result is out
+    assert duck.calls == 1
+    assert len(caught) == 1
+    np.testing.assert_array_equal(
+        np.asarray(out), np.asarray(symmetric_input) + 10.0
+    )
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
 @pytest.mark.parametrize(
     "op_name, invoke",
     [

@@ -745,12 +745,20 @@ class _SymmetricOutProtocolDuck:
         result=None,
         ignore_out=False,
         expected_out=None,
+        expected_input_alias=False,
+        write_input=False,
+        raises=None,
+        raise_before_write=False,
     ):
         self.values = np.asarray(values)
         self.write = write
         self.result = result
         self.ignore_out = ignore_out
         self.expected_out = expected_out
+        self.expected_input_alias = expected_input_alias
+        self.write_input = write_input
+        self.raises = raises
+        self.raise_before_write = raise_before_write
         self.seen_out = None
 
     def __array__(self, dtype=None, copy=None):
@@ -767,10 +775,28 @@ class _SymmetricOutProtocolDuck:
             assert actual.dtype == expected.dtype
             assert actual.strides == expected.strides
             assert actual.flags.writeable is expected.flags.writeable
-            assert not np.shares_memory(actual, np.asarray(expected))
+            assert actual.flags.aligned is expected.flags.aligned
+            if actual.size:
+                assert np.shares_memory(actual, np.asarray(expected))
+            else:
+                assert (
+                    actual.__array_interface__["data"][0]
+                    == np.asarray(expected).__array_interface__["data"][0]
+                )
             assert actual.tobytes(order="C") == np.asarray(expected).tobytes(
                 order="C"
             )
+            if self.expected_input_alias:
+                if actual.size:
+                    assert np.shares_memory(np.asarray(inputs[0]), actual)
+                else:
+                    assert (
+                        np.asarray(inputs[0]).__array_interface__["data"][0]
+                        == actual.__array_interface__["data"][0]
+                    )
+        if self.raise_before_write:
+            assert self.raises is not None
+            raise self.raises
         if self.ignore_out:
             return self.result
         raw_inputs = tuple(
@@ -779,7 +805,10 @@ class _SymmetricOutProtocolDuck:
         if self.write is None:
             return getattr(ufunc, method)(*raw_inputs, **kwargs)
         assert type(self.seen_out) is tuple and len(self.seen_out) == 1
-        np.copyto(self.seen_out[0], np.asarray(self.write), casting="unsafe")
+        target = raw_inputs[0] if self.write_input else self.seen_out[0]
+        np.copyto(target, np.asarray(self.write), casting="unsafe")
+        if self.raises is not None:
+            raise self.raises
         if self.result is None:
             return self.seen_out[0]
         return self.result
@@ -790,7 +819,17 @@ class _ForeignTuple(tuple):
 
 
 def _strided_symmetric_out(layout):
-    if layout == "positive":
+    if layout == "unaligned":
+        backing = np.zeros(73, dtype=np.uint8)
+        view = np.ndarray(
+            (3, 3),
+            dtype=np.float64,
+            buffer=backing,
+            offset=1,
+            strides=(24, 8),
+        )
+        written = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]])
+    elif layout == "positive":
         backing = np.zeros((6, 6), dtype=np.float64)
         view = backing[::2, ::2]
         written = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 5.0], [3.0, 5.0, 6.0]])
@@ -1000,25 +1039,27 @@ def test_foreign_ufunc_writes_and_returns_symmetric_out():
 
     assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
     assert type(duck.seen_out[0]) is np.ndarray
-    assert not np.shares_memory(duck.seen_out[0], np.asarray(out))
+    assert np.shares_memory(duck.seen_out[0], np.asarray(out))
     assert result is out
     np.testing.assert_array_equal(np.asarray(out), np.asarray(symmetric_input) + 10.0)
 
 
-@pytest.mark.parametrize("layout", ["positive", "negative", "zero", "overlapping"])
+@pytest.mark.parametrize(
+    "layout", ["unaligned", "positive", "negative", "zero", "overlapping"]
+)
 def test_foreign_ufunc_preserves_symmetric_out_layout(layout):
     out, written = _strided_symmetric_out(layout)
-    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
-    symmetric_input = flops.symmetrize(fnp.zeros((3, 3)), symmetry=symmetry)
     duck = _SymmetricOutProtocolDuck(
         0.0,
         write=written,
         expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
     )
 
     with flops.BudgetContext(flop_budget=int(1e10)):
         with pytest.warns(RemoteCallbackWarning):
-            result = fnp.add(symmetric_input, duck, out=out)
+            result = fnp.add(out, duck, out=out)
 
     assert result is out
     np.testing.assert_array_equal(np.asarray(out), written)
@@ -1050,6 +1091,7 @@ def test_foreign_ufunc_ignored_readonly_symmetric_out_preserves_sentinel():
     assert result is sentinel
     assert np.asarray(out).tobytes() == before
     assert out.flags.writeable is False
+    assert out.symmetry == symmetry
 
 
 def test_foreign_ufunc_write_to_readonly_symmetric_out_fails_before_commit():
@@ -1069,45 +1111,197 @@ def test_foreign_ufunc_write_to_readonly_symmetric_out_fails_before_commit():
 
     assert np.asarray(out).tobytes() == before
     assert out.flags.writeable is False
+    assert out.symmetry == symmetry
 
 
-def test_foreign_ufunc_rejects_asymmetric_scratch_without_mutating_out():
+@pytest.mark.parametrize("callback_result", [None, object()], ids=["canonical", "sentinel"])
+def test_foreign_ufunc_rejects_asymmetric_alias_write_and_rolls_back(
+    callback_result,
+):
     symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
-    symmetric_input = flops.symmetrize(
-        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
-    )
     out = flops.symmetrize(fnp.full((2, 2), 7.0), symmetry=symmetry)
     before = np.asarray(out).tobytes()
     duck = _SymmetricOutProtocolDuck(
         0.0,
         write=np.array([[1.0, 2.0], [3.0, 4.0]]),
+        result=callback_result,
+        expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
     )
 
     with flops.BudgetContext(flop_budget=int(1e10)):
         with pytest.warns(RemoteCallbackWarning):
             with pytest.raises(flops.errors.SymmetryError):
-                fnp.add(symmetric_input, duck, out=out)
+                fnp.add(out, duck, out=out)
 
     assert type(duck.seen_out) is tuple and len(duck.seen_out) == 1
     assert np.asarray(out).tobytes() == before
+    assert out.symmetry == symmetry
 
 
 def test_foreign_ufunc_preserves_sentinel_while_committing_safe_out_write():
     symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
-    symmetric_input = flops.symmetrize(
-        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
-    )
     out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
     sentinel = object()
-    written = np.asarray(symmetric_input) + 20.0
-    duck = _SymmetricOutProtocolDuck(0.0, write=written, result=sentinel)
+    written = np.array([[21.0, 22.0], [22.0, 23.0]])
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=written,
+        result=sentinel,
+        expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
+    )
 
     with flops.BudgetContext(flop_budget=int(1e10)):
         with pytest.warns(RemoteCallbackWarning):
-            result = fnp.add(symmetric_input, duck, out=out)
+            result = fnp.add(out, duck, out=out)
 
     assert result is sentinel
     np.testing.assert_array_equal(np.asarray(out), written)
+    assert out.symmetry == symmetry
+
+
+def test_foreign_ufunc_partial_input_out_alias_commits_valid_shared_write():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    backing = np.zeros((3, 3), dtype=np.float64)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        out = flops.as_symmetric(backing[:2, :2], symmetry=symmetry)
+        aliased_input = flops.as_symmetric(backing[1:, 1:], symmetry=symmetry)
+    sentinel = object()
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=np.array([[9.0, 0.0], [0.0, 0.0]]),
+        result=sentinel,
+        expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(aliased_input, duck, out=out)
+
+    assert result is sentinel
+    np.testing.assert_array_equal(np.asarray(out), [[0.0, 0.0], [0.0, 9.0]])
+    assert out.symmetry == symmetry
+
+
+def test_foreign_ufunc_alias_mutation_then_raise_preserves_exception_and_write():
+    from flopscope._write_epoch import epoch_of
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    before_epoch = epoch_of(out)
+    written = np.array([[1.0, 2.0], [3.0, 4.0]])
+    error = RuntimeError("callback failed after mutating aliased input")
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=written,
+        expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
+        raises=error,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            with pytest.raises(RuntimeError) as raised:
+                fnp.add(out, duck, out=out)
+
+    assert raised.value is error
+    np.testing.assert_array_equal(np.asarray(out), written)
+    assert epoch_of(out) != before_epoch
+    assert out.symmetry is None
+
+
+def test_foreign_ufunc_raise_before_alias_mutation_preserves_epoch_and_symmetry():
+    from flopscope._write_epoch import epoch_of
+
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    out = flops.symmetrize(fnp.full((2, 2), 7.0), symmetry=symmetry)
+    before = np.asarray(out).tobytes()
+    before_epoch = epoch_of(out)
+    error = RuntimeError("callback failed before mutation")
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        expected_out=out,
+        expected_input_alias=True,
+        raises=error,
+        raise_before_write=True,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            with pytest.raises(RuntimeError) as raised:
+                fnp.add(out, duck, out=out)
+
+    assert raised.value is error
+    assert np.asarray(out).tobytes() == before
+    assert epoch_of(out) == before_epoch
+    assert out.symmetry == symmetry
+
+
+def test_foreign_ufunc_empty_aliased_out_preserves_identity_and_symmetry():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        out = flops.as_symmetric(np.empty((0, 0)), symmetry=symmetry)
+    duck = _SymmetricOutProtocolDuck(
+        1.0,
+        expected_out=out,
+        expected_input_alias=True,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(out, duck, out=out)
+
+    assert result is out
+    assert out.shape == (0, 0)
+    assert out.symmetry == symmetry
+
+
+def test_foreign_ufunc_nan_payload_change_is_committed_bitwise():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    out = flops.symmetrize(fnp.zeros((2, 2)), symmetry=symmetry)
+    payload_bits = np.full((2, 2), 0x7FF8000000000042, dtype=np.uint64)
+    written = payload_bits.view(np.float64)
+    sentinel = object()
+    duck = _SymmetricOutProtocolDuck(
+        0.0,
+        write=written,
+        result=sentinel,
+        expected_out=out,
+        expected_input_alias=True,
+        write_input=True,
+    )
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(out, duck, out=out)
+
+    assert result is sentinel
+    assert np.asarray(out).tobytes(order="C") == written.tobytes(order="C")
+    assert out.symmetry is None
+
+
+def test_foreign_ufunc_where_mask_preserves_unwritten_symmetric_out_values():
+    symmetry = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    symmetric_input = flops.symmetrize(
+        fnp.array([[1.0, 2.0], [2.0, 3.0]]), symmetry=symmetry
+    )
+    out = flops.symmetrize(fnp.full((2, 2), 5.0), symmetry=symmetry)
+    mask = np.array([[True, False], [False, True]])
+    duck = _SymmetricOutProtocolDuck(10.0, expected_out=out)
+
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.warns(RemoteCallbackWarning):
+            result = fnp.add(symmetric_input, duck, out=out, where=mask)
+
+    assert result is out
+    np.testing.assert_array_equal(np.asarray(out), [[11.0, 5.0], [5.0, 13.0]])
+    assert out.symmetry == symmetry
 
 
 # Both operations are currently registered through ``_counted_unary``;
