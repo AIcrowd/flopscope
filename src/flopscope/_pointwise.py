@@ -20,8 +20,8 @@ from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
     billing_operand,
-    binary_float_loop_dtype,
     heavier_billing_dtype,
+    integer_to_float64_min_dtype,
     mean_compute_dtype,
     multi_store_billing_dtypes,
     natural_output_dtypes,
@@ -29,6 +29,7 @@ from flopscope._dtype_billing import (
     resolve_billing_dtype,
     store_billing_dtypes,
     sum_accumulator_dtype,
+    ufunc_resolver_operand,  # noqa: F401 - reserved for the binary resolver path.
     unary_float_loop_dtype,
 )
 from flopscope._flops import _ceil_log2
@@ -233,7 +234,7 @@ _UNARY_FLOAT_LOOP_OPS |= frozenset(
 # width -- unlike the size-mapped _UNARY_FLOAT_LOOP_OPS family (i0(int8) ->
 # float64, not float16, matching numpy's Chebyshev-polynomial/sin-ratio
 # implementations that don't have narrower loops). Float/complex inputs keep
-# their own width. binary_float_loop_dtype's "any int kind -> float64,
+# their own width. integer_to_float64_min_dtype's "any int kind -> float64,
 # float/complex unchanged" mapping already expresses exactly this rule (it
 # doesn't care about arity), so it is reused here instead of a new helper.
 _UNARY_FLOAT64_MIN_OPS = frozenset({"i0", "sinc"})
@@ -256,7 +257,7 @@ _BINARY_FLOAT_LOOP_OPS = frozenset(
 # single-precision loops at all (dd->d / DD->D are its narrowest), so
 # float32 inputs compute float64 and complex64 inputs compute complex128.
 # It is deliberately NOT a member of _BINARY_FLOAT_LOOP_OPS: that set's
-# resolver (binary_float_loop_dtype) leaves float/complex inputs unchanged,
+# resolver (integer_to_float64_min_dtype) leaves float/complex inputs unchanged,
 # which would bill float_power(f32, f32) at float32 and
 # float_power(c64, c64) at complex64 -- both below its true compute width.
 _BINARY_FLOAT64_MIN_OPS = frozenset({"float_power"})
@@ -654,7 +655,7 @@ def _counted_unary(np_func, op_name: str):
         elif op_name in _UNARY_FLOAT64_MIN_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
-                billing_dtypes = (binary_float_loop_dtype(resolved),)
+                billing_dtypes = (integer_to_float64_min_dtype(resolved),)
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -876,7 +877,7 @@ def _counted_binary(np_func, op_name: str):
         if op_name in _BINARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
-                billing_dtypes = (binary_float_loop_dtype(resolved),)
+                billing_dtypes = (integer_to_float64_min_dtype(resolved),)
         elif op_name in _BINARY_FLOAT64_MIN_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:

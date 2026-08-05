@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import IntEnum
 from typing import cast
 
 import numpy as np
@@ -257,14 +258,42 @@ def test_unary_float_loop_dtype_maps_ints_by_size():
     assert u(np.dtype("O")) == np.dtype("O")
 
 
-def test_binary_float_loop_dtype_maps_all_ints_to_f64():
-    from flopscope._dtype_billing import binary_float_loop_dtype as b
+def test_integer_to_float64_min_dtype_maps_all_ints_to_f64():
+    from flopscope._dtype_billing import integer_to_float64_min_dtype as f
 
-    # binary float-only ufuncs have no int loops: divide(int8,int8)->float64.
     for dt in (np.bool_, np.int8, np.int16, np.int32, np.int64, np.uint32):
-        assert b(np.dtype(dt)) == np.dtype(np.float64)
-    assert b(np.dtype(np.float32)) == np.dtype(np.float32)
-    assert b(np.dtype(np.complex128)) == np.dtype(np.complex128)
+        assert f(np.dtype(dt)) == np.dtype(np.float64)
+    assert f(np.dtype(np.float32)) == np.dtype(np.float32)
+    assert f(np.dtype(np.complex128)) == np.dtype(np.complex128)
+
+
+def test_ufunc_resolver_operand_preserves_python_scalar_weak_types():
+    from flopscope._dtype_billing import ufunc_resolver_operand
+
+    class One(IntEnum):
+        VALUE = 1
+
+    array = np.ones(2, dtype=np.int8)
+    for scalar in (True, 1, 1.0, 1.0j, One.VALUE):
+        resolver_operand = ufunc_resolver_operand(scalar, np.asarray(scalar))
+        assert np.add.resolve_dtypes((array.dtype, resolver_operand, None))[-1] == (
+            np.add(array, scalar).dtype
+        )
+
+    assert ufunc_resolver_operand(1, np.asarray(1)) is int
+    assert ufunc_resolver_operand(1.0, np.asarray(1.0)) is float
+    assert ufunc_resolver_operand(1.0j, np.asarray(1.0j)) is complex
+    assert ufunc_resolver_operand(True, np.asarray(True)) == np.dtype(np.bool_)
+
+    strong_scalar = np.int16(1)
+    assert ufunc_resolver_operand(strong_scalar, np.asarray(strong_scalar)) == np.dtype(
+        np.int16
+    )
+    assert ufunc_resolver_operand(One.VALUE, np.asarray(One.VALUE)) == np.dtype(
+        np.int64
+    )
+    float_array = np.ones(2, dtype=np.float32)
+    assert ufunc_resolver_operand(float_array, float_array) == np.dtype(np.float32)
 
 
 def test_fft_billing_dtype():

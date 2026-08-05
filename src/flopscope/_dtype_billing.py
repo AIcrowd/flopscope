@@ -50,6 +50,18 @@ def billing_operand(orig, coerced):
     return coerced.dtype
 
 
+def ufunc_resolver_operand(orig, coerced) -> _np.dtype | type:
+    """Operand form accepted by ``ufunc.resolve_dtypes``.
+
+    Exact built-in int, float, and complex scalars contribute their bare type
+    so NumPy applies NEP 50 weak promotion. Bool, NumPy scalars, numeric
+    subclasses, and arrays contribute their concrete dtype.
+    """
+    if type(orig) in (int, float, complex):
+        return type(orig)
+    return coerced.dtype
+
+
 def store_billing_dtypes(out) -> tuple:
     """What an ``out=`` buffer contributes to the billing resolution.
 
@@ -406,13 +418,8 @@ def unary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
     return _np.dtype(_np.float64)
 
 
-def binary_float_loop_dtype(resolved: _np.dtype) -> _np.dtype:
-    """Compute dtype of a float-only BINARY ufunc (divide/arctan2/hypot...).
-
-    Unlike the unary case, numpy resolves integer/bool operand pairs of a
-    binary float-only ufunc to the default float: divide(int8, int8) ->
-    float64. Float and complex inputs keep their own loop.
-    """
+def integer_to_float64_min_dtype(resolved: _np.dtype) -> _np.dtype:
+    """Floor integer/bool computation at float64; preserve inexact kinds."""
     if resolved.kind in "biu":
         return _np.dtype(_np.float64)
     return resolved
