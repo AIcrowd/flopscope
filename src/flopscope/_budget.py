@@ -359,6 +359,11 @@ def _call_numpy_impl(
     op_timer = budget._current_op_timer if budget is not None else None
     tracker: _PythonCallbackTracker | None = None
     previous_profile: Any = None
+    fallback_backend0 = 0.0
+    fallback_overhead0 = 0.0
+    fallback_user_code0 = 0.0
+    fallback_timer_backend0 = 0.0
+    non_callable_profiler_fallback = False
     t0: float | None = None
     try:
         if track_python_callbacks and budget is not None and op_timer is not None:
@@ -368,6 +373,12 @@ def _call_numpy_impl(
                     budget, op_timer, _sys._getframe(), previous_profile
                 )
                 _sys.setprofile(tracker)
+            else:
+                non_callable_profiler_fallback = True
+                fallback_backend0 = budget._total_flopscope_backend_time
+                fallback_overhead0 = budget._total_flopscope_overhead_time
+                fallback_user_code0 = budget._total_user_code_time
+                fallback_timer_backend0 = op_timer._backend_duration_s
         t0 = time.perf_counter()
         return fn(*args, **kwargs)
     finally:
@@ -385,6 +396,15 @@ def _call_numpy_impl(
         if tracker is not None:
             assert op_timer is not None
             op_timer._backend_duration_s += max(duration - tracker.callback_wall_s, 0.0)
+        elif non_callable_profiler_fallback:
+            assert budget is not None and op_timer is not None
+            already_classified = (
+                budget._total_flopscope_backend_time - fallback_backend0
+            ) + (budget._total_flopscope_overhead_time - fallback_overhead0)
+            already_classified += (
+                budget._total_user_code_time - fallback_user_code0
+            ) + (op_timer._backend_duration_s - fallback_timer_backend0)
+            op_timer._backend_duration_s += max(duration - already_classified, 0.0)
         else:
             budget = get_active_budget()
             if budget is not None and budget._current_op_timer is not None:
@@ -418,8 +438,9 @@ def _call_numpy_with_python_callbacks(fn: Any, *args: Any, **kwargs: Any) -> Any
     flopscope time is added to the user-code bucket used by
     ``_counted_wrapper``. Outside an active timed op this is a transparent
     passthrough, just like ``_call_numpy``. If CPython exposes a non-callable
-    active C profiler, this falls back to ordinary backend timing because the
-    C callback cannot be safely multiplexed with a Python profile hook.
+    active C profiler, unclassified callback time remains backend because the
+    C callback cannot be safely multiplexed with a Python profile hook; nested
+    work keeps its original timing classification.
     """
     return _call_numpy_impl(fn, args, kwargs, track_python_callbacks=True)
 

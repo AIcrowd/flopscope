@@ -145,6 +145,95 @@ def test_callback_helper_preserves_active_cprofile_when_exposed():
     assert budget.flopscope_backend_time_s >= 0.0
 
 
+def _run_cprofiler_fallback_case(kind):
+    callback_sleep = 0.02
+    classified_sleep = 0.02
+
+    if kind == "nested_counted":
+
+        @_counted_wrapper
+        def classified_work():
+            budget = get_active_budget()
+            assert budget is not None
+            with budget.deduct(
+                "add",
+                flop_cost=2,
+                subscripts=None,
+                shapes=((2,), (2,)),
+                dtypes=(np.float64,),
+            ):
+                _call_numpy(time.sleep, classified_sleep)
+
+    elif kind == "same_timer":
+
+        def classified_work():
+            _call_numpy(time.sleep, classified_sleep)
+
+    else:
+        raise AssertionError(f"unknown fallback test kind: {kind}")
+
+    duck = _NumericSleepyUfuncDuck(
+        [3.0, 4.0], sleep_s=callback_sleep, before_return=classified_work
+    )
+    result, budget = _run_callback_aware_add(duck)
+    return result, budget
+
+
+def _assert_fallback_decomposition(budget):
+    summary = budget.summary_dict()
+    bucket_sum = (
+        summary["flopscope_backend_time_s"]
+        + summary["flopscope_overhead_time_s"]
+        + summary["residual_wall_time_s"]
+    )
+    assert bucket_sum <= summary["wall_time_s"] + 0.015, summary
+    assert bucket_sum == pytest.approx(summary["wall_time_s"], abs=0.015)
+    return summary
+
+
+@pytest.mark.parametrize("kind", ["nested_counted", "same_timer"])
+def test_non_callable_profiler_fallback_excludes_already_classified_work(
+    monkeypatch, kind
+):
+    profiler = object()
+    setprofile_calls = []
+    monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
+    monkeypatch.setattr(
+        budget_module._sys, "setprofile", lambda profile: setprofile_calls.append(profile)
+    )
+
+    result, budget = _run_cprofiler_fallback_case(kind)
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert budget_module._sys.getprofile() is profiler
+    assert setprofile_calls == []
+    summary = _assert_fallback_decomposition(budget)
+    assert summary["flopscope_backend_time_s"] >= 0.015, summary
+    if kind == "nested_counted":
+        assert len(budget.op_log) == 2
+        nested_backend = budget.op_log[-1].flopscope_backend_duration_s
+        assert nested_backend is not None
+        assert nested_backend >= 0.015
+    else:
+        assert len(budget.op_log) == 1
+
+
+@pytest.mark.parametrize("kind", ["nested_counted", "same_timer"])
+def test_cprofile_fallback_excludes_already_classified_work_when_exposed(kind):
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        if sys.getprofile() is None:
+            pytest.skip("this runtime does not expose the active cProfile object")
+        result, budget = _run_cprofiler_fallback_case(kind)
+        assert sys.getprofile() is profiler
+    finally:
+        profiler.disable()
+
+    assert np.array_equal(result, np.array([4.0, 6.0]))
+    _assert_fallback_decomposition(budget)
+
+
 def test_numpy_protocol_callback_profiles_only_actual_callback_roots():
     """Cleanup must not create frames mistaken for NumPy protocol callbacks."""
 
