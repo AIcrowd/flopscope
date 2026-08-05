@@ -144,6 +144,59 @@ def test_proxy_dtype_does_not_execute_class_property_before_network(monkeypatch)
     assert network_calls == 0
 
 
+def test_serialization_diagnostic_does_not_execute_class_property(monkeypatch):
+    class HostileDtype:
+        def __init__(self):
+            self.class_calls = 0
+
+        @property
+        def __class__(self):
+            self.class_calls += 1
+            raise AssertionError("participant __class__ property executed")
+
+    spec = HostileDtype()
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteSerializationError, match="zeros"):
+        flopscope.zeros((1,), dtype=spec)
+    assert spec.class_calls == 0
+    assert network_calls == 0
+
+
+def test_serialization_diagnostic_does_not_execute_metaclass_name(monkeypatch):
+    name_calls = 0
+
+    class HostileMeta(type):
+        def __getattribute__(cls, name):
+            nonlocal name_calls
+            if name == "__name__":
+                name_calls += 1
+                raise AssertionError("participant metaclass name lookup executed")
+            return super().__getattribute__(name)
+
+    class HostileDtype(metaclass=HostileMeta):
+        pass
+
+    network_calls = 0
+
+    def network_forbidden():
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("network accessed")
+
+    monkeypatch.setattr(flopscope, "get_connection", network_forbidden)
+    with pytest.raises(RemoteSerializationError, match="zeros"):
+        flopscope.zeros((1,), dtype=HostileDtype())
+    assert name_calls == 0
+    assert network_calls == 0
+
+
 @pytest.mark.parametrize("op", sorted(LOCAL_CALLBACK_OPS))
 def test_callback_op_raises_remote_callback_error(op):
     fn = getattr(flopscope, op)

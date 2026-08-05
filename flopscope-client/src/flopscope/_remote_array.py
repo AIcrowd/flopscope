@@ -856,6 +856,18 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
         encoded_args = [_encode_arg(a) for a in args]
         encoded_kwargs = {k: _encode_arg(v) for k, v in kwargs.items()}
+        from flopscope import _describe_unserializable
+
+        bad = _describe_unserializable(encoded_args, encoded_kwargs)
+        if bad:
+            from flopscope.errors import RemoteSerializationError
+
+            detail = f" {bad}" if bad else ""
+            raise RemoteSerializationError(
+                f"{op_name}() received an argument{detail} that cannot be sent "
+                f"to the remote (client/server) backend. Pass a materialized "
+                f"array or built-in (list / number / str) instead."
+            )
         try:
             request = encode_request(op_name, args=encoded_args, kwargs=encoded_kwargs)
         except (TypeError, ValueError) as exc:
@@ -864,10 +876,8 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
             # from msgpack (this is how the RemoteScalar bug surfaced). Surface
             # a clear error naming the offending type instead. Imported lazily
             # (error path only) to avoid a circular import: __init__ imports us.
-            from flopscope import _describe_unserializable
             from flopscope.errors import RemoteSerializationError
 
-            bad = _describe_unserializable(encoded_args, encoded_kwargs)
             detail = f" {bad}" if bad else ""
             raise RemoteSerializationError(
                 f"{op_name}() received an argument{detail} that cannot be sent "

@@ -143,7 +143,28 @@ from flopscope._dtypes import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-_MSGPACK_OK = (type(None), bool, int, float, str, bytes)
+_MSGPACK_OK = (
+    builtins.type(None),
+    builtins.bool,
+    builtins.int,
+    builtins.float,
+    builtins.str,
+    builtins.bytes,
+)
+
+
+def _is_exact_msgpack_scalar(value: Any) -> bool:
+    """Check msgpack scalar support without invoking participant hooks."""
+    value_type = builtins.type(value)
+    return builtins.any(
+        value_type is supported_type for supported_type in _MSGPACK_OK
+    )
+
+
+def _static_type_name(value: Any) -> str:
+    """Return a class name without consulting a participant metaclass."""
+    name = builtins.type.__getattribute__(builtins.type(value), "__name__")
+    return name if builtins.type(name) is builtins.str else "object"
 
 
 def _describe_unserializable(args: Any, kwargs: Any) -> str:
@@ -151,27 +172,50 @@ def _describe_unserializable(args: Any, kwargs: Any) -> str:
     e.g. ``"of type 'generator'"``; ``""`` if none can be pinpointed."""
 
     def walk(value: Any):
-        if isinstance(value, _MSGPACK_OK):
+        value_type = builtins.type(value)
+        if _is_exact_msgpack_scalar(value):
             return None
-        if isinstance(value, (list, tuple)):
+        if value_type is builtins.list or value_type is builtins.tuple:
             for item in value:
                 bad = walk(item)
                 if bad is not None:
                     return bad
             return None
-        if isinstance(value, dict):
-            for item in value.values():
+        if value_type is builtins.dict:
+            for key, item in builtins.dict.items(value):
+                bad = walk(key)
+                if bad is not None:
+                    return bad
                 bad = walk(item)
                 if bad is not None:
                     return bad
             return None
-        return type(value).__name__
+        return _static_type_name(value)
 
-    for value in list(args) + list(kwargs.values()):
-        bad = walk(value)
-        if bad is not None:
-            return f"of type {bad!r}"
+    bad = walk(args)
+    if bad is not None:
+        return f"of type {bad!r}"
+    bad = walk(kwargs)
+    if bad is not None:
+        return f"of type {bad!r}"
     return ""
+
+
+def _raise_serialization_error(op_name: str, bad: str = "") -> None:
+    """Raise the client-side error for a value rejected before transmission."""
+    if op_name in LOCAL_CALLBACK_OPS:
+        raise RemoteCallbackError(
+            f"{op_name}() requires a Python callback, which the "
+            "client/server backend cannot execute remotely. Run it "
+            "in the in-process flopscope backend, or precompute the "
+            "result."
+        )
+    detail = f" {bad}" if bad else ""
+    raise RemoteSerializationError(
+        f"{op_name}() received an argument{detail} that cannot be sent "
+        f"to the remote (client/server) backend. Pass a materialized "
+        f"array or built-in (list / number / str) instead."
+    )
 
 
 def _make_proxy(op_name: str):
@@ -180,26 +224,14 @@ def _make_proxy(op_name: str):
     def proxy(*args: Any, **kwargs: Any):
         encoded_args = [_encode_arg(a) for a in args]
         encoded_kwargs = {k: _encode_arg(v) for k, v in kwargs.items()}
+        bad = _describe_unserializable(encoded_args, encoded_kwargs)
+        if bad:
+            _raise_serialization_error(op_name, bad)
         try:
             request = encode_request(op_name, args=encoded_args, kwargs=encoded_kwargs)
         except (TypeError, ValueError) as exc:
-            # Callback ops (apply_along_axis, …) carry a Python callable that
-            # msgpack can't serialize. Surface a clear error instead of the
-            # opaque "can not serialize 'function' object".
-            if op_name in LOCAL_CALLBACK_OPS:
-                raise RemoteCallbackError(
-                    f"{op_name}() requires a Python callback, which the "
-                    f"client/server backend cannot execute remotely. Run it "
-                    f"in the in-process flopscope backend, or precompute the "
-                    f"result."
-                ) from exc
-            bad = _describe_unserializable(encoded_args, encoded_kwargs)
-            detail = f" {bad}" if bad else ""
-            raise RemoteSerializationError(
-                f"{op_name}() received an argument{detail} that cannot be sent "
-                f"to the remote (client/server) backend. Pass a materialized "
-                f"array or built-in (list / number / str) instead."
-            ) from exc
+            _raise_serialization_error(op_name, bad)
+            raise AssertionError("unreachable") from exc
         resp = get_connection().send_recv(request)
         return _result_from_response(resp)
 
