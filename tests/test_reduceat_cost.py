@@ -74,18 +74,33 @@ def application_count_oracle(n_axis: int, indices) -> int:
     return total
 
 
-def honest_reduceat_cost(dtype, lanes: int, applications_per_lane: int) -> int:
-    """The expected bill, measured via an INDEPENDENT flopscope call.
+def test_reduceat_work_per_lane_accumulates_applications_as_python_int():
+    from flopscope._pointwise import _reduceat_work_per_lane
+
+    n = 2**62
+    indices = np.array([0, n - 1, 0, n - 1, 0], dtype=np.int64)
+
+    applications, output_cells = _reduceat_work_per_lane(indices, n)
+
+    expected_applications = 3 * n - 5
+    assert type(applications) is int
+    assert applications == expected_applications
+    assert applications > np.iinfo(np.int64).max
+    assert type(output_cells) is int
+    assert output_cells == len(indices)
+
+
+def honest_reduceat_cost(dtype, lanes: int, billed_units_per_lane: int) -> int:
+    """Independently price either per-lane work measure used for billing.
 
     ``lanes`` independent ``subtract.reduce`` calls over
-    ``applications_per_lane + 1``-length rows bill exactly
-    ``lanes * applications_per_lane`` applications at whatever rate/weight
-    is currently configured -- the same "n-1 per lane" reduction convention
-    reduceat itself follows. Comparing against this pins reduceat's bill to
-    ``.reduce``'s without hardcoding any rate or weight number, so it
+    ``billed_units_per_lane + 1``-length rows bill exactly
+    ``lanes * billed_units_per_lane`` units at whatever rate/weight is
+    currently configured. Comparing against this independently prices either
+    reduceat work measure without hardcoding any rate or weight number, so it
     survives cost-model-wide rate changes.
     """
-    length = applications_per_lane + 1
+    length = billed_units_per_lane + 1
     arr = fnp.asarray(np.full((lanes, length), 2, dtype=dtype))
     return billed(lambda: np.subtract.reduce(arr, axis=-1))
 
@@ -102,6 +117,8 @@ CASES = [
     ((10,), 0, [4], "single index, not at start"),
     ((10,), 0, [5, 2, 8], "overlapping / non-monotonic"),
     ((10,), 0, [3, 3, 7], "indices[i] == indices[i+1]"),
+    ((10,), 0, list(range(10)), "all singleton segments"),
+    ((1, 5), 0, [0, 0, 0, 0], "multi-lane copy-only output floor"),
     ((10,), 0, [], "empty index list"),
     ((4, 5), 0, [0, 2], "2-D, axis 0"),
     ((4, 5), 1, [0, 3], "2-D, axis 1"),
@@ -121,10 +138,27 @@ def test_reduceat_cost_matches_application_count_oracle(shape, axis, indices, la
     for i, d in enumerate(shape):
         if i != norm_axis:
             lanes *= d
-    applications = application_count_oracle(n, indices)
+    billed_units = max(application_count_oracle(n, indices), len(indices))
     actual = reduceat_actual_cost(shape, axis, indices, dtype)
-    expected = honest_reduceat_cost(dtype, lanes, applications)
+    expected = honest_reduceat_cost(dtype, lanes, billed_units)
     assert actual == expected
+
+
+def test_reduceat_output_floor_is_deducted_before_numpy(monkeypatch):
+    a = fnp.asarray(np.ones(1, dtype=np.float64))
+    old_global_minimum = honest_reduceat_cost(
+        np.float64, lanes=1, billed_units_per_lane=0
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("numpy must not run after budget preflight fails")
+
+    monkeypatch.setattr(flopscope._pointwise, "_call_numpy", fail_if_called)
+    with flopscope.BudgetContext(flop_budget=old_global_minimum, quiet=True):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(flopscope.BudgetExhaustedError):
+                np.subtract.reduceat(a, [0, 0])
 
 
 @pytest.mark.parametrize(
@@ -222,7 +256,7 @@ def test_reduceat_axis_none_on_1d_matches_axis_zero():
             fnp.asarray(np.full(n, 2, dtype=dtype)), [0], axis=0
         )
     )
-    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, billed_units_per_lane=0)
     assert none_cost == zero_cost
     assert none_cost > floor_cost
 
@@ -268,7 +302,7 @@ def test_reduceat_out_of_range_indices_do_not_inflate_the_bill():
     with pytest.raises(IndexError):
         np.subtract.reduceat(a_raw, [n])
 
-    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, billed_units_per_lane=0)
 
     huge_negative_cost = billed_raising(
         lambda: np.subtract.reduceat(fnp.asarray(a_raw.copy()), [-(10**9)]),
@@ -303,7 +337,7 @@ def test_reduceat_axis_as_length_one_tuple_matches_bare_axis():
             fnp.asarray(np.full(shape, 2, dtype=dtype)), [0, 3], axis=0
         )
     )
-    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, billed_units_per_lane=0)
     assert tuple_cost == bare_cost
     assert tuple_cost > floor_cost
 
@@ -325,7 +359,7 @@ def test_reduceat_negative_axis_on_multidim_bills_correctly():
             fnp.asarray(np.full(shape, 2, dtype=dtype)), [0, 2], axis=1
         )
     )
-    floor_cost = honest_reduceat_cost(dtype, lanes=1, applications_per_lane=0)
+    floor_cost = honest_reduceat_cost(dtype, lanes=1, billed_units_per_lane=0)
     assert neg_cost == pos_cost
     assert neg_cost > floor_cost
 
@@ -561,6 +595,38 @@ class _HonestIndexSubclass(np.ndarray):
     """A plain ndarray subclass that does NOT override ``.dtype`` -- legitimate
     subclassing must keep working exactly like a bare ndarray index.
     """
+
+
+@pytest.mark.parametrize(
+    "index_dtype",
+    [np.float64, np.uint64],
+    ids=["float64", "uint64"],
+)
+@pytest.mark.parametrize(
+    "raw_indices",
+    [
+        pytest.param([4, 4, 4], id="copy-only-global-minimum"),
+        pytest.param([0, 4], id="nonzero-arithmetic"),
+    ],
+)
+def test_reduceat_rejected_ndarray_index_dtype_retains_existing_bill(
+    index_dtype, raw_indices
+):
+    n = 5
+    dtype = np.int64
+    a_raw = np.full(n, 2, dtype=dtype)
+    indices = np.array(raw_indices, dtype=index_dtype)
+
+    with pytest.raises(TypeError):
+        np.subtract.reduceat(a_raw, indices)
+
+    actual = billed_raising(
+        lambda: np.subtract.reduceat(fnp.asarray(a_raw.copy()), indices),
+        TypeError,
+    )
+    applications = int(application_count_oracle(n, indices))
+    expected = honest_reduceat_cost(dtype, lanes=1, billed_units_per_lane=applications)
+    assert actual == expected
 
 
 def test_reduceat_lying_dtype_float_index_matches_raw_numpy_rejection():

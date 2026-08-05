@@ -1753,8 +1753,8 @@ def _resolve_reduceat_axis(axis, ndim: int) -> int:
     return axis
 
 
-def _reduceat_applications_per_lane(indices, n: int) -> int:
-    """Honest per-lane application count for ``ufunc.reduceat(a, indices)``.
+def _reduceat_work_per_lane(indices, n: int) -> tuple[int, int]:
+    """Per-lane arithmetic applications and produced cells for ``reduceat``.
 
     ``indices`` MUST already be the frozen, owned snapshot built by
     :func:`_counted_ufunc_reduceat` -- reading it here must be the only
@@ -1764,10 +1764,13 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     NumPy's semantics per segment ``i``: if ``indices[i] < indices[i+1]``,
     ``result[i] = reduce(a[indices[i]:indices[i+1]])`` (``L-1`` applications
     for a length-``L`` segment); otherwise ``result[i] = a[indices[i]]``, a
-    plain copy with no arithmetic (0 applications). The final segment always
-    runs to the end of the axis (length ``n``). Segments may overlap or run
-    backwards, so the true application count is bounded by the INDEX
-    VALUES, not by the array's own size.
+    plain copy with no arithmetic (0 applications). Every accepted segment
+    still produces one output cell, so safely castable index snapshots also
+    return ``k`` as a produced-cell billing floor. Rejected ndarray index
+    dtypes retain their existing arithmetic bill without gaining that floor.
+    The final segment always runs to the end of the axis (length ``n``).
+    Segments may overlap or run backwards, so the true application count is
+    bounded by the INDEX VALUES, not by the array's own size.
 
     ``n`` is the resolved axis's length -- ``_resolve_reduceat_axis`` raises
     directly (before this function is ever called) for any axis it cannot
@@ -1785,10 +1788,10 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     """
     k = indices.shape[0] if indices.ndim == 1 else 0
     if k == 0 or n == 0:
-        return 0
+        return (0, 0)
     idx64 = indices.astype(_np.int64)
     if bool(_np.any((idx64 < 0) | (idx64 >= n))):
-        return 0
+        return (0, 0)
     ends = _np.empty(k, dtype=_np.int64)
     ends[:-1] = idx64[1:]
     ends[-1] = n  # the final segment always runs to the axis end
@@ -1796,16 +1799,28 @@ def _reduceat_applications_per_lane(indices, n: int) -> int:
     # A real reduce segment of length L costs L-1 applications; the
     # non-monotonic (indices[i] >= indices[i+1]) branch is a plain element
     # copy and costs 0 -- np.maximum(lengths - 1, 0) covers both uniformly.
-    return int(_np.sum(_np.maximum(lengths - 1, 0)))
+    segment_applications = _np.maximum(lengths - 1, 0)
+    # The range guard above makes every contribution at most n-1. Keep the
+    # vectorized hot path whenever its Python-int upper bound fits int64;
+    # only potentially overflowing totals need per-element Python integers.
+    if k * (n - 1) <= _np.iinfo(_np.int64).max:
+        applications = int(_np.sum(segment_applications))
+    else:
+        applications = _builtins.sum(int(value) for value in segment_applications)
+    output_cells = (
+        k if _np.can_cast(indices.dtype, _np.dtype(_np.intp), casting="safe") else 0
+    )
+    return (applications, output_cells)
 
 
 @_counted_wrapper
 def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     """Cost-tracked ``ufunc.reduceat(a, indices, axis=...)``.
 
-    Cost is the honest per-segment application count from
-    :func:`_reduceat_applications_per_lane`, times the number of lanes
-    (every combination of indices in the axes other than ``axis``).
+    Cost is the larger of the honest per-segment application count and the
+    valid produced-cell floor from :func:`_reduceat_work_per_lane`, each
+    times the number of lanes (every combination of indices in the axes
+    other than ``axis``).
     Output symmetry is ``None``: arbitrary segment boundaries don't respect
     any axis-permutation group action.
     """
@@ -1914,9 +1929,15 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     if not (-a_view.ndim <= resolved_axis < a_view.ndim):
         raise _AxisError(resolved_axis, a_view.ndim)
     n = a_view.shape[resolved_axis]
-    applications_per_lane = _reduceat_applications_per_lane(indices_snapshot, n)
+    applications_per_lane, output_cells_per_lane = _reduceat_work_per_lane(
+        indices_snapshot, n
+    )
     lanes = a_view.size // n if n else 0
-    cost = _builtins.max(lanes * applications_per_lane, 1)
+    cost = _builtins.max(
+        lanes * applications_per_lane,
+        lanes * output_cells_per_lane,
+        1,
+    )
     # ``out=``'s billing view is captured here -- LAST, after every other
     # participant-controlled argument (``dtype=``, ``indices`` via
     # ``indices_snapshot``, and ``axis`` via ``resolved_axis``/the
