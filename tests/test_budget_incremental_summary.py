@@ -287,7 +287,6 @@ def test_generated_context_and_session_transitions_match_scan(
     ctx.__enter__()
     entered = True
     inflight = None
-    inflight_started_at: float | None = None
     inflight_namespace: str | None = None
     inflight_reset_epoch: int | None = None
     reset_epoch = 0
@@ -302,34 +301,38 @@ def test_generated_context_and_session_transitions_match_scan(
 
     def finish_inflight() -> None:
         nonlocal inflight, inflight_namespace, inflight_reset_epoch
-        nonlocal inflight_started_at
         if inflight is not None:
-            assert inflight_started_at is not None
             assert inflight_reset_epoch is not None
-            duration = clock.now - inflight_started_at
+            operation_before = ctx.op_log[inflight._op_index]
             inflight.__exit__(None, None, None)
             if inflight_reset_epoch != reset_epoch:
+                operation_after = ctx.op_log[inflight._op_index]
+                backend_delta = (
+                    operation_after.flopscope_backend_duration_s or 0.0
+                ) - (operation_before.flopscope_backend_duration_s or 0.0)
+                overhead_delta = (
+                    operation_after.flopscope_overhead_duration_s or 0.0
+                ) - (operation_before.flopscope_overhead_duration_s or 0.0)
                 operation_delta = {
                     "inflight_add": {
                         "flop_cost": 0,
                         "calls": 0,
-                        "flopscope_backend_time_s": 0.0,
-                        "flopscope_overhead_time_s": duration,
+                        "flopscope_backend_time_s": backend_delta,
+                        "flopscope_overhead_time_s": overhead_delta,
                     }
                 }
                 namespace_delta = {
                     inflight_namespace: {
                         "flops_used": 0,
                         "calls": 0,
-                        "flopscope_backend_time_s": 0.0,
-                        "flopscope_overhead_time_s": duration,
+                        "flopscope_backend_time_s": backend_delta,
+                        "flopscope_overhead_time_s": overhead_delta,
                         "operations": operation_delta,
                     }
                 }
                 _merge_bucket_mapping(orphan_operations, operation_delta)
                 _merge_bucket_mapping(orphan_namespaces, namespace_delta)
             inflight = None
-            inflight_started_at = None
             inflight_namespace = None
             inflight_reset_epoch = None
 
@@ -403,7 +406,6 @@ def test_generated_context_and_session_transitions_match_scan(
                             dtypes=(),
                         )
                         inflight.__enter__()
-                        inflight_started_at = clock.now
                         inflight_namespace = ctx.namespace
                         inflight_reset_epoch = reset_epoch
                     else:
