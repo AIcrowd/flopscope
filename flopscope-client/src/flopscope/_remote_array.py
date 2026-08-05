@@ -119,9 +119,31 @@ def _loaded_numpy_dtype_name(spec: Any) -> str | None:
     if type(numpy) is not types.ModuleType:
         return None
     dtype_type = vars(numpy).get("dtype")
-    if not isinstance(dtype_type, type) or not isinstance(spec, dtype_type):
+    if not _is_numpy_dtype_type(type(spec), dtype_type, numpy):
         return None
     return _static_dtype_string(spec, "name", allow_getset_descriptor=True)
+
+
+def _is_numpy_dtype_type(spec_type: type, dtype_type: Any, numpy: types.ModuleType) -> bool:
+    """Whether *spec_type* is an exact dtype type exported by loaded NumPy."""
+    try:
+        type.__getattribute__(dtype_type, "__mro__")
+    except TypeError:
+        return False
+    if spec_type is dtype_type:
+        return True
+
+    dtypes = vars(numpy).get("dtypes")
+    if type(dtypes) is not types.ModuleType:
+        return False
+    for candidate in vars(dtypes).values():
+        try:
+            type.__getattribute__(candidate, "__mro__")
+        except TypeError:
+            continue
+        if spec_type is candidate:
+            return True
+    return False
 
 
 def _loaded_numpy_scalar_type_name(spec: Any) -> str | None:
