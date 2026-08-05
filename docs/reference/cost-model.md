@@ -497,16 +497,22 @@ per-element charge: for segment `i`, `indices[i] < indices[i+1]` reduces the ele
 between them (a length-`L` segment costs `L-1` applications, the same `n-1` convention
 `reduce` uses), while a non-monotonic pair (`indices[i] >= indices[i+1]`) is a plain
 element copy with no arithmetic — the segment costs 0. The final segment always runs to
-the end of the axis. That per-segment count is then billed at the accumulator dtype,
-which widens the same way `reduce` does regardless of where the segment boundaries fall:
-applied as a single whole-axis segment (`indices=[0]`) to a 1000-element `int32` input,
-that's one `L=1000` segment, 999 applications — `np.add.reduceat` bills at the int64 rate
-(999 × 2.0 = **1998**), while `np.subtract.reduceat` on the same input has no such
-accumulator and keeps the int32 loop (999 × 1.0 = **999**). `ufunc.outer` is not itself an
-accumulating reduction, but an explicit `dtype=` on it resolves through the same
-request-is-the-loop rule: the dtype names the loop numpy actually runs, not a discount,
-so `np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over
-the full outer-product grid — double the default int32-loop total.
+the end of the axis. The exact call-level base formula is
+`max(lanes × applications_per_lane, lanes × produced_cells_per_lane, 1)`. The first two
+entries are the variable-work terms: actual ufunc applications across segments and cells
+produced per lane. The cell term accounts for singleton/copy branches that emit without
+invoking the ufunc; the final term retains a call-level minimum of one. The resulting
+base cost is priced through the standard resolved accumulator dtype rate, complex
+factor, and inherited base-ufunc weight. Ordinary long segments remain
+arithmetic-dominated; a single whole-axis segment of 1000 elements bills 999
+applications. When the reduced axis has length one, the produced-cell term can make
+`reduceat(a, [0])` bill more than `reduce(a)`; this is intentional because `reduceat`
+retains its per-produced-cell floor even when the segment performs no arithmetic.
+`ufunc.outer` is not itself an accumulating reduction, but an explicit
+`dtype=` on it resolves through the same request-is-the-loop rule: the dtype names the
+loop numpy actually runs, not a discount, so
+`np.multiply.outer(int32_arr, int32_arr, dtype=float64)` bills the float64 rate over the
+full outer-product grid — double the default int32-loop total.
 
 Worked examples (production rates, 1000-element input, `sum`):
 

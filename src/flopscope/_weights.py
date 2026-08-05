@@ -188,12 +188,13 @@ def get_weight(op_name: str) -> float:
                 return _ACTIVE_WEIGHTS[legacy_op]
             break
 
-    # 3. Generic ufunc-method fallback. ``.at``/``.outer`` apply the base ufunc
-    #    once per output cell; ``.reduce``/``.accumulate``/``.reduceat`` once
-    #    per input element -- in every case the base ufunc's per-application
-    #    weight IS the rate. Without this a heavier ufunc silently bills at the
-    #    neutral 1.0 when reached through a method (the same substitution the
-    #    alias fallback below exists to prevent).
+    # 3. Generic ufunc-method fallback. Every method inherits the base ufunc's
+    #    per-application weight: ``.outer``/``.at`` bill produced or touched
+    #    cells, ``.reduce``/``.accumulate`` bill arithmetic applications, and
+    #    ``.reduceat`` uses the larger of segment applications and produced
+    #    cells as its variable-work term (the call formula separately retains
+    #    a minimum of one). Without this fallback, heavier ufuncs would silently
+    #    fall through to the neutral 1.0 weight when reached through a method.
     for suffix in _UFUNC_METHOD_SUFFIXES:
         if op_name.endswith(suffix):
             base = op_name[: -len(suffix)]

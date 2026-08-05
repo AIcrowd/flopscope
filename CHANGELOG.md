@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
+
 ## v0.10.0 (2026-07-31)
 
 ### BREAKING CHANGE
