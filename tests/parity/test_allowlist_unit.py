@@ -157,3 +157,177 @@ def test_unmatched_entry_has_a_zero_match_count():
     result = apply([], entries=(_ENTRY,))
     assert result.match_counts[_ENTRY] == 0
     assert result.stale == [_ENTRY]
+
+
+def test_numeric_dtype_exception_gap_entries_are_exact_cases():
+    from tests.parity.allowlist import ENTRIES
+
+    issue = "INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS"
+    expected = {
+        ("types/range::dict-literal", "exc_bases"),
+        ("types/memoryview::positional", "exc_bases"),
+        ("types/memoryview::keyword", "exc_bases"),
+        ("types/memoryview::second-positional", "exc_bases"),
+        ("types/memoryview::dict-literal", "exc_bases"),
+        ("types/bytearray::positional", "exc_bases"),
+        ("types/bytearray::keyword", "exc_bases"),
+        ("types/bytearray::second-positional", "exc_bases"),
+        ("types/bytearray::dict-literal", "exc_bases"),
+        ("types/slice-object::positional", "exc_bases"),
+        ("types/slice-object::keyword", "exc_bases"),
+        ("types/slice-object::list-element", "exc_bases"),
+        ("types/slice-object::second-positional", "exc_bases"),
+        ("types/slice-object::dict-literal", "exc_bases"),
+        ("types/slice-object::constructor", "exc_bases"),
+        ("types/ellipsis::positional", "exc_bases"),
+        ("types/ellipsis::keyword", "exc_bases"),
+        ("types/ellipsis::list-element", "exc_bases"),
+        ("types/ellipsis::second-positional", "exc_bases"),
+        ("types/ellipsis::dict-literal", "exc_bases"),
+        ("types/ellipsis::constructor", "exc_bases"),
+        ("types/int-enum::dict-literal", "exc_type"),
+        ("types/int-enum::dict-literal", "exc_bases"),
+        ("types/nested-list::dict-literal", "exc_type"),
+        ("types/nested-list::dict-literal", "exc_bases"),
+        ("types/remote-scalar::dict-literal", "exc_bases"),
+        ("types/np-int64::dict-literal", "exc_bases"),
+        ("types/np-bool::dict-literal", "exc_bases"),
+    }
+    related_existing = {("types/remote-scalar::dict-literal", "exc_type")}
+    all_entries_by_key = {entry.key(): entry for entry in ENTRIES}
+    selected = expected | related_existing
+    entries = tuple(all_entries_by_key[key] for key in selected)
+
+    assert len(expected) == 28
+    assert {entry.key() for entry in entries} == selected
+    assert all(entry.issue == issue for entry in entries)
+    assert all(entry.category is Category.KNOWN_BUG for entry in entries)
+    assert all(not any(char in entry.case_id for char in "*?[") for entry in entries)
+
+    server_dict_refusal = {
+        ("types/memoryview::dict-literal", "exc_bases"),
+        ("types/bytearray::dict-literal", "exc_bases"),
+        ("types/remote-scalar::dict-literal", "exc_type"),
+        ("types/remote-scalar::dict-literal", "exc_bases"),
+        ("types/int-enum::dict-literal", "exc_type"),
+        ("types/int-enum::dict-literal", "exc_bases"),
+        ("types/nested-list::dict-literal", "exc_type"),
+        ("types/nested-list::dict-literal", "exc_bases"),
+    }
+    entries_by_key = {entry.key(): entry for entry in entries}
+    for key in server_dict_refusal:
+        reason = entries_by_key[key].reason
+        assert "server pre-dispatch unresolved-dict refusal" in reason
+        assert "plain TypeError" in reason
+        assert "UnsupportedDtypeError" in reason
+
+
+def test_buffer_allowlist_entries_are_literal_current_observations():
+    from tests.parity.allowlist import ENTRIES
+
+    families = ("memoryview", "bytearray")
+    expected: set[tuple[str, str]] = set()
+    for family in families:
+        prefix = f"types/{family}"
+        expected.update(
+            (f"{prefix}::{position}", "exc_type")
+            for position in (
+                "positional",
+                "keyword",
+                "second-positional",
+                "slice-bound",
+                "dict-literal",
+            )
+        )
+        expected.update(
+            (f"{prefix}::{position}", "flops")
+            for position in ("list-element", "index-key")
+        )
+        expected.update(
+            (f"{prefix}::{position}", "outcome")
+            for position in ("list-element", "index-key", "constructor")
+        )
+
+    entries = tuple(
+        entry
+        for entry in ENTRIES
+        if entry.case_id.startswith(("types/memoryview::", "types/bytearray::"))
+        and entry.dimension in {"exc_type", "flops", "outcome"}
+    )
+    entries_by_key = {entry.key(): entry for entry in entries}
+
+    assert set(entries_by_key) == expected
+    assert all(not any(char in entry.case_id for char in "*?[") for entry in entries)
+
+    for family in families:
+        prefix = f"types/{family}"
+        for position in ("positional", "keyword", "second-positional"):
+            reason = entries_by_key[(f"{prefix}::{position}", "exc_type")].reason
+            assert "ValueError" in reason
+            assert "UnsupportedDtypeError" in reason
+        slice_reason = entries_by_key[(f"{prefix}::slice-bound", "exc_type")].reason
+        assert "TypeError" in slice_reason
+        assert "ValueError" in slice_reason
+        dict_reason = entries_by_key[(f"{prefix}::dict-literal", "exc_type")].reason
+        assert "server pre-dispatch unresolved-dict refusal" in dict_reason
+        assert "UnsupportedDtypeError" in dict_reason
+        assert "plain TypeError" in dict_reason
+
+        list_flops = entries_by_key[(f"{prefix}::list-element", "flops")].reason
+        assert "8 FLOPs" in list_flops
+        assert "UnsupportedDtypeError" in list_flops
+        index_flops = entries_by_key[(f"{prefix}::index-key", "flops")].reason
+        assert "8 FLOPs" in index_flops
+        assert "IndexError" in index_flops
+
+        list_outcome = entries_by_key[(f"{prefix}::list-element", "outcome")].reason
+        assert "returned" in list_outcome
+        assert "UnsupportedDtypeError" in list_outcome
+        index_outcome = entries_by_key[(f"{prefix}::index-key", "outcome")].reason
+        assert "returned" in index_outcome
+        assert "IndexError" in index_outcome
+        constructor = entries_by_key[(f"{prefix}::constructor", "outcome")].reason
+        assert "uint8" in constructor
+        assert "UnsupportedDtypeError" in constructor
+
+
+def test_broad_exception_entries_describe_their_current_paths():
+    from tests.parity.allowlist import ENTRIES
+
+    entries = {entry.key(): entry for entry in ENTRIES}
+    expected_fragments = {
+        ("types/range::*", "exc_type"): (
+            "positional, keyword, and second-positional",
+            "ValueError",
+            "dict-literal",
+            "UnsupportedDtypeError",
+            "RemoteSerializationError",
+        ),
+        ("types/slice-object::*", "exc_type"): (
+            "six matched positions",
+            "UnsupportedDtypeError",
+            "RemoteSerializationError",
+        ),
+        ("types/ellipsis::*", "exc_type"): (
+            "six matched positions",
+            "UnsupportedDtypeError",
+            "RemoteSerializationError",
+        ),
+        ("types/np-int64::*", "exc_type"): (
+            "list-element",
+            "ValueError",
+            "dict-literal",
+            "UnsupportedDtypeError",
+            "RemoteSerializationError",
+        ),
+        ("types/np-bool::*", "exc_type"): (
+            "list-element",
+            "ValueError",
+            "dict-literal",
+            "UnsupportedDtypeError",
+            "RemoteSerializationError",
+        ),
+    }
+    for key, fragments in expected_fragments.items():
+        reason = entries[key].reason
+        assert all(fragment in reason for fragment in fragments)

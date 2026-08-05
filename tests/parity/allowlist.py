@@ -562,17 +562,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P4-family-9",
     ),
     Entry(
-        case_id="grid/seterr::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client's `fnp` module has no `seterr` attribute, so the call never"
-            " dispatches and 0 FLOPs are billed on the client, while in-process the"
-            " call runs and bills its real cost."
-        ),
-        issue="INTERNAL-P4-family-9",
-    ),
-    Entry(
         case_id="grid/array_split::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -974,30 +963,6 @@ ENTRIES: tuple[Entry, ...] = (
         category=Category.KNOWN_BUG,
         reason=(
             "The client wraps `lcm`'s server-side failure in a generic"
-            " `FlopscopeServerError`, so the exception's base-class chain collapses to"
-            " `[Exception, BaseException]` instead of the concrete in-process hierarchy"
-            " (e.g. LookupError, ValueError, ArithmeticError)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/mintypecode::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `mintypecode` and a real server-side"
-            " failure is surfaced to the client as a generic `FlopscopeServerError`,"
-            " losing the concrete exception type numpy raises in-process (which varies"
-            " with the grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/mintypecode::*",
-        dimension="exc_bases",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client wraps `mintypecode`'s server-side failure in a generic"
             " `FlopscopeServerError`, so the exception's base-class chain collapses to"
             " `[Exception, BaseException]` instead of the concrete in-process hierarchy"
             " (e.g. LookupError, ValueError, ArithmeticError)."
@@ -3792,29 +3757,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/datetime::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `datetime` value"
-            " for this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/datetime::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `datetime` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/decimal::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -3838,55 +3780,6 @@ ENTRIES: tuple[Entry, ...] = (
             " concrete in-process exception."
         ),
         issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/decimal::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `decimal` value for"
-            " this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/decimal::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `decimal` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/dict::*",
-        dimension="flops",
-        category=Category.ACCEPTED_DIVERGENCE,
-        reason=(
-            "In-process numpy coerces a `dict` operand to an `object` array and runs"
-            " the kernel, charging for it, before anything notices the result is"
-            " unusable. The server cannot deliver an `object` array to the client at"
-            " all, so it refuses the operand before dispatch and charges nothing."
-            " Charging for a result that provably cannot be returned is the worse"
-            " behaviour of the two, so the client stays at zero here deliberately."
-        ),
-        issue="INTERNAL-P3-refuse-before-charging",
-    ),
-    Entry(
-        case_id="types/*::dict-literal",
-        dimension="flops",
-        category=Category.ACCEPTED_DIVERGENCE,
-        reason=(
-            "Same deliberate choice as the `types/dict::*` flops entry, reached from"
-            " the other direction: the dict-literal position wraps every value family"
-            " in a `dict`, so whatever the value is, the operand is one the server"
-            " refuses before dispatch while in-process numpy runs and charges for it."
-        ),
-        issue="INTERNAL-P3-refuse-before-charging",
     ),
     Entry(
         case_id="types/dict::*",
@@ -3940,29 +3833,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/dict-with-handle::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `dict-with-handle`"
-            " value for this argument position; the client cannot encode it onto the"
-            " wire and raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/dict-with-handle::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `dict-with-handle` value fails to encode onto the wire before the"
-            " call dispatches, so the client bills 0 FLOPs where in-process the call"
-            " ran and billed a nonzero amount (or vice versa when the value encodes but"
-            " the in-process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/dtype-named-object::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -3989,51 +3859,14 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/dtype-named-object::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `dtype-named-object` value fails to encode onto the wire before the"
-            " call dispatches, so the client bills 0 FLOPs where in-process the call"
-            " ran and billed a nonzero amount (or vice versa when the value encodes but"
-            " the in-process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/ellipsis::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "The `ellipsis` value has no clean wire encoding on the client; depending"
-            " on where it appears, the client either raises `RemoteSerializationError`"
-            " directly while encoding the argument, or reaches a different failure than"
-            " the equivalent in-process rejection (numpy either accepts the value"
-            " directly or raises its own `TypeError`/`ValueError`/`IndexError` while"
-            " in-process handles it structurally)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/ellipsis::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `ellipsis` value"
-            " for this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/ellipsis::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `ellipsis` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
+            "At all six matched positions (the positional, keyword, list-element,"
+            " second-positional, dict-literal, and constructor cases), in-process"
+            " numeric-only validation raises UnsupportedDtypeError while client"
+            " argument serialization raises RemoteSerializationError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4063,29 +3896,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/fraction::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `fraction` value"
-            " for this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/fraction::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `fraction` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/frozenset::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -4107,29 +3917,6 @@ ENTRIES: tuple[Entry, ...] = (
             "The `frozenset` value has no clean wire encoding on the client, so the"
             " exception it raises there has a different base-class chain than the"
             " concrete in-process exception."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/frozenset::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `frozenset` value"
-            " for this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/frozenset::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `frozenset` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4159,18 +3946,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/generator::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `generator` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/handle-lookalike::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -4193,29 +3968,6 @@ ENTRIES: tuple[Entry, ...] = (
             "The `handle-lookalike` value has no clean wire encoding on the client, so"
             " the exception it raises there has a different base-class chain than the"
             " concrete in-process exception."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/handle-lookalike::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `handle-lookalike`"
-            " value for this argument position; the client cannot encode it onto the"
-            " wire and raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/handle-lookalike::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `handle-lookalike` value fails to encode onto the wire before the"
-            " call dispatches, so the client bills 0 FLOPs where in-process the call"
-            " ran and billed a nonzero amount (or vice versa when the value encodes but"
-            " the in-process side rejects it first)."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4420,12 +4172,10 @@ ENTRIES: tuple[Entry, ...] = (
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "The `np-bool` value has no clean wire encoding on the client; depending"
-            " on where it appears, the client either raises `RemoteSerializationError`"
-            " directly while encoding the argument, or reaches a different failure than"
-            " the equivalent in-process rejection (numpy either accepts the value"
-            " directly or raises its own `TypeError`/`ValueError`/`IndexError` while"
-            " in-process handles it structurally)."
+            "At list-element, in-process concatenate raises ValueError while client"
+            " argument serialization raises RemoteSerializationError. At dict-literal,"
+            " in-process numeric-only validation raises UnsupportedDtypeError while"
+            " client serialization raises RemoteSerializationError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4653,12 +4403,10 @@ ENTRIES: tuple[Entry, ...] = (
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "The `np-int64` value has no clean wire encoding on the client; depending"
-            " on where it appears, the client either raises `RemoteSerializationError`"
-            " directly while encoding the argument, or reaches a different failure than"
-            " the equivalent in-process rejection (numpy either accepts the value"
-            " directly or raises its own `TypeError`/`ValueError`/`IndexError` while"
-            " in-process handles it structurally)."
+            "At list-element, in-process concatenate raises ValueError while client"
+            " argument serialization raises RemoteSerializationError. At dict-literal,"
+            " in-process numeric-only validation raises UnsupportedDtypeError while"
+            " client serialization raises RemoteSerializationError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4788,12 +4536,11 @@ ENTRIES: tuple[Entry, ...] = (
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "The `range` value has no clean wire encoding on the client; depending on"
-            " where it appears, the client either raises `RemoteSerializationError`"
-            " directly while encoding the argument, or reaches a different failure than"
-            " the equivalent in-process rejection (numpy either accepts the value"
-            " directly or raises its own `TypeError`/`ValueError`/`IndexError` while"
-            " in-process handles it structurally)."
+            "At positional, keyword, and second-positional, in-process broadcasting"
+            " raises ValueError while client argument serialization raises"
+            " RemoteSerializationError. At dict-literal, in-process numeric-only"
+            " validation raises UnsupportedDtypeError while client serialization raises"
+            " RemoteSerializationError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4847,18 +4594,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/remote-array::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `remote-array` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/set::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -4884,63 +4619,14 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/set::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `set` value for"
-            " this argument position; the client cannot encode it onto the wire and"
-            " raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/set::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `set` value fails to encode onto the wire before the call dispatches,"
-            " so the client bills 0 FLOPs where in-process the call ran and billed a"
-            " nonzero amount (or vice versa when the value encodes but the in-process"
-            " side rejects it first)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/slice-object::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "The `slice-object` value has no clean wire encoding on the client;"
-            " depending on where it appears, the client either raises"
-            " `RemoteSerializationError` directly while encoding the argument, or"
-            " reaches a different failure than the equivalent in-process rejection"
-            " (numpy either accepts the value directly or raises its own"
-            " `TypeError`/`ValueError`/`IndexError` while in-process handles it"
-            " structurally)."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/slice-object::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "In-process, numpy accepts or structurally handles the `slice-object`"
-            " value for this argument position; the client cannot encode it onto the"
-            " wire and raises instead."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/slice-object::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `slice-object` value fails to encode onto the wire before the call"
-            " dispatches, so the client bills 0 FLOPs where in-process the call ran and"
-            " billed a nonzero amount (or vice versa when the value encodes but the in-"
-            " process side rejects it first)."
+            "At all six matched positions (the positional, keyword, list-element,"
+            " second-positional, dict-literal, and constructor cases), in-process"
+            " numeric-only validation raises UnsupportedDtypeError while client"
+            " argument serialization raises RemoteSerializationError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -4967,56 +4653,6 @@ ENTRIES: tuple[Entry, ...] = (
             "The `uint64-max` value has no clean wire encoding on the client, so the"
             " exception it raises there has a different base-class chain than the"
             " concrete in-process exception."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/bytearray::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `bytearray` value's wire encoding is inconsistent by argument"
-            " position: some positions raise `ValueError` in-process against"
-            " `FlopscopeServerError` on the client, others raise `TypeError` in-process"
-            " against `ValueError` on the client - the client never reproduces the"
-            " concrete in-process exception for this value."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/bytearray::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `bytearray` value's wire encoding is inconsistent by argument"
-            " position: where it fails to encode at all the client bills 0 against a"
-            " nonzero in-process cost; where it does encode (list-element) the client"
-            " bills one FLOP less than in-process for the same call."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/memoryview::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `memoryview` value's wire encoding is inconsistent by argument"
-            " position: some positions raise `ValueError` in-process against"
-            " `FlopscopeServerError` on the client, others raise `TypeError` in-process"
-            " against `ValueError` on the client - the client never reproduces the"
-            " concrete in-process exception for this value."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/memoryview::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `memoryview` value's wire encoding is inconsistent by argument"
-            " position: where it fails to encode at all the client bills 0 against a"
-            " nonzero in-process cost; where it does encode (list-element) the client"
-            " bills one FLOP less than in-process for the same call."
         ),
         issue="INTERNAL-P2-family-4",
     ),
@@ -5188,17 +4824,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-3",
     ),
     Entry(
-        case_id="idiom/handle-lookalike-string",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`fnp.sum('a0')` bills 1 FLOP in-process before rejecting the string; the"
-            " client's handle-lookalike sniffing rejects it before billing anything (0"
-            " FLOPs)."
-        ),
-        issue="INTERNAL-P5-family-3",
-    ),
-    Entry(
         case_id="idiom/complex-scalar-mul",
         dimension="outcome",
         category=Category.KNOWN_BUG,
@@ -5307,18 +4932,6 @@ ENTRIES: tuple[Entry, ...] = (
             " chain."
         ),
         issue="INTERNAL-P5-family-7",
-    ),
-    Entry(
-        case_id="idiom/string-array-read",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`fnp.asarray(['foo', 'bar']).tolist()` succeeds in-process; the client"
-            " cannot decode the string array's dtype and raises instead. Family 8"
-            " (undecodable dtypes) has no phase assigned in the mapping provided for"
-            " this task, so this is filed as unclassified."
-        ),
-        issue="INTERNAL-P5-unclassified",
     ),
     Entry(
         case_id="idiom/fft-rfft",
@@ -5517,30 +5130,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-unclassified",
     ),
     Entry(
-        case_id="types/memoryview::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `memoryview` value's wire encoding is inconsistent by argument"
-            " position: in-process it is always accepted, while the client rejects it"
-            " outright in some positions (`index-key`, `list-element`) and accepts it"
-            " in others."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/bytearray::*",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The `bytearray` value's wire encoding is inconsistent by argument"
-            " position: in-process it is always accepted, while the client rejects it"
-            " outright in some positions (`index-key`, `list-element`) and accepts it"
-            " in others."
-        ),
-        issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
         case_id="types/remote-scalar::index-key",
         dimension="outcome",
         category=Category.KNOWN_BUG,
@@ -5556,75 +5145,495 @@ ENTRIES: tuple[Entry, ...] = (
         dimension="exc_type",
         category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.multiply(V, {'k': V[0]})` (a remote scalar nested in a dict literal)"
-            " raises `TypeError` in-process; the client's argument encoder does not"
-            " recurse into `dict` values the way it does for `list`/`tuple`, so it"
-            " raises `RemoteSerializationError` while trying to encode the dict itself."
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception type diverges."
         ),
-        issue="INTERNAL-P2-family-4",
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/range::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception hierarchy diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception hierarchy diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::keyword",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::list-element",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::second-positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/slice-object::constructor",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::keyword",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::list-element",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::second-positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/ellipsis::constructor",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
     ),
     Entry(
         case_id="types/remote-scalar::dict-literal",
-        dimension="flops",
+        dimension="exc_bases",
         category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.multiply(V, {'k': V[0]})` bills 6 FLOPs in-process before rejecting"
-            " the dict argument; the client's encoder rejects the dict before billing"
-            " anything (0 FLOPs)."
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception hierarchy diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/np-int64::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/np-bool::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The remote argument path raises a serialization error where the in-process numeric-dtype policy raises a TypeError subclass; the transport contract does not preserve the authoritative exception hierarchy."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::keyword",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::second-positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::keyword",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::second-positional",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The wire representation of this buffer reaches a different validation path than the in-process value, so the two backends expose different exception hierarchies; serialization and remote validation need one contract."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/int-enum::dict-literal",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception type diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/int-enum::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception hierarchy diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/nested-list::dict-literal",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception type diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/nested-list::dict-literal",
+        dimension="exc_bases",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "The server pre-dispatch unresolved-dict refusal returns plain TypeError,"
+            " while in-process numeric-only validation raises UnsupportedDtypeError"
+            " (a TypeError subclass), so the remote exception hierarchy diverges."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::positional",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at positional, in-process broadcasting raises ValueError; "
+            "the wire converts the buffer to bytes, so client numeric-only validation "
+            "sees a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::keyword",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at keyword, in-process broadcasting raises ValueError; the "
+            "wire converts the buffer to bytes, so client numeric-only validation sees "
+            "a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::second-positional",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at second-positional, in-process broadcasting raises "
+            "ValueError; the wire converts the buffer to bytes, so client numeric-only "
+            "validation sees a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::slice-bound",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at slice-bound, in-process slice validation raises "
+            "TypeError; the wire sends the buffer bytes and client integer decoding "
+            "raises ValueError."
         ),
         issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="types/bytes::constructor",
-        dimension="outcome",
-        category=Category.ACCEPTED_DIVERGENCE,
+        case_id="types/memoryview::dict-literal",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.asarray(b'\\x01\\x02')` produces an in-process array with a"
-            " byte-string dtype (`|S2`). The client has no decodable"
-            " representation for string/byte-string dtypes, so the server refuses"
-            " to mint a handle for it rather than returning one the client could"
-            " not read back - a deliberate choice, consistent with the client's"
-            " own `array()` already rejecting `bytes`/`str` inputs outright."
+            "For memoryview at dict-literal, the server pre-dispatch unresolved-dict "
+            "refusal returns plain TypeError while in-process numeric-only validation "
+            "raises UnsupportedDtypeError."
         ),
-        issue="INTERNAL-P5-dtype-representation",
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
     ),
     Entry(
-        case_id="types/dict::constructor",
-        dimension="outcome",
-        category=Category.ACCEPTED_DIVERGENCE,
+        case_id="types/memoryview::list-element",
+        dimension="flops",
+        category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.asarray({'k': 1})` produces an in-process array with `object`"
-            " dtype. The client has no decodable representation for `object`"
-            " dtype, so the server refuses to mint a handle for it rather than"
-            " returning one the client could not read back - a deliberate choice."
+            "For memoryview at list-element, in-process concatenate returns and bills 8 "
+            "FLOPs; client numeric-only validation rejects the wire bytes with "
+            "UnsupportedDtypeError before billing, so the client bills 0."
         ),
-        issue="INTERNAL-P5-dtype-representation",
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
     ),
     Entry(
-        case_id="types/dict::second-positional",
-        dimension="outcome",
-        category=Category.ACCEPTED_DIVERGENCE,
+        case_id="types/memoryview::index-key",
+        dimension="flops",
+        category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.where(M, {'k': 1}, 0.0)` produces an in-process array with"
-            " `object` dtype (from mixing a `dict` operand into the result). The"
-            " client has no decodable representation for `object` dtype, so the"
-            " server refuses to mint a handle for it rather than returning one the"
-            " client could not read back - a deliberate choice."
+            "For memoryview at index-key, in-process indexing returns two values and "
+            "bills 8 FLOPs; server indexing raises IndexError (surfaced as "
+            "FlopscopeServerError) before client billing, so the client bills 0."
         ),
-        issue="INTERNAL-P5-dtype-representation",
+        issue="INTERNAL-P2-family-4",
     ),
     Entry(
-        case_id="grid/where::scalar-operand",
+        case_id="types/memoryview::list-element",
         dimension="outcome",
-        category=Category.ACCEPTED_DIVERGENCE,
+        category=Category.KNOWN_BUG,
         reason=(
-            "`fnp.where(V, 2.0)` (the two-argument, condition-only form) produces"
-            " an in-process array with `object` dtype. The client has no decodable"
-            " representation for `object` dtype, so the server refuses to mint a"
-            " handle for it rather than returning one the client could not read"
-            " back - a deliberate choice."
+            "For memoryview at list-element, in-process concatenate returned an array "
+            "while client numeric-only validation rejects the wire bytes with "
+            "UnsupportedDtypeError."
         ),
-        issue="INTERNAL-P5-dtype-representation",
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/memoryview::index-key",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at index-key, in-process indexing returned two values while "
+            "server indexing raises IndexError surfaced as FlopscopeServerError."
+        ),
+        issue="INTERNAL-P2-family-4",
+    ),
+    Entry(
+        case_id="types/memoryview::constructor",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For memoryview at constructor, in-process asarray returned a uint8 array "
+            "while client numeric-only validation sees the wire bytes dtype and raises "
+            "UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::positional",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at positional, in-process broadcasting raises ValueError; "
+            "the wire converts the buffer to bytes, so client numeric-only validation "
+            "sees a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::keyword",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at keyword, in-process broadcasting raises ValueError; the "
+            "wire converts the buffer to bytes, so client numeric-only validation sees "
+            "a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::second-positional",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at second-positional, in-process broadcasting raises "
+            "ValueError; the wire converts the buffer to bytes, so client numeric-only "
+            "validation sees a nonnumeric bytes dtype and raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::slice-bound",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at slice-bound, in-process slice validation raises "
+            "TypeError; the wire sends the buffer bytes and client integer decoding "
+            "raises ValueError."
+        ),
+        issue="INTERNAL-P2-family-4",
+    ),
+    Entry(
+        case_id="types/bytearray::dict-literal",
+        dimension="exc_type",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at dict-literal, the server pre-dispatch unresolved-dict "
+            "refusal returns plain TypeError while in-process numeric-only validation "
+            "raises UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::list-element",
+        dimension="flops",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at list-element, in-process concatenate returns and bills 8 "
+            "FLOPs; client numeric-only validation rejects the wire bytes with "
+            "UnsupportedDtypeError before billing, so the client bills 0."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::index-key",
+        dimension="flops",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at index-key, in-process indexing returns two values and "
+            "bills 8 FLOPs; server indexing raises IndexError (surfaced as "
+            "FlopscopeServerError) before client billing, so the client bills 0."
+        ),
+        issue="INTERNAL-P2-family-4",
+    ),
+    Entry(
+        case_id="types/bytearray::list-element",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at list-element, in-process concatenate returned an array "
+            "while client numeric-only validation rejects the wire bytes with "
+            "UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
+    ),
+    Entry(
+        case_id="types/bytearray::index-key",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at index-key, in-process indexing returned two values while "
+            "server indexing raises IndexError surfaced as FlopscopeServerError."
+        ),
+        issue="INTERNAL-P2-family-4",
+    ),
+    Entry(
+        case_id="types/bytearray::constructor",
+        dimension="outcome",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "For bytearray at constructor, in-process asarray returned a uint8 array "
+            "while client numeric-only validation sees the wire bytes dtype and raises "
+            "UnsupportedDtypeError."
+        ),
+        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
     ),
 )
 
