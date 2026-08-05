@@ -19,6 +19,7 @@ from flopscope._budget import (
     _counted_wrapper,
     get_active_budget,
 )
+from flopscope._config import get_setting
 
 
 class _NumericSleepyUfuncDuck:
@@ -45,6 +46,36 @@ class _NumericSleepyUfuncDuck:
         return getattr(ufunc, method)(*raw_inputs, **kwargs)
 
 
+class _NumericSleepyUfuncArray(np.ndarray):
+    """Foreign ndarray output whose ufunc protocol sleeps in Python."""
+
+    def __new__(cls, payload, *, sleep_s=0.04):
+        result = np.asarray(payload).view(cls)
+        result.sleep_s = sleep_s
+        result.calls = 0
+        return result
+
+    def __array_finalize__(self, original):
+        if original is not None:
+            self.sleep_s = getattr(original, "sleep_s", 0.04)
+            self.calls = getattr(original, "calls", 0)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls += 1
+        time.sleep(self.sleep_s)
+        raw_inputs = tuple(
+            np.asarray(value)
+            if isinstance(value, (flops.FlopscopeArray, _NumericSleepyUfuncArray))
+            else value
+            for value in inputs
+        )
+        if "out" in kwargs and kwargs["out"] is not None:
+            kwargs["out"] = tuple(
+                None if value is None else np.asarray(value) for value in kwargs["out"]
+            )
+        return getattr(ufunc, method)(*raw_inputs, **kwargs)
+
+
 def _run_callback_aware_add(duck):
     flops.budget_reset()
     with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
@@ -67,6 +98,63 @@ def test_numpy_protocol_callback_time_lands_in_residual_not_backend():
     result, budget = _run_callback_aware_add(duck)
 
     assert np.array_equal(result, np.array([4.0, 6.0]))
+    assert duck.calls == 1
+    summary = budget.summary_dict()
+    assert summary["residual_wall_time_s"] >= 0.03, summary
+    assert summary["flopscope_backend_time_s"] < 0.02, summary
+
+
+@pytest.mark.parametrize(
+    "op_name, make_duck, invoke",
+    [
+        (
+            "add",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: fnp.add(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "add.outer",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: np.add.outer(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "subtract.reduce",
+            lambda: _NumericSleepyUfuncArray(0.0),
+            lambda duck: np.subtract.reduce(fnp.array([3.0, 4.0]), out=duck, axis=0),
+        ),
+        (
+            "subtract.accumulate",
+            lambda: _NumericSleepyUfuncArray([0.0, 0.0]),
+            lambda duck: np.subtract.accumulate(
+                fnp.array([3.0, 4.0]), out=duck, axis=0
+            ),
+        ),
+        (
+            "add.reduceat",
+            lambda: _NumericSleepyUfuncArray([0.0, 0.0]),
+            lambda duck: np.add.reduceat(
+                fnp.array([3.0, 4.0]), [0, 1], out=duck, axis=0
+            ),
+        ),
+        (
+            "add.at",
+            lambda: _NumericSleepyUfuncDuck([3.0, 4.0]),
+            lambda duck: np.add.at(fnp.zeros(2), [0, 1], duck),
+        ),
+    ],
+)
+def test_foreign_ufunc_protocol_time_lands_in_residual(op_name, make_duck, invoke):
+    duck = make_duck()
+    flops.budget_reset()
+    previous_callback_warnings = get_setting("callback_warnings")
+    flops.configure(callback_warnings=True)
+    try:
+        with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
+            with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
+                invoke(duck)
+    finally:
+        flops.configure(callback_warnings=previous_callback_warnings)
+
     assert duck.calls == 1
     summary = budget.summary_dict()
     assert summary["residual_wall_time_s"] >= 0.03, summary

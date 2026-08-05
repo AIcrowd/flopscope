@@ -617,6 +617,36 @@ class _ProtocolDuck:
         return NotImplemented
 
 
+class _SuccessfulProtocolDuck:
+    """Protocol participant that records the raw NumPy dispatch it receives."""
+
+    def __init__(self, values, *, raises=None):
+        self.values = np.asarray(values)
+        self.raises = raises
+        self.calls = []
+
+    def __array__(self, dtype=None, copy=None):
+        return np.asarray(self.values, dtype=dtype)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls.append((ufunc.__name__, method))
+        if self.raises is not None:
+            raise self.raises
+        raw_inputs = tuple(
+            self.values
+            if value is self
+            else np.asarray(value)
+            if isinstance(value, FlopscopeArray)
+            else value
+            for value in inputs
+        )
+        if "out" in kwargs and kwargs["out"] is not None:
+            kwargs["out"] = tuple(
+                None if value is None else np.asarray(value) for value in kwargs["out"]
+            )
+        return getattr(ufunc, method)(*raw_inputs, **kwargs)
+
+
 @pytest.mark.parametrize(
     "op_name,call",
     [
@@ -647,6 +677,77 @@ def test_duck_array_ufunc_protocol_fires_matching_raw_numpy(op_name, call):
         "materialized through __array__ and numpy's dispatch protocol was "
         "bypassed"
     )
+
+
+@pytest.mark.parametrize(
+    "name, raw_call, flops_call",
+    [
+        (
+            "call",
+            lambda duck: np.add(np.array([1.0, 2.0]), duck),
+            lambda duck: fnp.add(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "outer",
+            lambda duck: np.add.outer(np.array([1.0, 2.0]), duck),
+            lambda duck: np.add.outer(fnp.array([1.0, 2.0]), duck),
+        ),
+        (
+            "reduce",
+            lambda duck: np.subtract.reduce(duck, axis=0),
+            lambda duck: np.subtract.reduce(duck, axis=0, out=fnp.zeros(())),
+        ),
+        (
+            "accumulate",
+            lambda duck: np.subtract.accumulate(duck, axis=0),
+            lambda duck: np.subtract.accumulate(duck, axis=0, out=fnp.zeros(2)),
+        ),
+        (
+            "reduceat",
+            lambda duck: np.add.reduceat(duck, [0, 1], axis=0),
+            lambda duck: np.add.reduceat(duck, [0, 1], axis=0, out=fnp.zeros(2)),
+        ),
+        (
+            "at",
+            lambda duck: np.add.at(np.zeros(2), [0, 1], duck),
+            lambda duck: np.add.at(fnp.zeros(2), [0, 1], duck),
+        ),
+    ],
+)
+def test_successful_ufunc_protocol_matches_raw_numpy_dispatch(name, raw_call, flops_call):
+    raw_duck = _SuccessfulProtocolDuck([3.0, 4.0])
+    expected = raw_call(raw_duck)
+    duck = _SuccessfulProtocolDuck([3.0, 4.0])
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        actual = flops_call(duck)
+
+    assert duck.calls == raw_duck.calls == [
+        ("add" if name not in {"reduce", "accumulate"} else "subtract", name if name != "call" else "__call__")
+    ]
+    if expected is not None:
+        np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda duck: fnp.add(fnp.array([1.0, 2.0]), duck),
+        lambda duck: np.add.outer(fnp.array([1.0, 2.0]), duck),
+        lambda duck: np.subtract.reduce(duck, axis=0, out=fnp.zeros(())),
+        lambda duck: np.subtract.accumulate(duck, axis=0, out=fnp.zeros(2)),
+        lambda duck: np.add.reduceat(duck, [0, 1], axis=0, out=fnp.zeros(2)),
+        lambda duck: np.add.at(fnp.zeros(2), [0, 1], duck),
+    ],
+    ids=["call", "outer", "reduce", "accumulate", "reduceat", "at"],
+)
+def test_ufunc_protocol_exception_identity_matches_raw_numpy(call):
+    error = RuntimeError("protocol boom")
+    duck = _SuccessfulProtocolDuck([3.0, 4.0], raises=error)
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        with pytest.raises(RuntimeError) as raised:
+            call(duck)
+    assert raised.value is error
+    assert len(duck.calls) == 1
 
 
 @pytest.mark.parametrize(

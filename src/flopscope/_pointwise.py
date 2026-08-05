@@ -15,7 +15,11 @@ from numpy.exceptions import AxisError as _AxisError
 from numpy.typing import ArrayLike
 
 from flopscope._accumulation._cost import contraction_complex_override
-from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._budget import (
+    _call_numpy,
+    _call_numpy_with_python_callbacks,
+    _counted_wrapper,
+)
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
@@ -61,6 +65,7 @@ from flopscope.errors import (
     CostFallbackWarning,
     SymmetryError,
     UnsupportedFunctionError,
+    _warn_remote_callback,
     _warn_symmetry_loss,
 )
 
@@ -473,12 +478,35 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
     return _builtins.max(int(dense_cost) * int(unique) // dense_output, 1)
 
 
+def _has_foreign_array_ufunc(value) -> bool:
+    """Whether *value* can dispatch a raw ufunc call to foreign Python code."""
+    if isinstance(value, (tuple, list)):
+        return _builtins.any(_has_foreign_array_ufunc(item) for item in value)
+    if isinstance(value, FlopscopeArray):
+        return False
+    implementation = getattr(type(value), "__array_ufunc__", None)
+    return implementation is not None and implementation is not _np.ndarray.__array_ufunc__
+
+
+def _call_ufunc_with_protocol_timing(
+    op_name, fn, *args, protocol_operands=(), **kwargs
+):
+    """Call a ufunc, attributing foreign protocol callbacks to residual time."""
+    if _builtins.any(
+        _has_foreign_array_ufunc(value) for value in protocol_operands
+    ):
+        _warn_remote_callback(op_name)
+        return _call_numpy_with_python_callbacks(fn, *args, **kwargs)
+    return _call_numpy(fn, *args, **kwargs)
+
+
 def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwargs):
     # Strip flopscope subclasses (FlopscopeArray / SymmetricTensor) from arrays so
     # the raw NumPy call does not re-dispatch through ``__array_ufunc__`` /
     # ``__array_function__`` and recurse infinitely. Python scalars and
     # other non-array values pass through unchanged so NEP 50 weak-typing
     # rules continue to apply at the NumPy boundary.
+    protocol_operands = (*args, out)
     args = tuple(_to_base_ndarray(a) for a in args)
     # ``where=`` kwarg may be a FlopscopeArray bool mask; strip it. Other
     # array-valued kwargs (e.g. ``axes`` lists for matmul / einsum
@@ -492,8 +520,25 @@ def _call_with_optional_out(np_func, *args, out=None, supports_out=False, **kwar
     _require_ndarray_out(out, getattr(np_func, "__name__", "op"))
     out_stripped = _to_base_ndarray(out) if out is not None else None
     if out is None:
+        if isinstance(np_func, _np.ufunc):
+            return _call_ufunc_with_protocol_timing(
+                np_func.__name__,
+                np_func,
+                *args,
+                protocol_operands=protocol_operands,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, **kwargs)
     if supports_out:
+        if isinstance(np_func, _np.ufunc):
+            return _call_ufunc_with_protocol_timing(
+                np_func.__name__,
+                np_func,
+                *args,
+                out=out_stripped,
+                protocol_operands=protocol_operands,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, out=out_stripped, **kwargs)
     result = _call_numpy(np_func, *args, **kwargs)
     # Fallback copy when np_func doesn't natively support out=. This is
@@ -517,6 +562,7 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
     slots are filled with the freshly-allocated plain ndarray that numpy
     returned.
     """
+    protocol_operands = (*args, out)
     args = tuple(_to_base_ndarray(a) for a in args)
     for k, v in list(kwargs.items()):
         if isinstance(v, _np.ndarray):
@@ -524,6 +570,14 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
         elif isinstance(v, (tuple, list)):
             kwargs[k] = _to_base_ndarray_tree(v)
     if out is None:
+        if isinstance(np_func, _np.ufunc):
+            return _call_ufunc_with_protocol_timing(
+                np_func.__name__,
+                np_func,
+                *args,
+                protocol_operands=protocol_operands,
+                **kwargs,
+            )
         return _call_numpy(np_func, *args, **kwargs)
     if not isinstance(out, tuple) or len(out) != nout:
         length_repr = len(out) if hasattr(out, "__len__") else "?"
@@ -533,7 +587,17 @@ def _call_with_optional_multi_out(np_func, *args, out=None, nout, **kwargs):
             f"{type(out).__name__} of length {length_repr}"
         )
     stripped = tuple(_to_base_ndarray(o) if o is not None else None for o in out)
-    result = _call_numpy(np_func, *args, out=stripped, **kwargs)
+    if isinstance(np_func, _np.ufunc):
+        result = _call_ufunc_with_protocol_timing(
+            np_func.__name__,
+            np_func,
+            *args,
+            out=stripped,
+            protocol_operands=protocol_operands,
+            **kwargs,
+        )
+    else:
+        result = _call_numpy(np_func, *args, out=stripped, **kwargs)
     # Numpy returns a tuple of the stripped buffers (or fresh allocations
     # for None slots). Replace each non-None slot with the caller's
     # original to preserve object identity.
@@ -1407,11 +1471,13 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         shapes=(a_view.shape, b_view.shape),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(
+        result = _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.outer",
             ufunc.outer,
             a_fwd,
             b_fwd,
             out=out_fwd,
+            protocol_operands=(a_fwd, b_fwd, out_fwd),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=out_sym)
@@ -1570,12 +1636,14 @@ def _counted_ufunc_reduce_generic(
         shapes=(a_view.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(
+        result = _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.reduce",
             ufunc.reduce,
             a_fwd,
             axis=axis,
             out=_to_base_ndarray(out) if out is not None else None,
             keepdims=keepdims,
+            protocol_operands=(a_fwd, out),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=out_sym)
@@ -1666,11 +1734,13 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
         shapes=(a_view.shape,),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(
+        result = _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.accumulate",
             ufunc.accumulate,
             a_fwd,
             axis=axis,
             out=_to_base_ndarray(out) if out is not None else None,
+            protocol_operands=(a_fwd, out),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=out_sym)
@@ -2000,12 +2070,14 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         # form ``_resolve_reduceat_axis`` cannot pin down already raised,
         # above, before reaching this point -- there is no fallback to the
         # original ``axis`` object left to guard here.
-        result = _call_numpy(
+        result = _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.reduceat",
             ufunc.reduceat,
             a_fwd,
             indices_snapshot,
             axis=resolved_axis,
             out=out_fwd,
+            protocol_operands=(a_fwd, out_fwd),
             **kwargs,
         )
     return _wrap_result(result, out=out, symmetry=None)
@@ -2361,11 +2433,13 @@ def _counted_ufunc_at(ufunc, a, indices, *args, **kwargs):
         # a plain alias of a tagged buffer reaches it, which is exactly the case
         # a guard on tagged arrays cannot cover.
         note_write(_to_base_ndarray(a) if isinstance(a, _np.ndarray) else a)
-        _call_numpy(
+        _call_ufunc_with_protocol_timing(
+            f"{ufunc.__name__}.at",
             ufunc.at,
             _to_base_ndarray(a),
             canonical,
             *forward_args,
+            protocol_operands=(a, *forward_args),
             **kwargs,
         )
     return None  # numpy's ufunc.at returns None (mutation is the side effect)
