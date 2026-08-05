@@ -52,21 +52,6 @@ class _NumericUfuncDuck:
         return getattr(ufunc, method)(*inputs, **kwargs)
 
 
-class _ForeignMaskDuck:
-    """Array-like mask that participates in a ufunc protocol call."""
-
-    def __init__(self):
-        self.calls = 0
-
-    def __array__(self, dtype=None, copy=None):
-        return np.asarray([True, False], dtype=dtype)
-
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        self.calls += 1
-        kwargs["where"] = np.asarray(self)
-        return getattr(ufunc, method)(*inputs, **kwargs)
-
-
 class _ForeignIndexArray(np.ndarray):
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         raise AssertionError("indices must not dispatch __array_ufunc__")
@@ -192,17 +177,6 @@ def test_non_foreign_ufunc_protocol_operands_do_not_warn(operand, expect_error):
             else:
                 with pytest.raises(expect_error):
                     fnp.add(fnp.array([1.0, 2.0]), operand)
-
-
-def test_where_protocol_warns_and_dispatches_once():
-    mask = _ForeignMaskDuck()
-    with flops.BudgetContext(flop_budget=10**9):
-        with pytest.warns(RemoteCallbackWarning, match=r"^add\(\)"):
-            result = fnp.add(
-                fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=mask
-            )
-    assert result[0] == 4.0
-    assert mask.calls == 1
 
 
 def test_at_indices_protocol_is_not_treated_as_a_ufunc_callback_operand():

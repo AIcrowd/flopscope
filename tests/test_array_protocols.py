@@ -10,6 +10,8 @@ Translated against post-PR-#51 unified SymmetryGroup API.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import numpy.ma as ma
 import pytest
@@ -648,14 +650,13 @@ class _SuccessfulProtocolDuck:
 
 
 class _UnaryProtocolDuck:
-    """Unary protocol participant with both NumPy dispatch mechanisms."""
+    """Unary ufunc protocol participant."""
 
     def __init__(self, values, *, raises=None, decline=False):
         self.values = np.asarray(values)
         self.raises = raises
         self.decline = decline
         self.ufunc_calls = []
-        self.function_calls = []
 
     def __array__(self, dtype=None, copy=None):
         return np.asarray(self.values, dtype=dtype)
@@ -668,13 +669,6 @@ class _UnaryProtocolDuck:
             return NotImplemented
         inputs = tuple(self.values if value is self else value for value in inputs)
         return getattr(ufunc, method)(*inputs, **kwargs)
-
-    def __array_function__(self, function, types, args, kwargs):
-        self.function_calls.append(function.__name__)
-        if function is np.real:
-            return np.real(self.values)
-        return NotImplemented
-
 
 class _StatefulProtocolMeta(type):
     protocol_lookups = 0
@@ -720,80 +714,8 @@ class _NonNdarrayUfuncOptOut(metaclass=_OptOutProtocolMeta):
         raise AssertionError("__array__ must not be called for a ufunc opt-out")
 
 
-class _NonUfuncDispatcherOptOut:
-    """Object accepted by NumPy's non-ufunc array-dispatch helpers."""
-
-    __array_ufunc__ = None
-
-    def __init__(self, values):
-        self.values = np.asarray(values)
-        self.array_calls = 0
-
-    def __array__(self, dtype=None, copy=None):
-        self.array_calls += 1
-        return np.asarray(self.values, dtype=dtype)
-
-
-class _StatefulNonUfuncDispatcherOptOut:
-    """Array-like whose second conversion exposes accidental re-resolution."""
-
-    __array_ufunc__ = None
-
-    def __init__(self):
-        self.array_calls = 0
-
-    def __array__(self, dtype=None, copy=None):
-        values = ([1.5, -2.5], [99.5])[
-            min(self.array_calls, 1)
-        ]
-        self.array_calls += 1
-        return np.asarray(values, dtype=dtype)
-
-
-class _NonUfuncArrayFunctionSentinel:
-    """NEP 18 participant that must be dispatched before materialization."""
-
-    def __init__(self, sentinel):
-        self.sentinel = sentinel
-        self.array_calls = 0
-        self.function_calls = []
-
-    def __array__(self, dtype=None, copy=None):
-        self.array_calls += 1
-        raise AssertionError("__array__ must not precede __array_function__")
-
-    def __array_function__(self, function, types, args, kwargs):
-        self.function_calls.append(function.__name__)
-        return self.sentinel
-
-
-class _NdarrayArrayFunctionSentinel(np.ndarray):
-    """ndarray subclass whose NEP 18 override must take precedence."""
-
-    def __new__(cls, sentinel):
-        value = np.asarray([1.5, -2.5]).view(cls)
-        value.sentinel = sentinel
-        value.array_calls = 0
-        value.function_calls = []
-        return value
-
-    def __array_finalize__(self, source):
-        if source is not None:
-            self.sentinel = getattr(source, "sentinel", None)
-            self.array_calls = getattr(source, "array_calls", 0)
-            self.function_calls = getattr(source, "function_calls", [])
-
-    def __array__(self, dtype=None, copy=None):
-        self.array_calls += 1
-        return np.ndarray.__array__(self, dtype=dtype, copy=copy)
-
-    def __array_function__(self, function, types, args, kwargs):
-        self.function_calls.append(function.__name__)
-        return self.sentinel
-
-
 class _NdarrayUfuncOptOut(np.ndarray):
-    __array_ufunc__ = None
+    __array_ufunc__ = None  # pyright: ignore[reportAssignmentType]
 
 
 class _RawReturnUfuncDuck:
@@ -857,163 +779,6 @@ def test_non_ndarray_ufunc_opt_out_matches_raw_numpy_without_materializing(
 
 
 @pytest.mark.parametrize(
-    "raw_call, flops_call, flops_array_calls",
-    [
-        (lambda value: np.real(value), lambda value: fnp.real(value), 1),
-        (lambda value: np.angle(value), lambda value: fnp.angle(value), 1),
-        (lambda value: np.nan_to_num(value), lambda value: fnp.nan_to_num(value), 1),
-        (lambda value: np.around(value), lambda value: fnp.around(value), 1),
-        (lambda value: np.round(value), lambda value: fnp.round(value), 1),
-    ],
-)
-def test_non_ufunc_dispatchers_materialize_ufunc_opt_out(
-    raw_call, flops_call, flops_array_calls
-):
-    raw_value = _NonUfuncDispatcherOptOut([1.5, -2.5])
-    expected = raw_call(raw_value)
-
-    value = _NonUfuncDispatcherOptOut([1.5, -2.5])
-    with flops.BudgetContext(flop_budget=int(1e10)):
-        actual = flops_call(value)
-
-    np.testing.assert_array_equal(np.asarray(actual), expected)
-    assert raw_value.array_calls == 1
-    assert value.array_calls == flops_array_calls
-
-
-@pytest.mark.parametrize(
-    "raw_call, flops_call",
-    [
-        (lambda value: np.around(value), lambda value: fnp.around(value)),
-        (lambda value: np.round(value), lambda value: fnp.round(value)),
-    ],
-)
-def test_round_dispatchers_materialize_stateful_array_like_once(raw_call, flops_call):
-    raw_value = _StatefulNonUfuncDispatcherOptOut()
-    expected = raw_call(raw_value)
-
-    value = _StatefulNonUfuncDispatcherOptOut()
-    with flops.BudgetContext(flop_budget=int(1e10)):
-        actual = flops_call(value)
-
-    np.testing.assert_array_equal(np.asarray(actual), expected)
-    assert raw_value.array_calls == value.array_calls == 1
-
-
-@pytest.mark.parametrize(
-    "expected_function, raw_call, flops_call, value_factory",
-    [
-        (
-            "real",
-            lambda value: np.real(value),
-            lambda value: fnp.real(value),
-            _NonUfuncArrayFunctionSentinel,
-        ),
-        (
-            "real",
-            lambda value: np.real(value),
-            lambda value: fnp.real(value),
-            _NdarrayArrayFunctionSentinel,
-        ),
-        (
-            "angle",
-            lambda value: np.angle(value),
-            lambda value: fnp.angle(value),
-            _NonUfuncArrayFunctionSentinel,
-        ),
-        (
-            "angle",
-            lambda value: np.angle(value),
-            lambda value: fnp.angle(value),
-            _NdarrayArrayFunctionSentinel,
-        ),
-        (
-            "nan_to_num",
-            lambda value: np.nan_to_num(value),
-            lambda value: fnp.nan_to_num(value),
-            _NonUfuncArrayFunctionSentinel,
-        ),
-        (
-            "nan_to_num",
-            lambda value: np.nan_to_num(value),
-            lambda value: fnp.nan_to_num(value),
-            _NdarrayArrayFunctionSentinel,
-        ),
-        (
-            "around",
-            lambda value: np.around(value),
-            lambda value: fnp.around(value),
-            _NonUfuncArrayFunctionSentinel,
-        ),
-        (
-            "around",
-            lambda value: np.around(value),
-            lambda value: fnp.around(value),
-            _NdarrayArrayFunctionSentinel,
-        ),
-        (
-            "round",
-            lambda value: np.round(value),
-            lambda value: fnp.round(value),
-            _NonUfuncArrayFunctionSentinel,
-        ),
-        (
-            "round",
-            lambda value: np.round(value),
-            lambda value: fnp.round(value),
-            _NdarrayArrayFunctionSentinel,
-        ),
-    ],
-)
-def test_non_ufunc_dispatchers_forward_array_function_before_materializing(
-    expected_function, raw_call, flops_call, value_factory
-):
-    raw_sentinel = object()
-    raw_value = value_factory(raw_sentinel)
-    assert raw_call(raw_value) is raw_sentinel
-
-    sentinel = object()
-    value = value_factory(sentinel)
-    with flops.BudgetContext(flop_budget=int(1e10)):
-        actual = flops_call(value)
-
-    assert actual is sentinel
-    assert raw_value.function_calls == value.function_calls == [expected_function]
-    assert raw_value.array_calls == value.array_calls == 0
-
-
-@pytest.mark.parametrize(
-    "raw_call, flops_call",
-    [
-        (lambda value: np.real(value), lambda value: fnp.real(value)),
-        (lambda value: np.angle(value), lambda value: fnp.angle(value)),
-        (lambda value: np.nan_to_num(value), lambda value: fnp.nan_to_num(value)),
-        (lambda value: np.around(value), lambda value: fnp.around(value)),
-        (lambda value: np.round(value), lambda value: fnp.round(value)),
-    ],
-)
-@pytest.mark.parametrize(
-    "value_factory",
-    [
-        lambda: np.asarray([1.5, -2.5]),
-        lambda: fnp.asarray([1.5, -2.5]),
-        lambda: _NonUfuncDispatcherOptOut([1.5, -2.5]),
-    ],
-)
-def test_non_ufunc_dispatchers_wrap_nonparticipants(
-    raw_call, flops_call, value_factory
-):
-    value = value_factory()
-    expected = raw_call(np.asarray(value))
-
-    with flops.BudgetContext(flop_budget=int(1e10)):
-        actual = flops_call(value)
-
-    assert isinstance(actual, FlopscopeArray)
-    np.testing.assert_array_equal(np.asarray(actual), expected)
-
-
-@pytest.mark.parametrize(
     "raw_call, flops_call",
     [
         (
@@ -1024,17 +789,9 @@ def test_non_ufunc_dispatchers_wrap_nonparticipants(
             lambda value: np.divmod(np.array([5.0, 6.0]), value),
             lambda value, a, _b: fnp.divmod(a, value),
         ),
-        (
-            lambda value: np.add(
-                np.array([1.0, 2.0]), np.array([3.0, 4.0]), where=value
-            ),
-            lambda value, a, b: fnp.add(a, b, where=value),
-        ),
     ],
 )
-def test_non_ndarray_ufunc_opt_out_preflights_before_billing(
-    raw_call, flops_call
-):
+def test_non_ndarray_ufunc_opt_out_preflights_before_billing(raw_call, flops_call):
     raw_value = _NonNdarrayUfuncOptOut()
     with pytest.raises(TypeError) as raw_raised:
         raw_call(raw_value)
@@ -1062,7 +819,7 @@ def test_ndarray_ufunc_opt_out_out_preflights_before_billing():
     out = fnp.zeros(2).view(_NdarrayUfuncOptOut)
     with flops.BudgetContext(flop_budget=int(1e10)) as budget:
         with pytest.raises(TypeError) as raised:
-            fnp.add(left, right, out=out)
+            fnp.add(left, right, out=out)  # pyright: ignore[reportArgumentType]
 
     assert str(raised.value) == str(raw_raised.value)
     assert budget.flops_used == 0
@@ -1108,6 +865,60 @@ def test_foreign_ufunc_return_preserves_raw_result_identity(raw_call, flops_call
 
 
 @pytest.mark.parametrize(
+    "raw_call, flops_call, make_raw_out, make_out",
+    [
+        (
+            lambda duck, out: np.negative(duck, out=out),
+            lambda duck, out: fnp.negative(duck, out=out),
+            lambda: np.zeros(2),
+            lambda: fnp.zeros(2),
+        ),
+        (
+            lambda duck, out: np.modf(duck, out=out),
+            lambda duck, out: fnp.modf(duck, out=out),
+            lambda: (np.zeros(2), np.zeros(2)),
+            lambda: (fnp.zeros(2), fnp.zeros(2)),
+        ),
+    ],
+)
+def test_foreign_ufunc_delegation_preserves_flopscope_out_identity(
+    raw_call, flops_call, make_raw_out, make_out
+):
+    raw_out = make_raw_out()
+    raw_result = raw_call(_SuccessfulProtocolDuck([1.5, -2.5]), raw_out)
+
+    out = make_out()
+    with flops.BudgetContext(flop_budget=int(1e10)):
+        result = flops_call(_SuccessfulProtocolDuck([1.5, -2.5]), out)
+
+    if isinstance(out, tuple):
+        for raw_actual, raw_destination in zip(raw_result, raw_out, strict=True):
+            assert raw_actual is raw_destination
+        for actual, destination in zip(result, out, strict=True):
+            assert actual is destination
+    else:
+        assert raw_result is raw_out
+        assert result is out
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(raw_out))
+
+
+def test_ufunc_opt_out_precedes_invalid_out_normalization():
+    invalid_out: Any = "not-an-array"
+    raw_value = _NonNdarrayUfuncOptOut()
+    with pytest.raises(TypeError) as raw_raised:
+        np.negative(raw_value, out=invalid_out)
+
+    value = _NonNdarrayUfuncOptOut()
+    with flops.BudgetContext(flop_budget=int(1e10)) as budget:
+        with pytest.raises(TypeError) as raised:
+            fnp.negative(value, out=invalid_out)
+
+    assert str(raised.value) == str(raw_raised.value)
+    assert value.array_calls == raw_value.array_calls == 0
+    assert budget.flops_used == 0
+
+
+@pytest.mark.parametrize(
     "name, raw_call, flops_call, expected_protocol",
     [
         (
@@ -1141,17 +952,6 @@ def test_unary_ufunc_protocol_matches_raw_numpy(
         np.testing.assert_array_equal(actual, expected)
 
 
-def test_free_unary_protocol_matches_raw_numpy():
-    raw_duck = _UnaryProtocolDuck([1.0 + 2.0j])
-    expected = np.real(raw_duck)
-    duck = _UnaryProtocolDuck([1.0 + 2.0j])
-    with flops.BudgetContext(flop_budget=int(1e10)):
-        actual = fnp.real(duck)
-
-    assert raw_duck.function_calls == duck.function_calls == ["real"]
-    np.testing.assert_array_equal(actual, expected)
-
-
 @pytest.mark.parametrize(
     "raw_call, flops_call",
     [
@@ -1175,7 +975,9 @@ def test_unary_ufunc_protocol_exception_identity_matches_raw_numpy(
     assert raw_duck.ufunc_calls == duck.ufunc_calls
 
 
-@pytest.mark.parametrize("call", [lambda duck: fnp.negative(duck), lambda duck: fnp.modf(duck)])
+@pytest.mark.parametrize(
+    "call", [lambda duck: fnp.negative(duck), lambda duck: fnp.modf(duck)]
+)
 def test_unary_ufunc_protocol_notimplemented_matches_raw_numpy(call):
     raw_duck = _UnaryProtocolDuck([1.5, -2.5], decline=True)
     with pytest.raises(TypeError):
@@ -1255,16 +1057,25 @@ def test_duck_array_ufunc_protocol_fires_matching_raw_numpy(op_name, call):
         ),
     ],
 )
-def test_successful_ufunc_protocol_matches_raw_numpy_dispatch(name, raw_call, flops_call):
+def test_successful_ufunc_protocol_matches_raw_numpy_dispatch(
+    name, raw_call, flops_call
+):
     raw_duck = _SuccessfulProtocolDuck([3.0, 4.0])
     expected = raw_call(raw_duck)
     duck = _SuccessfulProtocolDuck([3.0, 4.0])
     with flops.BudgetContext(flop_budget=int(1e10)):
         actual = flops_call(duck)
 
-    assert duck.calls == raw_duck.calls == [
-        ("add" if name not in {"reduce", "accumulate"} else "subtract", name if name != "call" else "__call__")
-    ]
+    assert (
+        duck.calls
+        == raw_duck.calls
+        == [
+            (
+                "add" if name not in {"reduce", "accumulate"} else "subtract",
+                name if name != "call" else "__call__",
+            )
+        ]
+    )
     if expected is not None:
         np.testing.assert_array_equal(actual, expected)
 

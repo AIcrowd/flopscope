@@ -46,16 +46,6 @@ class _NumericSleepyUfuncDuck:
         return getattr(ufunc, method)(*raw_inputs, **kwargs)
 
 
-class _SleepyWhereUfuncDuck(_NumericSleepyUfuncDuck):
-    """A slow ufunc participant supplied through the top-level ``where=``."""
-
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        self.calls += 1
-        time.sleep(self.sleep_s)
-        kwargs["where"] = self.payload
-        return getattr(ufunc, method)(*inputs, **kwargs)
-
-
 class _NumericSleepyUfuncArray(np.ndarray):
     """Foreign ndarray output whose ufunc protocol sleeps in Python."""
 
@@ -191,42 +181,6 @@ def test_unary_ufunc_protocol_time_lands_in_residual(op_name, invoke):
     assert summary["flopscope_backend_time_s"] < 0.02, summary
 
 
-@pytest.mark.parametrize(
-    "op_name, invoke",
-    [
-        (
-            "add",
-            lambda duck: fnp.add(
-                fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=duck
-            ),
-        ),
-        (
-            "add.outer",
-            lambda duck: np.add.outer(
-                fnp.array([1.0, 2.0]), fnp.array([3.0, 4.0]), where=duck
-            ),
-        ),
-        (
-            "subtract.reduce",
-            lambda duck: np.subtract.reduce(
-                fnp.array([3.0, 4.0]), where=duck, initial=0
-            ),
-        ),
-    ],
-)
-def test_where_ufunc_protocol_time_lands_in_residual(op_name, invoke):
-    duck = _SleepyWhereUfuncDuck([True, False])
-    flops.budget_reset()
-    with flops.BudgetContext(flop_budget=10**6, quiet=True) as budget:
-        with pytest.warns(flops.errors.RemoteCallbackWarning, match=op_name):
-            invoke(duck)
-
-    assert duck.calls == 1
-    summary = budget.summary_dict()
-    assert summary["residual_wall_time_s"] >= 0.03, summary
-    assert summary["flopscope_backend_time_s"] < 0.02, summary
-
-
 def test_numpy_protocol_callback_chains_and_restores_existing_profile_hook():
     duck = _NumericSleepyUfuncDuck([3.0, 4.0], sleep_s=0.0)
     events = []
@@ -252,7 +206,9 @@ def test_callback_helper_skips_non_callable_existing_profiler(monkeypatch):
     setprofile_calls = []
     monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
     monkeypatch.setattr(
-        budget_module._sys, "setprofile", lambda profile: setprofile_calls.append(profile)
+        budget_module._sys,
+        "setprofile",
+        lambda profile: setprofile_calls.append(profile),
     )
 
     flops.budget_reset()
@@ -353,7 +309,9 @@ def test_non_callable_profiler_fallback_excludes_already_classified_work(
     setprofile_calls = []
     monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
     monkeypatch.setattr(
-        budget_module._sys, "setprofile", lambda profile: setprofile_calls.append(profile)
+        budget_module._sys,
+        "setprofile",
+        lambda profile: setprofile_calls.append(profile),
     )
 
     result, budget = _run_cprofiler_fallback_case(kind)
@@ -469,9 +427,7 @@ def test_numpy_protocol_callback_reclaims_profile_after_prior_hook_mutation(
     def prior_profile(frame, event, arg):
         if event == "call" and frame.f_code.co_name == "__array_ufunc__":
             mutations.append(event)
-            sys.setprofile(
-                None if replacement_kind == "none" else replacement_profile
-            )
+            sys.setprofile(None if replacement_kind == "none" else replacement_profile)
 
     original_profile = sys.getprofile()
     sys.setprofile(prior_profile)
@@ -530,9 +486,7 @@ def test_numpy_protocol_callback_exception_stays_residual_and_propagates():
             dtypes=(np.float64,),
         ):
             with pytest.raises(RuntimeError, match="protocol boom") as raised:
-                _call_numpy_with_python_callbacks(
-                    np.add, np.array([1.0, 2.0]), duck
-                )
+                _call_numpy_with_python_callbacks(np.add, np.array([1.0, 2.0]), duck)
 
     assert raised.value is error
     assert duck.calls == 1
