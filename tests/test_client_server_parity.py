@@ -52,6 +52,55 @@ def _load_client(relative: str, alias: str) -> types.ModuleType:
     return _load_module(CLIENT_SRC / "flopscope" / relative, alias)
 
 
+def test_budget_text_formatter_matches_core() -> None:
+    canonical_mapping = {
+        "flop_budget": 100,
+        "flops_used": 7,
+        "flops_remaining": 93,
+        "operations": {
+            "add": {
+                "flop_cost": 7,
+                "calls": 1,
+                "flopscope_backend_time_s": 0.2,
+                "flopscope_overhead_time_s": 0.1,
+            }
+        },
+        "wall_time_s": 1.0,
+        "flopscope_backend_time_s": 0.2,
+        "flopscope_overhead_time_s": 0.1,
+        "residual_wall_time_s": 0.7,
+        "by_namespace": {
+            "phase": {
+                "flops_used": 7,
+                "calls": 1,
+                "flopscope_backend_time_s": 0.2,
+                "flopscope_overhead_time_s": 0.1,
+                "operations": {
+                    "add": {
+                        "flop_cost": 7,
+                        "calls": 1,
+                        "flopscope_backend_time_s": 0.2,
+                        "flopscope_overhead_time_s": 0.1,
+                    }
+                },
+            }
+        },
+    }
+    core_display = _load_core("_display.py", "_parity_core_display")
+    client_display = _load_client("_display.py", "_parity_client_display")
+    expected = core_display._format_budget_summary_text(
+        canonical_mapping,
+        by_namespace=True,
+        header="flopscope FLOP Budget Summary",
+    )
+    actual = client_display._format_budget_summary_text(
+        canonical_mapping,
+        by_namespace=True,
+        header="flopscope FLOP Budget Summary",
+    )
+    assert actual == expected
+
+
 # ---------------------------------------------------------------------------
 # TestRegistryParity
 # ---------------------------------------------------------------------------
