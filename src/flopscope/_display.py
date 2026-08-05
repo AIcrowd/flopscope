@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from flopscope._budget import (
+    _budget_display_totals,
     _measure_summary_overhead,
-    _snapshot_records,
     budget_summary_dict,
 )
 
@@ -134,28 +134,19 @@ def _is_global_default_ns(ns, ns_data: dict) -> bool:
 
 def _display_totals(data: dict | None = None) -> dict:
     """Compute user-facing totals, hiding the implicit global default budget."""
-    if data is None:
-        data = budget_summary_dict()
-
-    explicit_budget = 0
-    explicit_used = 0
-    for record in _snapshot_records():
-        if record.namespace is None and record.flop_budget >= _GLOBAL_DEFAULT_BUDGET:
-            explicit_used += record.flops_used
-        else:
-            explicit_budget += record.flop_budget
-            explicit_used += record.flops_used
-
-    has_explicit_budget = explicit_budget > 0
-    if has_explicit_budget:
+    totals = _budget_display_totals()
+    if totals["has_explicit_budget"]:
+        budget = totals["budget"]
+        used = totals["used"]
         return {
             "has_explicit_budget": True,
-            "budget": explicit_budget,
-            "used": explicit_used,
-            "remaining": explicit_budget - explicit_used,
-            "color": _usage_color(explicit_used, explicit_budget),
+            "budget": budget,
+            "used": used,
+            "remaining": budget - used,
+            "color": _usage_color(used, budget),
         }
-
+    if data is None:
+        data = budget_summary_dict()
     return {
         "has_explicit_budget": False,
         "budget": data["flop_budget"],

@@ -256,9 +256,11 @@ class TestRichNamespaceTable:
 
 class TestRichSummary:
     def test_display_totals_exclude_implicit_global_default_budget(self):
+        from flopscope._budget import _get_global_default
+
         _make_budget(flop_budget=5000, namespace="train", ops=[("matmul", 1000)])
-        with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
+        global_ctx = _get_global_default()
+        global_ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
 
         totals = _display_totals()
         assert totals["has_explicit_budget"] is True
@@ -320,13 +322,13 @@ class TestRichSummary:
     def test_global_default_ns_excluded_from_budget(self):
         """Namespace rendering uses attribution buckets rather than pseudo-budgets."""
         pytest.importorskip("rich")
+        from flopscope._budget import _get_global_default
         from flopscope._display import _rich_summary
 
         # A named explicit namespace
         _make_budget(flop_budget=5000, namespace="train", ops=[("matmul", 1000)])
-        # Simulate the global default (None namespace, budget >= 1e15)
-        with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
+        global_ctx = _get_global_default()
+        global_ctx.deduct("add", flop_cost=10, subscripts=None, shapes=(), dtypes=())
         result = _rich_summary(by_namespace=True)
         import io
 
@@ -359,11 +361,13 @@ class TestRichSummary:
         pytest.importorskip("rich")
         from rich.panel import Panel
 
+        from flopscope._budget import _get_global_default
         from flopscope._display import _rich_summary
 
-        # Only the global default namespace (large budget, None ns)
-        with BudgetContext(flop_budget=int(1e15), quiet=True, namespace=None) as b:
-            b.deduct("matmul", flop_cost=100, subscripts=None, shapes=(), dtypes=())
+        global_ctx = _get_global_default()
+        global_ctx.deduct(
+            "matmul", flop_cost=100, subscripts=None, shapes=(), dtypes=()
+        )
         result = _rich_summary(by_namespace=True)
         assert isinstance(result, Panel)
 

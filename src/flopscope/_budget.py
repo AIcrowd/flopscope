@@ -1712,6 +1712,7 @@ class BudgetContext:
             overhead = 0.0
         return _SummaryDelta(
             namespace=self.namespace,
+            is_implicit_global=self is _global_default,
             flop_budget=0 if self._budget_recorded else self.flop_budget,
             flops_used=max(self._flops_used - self._recorded_flops_used, 0),
             rollup=(
@@ -1949,6 +1950,7 @@ class NamespaceRecord(NamedTuple):
 
 class _SummaryDelta(NamedTuple):
     namespace: str | None
+    is_implicit_global: bool
     flop_budget: int
     flops_used: int
     rollup: _SummaryRollup
@@ -1962,6 +1964,24 @@ def _snapshot_namespace_record(ctx: BudgetContext) -> NamespaceRecord:
     return ctx._snapshot_record()
 
 
+@dataclass
+class _DisplayTotals:
+    explicit_budget: int = 0
+    explicit_used: int = 0
+
+    def add_context(
+        self, *, is_implicit_global: bool, flop_budget: int, flops_used: int
+    ) -> None:
+        if is_implicit_global:
+            self.explicit_used += flops_used
+        else:
+            self.explicit_budget += flop_budget
+            self.explicit_used += flops_used
+
+    def copy(self) -> _DisplayTotals:
+        return _DisplayTotals(self.explicit_budget, self.explicit_used)
+
+
 class BudgetAccumulator:
     """Collects budget records across multiple BudgetContext sessions."""
 
@@ -1973,6 +1993,7 @@ class BudgetAccumulator:
         self._wall_time_s: float | None = None
         self._backend_s = 0.0
         self._overhead_s = 0.0
+        self._display_totals = _DisplayTotals()
         self._generation = 0
         self._rollup_generation = 0
         self._stable_rollup_cache: dict[tuple, tuple[dict, dict | None]] = {}
@@ -1993,6 +2014,11 @@ class BudgetAccumulator:
         self._flop_budget += delta.flop_budget
         self._flops_used += delta.flops_used
         self._rollup.merge(delta.rollup)
+        self._display_totals.add_context(
+            is_implicit_global=delta.is_implicit_global,
+            flop_budget=delta.flop_budget,
+            flops_used=delta.flops_used,
+        )
 
     def _merge_timing(self, delta: _SummaryDelta) -> None:
         if delta.wall_time_s is not None:
@@ -2064,23 +2090,69 @@ class BudgetAccumulator:
             )
             self._invalidate_caches(rollup_changed=rollup_changed)
 
-    def snapshot(self, by_namespace: bool = False) -> dict:
+    def snapshot(
+        self,
+        by_namespace: bool = False,
+        *,
+        live_contexts: tuple[BudgetContext, ...] = (),
+    ) -> dict:
         with self._lock:
+            if not live_contexts:
+                cached = self._closed_snapshot_cache.get(by_namespace)
+                if cached is not None and cached[0] == self._generation:
+                    return deepcopy(cached[1])
+
+            deltas = tuple(ctx._snapshot_summary_delta() for ctx in live_contexts)
+            stable_key = (
+                by_namespace,
+                self._rollup_generation,
+                tuple(
+                    (id(ctx), delta.rollup_generation)
+                    for ctx, delta in zip(live_contexts, deltas, strict=True)
+                ),
+            )
+            stable = self._stable_rollup_cache.get(stable_key)
+            if stable is None:
+                combined = self._rollup.copy()
+                for delta in deltas:
+                    combined.merge(delta.rollup)
+                operations = combined.operations_dict()
+                namespaces = combined.namespaces_dict() if by_namespace else None
+                stable = (operations, namespaces)
+                for old_key in tuple(self._stable_rollup_cache):
+                    if old_key[0] == by_namespace:
+                        del self._stable_rollup_cache[old_key]
+                self._stable_rollup_cache[stable_key] = stable
+            operations, namespaces = stable
+
+            flop_budget = self._flop_budget + sum(d.flop_budget for d in deltas)
+            flops_used = self._flops_used + sum(d.flops_used for d in deltas)
+            wall_time = self._wall_time_s
+            for delta in deltas:
+                if delta.wall_time_s is not None:
+                    wall_time = (wall_time or 0.0) + delta.wall_time_s
+            backend_s = self._backend_s + sum(d.backend_time_s for d in deltas)
+            overhead_s = self._overhead_s + sum(d.overhead_time_s for d in deltas)
             wall, backend, overhead, residual = _timing_summary(
-                self._wall_time_s, self._backend_s, self._overhead_s
+                wall_time, backend_s, overhead_s
             )
             result = {
-                "flop_budget": self._flop_budget,
-                "flops_used": self._flops_used,
-                "flops_remaining": self._flop_budget - self._flops_used,
-                "operations": self._rollup.operations_dict(),
+                "flop_budget": flop_budget,
+                "flops_used": flops_used,
+                "flops_remaining": flop_budget - flops_used,
+                "operations": operations,
                 "wall_time_s": wall,
                 "flopscope_backend_time_s": backend,
                 "flopscope_overhead_time_s": overhead,
                 "residual_wall_time_s": residual,
             }
             if by_namespace:
-                result["by_namespace"] = self._rollup.namespaces_dict()
+                result["by_namespace"] = namespaces
+            if not live_contexts:
+                self._closed_snapshot_cache[by_namespace] = (
+                    self._generation,
+                    deepcopy(result),
+                )
             return deepcopy(result)
 
     def get_data(self, by_namespace: bool = False) -> dict:
@@ -2141,6 +2213,7 @@ class BudgetAccumulator:
             self._wall_time_s = None
             self._backend_s = 0.0
             self._overhead_s = 0.0
+            self._display_totals = _DisplayTotals()
             self._diagnostic_op_locations.clear()
             self._invalidate_caches(rollup_changed=True)
 
@@ -2148,18 +2221,32 @@ class BudgetAccumulator:
 _accumulator = BudgetAccumulator()
 
 
-def _snapshot_records() -> list[NamespaceRecord]:
-    records = list(_accumulator._records)
+def _live_summary_contexts() -> tuple[BudgetContext, ...]:
+    contexts: list[BudgetContext] = []
     active = get_active_budget()
     if _global_default is not None and _global_default._has_unrecorded_activity():
-        records.append(_snapshot_namespace_record(_global_default))
-    if (
-        active is not None
-        and active is not _global_default
-        and active._has_unrecorded_activity()
-    ):
-        records.append(_snapshot_namespace_record(active))
-    return records
+        contexts.append(_global_default)
+    if active is not None and active is not _global_default:
+        contexts.append(active)
+    return tuple(contexts)
+
+
+def _budget_display_totals() -> dict:
+    live_contexts = _live_summary_contexts()
+    with _accumulator._lock:
+        totals = _accumulator._display_totals.copy()
+        for ctx in live_contexts:
+            delta = ctx._snapshot_summary_delta(prepared_rollup=ctx._unrecorded_rollup)
+            totals.add_context(
+                is_implicit_global=delta.is_implicit_global,
+                flop_budget=delta.flop_budget,
+                flops_used=delta.flops_used,
+            )
+    return {
+        "has_explicit_budget": totals.explicit_budget > 0,
+        "budget": totals.explicit_budget,
+        "used": totals.explicit_used,
+    }
 
 
 def budget_summary_dict(by_namespace: bool = False) -> dict:
@@ -2189,9 +2276,11 @@ def budget_summary_dict(by_namespace: bool = False) -> dict:
     >>> sorted(summary)
     ['flop_budget', 'flops_remaining', 'flops_used', 'flopscope_backend_time_s', 'flopscope_overhead_time_s', 'operations', 'residual_wall_time_s', 'wall_time_s']
     """
-    acc_copy = BudgetAccumulator()
-    acc_copy._records = _snapshot_records()
-    return acc_copy.get_data(by_namespace=by_namespace)
+    with _measure_summary_overhead():
+        return _accumulator.snapshot(
+            by_namespace=by_namespace,
+            live_contexts=_live_summary_contexts(),
+        )
 
 
 def budget_reset() -> None:

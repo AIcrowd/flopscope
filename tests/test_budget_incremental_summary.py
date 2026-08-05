@@ -14,6 +14,11 @@ class _PoisonedHistory(list):
     def __iter__(self):
         raise AssertionError("summary traversed historical operation records")
 
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            raise AssertionError("summary sliced historical operation records")
+        return super().__getitem__(index)
+
 
 def _op(
     name: str = "add",
@@ -213,6 +218,214 @@ def test_context_summary_returns_deep_defensive_copies() -> None:
     first["operations"]["add"]["calls"] = 99
     first["by_namespace"][None]["operations"].clear()
     assert ctx.summary_dict(by_namespace=True) == expected
+
+
+def test_global_summary_does_not_iterate_records_or_live_op_log() -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    with BudgetContext(100, quiet=True) as closed:
+        closed.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    records = budget_module._accumulator._records
+    budget_module._accumulator._records = _PoisonedHistory(records)
+    try:
+        with BudgetContext(100, quiet=True) as live:
+            live.deduct("multiply", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+            diagnostic_log = live._op_log
+            live._op_log = _PoisonedHistory(diagnostic_log)
+            try:
+                summary = flops.budget_summary_dict(by_namespace=True)
+            finally:
+                live._op_log = diagnostic_log
+    finally:
+        budget_module._accumulator._records = records
+
+    assert summary["flops_used"] == 12
+    assert summary["operations"]["add"]["flop_cost"] == 5
+    assert summary["operations"]["multiply"]["flop_cost"] == 7
+
+
+def test_fresh_active_zero_op_summary_includes_budget_wall_and_next_overhead(
+    monkeypatch,
+) -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    ticks = [0.0, 0.0, 5.0, 5.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0]
+
+    def fake_perf_counter() -> float:
+        return ticks.pop(0) if ticks else 6.0
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", fake_perf_counter)
+    with BudgetContext(100, quiet=True):
+        first = flops.budget_summary_dict()
+        second = flops.budget_summary_dict()
+
+    assert first["flop_budget"] == 100
+    assert first["flops_used"] == 0
+    assert first["wall_time_s"] == 5.0
+    assert first["flopscope_overhead_time_s"] == 0.0
+    assert second["flop_budget"] == 100
+    assert second["wall_time_s"] == 6.0
+    assert second["flopscope_overhead_time_s"] == 1.0
+
+
+def test_reentered_zero_op_summary_includes_current_invocation_wall(
+    monkeypatch,
+) -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    ctx = BudgetContext(100, quiet=True)
+    with ctx:
+        now[0] = 2.0
+
+    now[0] = 10.0
+    with ctx:
+        now[0] = 13.0
+        summary = flops.budget_summary_dict()
+
+    assert summary["flop_budget"] == 100
+    assert summary["wall_time_s"] == 5.0
+
+
+def test_first_post_reset_active_summary_includes_budget_and_elapsed_delta(
+    monkeypatch,
+) -> None:
+    import flopscope as flops
+    import flopscope._budget as budget_module
+    from flopscope._budget import BudgetContext
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    ctx = BudgetContext(100, quiet=True)
+    with ctx:
+        now[0] = 4.0
+        flops.budget_reset()
+        now[0] = 9.0
+        first = flops.budget_summary_dict()
+        now[0] = 10.0
+        second = flops.budget_summary_dict()
+
+    assert first["flop_budget"] == 100
+    assert first["flops_used"] == 0
+    assert first["wall_time_s"] == 5.0
+    assert second["flop_budget"] == 100
+    assert second["wall_time_s"] == 6.0
+
+
+def test_closed_session_reuses_complete_canonical_snapshot(monkeypatch) -> None:
+    import flopscope as flops
+    from flopscope._budget import BudgetContext, _SummaryRollup
+
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    calls = 0
+    original = _SummaryRollup.operations_dict
+
+    def counted(self):
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(_SummaryRollup, "operations_dict", counted)
+    first = flops.budget_summary_dict()
+    second = flops.budget_summary_dict()
+    assert first == second
+    assert calls == 1
+
+
+def test_closed_snapshot_cache_invalidates_after_record_and_reset(monkeypatch) -> None:
+    import flopscope as flops
+    from flopscope._budget import BudgetContext, _SummaryRollup
+
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    calls = 0
+    original = _SummaryRollup.operations_dict
+
+    def counted(self):
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(_SummaryRollup, "operations_dict", counted)
+    assert flops.budget_summary_dict()["flops_used"] == 5
+    assert flops.budget_summary_dict()["flops_used"] == 5
+    assert calls == 1
+
+    with BudgetContext(200, quiet=True) as ctx:
+        ctx.deduct("multiply", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+    assert flops.budget_summary_dict()["flops_used"] == 12
+    assert calls == 2
+
+    flops.budget_reset()
+    reset = flops.budget_summary_dict()
+    assert reset["flop_budget"] == 0
+    assert reset["flops_used"] == 0
+    assert reset["operations"] == {}
+    assert calls == 3
+
+
+def test_live_global_summary_reuses_rollup_cache_until_operation_changes(
+    monkeypatch,
+) -> None:
+    import flopscope as flops
+    from flopscope._budget import BudgetContext, _SummaryRollup
+
+    calls = 0
+    original = _SummaryRollup.operations_dict
+
+    def counted(self):
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(_SummaryRollup, "operations_dict", counted)
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+        first = flops.budget_summary_dict()
+        second = flops.budget_summary_dict()
+        assert first["operations"] == second["operations"]
+        assert calls == 1
+
+        ctx.deduct("multiply", flop_cost=7, subscripts=None, shapes=(), dtypes=())
+        third = flops.budget_summary_dict()
+        assert third["flops_used"] == 12
+        assert calls == 2
+
+
+def test_global_summary_returns_deep_defensive_copies() -> None:
+    import flopscope as flops
+    from flopscope._budget import BudgetContext
+
+    with BudgetContext(100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=())
+    first = flops.budget_summary_dict(by_namespace=True)
+    expected = deepcopy(first)
+    first["operations"]["add"]["calls"] = 99
+    first["by_namespace"][None]["operations"].clear()
+    assert flops.budget_summary_dict(by_namespace=True) == expected
+
+
+def test_global_summary_overhead_is_visible_on_the_next_snapshot() -> None:
+    import flopscope as flops
+    from flopscope._budget import BudgetContext
+
+    with BudgetContext(100, quiet=True) as ctx:
+        before = ctx.flopscope_overhead_time_s
+        first = flops.budget_summary_dict()
+        after_first = ctx.flopscope_overhead_time_s
+        second = flops.budget_summary_dict()
+
+    assert first["flopscope_overhead_time_s"] == before
+    assert after_first > before
+    assert second["flopscope_overhead_time_s"] >= after_first
 
 
 def test_context_live_reads_reuse_rollup_mapping_but_advance_wall(monkeypatch) -> None:
@@ -640,7 +853,10 @@ def test_inflight_op_completion_merges_zero_call_timing_delta(monkeypatch) -> No
     assert accumulator._generation == first_generation + 2
     assert accumulator._rollup_generation == first_rollup_generation + 1
     assert accumulator._closed_snapshot_cache == {}
-    assert accumulator._stable_rollup_cache == {}
+    stable = accumulator._stable_rollup_cache[
+        (True, accumulator._rollup_generation, ())
+    ]
+    assert stable == (result["operations"], result["by_namespace"])
 
 
 def test_reset_drops_inflight_diagnostic_provenance_but_keeps_later_timing(
