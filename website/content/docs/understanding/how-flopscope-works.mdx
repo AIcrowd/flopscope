@@ -100,7 +100,7 @@ The categories determine how costs are calculated:
 | `free` | Zero FLOP cost | 0 |
 | `blacklisted` | Intentionally unsupported | Raises `AttributeError` |
 
-**Free operations** include allocation (`zeros`, `ones`, `empty`), shape manipulation (`reshape`, `transpose`, `squeeze`), indexing helpers (`ix_`, `indices`), and metadata queries (`shape`, `ndim`, `size`). These do not touch the budget.
+**Free operations** include allocation (`zeros`, `ones`, `empty`), shape manipulation (`reshape`, `transpose`, `squeeze`), indexing helpers (`indices`), and metadata queries (`shape`, `ndim`, `size`). These do not touch the budget.
 
 **Blocked operations** include I/O (`save`, `load`), error state management (`geterr`, `seterr`), and other operations that do not make sense in a FLOP-counted context. Calling a blocked operation raises `AttributeError`.
 

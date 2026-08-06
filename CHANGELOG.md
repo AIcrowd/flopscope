@@ -47,10 +47,19 @@
   the same way. The same under-bill existed on the sibling routes named
   above (a source or parameter cast to a numeric dtype while only the output
   element count was billed); it is closed the same way.
+- `fnp.ix_` now bills `sum(numel(outputs))` for index-array construction plus
+  `numel(arg)` for every Boolean argument scanned internally by NumPy's
+  `nonzero`; it was previously multiplied by a shipped weight of `0.0`.
+- `fnp.ix_` continues to accept plain NumPy arrays, list-like inputs, and
+  `FlopscopeArray` inputs, but now rejects foreign NumPy `ndarray` subclasses,
+  including `MaskedArray` and `memmap`, because their hooks cannot be safely
+  billed.
 
 ### Fix
 
 - **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
+- **billing**: route `fnp.ix_` through the NumPy timing boundary so Boolean-mask
+  scans count as backend time instead of Flopscope overhead.
 - **billing**: `UnsupportedDtypeError` raised from inside a wrapper built by
   an internal factory (e.g. `mean`/`std`/`var`/`nanmean`/`nanstd`/`nanvar`)
   now names the actual operation in its message instead of the factory's

@@ -106,7 +106,6 @@ _ALLOWLIST = {
     "diag_indices",
     "diag_indices_from",
     "mask_indices",
-    "ix_",
     "unravel_index",
     "ravel_multi_index",
     # misc cheap
@@ -125,10 +124,29 @@ _ALLOWLIST = {
 
 
 def _is_counted_wrapper(node: ast.FunctionDef) -> bool:
-    return any(
-        isinstance(d, ast.Name) and d.id == "_counted_wrapper"
-        for d in node.decorator_list
-    )
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id == "_counted_wrapper":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr == "_counted_wrapper":
+            return True
+    return False
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    [
+        "@_counted_wrapper",
+        "@_counted_wrapper()",
+        "@_counted_wrapper(preflight=guard)",
+        "@budget._counted_wrapper(preflight=guard)",
+    ],
+)
+def test_counted_wrapper_recognizer_accepts_bare_and_configured_forms(decorator):
+    node = ast.parse(f"{decorator}\ndef wrapped():\n    pass\n").body[0]
+    assert isinstance(node, ast.FunctionDef)
+
+    assert _is_counted_wrapper(node)
 
 
 def _bare_np_calls(fn: ast.FunctionDef):

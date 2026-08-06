@@ -16,6 +16,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "flopscope"
 
 
@@ -39,12 +41,29 @@ def _functions_with_budget_deduct(path: Path) -> list[ast.FunctionDef]:
 
 
 def _has_counted_wrapper_decorator(fn: ast.FunctionDef) -> bool:
-    for dec in fn.decorator_list:
-        if isinstance(dec, ast.Name) and dec.id == "_counted_wrapper":
+    for decorator in fn.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id == "_counted_wrapper":
             return True
-        if isinstance(dec, ast.Attribute) and dec.attr == "_counted_wrapper":
+        if isinstance(target, ast.Attribute) and target.attr == "_counted_wrapper":
             return True
     return False
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    [
+        "@_counted_wrapper",
+        "@_counted_wrapper()",
+        "@_counted_wrapper(preflight=guard)",
+        "@budget._counted_wrapper(preflight=guard)",
+    ],
+)
+def test_counted_wrapper_recognizer_accepts_bare_and_configured_forms(decorator):
+    node = ast.parse(f"{decorator}\ndef wrapped():\n    pass\n").body[0]
+    assert isinstance(node, ast.FunctionDef)
+
+    assert _has_counted_wrapper_decorator(node)
 
 
 def test_every_wrapper_with_budget_deduct_is_decorated():

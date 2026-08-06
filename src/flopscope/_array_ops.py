@@ -15,7 +15,7 @@ import math as _math
 import operator as _operator
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 import numpy as _np
 from numpy.typing import ArrayLike, DTypeLike
@@ -3031,22 +3031,108 @@ def iterable(*args, **kwargs):
 attach_docstring(iterable, _np.iterable, "free", "0 FLOPs")
 
 
-@_counted_wrapper
+def _reject_ix_ndarray_subclass() -> None:
+    raise TypeError(
+        "ix_: ndarray subclasses are not supported; pass a plain ndarray, "
+        "list-like operand, or FlopscopeArray"
+    )
+
+
+_IX_TYPE_MRO_DESCRIPTOR = type.__dict__["__mro__"]
+
+
+def _ix_argument_is_flopscope_array(arg: object) -> bool:
+    """Classify an ``ix_`` argument without dispatching instance/type hooks."""
+    arg_type = type(arg)
+    if arg_type is _np.ndarray:
+        return False
+
+    arg_mro = _IX_TYPE_MRO_DESCRIPTOR.__get__(arg_type)
+    if any(base is FlopscopeArray for base in arg_mro):
+        return True
+    if any(base is _np.ndarray for base in arg_mro):
+        _reject_ix_ndarray_subclass()
+    return False
+
+
+def _preflight_ix_ndarray_boundary(
+    args: tuple[object, ...], _kwargs: dict[str, Any]
+) -> None:
+    """Enforce ``ix_``'s ndarray boundary before generic dtype preflight."""
+    for arg in args:
+        _ix_argument_is_flopscope_array(arg)
+
+
+def _resolve_ix_argument(arg: ArrayLike) -> tuple[_np.ndarray, _np.ndarray]:
+    """Resolve an ``ix_`` operand without executing ndarray subclass hooks.
+
+    Flopscope arrays are stripped through NumPy's base ``view`` method.  Every
+    other ndarray subclass is rejected before reading metadata or entering the
+    NumPy ``ix_`` backend.
+    """
+    arg_type = type(arg)
+    is_flopscope_array = _ix_argument_is_flopscope_array(arg)
+    if arg_type is _np.ndarray:
+        exact_arg = cast(_np.ndarray, arg)
+        return exact_arg, exact_arg
+
+    if is_flopscope_array:
+        stripped = _np.ndarray.view(cast(_np.ndarray, arg), _np.ndarray)
+        return stripped, stripped
+
+    resolved = _np.asarray(arg)
+    if type(resolved) is not _np.ndarray:
+        _reject_ix_ndarray_subclass()
+    if resolved.size == 0:
+        resolved = resolved.astype(_np.intp)
+    return resolved, resolved
+
+
+@_counted_wrapper(preflight=_preflight_ix_ndarray_boundary)
 def ix_(*args: ArrayLike, **kwargs: Any) -> tuple[FlopscopeArray, ...]:
-    """Construct open mesh from multiple sequences. Cost: numel(output)."""
+    """Construct an open mesh from multiple sequences.
+
+    Cost: sum(numel(outputs)) plus numel(arg) for each Boolean argument.
+    """
     budget = require_budget()
-    stripped_args = _to_base_ndarray_tree(args)
-    result = _np.ix_(*stripped_args, **kwargs)  # type: ignore[arg-type, call-overload]
-    cost = sum(a.size for a in result)
-    _ix_dtypes = tuple(a.dtype for a in result) if result else (_np.dtype(float),)
-    with budget.deduct(
-        "ix_", flop_cost=cost, subscripts=None, shapes=(), dtypes=_ix_dtypes
-    ):
-        pass  # numpy call already executed above
+    resolved_args = tuple(_resolve_ix_argument(arg) for arg in args)
+    boolean_scan_cost = sum(
+        billing_view.size
+        for _, billing_view in resolved_args
+        if _np.issubdtype(billing_view.dtype, _np.bool_)
+    )
+    with budget.deduct_after("ix_", subscripts=None, shapes=(), dtypes=()) as op:
+        result = _call_numpy(
+            _np.ix_, *(execution_arg for execution_arg, _ in resolved_args), **kwargs
+        )
+        # The normal ix_ path returns base ndarrays, but a backend replacement
+        # may return a foreign subclass.  Never bill its overrideable metadata.
+        result_billing_views = tuple(_np.asarray(array) for array in result)
+        op.set_dtypes(
+            tuple(array.dtype for array in result_billing_views)
+            if result_billing_views
+            else (_np.dtype(float),)
+        )
+        op.set_cost(
+            boolean_scan_cost + sum(array.size for array in result_billing_views)
+        )
     return result
 
 
-attach_docstring(ix_, _np.ix_, "free", "0 FLOPs")
+attach_docstring(
+    ix_,
+    _np.ix_,
+    "counted_custom",
+    (
+        "sum(numel(outputs)) + sum(numel(Boolean inputs)) FLOPs\n\n"
+        "Input Support\n"
+        "-------------\n"
+        "Plain NumPy ndarray, FlopscopeArray, and non-ndarray array-like inputs "
+        "are supported.\n"
+        "Foreign NumPy ndarray subclasses, including MaskedArray and memmap, "
+        "raise TypeError."
+    ),
+)
 
 
 @_counted_wrapper
