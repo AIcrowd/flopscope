@@ -124,9 +124,11 @@ This tier covers four families, each detailed in its own section below:
 - **Gather** — `take`, `take_along_axis`, `choose`: a computed-index read is a
   non-sequential memory access, unlike a materializing copy's sequential write (see
   [Copy and gather](#copy-and-gather)).
-- **Random reorder** — `random.permutation`, `random.shuffle`, `random.sample`, and the
+- **Random reorder** — `random.permutation`, `random.shuffle`, `random.choice`, and the
   `Generator`/`RandomState` `.choice` / `.permutation` / `.permuted` / `.shuffle`
-  methods (see [Random](#random-module-level-generator-randomstate)).
+  methods (see [Random](#random-module-level-generator-randomstate)). Note
+  `random.sample` is *not* in this tier — despite the name it is numpy's alias for
+  `random_sample`, a plain uniform draw.
 
 A materializing copy or write (`concatenate`, `ones`, a scatter write) stays at weight
 1.0 — it touches memory sequentially, one write per element. The access tier prices the
@@ -530,9 +532,13 @@ Worked consequences:
 - **Dtype-neutral bookkeeping declares `dtypes=()`.** Ops that carry no value dtype at
   all (for example `einsum_path`) resolve to rate `1.0`, factor `1.0`, so the rate table
   cannot perturb them. Ops with a *fixed* output dtype but no array operand — window
-  functions, `fft.fftfreq`, the random samplers — are **not** neutral: they declare
-  their output dtype (numpy produces float64 for all of these), so their real float64
-  arithmetic bills at the float64 rate like everything else.
+  functions, `fft.fftfreq`, the random *distribution* samplers — are **not** neutral: they
+  declare their output dtype, whatever it is (float64 for the continuous draws, int64 for
+  the discrete ones), so their real arithmetic bills at that dtype's rate like everything
+  else. This does **not** cover the data-movement random ops (`choice`, `shuffle`,
+  `permutation`, `Generator.permuted`), which reorder caller-supplied values of any
+  numeric dtype and *are* billed neutrally — their selection work is width-independent.
+  See [Random](#random-module-level-generator-randomstate).
 
 ### Reduction accumulators
 
@@ -1137,15 +1143,20 @@ default to float64, rate 2.0); complex dtypes are covered below.
 
 Weight tiers:
 
-- **weight 1.0** — uniform/integer/structural draws that are not module-level
-  reorder ops: `rand`, `random`, `random_sample`, `ranf`, `uniform`, `randint`,
-  `integers`, module-level `random.choice`, `multivariate_normal`.
+- **weight 1.0** — plain uniform/integer/structural draws: `rand`, `random`,
+  `random_sample`, `ranf`, `sample` (a documented numpy alias of
+  `random_sample` — the same uniform draw, so it prices at the same tier as its
+  twins, not at the reorder tier), `uniform`, `randint`, `integers`,
+  `multivariate_normal`.
 - **weight 4.0** — reorder / resample ops, the same non-sequential [access
-  tier](#access-tier-weight-40) as sort and gather: module-level `random.sample`
-  (an alias of `random_sample`'s draw, priced independently — see [Sort and
-  select](#sort-and-select) for the sibling sort/set family), module-level
-  `random.permutation` and `random.shuffle`, and every `Generator`/`RandomState`
-  `.choice` / `.permutation` / `.permuted` / `.shuffle` method. A Fisher-Yates
+  tier](#access-tier-weight-40) as sort and gather: `random.permutation`,
+  `random.shuffle` and `random.choice` at module level, and every
+  `Generator`/`RandomState`
+  `.choice` / `.permutation` / `.permuted` / `.shuffle` method. The module-level
+  surface delegates to the legacy `RandomState` singleton, so it runs the same
+  selection machinery as the method surface and prices identically — a
+  module-level entry at weight 1.0 would be a cheaper alias route around this
+  tier. A Fisher-Yates
   reorder and a rejection-sampled choice both touch memory non-sequentially, the
   same reason a sort does.
 - **weight 16.0** — transcendental samplers (every continuous/transformed
@@ -1161,14 +1172,14 @@ Weight tiers:
 | Op / family | flop_cost | weight | basis | source |
 |---|---|---|---|---|
 | `random.rand`, `random.random`, `random.random_sample`, `random.ranf` | `numel(output)` | 1.0 | DECLARED: 1 FLOP per uniform draw | `_cost_formulas.py` |
-| `random.sample` | `numel(output)` | 4.0 | DECLARED: same draw as `random_sample`, priced at the reorder/resample tier instead of the plain-draw tier (accepted policy divergence) | `_cost_formulas.py` |
+| `random.sample` | `numel(output)` | 1.0 | DECLARED: a documented numpy alias of `random_sample` — the same uniform draw, so it prices at the plain-draw tier like its twins. It has no `dtype=` parameter and always resolves float64, so the bill is `2 × numel` | `_cost_formulas.py` |
 | `random.uniform` | `3 × numel(output)` | 1.0 | DERIVED: affine map `low + (high − low) × U` = 1 sub + 1 mul + 1 add per element (FMA=2, three ops) | `_cost_formulas.py` |
 | `random.randn`, `random.standard_normal`, `random.normal` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 from `default_weights.json`; draws default to float64 (see the preamble above), so the full bill is `32 × numel` unless a narrower `dtype=` is passed | `_cost_formulas.py` |
 | `random.randint`, `random.integers` | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
-| `random.choice` (module-level; replace=True, p=None) | `numel(output)` | 1.0 | DECLARED | `_cost_formulas.py` |
-| `random.choice` (module-level; replace=False, p=None) | `n` (Fisher-Yates, matches `permutation`) | 1.0 | DECLARED | `_cost_formulas.py` |
-| `random.choice` (module-level; replace=False, p≠None) | `sort_cost(n) = n × ⌈log₂ n⌉` (conservative floor for the data-dependent rejection loop) | 1.0 | DECLARED | `_cost_formulas.py` |
-| `Generator.choice`, `RandomState.choice` | same formula shape as module-level `random.choice` above (`Generator.choice` additionally adds `3n + m×⌈log₂ n⌉` — CDF build + binary search — when `p` is given and `replace=True`) | 4.0 | DECLARED/DERIVED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=True, p=None) | `numel(output)` | 4.0 | DECLARED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=False, p=None) | `n` (Fisher-Yates, matches `permutation`) | 4.0 | DECLARED | `_cost_formulas.py` |
+| `random.choice` (module-level; replace=False, p≠None) | `sort_cost(n) = n × ⌈log₂ n⌉` (conservative floor for the data-dependent rejection loop) | 4.0 | DECLARED | `_cost_formulas.py` |
+| `Generator.choice`, `RandomState.choice` | same formula shape **and weight** as module-level `random.choice` above (`Generator.choice` additionally adds `3n + m×⌈log₂ n⌉` — CDF build + binary search — when `p` is given and `replace=True`) | 4.0 | DECLARED/DERIVED | `_cost_formulas.py` |
 | `random.shuffle`, `random.permutation` (module-level) | `max(n, 1)`, `n = x.shape[0]` for array input or the int argument itself | 4.0 | DECLARED: in-place Fisher-Yates draws, dtype-neutral | `_cost_formulas.py` |
 | `Generator.permutation`, `Generator.shuffle`, `RandomState.permutation`, `RandomState.shuffle` | `max(shape[axis], 1)` (`axis` defaults to 0; `RandomState` has no `axis` kwarg) | 4.0 | DECLARED: Fisher-Yates draws | `_cost_formulas.py` |
 | `Generator.permuted` | `numel(input)` (every element is reordered within its axis-slice, not just `shape[axis]` slices as `shuffle`/`permutation` bill; a nested Python-list input is routed through `asarray` first, so it bills every element regardless of nesting depth, not just the outer dimension) | 4.0 | DECLARED | `_cost_formulas.py` |

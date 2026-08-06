@@ -64,6 +64,14 @@
   an internal factory (e.g. `mean`/`std`/`var`/`nanmean`/`nanstd`/`nanvar`)
   now names the actual operation in its message instead of the factory's
   generic internal closure name.
+- **docs**: `cost-model.md` now states the shipped weights for module-level
+  `random.choice` (4.0, the reorder tier) and `random.sample` (1.0, the
+  plain-draw tier). The page had carried the pre-review values since the
+  four-factor rewrite, contradicting `default_weights.json` in both
+  directions. Documentation only — no billed amount changes. Also narrows
+  the "fixed output dtype ⇒ not neutral" rule to the *distribution* samplers,
+  which the Random section had already carved `choice`/`shuffle`/
+  `permutation`/`permuted` out of. Reported in #176.
 
 ## v0.10.0 (2026-07-31)
 
