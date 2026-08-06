@@ -429,6 +429,47 @@ def test_reentry_resets_recorded_wall_baseline(monkeypatch) -> None:
     assert accumulator.snapshot()["wall_time_s"] == 5.0
 
 
+def test_context_close_timing_includes_accumulator_bookkeeping(monkeypatch) -> None:
+    import flopscope._budget as budget_module
+
+    now = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: now[0])
+    accumulator = BudgetAccumulator()
+    monkeypatch.setattr(budget_module, "_accumulator", accumulator)
+
+    ctx = BudgetContext(100, quiet=True)
+    original_mark_recorded = ctx._mark_recorded
+    mark_calls = 0
+
+    def mark_recorded(**kwargs):
+        nonlocal mark_calls
+        original_mark_recorded(**kwargs)
+        mark_calls += 1
+        if mark_calls == 1:
+            now[0] += 2.0
+
+    original_invalidate_caches = accumulator._invalidate_caches
+
+    def invalidate_caches(*, rollup_changed):
+        original_invalidate_caches(rollup_changed=rollup_changed)
+        now[0] += 3.0
+
+    monkeypatch.setattr(ctx, "_mark_recorded", mark_recorded)
+    monkeypatch.setattr(accumulator, "_invalidate_caches", invalidate_caches)
+
+    with ctx:
+        now[0] = 5.0
+
+    result = accumulator.snapshot()
+    assert mark_calls == 2
+    assert ctx.wall_time_s == 10.0
+    assert result["wall_time_s"] == 10.0
+    assert result["flopscope_overhead_time_s"] == 5.0
+    assert result["residual_wall_time_s"] == 5.0
+    assert accumulator._records[-1].wall_time_s == 10.0
+    assert accumulator._records[-1].total_flopscope_overhead_time == 5.0
+
+
 def test_record_commits_wall_boundary_from_delta_snapshot(monkeypatch) -> None:
     import flopscope._budget as budget_module
 

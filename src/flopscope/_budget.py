@@ -2212,11 +2212,7 @@ class BudgetAccumulator:
                 ctx._snapshot_diagnostic_delta()
             )
 
-            if body_end is not None:
-                ctx._finalize_close_timing(body_end=body_end)
-                final = ctx._snapshot_summary_delta(prepared_rollup=prepared.rollup)
-            else:
-                final = prepared
+            final = prepared
 
             self._merge_timing(final)
             diagnostic_locations = self._diagnostic_op_locations.get(ctx)
@@ -2262,6 +2258,33 @@ class BudgetAccumulator:
                 overhead_time_delta_s=final.overhead_time_s,
             )
             self._invalidate_caches(rollup_changed=rollup_changed)
+
+            if body_end is not None:
+                # Close timing is sampled only after the accumulator has applied
+                # diagnostic replacements, appended the record, committed the
+                # context boundary, and invalidated its caches.  Those steps are
+                # part of BudgetContext.__exit__ and therefore Flopscope overhead.
+                ctx._finalize_close_timing(body_end=body_end)
+                close_timing = ctx._snapshot_summary_delta()
+                self._merge_timing(close_timing)
+                record = self._records[-1]
+                self._records[-1] = record._replace(
+                    wall_time_s=(record.wall_time_s or 0.0)
+                    + (close_timing.wall_time_s or 0.0),
+                    total_flopscope_backend_time=(
+                        record.total_flopscope_backend_time or 0.0
+                    )
+                    + close_timing.backend_time_s,
+                    total_flopscope_overhead_time=(
+                        record.total_flopscope_overhead_time or 0.0
+                    )
+                    + close_timing.overhead_time_s,
+                )
+                ctx._mark_recorded(
+                    wall_time_delta_s=close_timing.wall_time_s or 0.0,
+                    backend_time_delta_s=close_timing.backend_time_s,
+                    overhead_time_delta_s=close_timing.overhead_time_s,
+                )
 
     def snapshot(
         self,
