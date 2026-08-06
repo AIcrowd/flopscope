@@ -10,16 +10,52 @@ import msgpack
 import zmq
 
 import flopscope
+from flopscope._budget import get_active_budget
 from flopscope_server._connection_store import ConnectionStore
 from flopscope_server._protocol import (
+    AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY,
     InvalidRequestError,
     decode_request,
+    encode_budget_summary_response,
     encode_error_response,
     encode_response,
     validate_request,
 )
 from flopscope_server._request_handler import RequestHandler
 from flopscope_server._session import Session
+
+
+def _decode_budget_summary_kwargs(msg: dict) -> tuple[str, bool]:
+    """Validate and decode the exact public ``budget_summary`` request."""
+    required = {"op", "kwargs"}
+    allowed = required | {"args"}
+    if not required.issubset(msg) or set(msg) - allowed:
+        raise InvalidRequestError(
+            "budget_summary requires op and kwargs and rejects unknown "
+            f"top-level fields; got {sorted(map(str, msg))}"
+        )
+    args = msg.get("args")
+    if args not in (None, []):
+        raise InvalidRequestError("budget_summary args must be absent, null, or []")
+    kwargs = msg.get("kwargs")
+    if not isinstance(kwargs, dict):
+        raise InvalidRequestError("budget_summary kwargs must be a dict")
+    expected = {"scope", "by_namespace"}
+    actual = set(kwargs)
+    if actual != expected:
+        raise InvalidRequestError(
+            "budget_summary kwargs must contain exactly scope and by_namespace; "
+            f"got {sorted(map(str, actual))}"
+        )
+    scope = kwargs["scope"]
+    by_namespace = kwargs["by_namespace"]
+    if scope not in ("session", "active_context"):
+        raise InvalidRequestError(
+            "budget_summary scope must be 'session' or 'active_context'"
+        )
+    if not isinstance(by_namespace, bool):
+        raise InvalidRequestError("budget_summary by_namespace must be boolean")
+    return scope, by_namespace
 
 
 class FlopscopeServer:
@@ -115,6 +151,24 @@ class FlopscopeServer:
             return self._handle_hello(msg)
 
         # --- Session lifecycle ops (privileged: require the control token) ---
+        if op == "budget_summary_reset":
+            if not self._control_token_ok(msg):
+                return encode_error_response(
+                    "UnauthorizedControlError",
+                    "summary lifecycle is grader-controlled; participant code "
+                    "cannot reset budget summary history",
+                )
+            if (
+                self._session is not None and self._session.is_open
+            ) or get_active_budget() is not None:
+                return encode_error_response(
+                    "RuntimeError",
+                    "cannot reset budget summary history while a budget context "
+                    "is active",
+                )
+            flopscope.budget_reset()
+            return encode_response(None, budget=0, comms_overhead_ns=0)
+
         if op in ("budget_open", "budget_close"):
             if not self._control_token_ok(msg):
                 return encode_error_response(
@@ -125,6 +179,9 @@ class FlopscopeServer:
             if op == "budget_open":
                 return self._handle_budget_open(msg, t0, t1)
             return self._handle_budget_close(t0, t1)
+
+        if op == "budget_summary":
+            return self._handle_budget_summary(raw, msg, t0, t1)
 
         # --- Require active session for everything else ---
         if self._session is None:
@@ -201,6 +258,81 @@ class FlopscopeServer:
         self._last_activity = monotonic()
         return response_bytes
 
+    def _handle_budget_summary(
+        self, raw: bytes, msg: dict, t0_ns: int, t1_ns: int
+    ) -> bytes:
+        """Return a validated authoritative session or active-context snapshot."""
+        try:
+            scope, by_namespace = _decode_budget_summary_kwargs(msg)
+        except InvalidRequestError as exc:
+            return encode_error_response("InvalidRequestError", str(exc))
+
+        session = (
+            self._session
+            if self._session is not None and self._session.is_open
+            else None
+        )
+        if scope == "active_context" and session is None:
+            return encode_error_response(
+                "NoBudgetContextError",
+                "no active budget context for active_context summary",
+            )
+
+        active = session.budget_context if session is not None else None
+        backend_before = active.flopscope_backend_time_s if active is not None else 0.0
+        overhead_before = (
+            active.flopscope_overhead_time_s if active is not None else 0.0
+        )
+
+        try:
+            if scope == "session":
+                result = flopscope.budget_summary_dict(by_namespace=by_namespace)
+                display_totals = flopscope._budget._budget_display_totals()
+            else:
+                assert session is not None
+                result = session.budget_summary_dict(by_namespace=by_namespace)
+                display_totals = {
+                    "has_explicit_budget": True,
+                    "budget": result["flop_budget"],
+                    "used": result["flops_used"],
+                }
+            display_totals["client_context_compute_ns"] = (
+                session.comms_tracker.summary()["total_compute_time_ns"]
+                if session is not None
+                else None
+            )
+            budget = session.budget_status() if session is not None else None
+            response = encode_budget_summary_response(
+                result,
+                display_totals=display_totals,
+                budget=budget,
+            )
+        except Exception as exc:
+            response = encode_error_response(
+                "FlopscopeServerError",
+                f"failed to construct budget summary: {type(exc).__name__}",
+            )
+
+        t3_ns = perf_counter_ns()
+        if active is not None:
+            nested_s = max(active.flopscope_backend_time_s - backend_before, 0.0) + max(
+                active.flopscope_overhead_time_s - overhead_before, 0.0
+            )
+            outer_wall_s = max(t3_ns - t0_ns, 0) / 1e9
+            active._record_external_flopscope_overhead(
+                max(outer_wall_s - nested_s, 0.0)
+            )
+            assert session is not None
+            session.comms_tracker.record_request(
+                bytes_received=len(raw),
+                bytes_sent=len(response),
+                comms_overhead_ns=max(t3_ns - t0_ns, 0),
+                compute_time_ns=0,
+                is_fetch=False,
+            )
+        self._last_activity = monotonic()
+        return response
+
     # ------------------------------------------------------------------
     # Token gate
     # ------------------------------------------------------------------
@@ -212,12 +344,14 @@ class FlopscopeServer:
         the server's own test suite), control is unrestricted. Production always
         configures one via ``--token-fd``.
         """
+        kwargs = msg.get("kwargs")
+        if kwargs is not None and not isinstance(kwargs, dict):
+            return False
         if self._control_token is None:
             return True
         token = msg.get("control_token")
         if token is None:
-            kwargs = msg.get("kwargs") or {}
-            token = kwargs.get("control_token")
+            token = kwargs.get("control_token") if kwargs is not None else None
         # _normalize_arg only ASCII-decodes byte strings of length ≤ 32; a
         # 64-char token_hex(32) exceeds that threshold and stays as bytes even
         # after _normalize_msg.  Decode it here so compare_digest gets two strs.
@@ -245,11 +379,27 @@ class FlopscopeServer:
         # flop_budget may be top-level or nested in kwargs. There is no
         # multiplier: the server never scales op costs by a client-supplied
         # factor (that was the budget-bypass vector). Cost = flop_cost × weight.
+        raw_kwargs = msg.get("kwargs")
+        kwargs = {} if raw_kwargs is None else raw_kwargs
+        if not isinstance(kwargs, dict):
+            return encode_error_response(
+                "InvalidRequestError",
+                "budget_open kwargs must be a dict",
+            )
         flop_budget = msg.get("flop_budget")
         if flop_budget is None:
-            kwargs = msg.get("kwargs") or {}
             flop_budget = kwargs.get("flop_budget", 1_000_000)
-        self._session = Session(flop_budget=flop_budget, conn_store=self._conn_store)
+        namespace = kwargs.get("namespace")
+        if namespace is not None and not isinstance(namespace, str):
+            return encode_error_response(
+                "InvalidRequestError",
+                "budget_open namespace must be a string or null",
+            )
+        self._session = Session(
+            flop_budget=flop_budget,
+            conn_store=self._conn_store,
+            namespace=namespace,
+        )
         self._handler = RequestHandler(self._session)
         self._last_activity = monotonic()
 
@@ -326,7 +476,11 @@ class FlopscopeServer:
             )
 
         return msgpack.packb(
-            {"status": "ok", "server_version": server_xyz},
+            {
+                "status": "ok",
+                "server_version": server_xyz,
+                "capabilities": [AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY],
+            },
             use_bin_type=True,
         )
 

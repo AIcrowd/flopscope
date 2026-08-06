@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import msgpack
 
+AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY = "authoritative_budget_summary_v1"
+
 
 def encode_request(op: str, args=None, kwargs=None) -> bytes:
     """Msgpack-encode ``{"op": op, "args": args, "kwargs": kwargs}``."""
@@ -23,9 +25,12 @@ def encode_create_from_data(data: bytes, shape: list, dtype: str) -> bytes:
     return encode_request("create_from_data", args=[data, shape, dtype])
 
 
-def encode_budget_open(flop_budget: int) -> bytes:
+def encode_budget_open(flop_budget: int, namespace: str | None = None) -> bytes:
     """Encode a budget_open request."""
-    return encode_request("budget_open", kwargs={"flop_budget": flop_budget})
+    return encode_request(
+        "budget_open",
+        kwargs={"flop_budget": flop_budget, "namespace": namespace},
+    )
 
 
 def encode_budget_close() -> bytes:
@@ -36,6 +41,14 @@ def encode_budget_close() -> bytes:
 def encode_budget_status() -> bytes:
     """Encode a budget_status request."""
     return encode_request("budget_status")
+
+
+def encode_budget_summary(scope: str, *, by_namespace: bool = False) -> bytes:
+    """Encode an authoritative budget-summary request."""
+    return encode_request(
+        "budget_summary",
+        kwargs={"scope": scope, "by_namespace": by_namespace},
+    )
 
 
 def encode_fetch(handle_id: str) -> bytes:

@@ -52,9 +52,29 @@ jobs:
           path: ${{ matrix.package.path }}/dist/
           if-no-files-found: error
 
+  release-contract:
+    name: Verify wheel budget-summary contract
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: release-dist
+      - name: Install test dependencies
+        run: uv sync --extra dev --extra server
+      - name: Test exact workflow-built wheels
+        env:
+          WHEST_RELEASE_DIST_DIR: ${{ github.workspace }}/release-dist
+        run: uv run --with packaging pytest tests/test_release_contract.py -v
+
   publish-pypi:
     name: Publish ${{ matrix.package.name }} to PyPI
-    needs: build
+    needs: [build, release-contract]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

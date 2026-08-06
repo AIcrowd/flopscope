@@ -55,6 +55,38 @@ with flops.BudgetContext(flop_budget=1_000_000):
 
 The client's first request performs a version handshake with the server; mismatched flopscope versions raise `ConnectionError` with both versions in the message. Keep `flopscope-server` and `flopscope-client` on the same release.
 
+## Authoritative budget summaries
+
+The server owns budget truth. Remote summary dictionaries are read-only
+snapshots with the same public schema and accounting meaning as local summaries.
+The global view covers the current server summary epoch. Peers must negotiate
+the authoritative-summary capability rather than silently accepting partial or
+zero-filled data.
+
+WHEST's one-participant-process epoch is an evaluator deployment contract. A
+conforming evaluator must start this server with `--token-fd`, keep the minted
+token in its trusted control channel, perform a post-smoke, pre-scoring reset,
+and couple every server replacement to participant-process replacement. This
+excludes smoke work and prevents participant requests from resetting the epoch,
+because the participant never receives the token. Without `--token-fd`, a
+standalone local/development server intentionally permits lifecycle control
+operations; tokenless mode is convenient for testing and is not a hardened
+participant boundary.
+
+Snapshots are assembled from incremental authoritative rollups in `O(K)` time
+for the returned operation and optional namespace buckets, independent of
+historical call count. The flat and namespaced forms share the same totals, and
+formatted displays render the corresponding mapping. A summary request records
+its own measured inspection overhead after taking the snapshot, so that work
+appears in the next snapshot or a later final-close snapshot. The final close
+response cannot recursively include its own post-boundary serialization.
+
+A live client-owned context obtains its resource summary from the server. The
+client may replace only the four top-level timing fields to preserve that
+context's end-to-end timing meaning; those local measurements are never sent
+back and cannot affect authoritative FLOPs, operations, namespaces, budgets,
+the session summary, or scoring.
+
 ## Architecture overview
 
 ```

@@ -134,6 +134,48 @@ data = flops.budget_summary_dict(by_namespace=True)
 print(data["by_namespace"]["solver"]["flops_used"])
 ```
 
+Local and remote summary dictionaries have the same public schema and
+accounting meaning. During evaluation, the remote global summary is a read-only
+snapshot of authoritative server state.
+
+The one-participant-process epoch is a WHEST evaluator deployment guarantee,
+not a property of every standalone server. A conforming evaluator must launch
+the server with `--token-fd`, retain the minted token only in its trusted control
+channel, perform a post-smoke, pre-scoring reset, and replace the participant
+whenever the server is replaced. Under that contract, smoke work is excluded
+and participant code cannot reset the epoch because it never receives the
+control token. Tokenless local/development servers intentionally accept
+lifecycle control operations and are not hardened participant boundaries. An
+incompatible peer that lacks authoritative summary support raises an actionable
+error instead of returning partial or zero-filled data.
+
+Both flat and namespaced summaries are constructed in `O(K)` time for the
+operation and optional namespace buckets returned, independent of historical
+call count. `budget_summary()` and `budget.summary()` format those same mappings.
+Opting into `by_namespace=True` adds the namespace breakdown without changing
+the flat budget, FLOP, operation, or timing totals.
+
+Summary inspection contributes FLOPScope overhead. The current call takes its
+snapshot first and commits its measured inspection overhead afterward, so that
+overhead appears in the next snapshot or a later final-close snapshot. A final
+close response cannot recursively include its own post-boundary serialization.
+
+An explicit `BudgetContext` has three summary states:
+
+- Before its first entry, `summary_dict()` returns the canonical empty mapping.
+- While it is active, `summary_dict()` requests that authoritative server
+  resource and preserves the client-owned context's existing end-to-end timing
+  meaning by normalizing only the four top-level timing fields.
+- After close, `summary_dict()` returns a defensive copy of the cached final
+  mapping. Later session activity cannot change it.
+
+Live scalar timing properties deliberately keep their existing
+`None`/zero-until-close behavior. After close, all scalar timing properties are
+read from that same cached mapping, so scalar, dictionary, and formatted views
+cannot diverge. Client-only timing measurements are not sent to the server and
+cannot change FLOPs, operations, namespaces, budgets, the global session
+summary, or scoring.
+
 ## Quick tips for competition
 
 **Check costs before committing budget.** Use cost query functions to estimate before executing:

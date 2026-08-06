@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from flopscope._budget import _snapshot_records, budget_summary_dict
+from flopscope._budget import (
+    _budget_display_totals,
+    _measure_summary_overhead,
+    budget_summary_dict,
+)
 
 
 def _format_flops(n: int) -> str:
@@ -113,10 +117,11 @@ def _format_budget_summary_text(
 
 def _plain_text_summary(by_namespace: bool = False) -> str:
     """Render a plain-text budget summary."""
-    return _format_budget_summary_text(
-        budget_summary_dict(by_namespace=by_namespace),
-        by_namespace=by_namespace,
-    )
+    with _measure_summary_overhead():
+        return _format_budget_summary_text(
+            budget_summary_dict(by_namespace=by_namespace),
+            by_namespace=by_namespace,
+        )
 
 
 _GLOBAL_DEFAULT_BUDGET = int(1e15)
@@ -129,28 +134,19 @@ def _is_global_default_ns(ns, ns_data: dict) -> bool:
 
 def _display_totals(data: dict | None = None) -> dict:
     """Compute user-facing totals, hiding the implicit global default budget."""
-    if data is None:
-        data = budget_summary_dict()
-
-    explicit_budget = 0
-    explicit_used = 0
-    for record in _snapshot_records():
-        if record.namespace is None and record.flop_budget >= _GLOBAL_DEFAULT_BUDGET:
-            explicit_used += record.flops_used
-        else:
-            explicit_budget += record.flop_budget
-            explicit_used += record.flops_used
-
-    has_explicit_budget = explicit_budget > 0
-    if has_explicit_budget:
+    totals = _budget_display_totals()
+    if totals["has_explicit_budget"]:
+        budget = totals["budget"]
+        used = totals["used"]
         return {
             "has_explicit_budget": True,
-            "budget": explicit_budget,
-            "used": explicit_used,
-            "remaining": explicit_budget - explicit_used,
-            "color": _usage_color(explicit_used, explicit_budget),
+            "budget": budget,
+            "used": used,
+            "remaining": budget - used,
+            "color": _usage_color(used, budget),
         }
-
+    if data is None:
+        data = budget_summary_dict()
     return {
         "has_explicit_budget": False,
         "budget": data["flop_budget"],
@@ -340,28 +336,27 @@ def _rich_operations_table(ops: dict[str, dict], total_flops_used: int):
 
 def _rich_summary(by_namespace: bool = False):
     """Render a Rich-formatted budget summary."""
-    from rich.console import Group
-    from rich.panel import Panel
+    with _measure_summary_overhead():
+        from rich.console import Group
+        from rich.panel import Panel
 
-    data = budget_summary_dict(by_namespace=by_namespace)
-    if data["flops_used"] == 0 and not data.get("operations"):
-        return Panel("No budget data recorded yet.", title="flopscope Budget")
-
-    renderables = [_rich_totals_table(data)]
-    if by_namespace and data.get("by_namespace"):
-        renderables.append(
-            _rich_attribution_table(data["by_namespace"], data["flops_used"])
+        data = budget_summary_dict(by_namespace=by_namespace)
+        if data["flops_used"] == 0 and not data.get("operations"):
+            return Panel("No budget data recorded yet.", title="flopscope Budget")
+        renderables = [_rich_totals_table(data)]
+        if by_namespace and data.get("by_namespace"):
+            renderables.append(
+                _rich_attribution_table(data["by_namespace"], data["flops_used"])
+            )
+        if data.get("operations"):
+            renderables.append(
+                _rich_operations_table(data["operations"], data["flops_used"])
+            )
+        return Panel(
+            Group(*renderables),
+            title="[bold cyan]flopscope FLOP Budget Summary[/bold cyan]",
+            border_style="cyan",
         )
-    if data.get("operations"):
-        renderables.append(
-            _rich_operations_table(data["operations"], data["flops_used"])
-        )
-
-    return Panel(
-        Group(*renderables),
-        title="[bold cyan]flopscope FLOP Budget Summary[/bold cyan]",
-        border_style="cyan",
-    )
 
 
 def render_budget_summary(by_namespace: bool = False):
@@ -464,15 +459,16 @@ def budget_summary(by_namespace: bool = False):
     ...     _ = fnp.add(fnp.array([1.0]), fnp.array([2.0]))
     >>> flops.budget_summary()
     """
-    result = render_budget_summary(by_namespace=by_namespace)
-    try:
-        _ = get_ipython  # type: ignore[name-defined]  # noqa: F821
-        return result
-    except NameError:
-        if isinstance(result, str):
-            print(result)
-        else:
-            from rich.console import Console
+    with _measure_summary_overhead():
+        result = render_budget_summary(by_namespace=by_namespace)
+        try:
+            _ = get_ipython  # type: ignore[name-defined]  # noqa: F821
+            return result
+        except NameError:
+            if isinstance(result, str):
+                print(result)
+            else:
+                from rich.console import Console
 
-            Console().print(result)
-        return None
+                Console().print(result)
+            return None

@@ -41,6 +41,20 @@ def test_handle_hello_matching_version_returns_ok():
     assert decoded["server_version"] == client_version
 
 
+def test_hello_advertises_authoritative_summary() -> None:
+    server = FlopscopeServer()
+    response = server._handle_hello(
+        {
+            "op": "hello",
+            "kwargs": {
+                "client_version": flopscope.__version__.split("+", 1)[0],
+            },
+        }
+    )
+    decoded = msgpack.unpackb(response, raw=False)
+    assert decoded["capabilities"] == ["authoritative_budget_summary_v1"]
+
+
 def test_handle_hello_mismatch_returns_version_mismatch_error():
     """Mismatched client_version → error response with VersionMismatch."""
     server = FlopscopeServer.__new__(FlopscopeServer)

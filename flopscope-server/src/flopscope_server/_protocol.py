@@ -10,11 +10,13 @@ when raw=False is not used, so decode_request handles normalisation carefully:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import msgpack
 
 from flopscope._registry import REGISTRY
+
+AUTHORITATIVE_BUDGET_SUMMARY_CAPABILITY = "authoritative_budget_summary_v1"
 
 # ---------------------------------------------------------------------------
 # Whitelist
@@ -27,6 +29,7 @@ _PROTOCOL_OPS: frozenset[str] = frozenset(
         "budget_open",
         "budget_close",
         "budget_status",
+        "budget_summary",
         "fetch",
         "fetch_slice",
         "free",
@@ -178,6 +181,24 @@ def encode_response(result: Any, budget: int, comms_overhead_ns: int) -> bytes:
         "comms_overhead_ns": comms_overhead_ns,
     }
     return msgpack.packb(payload, use_bin_type=True)
+
+
+def encode_budget_summary_response(
+    result: dict,
+    *,
+    display_totals: dict,
+    budget: dict | None,
+) -> bytes:
+    """Encode an authoritative budget-summary snapshot."""
+    payload: dict[str, object] = {
+        "status": "ok",
+        "result": result,
+        "display_totals": display_totals,
+        "comms_overhead_ns": 0,
+    }
+    if budget is not None:
+        payload["budget"] = budget
+    return cast(bytes, msgpack.packb(payload, use_bin_type=True))
 
 
 # ---------------------------------------------------------------------------

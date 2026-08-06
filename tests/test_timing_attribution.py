@@ -3,6 +3,7 @@
 import cProfile
 import gc
 import sys
+import threading
 import time
 import weakref
 
@@ -20,6 +21,321 @@ from flopscope._budget import (
     get_active_budget,
 )
 from flopscope._config import get_setting
+
+
+def test_ordinary_backend_call_reset_keeps_only_post_reset_overlap(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def backend():
+        logical_clock[0] = 2.0
+        flops.budget_reset()
+        logical_clock[0] = 5.0
+        return "ok"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(backend) == "ok"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert budget._live_backend_calls == set()
+
+
+def test_callback_tracked_call_reset_rebases_active_callback_root(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def callback_backend():
+        logical_clock[0] = 2.0
+        flops.budget_reset()
+        logical_clock[0] = 5.0
+        return "ok"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "callback", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy_with_python_callbacks(callback_backend) == "ok"
+
+    summary = flops.budget_summary_dict()
+    assert budget._total_user_code_time == 3.0
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 0.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 3.0
+    assert budget._live_backend_calls == set()
+
+
+def test_non_callable_profiler_fallback_reset_keeps_post_reset_overlap(monkeypatch):
+    logical_clock = [0.0]
+    profiler = object()
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+    monkeypatch.setattr(budget_module._sys, "getprofile", lambda: profiler)
+    monkeypatch.setattr(budget_module._sys, "setprofile", lambda _profile: None)
+
+    def backend():
+        logical_clock[0] = 2.0
+        flops.budget_reset()
+        logical_clock[0] = 5.0
+        return "ok"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "fallback", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy_with_python_callbacks(backend) == "ok"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert budget._live_backend_calls == set()
+
+
+def test_backend_call_multiple_resets_uses_latest_epoch(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def backend():
+        logical_clock[0] = 1.0
+        flops.budget_reset()
+        logical_clock[0] = 3.0
+        flops.budget_reset()
+        logical_clock[0] = 7.0
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            _call_numpy(backend)
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 4.0
+    assert summary["flopscope_backend_time_s"] == 4.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert budget._live_backend_calls == set()
+
+
+def test_backend_registration_setup_is_overhead_not_backend(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    class ClockAdvancingSet(set):
+        def add(self, value):
+            logical_clock[0] = 2.0
+            super().add(value)
+
+    def backend():
+        logical_clock[0] = 5.0
+        return "ok"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        budget._live_backend_calls = ClockAdvancingSet()
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(backend) == "ok"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 5.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 2.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert summary["operations"]["ordinary"]["flopscope_overhead_time_s"] == 2.0
+    assert budget._live_backend_calls == set()
+
+
+def test_nested_ordinary_backend_calls_count_overlap_once(monkeypatch):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def inner_backend():
+        logical_clock[0] = 3.0
+        return "inner"
+
+    def outer_backend():
+        logical_clock[0] = 1.0
+        assert _call_numpy(inner_backend) == "inner"
+        logical_clock[0] = 5.0
+        return "outer"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(outer_backend) == "outer"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 5.0
+    assert summary["flopscope_backend_time_s"] == 5.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 5.0
+    assert budget._live_backend_calls == set()
+
+
+def test_nested_ordinary_backend_calls_reset_count_post_reset_overlap_once(
+    monkeypatch,
+):
+    logical_clock = [0.0]
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def inner_backend():
+        logical_clock[0] = 2.0
+        flops.budget_reset()
+        logical_clock[0] = 4.0
+        return "inner"
+
+    def outer_backend():
+        logical_clock[0] = 1.0
+        assert _call_numpy(inner_backend) == "inner"
+        logical_clock[0] = 5.0
+        return "outer"
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        with budget.deduct(
+            "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+        ):
+            assert _call_numpy(outer_backend) == "outer"
+
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert budget._live_backend_calls == set()
+
+
+def test_reset_after_backend_return_before_commit_drops_the_finished_call(
+    monkeypatch,
+):
+    logical_clock = [0.0]
+    backend_returned = threading.Event()
+    end_sample_entered = threading.Event()
+    reset_finished = threading.Event()
+    end_sample_taken = [False]
+    main_thread_id = threading.get_ident()
+
+    def perf_counter():
+        if (
+            threading.get_ident() == main_thread_id
+            and backend_returned.is_set()
+            and not end_sample_taken[0]
+        ):
+            end_sample_taken[0] = True
+            end_sample_entered.set()
+            assert reset_finished.wait(timeout=5.0)
+            return 5.0
+        return logical_clock[0]
+
+    monkeypatch.setattr(budget_module.time, "perf_counter", perf_counter)
+
+    def backend():
+        logical_clock[0] = 5.0
+        backend_returned.set()
+
+    def reset_after_end_sample_starts():
+        assert end_sample_entered.wait(timeout=5.0)
+        logical_clock[0] = 6.0
+        flops.budget_reset()
+        reset_finished.set()
+
+    reset_thread = threading.Thread(target=reset_after_end_sample_starts)
+    reset_thread.start()
+    try:
+        with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+            with budget.deduct(
+                "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+            ):
+                _call_numpy(backend)
+                logical_clock[0] = 7.0
+    finally:
+        reset_finished.set()
+        reset_thread.join(timeout=5.0)
+
+    assert not reset_thread.is_alive()
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 1.0
+    assert summary["flopscope_backend_time_s"] == 0.0
+    assert summary["flopscope_overhead_time_s"] == 1.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert budget._live_backend_calls == set()
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_cross_thread_reset_during_backend_keeps_only_post_reset_overlap(
+    monkeypatch, raises
+):
+    logical_clock = [0.0]
+    backend_started = threading.Event()
+    reset_finished = threading.Event()
+    release_backend = threading.Event()
+    reset_errors: list[BaseException] = []
+    monkeypatch.setattr(budget_module.time, "perf_counter", lambda: logical_clock[0])
+
+    def backend():
+        logical_clock[0] = 2.0
+        backend_started.set()
+        assert release_backend.wait(timeout=5.0)
+        logical_clock[0] = 5.0
+        if raises:
+            raise RuntimeError("backend failed")
+        return "ok"
+
+    def reset_while_backend_is_blocked():
+        try:
+            assert backend_started.wait(timeout=5.0)
+            flops.budget_reset()
+        except BaseException as exc:  # pragma: no cover - asserted below
+            reset_errors.append(exc)
+        finally:
+            reset_finished.set()
+            release_backend.set()
+
+    reset_thread = threading.Thread(target=reset_while_backend_is_blocked)
+    reset_thread.start()
+    try:
+        with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+            if raises:
+                with pytest.raises(RuntimeError, match="backend failed"):
+                    with budget.deduct(
+                        "ordinary",
+                        flop_cost=1,
+                        subscripts=None,
+                        shapes=(),
+                        dtypes=(),
+                    ):
+                        _call_numpy(backend)
+            else:
+                with budget.deduct(
+                    "ordinary", flop_cost=1, subscripts=None, shapes=(), dtypes=()
+                ):
+                    assert _call_numpy(backend) == "ok"
+    finally:
+        release_backend.set()
+        reset_thread.join(timeout=5.0)
+
+    assert reset_finished.is_set()
+    assert not reset_thread.is_alive()
+    assert not reset_errors
+    summary = flops.budget_summary_dict()
+    assert summary["wall_time_s"] == 3.0
+    assert summary["flopscope_backend_time_s"] == 3.0
+    assert summary["flopscope_overhead_time_s"] == 0.0
+    assert summary["residual_wall_time_s"] == 0.0
+    assert summary["operations"]["ordinary"]["flopscope_backend_time_s"] == 3.0
+    assert budget._live_backend_calls == set()
 
 
 class _NumericSleepyUfuncDuck:
@@ -845,6 +1161,37 @@ def test_deduct_after_attributes_backend_even_when_block_raises():
     assert all(rec.op_name != "tile" for rec in b.op_log)  # nothing recorded
 
 
+def test_counted_wrapper_preflight_preserves_incremental_op_timing():
+    """A custom preflight and incremental timing attribution compose safely."""
+    events = []
+
+    def preflight(args, kwargs):
+        events.append(("preflight", args, kwargs))
+
+    @_counted_wrapper(preflight=preflight)
+    def fake(value, *, scale=1):
+        events.append(("body", value, scale))
+        budget = get_active_budget()
+        assert budget is not None
+        with budget.deduct(
+            "preflight_test", flop_cost=3, subscripts=None, shapes=(), dtypes=()
+        ):
+            pass
+        return value * scale
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        assert fake(4, scale=2) == 8
+
+    assert events == [("preflight", (4,), {"scale": 2}), ("body", 4, 2)]
+    summary = budget.summary_dict()
+    operation = summary["operations"]["preflight_test"]
+    assert summary["flops_used"] == 3
+    assert operation["calls"] == 1
+    assert operation["flopscope_overhead_time_s"] == pytest.approx(
+        budget.op_log[0].flopscope_overhead_duration_s
+    )
+
+
 @pytest.mark.parametrize(
     "invoke",
     [
@@ -885,6 +1232,7 @@ def test_ufunc_methods_bill_to_backend(invoke):
     (pinned in ``test_symmetry_tag_forgery``); this is the timing half.
     """
     big = flops.numpy.array(np.random.randn(2000, 2000))
+    invoke(big)
     flops.budget_reset()
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
         invoke(big)

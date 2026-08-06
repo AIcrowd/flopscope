@@ -51,7 +51,13 @@ Each FMA (fused multiply-add) counts as 2 operations (one multiply + one add). A
 4. If within budget: the cost is recorded, and the real NumPy function runs
 5. If over budget: `BudgetExhaustedError` is raised, and the operation does **not** execute
 
-Every deduction is recorded as an `OpRecord` in the budget's operation log, capturing the operation name, input shapes, FLOP cost, cumulative total, context start offset, backend duration, and flopscope overhead duration. This log powers the budget summary and debugging tools.
+Every successful deduction is recorded as an `OpRecord` in the budget's
+operation log, capturing the operation name, input shapes, FLOP cost,
+cumulative total, context start offset, backend duration, and Flopscope
+overhead duration. The operation log remains available for per-call
+diagnostics. Incremental
+operation and namespace rollups, updated alongside the log, power summary
+accessors without rescanning historical calls.
 
 If no explicit `BudgetContext` is active, Flopscope automatically creates a global default context with a budget of 1e15 FLOPs (configurable via the `FLOPSCOPE_DEFAULT_BUDGET` environment variable). This means bare calls outside any `with` block still work and still count FLOPs.
 

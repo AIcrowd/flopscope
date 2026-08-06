@@ -126,6 +126,11 @@ class TestValidateRequest:
     def test_budget_status_passes(self):
         validate_request({"op": "budget_status"})
 
+    def test_budget_summary_is_whitelisted(self):
+        from flopscope_server._protocol import WHITELIST
+
+        assert "budget_summary" in WHITELIST
+
     def test_fetch_passes(self):
         validate_request({"op": "fetch"})
 

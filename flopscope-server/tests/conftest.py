@@ -17,3 +17,19 @@ def _reset_handle_counter():
     mod._reset_handle_counter()
     gmod._reset_gen_counter()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_core_budget_summary_state():
+    """Isolate the authoritative summary epoch between server tests."""
+    from flopscope._budget import budget_reset, get_active_budget
+
+    active = get_active_budget()
+    if active is not None:
+        active.__exit__(None, None, None)
+    budget_reset()
+    yield
+    active = get_active_budget()
+    if active is not None:
+        active.__exit__(None, None, None)
+    budget_reset()

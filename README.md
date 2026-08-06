@@ -189,6 +189,43 @@ flopscope FLOP Budget Summary
   Residual Wall Time:  ...s  (...%)
 ```
 
+### Budget summary semantics
+
+Local and remote summary dictionaries have the same public schema and
+accounting meaning. Remote summaries are read-only snapshots of authoritative
+server state. The global remote view is the current server summary epoch.
+
+The one-participant-process epoch is a WHEST evaluator deployment contract, not
+a security property of every server invocation. A conforming evaluator launches
+the server with `--token-fd`, keeps the minted token in its trusted control
+channel, performs a post-smoke, pre-scoring reset, and couples server replacement
+to participant-process replacement. Under that contract, smoke work is excluded
+and participant code cannot reset the epoch because it never receives the
+control token. Standalone tokenless local/development servers intentionally
+allow lifecycle control operations and are not a hardened participant boundary.
+A client connected to a peer that does not advertise authoritative summaries
+gets an actionable compatibility error rather than partial or zero-filled data.
+
+Summary construction is `O(K)` in the operation and optional namespace buckets
+returned, independent of historical call count. The formatted
+`budget_summary()` and `BudgetContext.summary()` views render those same
+dictionaries; `by_namespace=True` adds the namespace mapping without changing
+the flat totals.
+
+Summary inspection is itself measured FLOPScope work. A summary call takes its
+snapshot before committing that call's inspection overhead, so the overhead
+appears in the next snapshot or a later final-close snapshot. A final close
+response cannot recursively include its own post-boundary serialization.
+
+`BudgetContext.summary_dict()` has three states: before first entry it returns a
+canonical empty mapping; while active it reads the authoritative context and
+normalizes only the four top-level timing fields to the client-owned context's
+end-to-end timing; after close it returns a defensive copy of the cached final
+mapping. Live scalar timing properties retain their established
+`None`/zero-until-close behavior. After close, every scalar timing property is
+read from the same cached mapping, so the scalar and dictionary views cannot
+diverge.
+
 ### Plan Your Budget Before Executing
 
 ```python

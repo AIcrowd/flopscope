@@ -25,10 +25,15 @@ class Session:
         (issue #107). When ``None`` (standalone / unit-test use) a private
         ``ConnectionStore`` is created so a bare ``Session`` still works in
         isolation.
+    namespace : str | None
+        Optional literal root namespace for the session budget context.
     """
 
     def __init__(
-        self, flop_budget: int, conn_store: ConnectionStore | None = None
+        self,
+        flop_budget: int,
+        conn_store: ConnectionStore | None = None,
+        namespace: str | None = None,
     ) -> None:
         # The array + generator stores live for the CONNECTION, not the budget
         # session. The server injects one shared ConnectionStore across all MLPs
@@ -40,6 +45,7 @@ class Session:
         self._budget_ctx = flops.BudgetContext(
             flop_budget=flop_budget,
             quiet=True,
+            namespace=namespace,
         )
         self._budget_ctx.__enter__()
         self._is_open = True
@@ -167,6 +173,12 @@ class Session:
             "flops_remaining": self._budget_ctx.flops_remaining,
         }
 
+    def budget_summary_dict(self, *, by_namespace: bool) -> dict:
+        """Return the active context's authoritative structured summary."""
+        if not self._is_open:
+            raise flops.NoBudgetContextError
+        return self.budget_context.summary_dict(by_namespace=by_namespace)
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
@@ -197,7 +209,20 @@ class Session:
             namespace is not None
             for namespace in budget_breakdown.get("by_namespace", {})
         )
-        budget_summary = self._budget_ctx.summary(by_namespace=show_namespaces)
+        from flopscope._display import _format_budget_summary_text
+
+        budget_summary = _format_budget_summary_text(
+            budget_breakdown,
+            by_namespace=show_namespaces,
+            header=(
+                "flopscope FLOP Budget Summary"
+                + (
+                    f" [{self._budget_ctx.namespace}]"
+                    if self._budget_ctx.namespace
+                    else ""
+                )
+            ),
+        )
         comms_summary = self._comms_tracker.summary()
         # The array + generator stores are owned by the connection, not the
         # session, so they are intentionally NOT cleared here — module-level

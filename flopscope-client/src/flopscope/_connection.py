@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import NoReturn
 
 import zmq
 
@@ -36,6 +37,7 @@ class Connection:
         self._context: zmq.Context | None = None
         self._socket: zmq.Socket | None = None
         self._handshake_done: bool = False
+        self._capabilities: frozenset[str] = frozenset()
         self._flushing_frees: bool = False
 
     # ------------------------------------------------------------------
@@ -53,6 +55,13 @@ class Connection:
         sock.connect(self.url)
         self._socket = sock
         return sock
+
+    def _fail_handshake(
+        self, message: str, *, cause: BaseException | None = None
+    ) -> NoReturn:
+        """Reset invalid handshake state and raise a client-facing error."""
+        self._reset_socket()
+        raise ConnectionError(message) from cause
 
     # ------------------------------------------------------------------
     # Public API
@@ -91,20 +100,66 @@ class Connection:
                 "server did not respond"
             ) from err
 
-        response = decode_response(raw)
+        try:
+            response_obj: object = decode_response(raw)
+        except Exception as err:
+            self._fail_handshake(
+                f"malformed handshake response from server: {err}", cause=err
+            )
+        if not isinstance(response_obj, dict):
+            self._fail_handshake(
+                "malformed handshake response from server: expected a mapping, "
+                f"got {response_obj!r}"
+            )
+        response = response_obj
         if (
             response.get("status") == "error"
             and response.get("error_type") == "VersionMismatch"
         ):
-            raise ConnectionError(
+            self._fail_handshake(
                 f"flopscope-client {client_xyz} cannot talk to this server: "
                 f"{response.get('message', 'version mismatch')}"
             )
         if response.get("status") != "ok":
-            raise ConnectionError(
+            self._fail_handshake(
                 f"unexpected handshake response from server: {response!r}"
             )
+        server_version = response.get("server_version")
+        if not isinstance(server_version, str) or not server_version:
+            self._fail_handshake(
+                "malformed server_version in server handshake: expected a "
+                f"non-empty string matching {client_xyz!r}, got {server_version!r}. "
+                "Install matching client/server versions."
+            )
+        if server_version != client_xyz:
+            self._fail_handshake(
+                f"flopscope-client {client_xyz} cannot talk to flopscope-server "
+                f"{server_version}: versions must match. Install matching "
+                "client/server versions."
+            )
+        raw_capabilities = response.get("capabilities", [])
+        if not isinstance(raw_capabilities, list) or not all(
+            isinstance(value, str) for value in raw_capabilities
+        ):
+            self._fail_handshake(
+                f"malformed capabilities in server handshake: {raw_capabilities!r}"
+            )
+        self._capabilities = frozenset(raw_capabilities)
         self._handshake_done = True
+
+    def require_capability(self, name: str) -> None:
+        """Raise an actionable error when the connected server lacks *name*."""
+        self._ensure_connected()
+        self._ensure_handshaked()
+        if name not in self._capabilities:
+            from flopscope.errors import FlopscopeServerError
+
+            raise FlopscopeServerError(
+                "budget_summary_dict() requires authoritative remote-summary "
+                "support. The connected FLOPScope server does not provide it; "
+                "install matching client/server versions or avoid this accessor "
+                "in prediction code."
+            )
 
     def _flush_pending_frees(self) -> None:
         """Release GC'd server handles, batched onto the current round-trip.
@@ -172,7 +227,19 @@ class Connection:
                 ) from err
             t1 = time.monotonic_ns()
 
-            response = decode_response(raw_response)
+            try:
+                response_obj: object = decode_response(raw_response)
+            except Exception as err:
+                self._reset_socket()
+                raise FlopscopeServerError(
+                    "malformed response from server: could not decode msgpack"
+                ) from err
+            if not isinstance(response_obj, dict):
+                self._reset_socket()
+                raise FlopscopeServerError(
+                    "malformed response from server: expected a mapping"
+                )
+            response = response_obj
             response["_round_trip_ns"] = t1 - t0
             response["_request_bytes"] = len(raw_request)
             response["_response_bytes"] = len(raw_response)
@@ -206,6 +273,7 @@ class Connection:
             self._socket.close(linger=0)
             self._socket = None
         self._handshake_done = False
+        self._capabilities = frozenset()
 
     def close(self) -> None:
         """Close the ZMQ socket, if open."""
@@ -213,6 +281,7 @@ class Connection:
             self._socket.close(linger=0)
             self._socket = None
         self._handshake_done = False
+        self._capabilities = frozenset()
 
 
 # ---------------------------------------------------------------------------
