@@ -158,6 +158,7 @@ export function getNamespaceInventory(namespace: PublicApiNamespace): NamespaceI
           'budget',
           'budget_live',
           'budget_reset',
+          'current_budget',
           'budget_summary',
           'budget_summary_dict',
           'configure',
@@ -183,6 +184,7 @@ export function getNamespaceInventory(namespace: PublicApiNamespace): NamespaceI
           'Public result objects and tensor wrappers exposed by Flopscope itself.',
         entries: topLevelFlopscopeEntries([
           'FlopscopeArray',
+          'BudgetSnapshot',
           'PathInfo',
           'StepInfo',
           'SymmetricTensor',

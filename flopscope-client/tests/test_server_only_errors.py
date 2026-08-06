@@ -8,11 +8,10 @@ def test_top_level_server_only_clear_error():
         _ = flops.SymmetricTensor
 
 
-def test_top_level_server_only_budget_reset():
+def test_budget_reset_is_available_in_client():
     import flopscope as flops
 
-    with pytest.raises(AttributeError, match="not available in the flopscope client"):
-        _ = flops.budget_reset
+    assert callable(flops.budget_reset)
 
 
 def test_flops_submodule_has_getattr():

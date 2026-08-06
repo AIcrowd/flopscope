@@ -171,6 +171,11 @@ class TestClassExports:
 
         assert we.OpRecord is OpRecord
 
+    def test_BudgetSnapshot_is_class(self):
+        from flopscope._budget import BudgetSnapshot
+
+        assert we.BudgetSnapshot is BudgetSnapshot
+
     def test_errors_exported(self):
         assert issubclass(we.BudgetExhaustedError, we.FlopscopeError)
         assert issubclass(we.NoBudgetContextError, we.FlopscopeError)

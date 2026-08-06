@@ -53,10 +53,12 @@ from flopscope._accumulation import (  # noqa: F401,E402
 # --- Budget and diagnostics ---
 from flopscope._budget import (  # noqa: F401,E402
     BudgetContext,
+    BudgetSnapshot,
     OpRecord,
     budget,
     budget_reset,
     budget_summary_dict,
+    current_budget,
     namespace,
 )
 from flopscope._config import configure  # noqa: F401,E402
@@ -260,10 +262,12 @@ __all__ = [
     "accounting",
     "as_symmetric",
     "budget",
+    "BudgetSnapshot",
     "budget_live",
     "budget_reset",
     "budget_summary",
     "budget_summary_dict",
+    "current_budget",
     "clear_cache",
     "configure",
     "einsum_accumulation_cost",

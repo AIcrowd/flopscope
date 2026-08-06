@@ -9,7 +9,6 @@ SERVER_ONLY: frozenset[str] = frozenset(
         "PathInfo",
         "StepInfo",
         "SymmetricTensor",
-        "budget_reset",
         "clear_einsum_cache",
         "einsum_cache_info",
         "flops.bartlett_cost",

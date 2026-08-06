@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from copy import deepcopy
 from math import isfinite
-from typing import NoReturn, TypeGuard
+from typing import NamedTuple, NoReturn, TypeGuard
 
 from flopscope._connection import get_connection
 from flopscope._dispatch import dispatch_span, total_dispatch_ns
@@ -29,6 +29,14 @@ _SUMMARY_KEYS = {
 
 # Module-level guard: only one BudgetContext can be active at a time.
 _active_context = None
+
+
+class BudgetSnapshot(NamedTuple):
+    """Immutable view of a budget context's enforcement counters."""
+
+    flop_budget: int
+    flops_used: int
+    flops_remaining: int
 
 
 def _malformed(message: str) -> NoReturn:
@@ -600,7 +608,36 @@ def budget_summary_dict(by_namespace=False):
     return summary
 
 
-# Note: No budget_reset() in the client — participants must not clear usage.
+def current_budget() -> BudgetSnapshot:
+    """Return enforcement counters for the active budget context."""
+    if _active_context is None:
+        from flopscope.errors import NoBudgetContextError
+
+        raise NoBudgetContextError()
+    return BudgetSnapshot(
+        flop_budget=_active_context._flop_budget,
+        flops_used=_active_context._flops_used,
+        flops_remaining=_active_context.flops_remaining,
+    )
+
+
+def budget_reset() -> None:
+    """Reset active client-side usage while reusing the live session.
+
+    Notes
+    -----
+    Client-side usage is already updated on each compute response. ``budget_reset``
+    is now available to participants for local, non-authoritative baseline
+    management (e.g., long-running notebooks/tests that want session summaries to
+    restart from zero while continuing the same live session).
+    """
+    if _active_context is not None:
+        _active_context._flops_used = 0
+        _active_context._closed_summary = None
+        _active_context._wall_time_s = None
+        _active_context._flopscope_backend_time = 0.0
+        _active_context._flopscope_overhead_time = 0.0
+        _active_context._residual_wall_time = None
 
 
 _global_default = None
