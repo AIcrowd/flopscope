@@ -2500,7 +2500,28 @@ def budget_summary_dict(by_namespace: bool = False) -> dict:
 
 
 def current_budget() -> BudgetSnapshot:
-    """Return enforcement counters for the active budget context."""
+    """Return enforcement counters for the active budget context.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    BudgetSnapshot
+        Snapshot of ``flop_budget``, ``flops_used``, and ``flops_remaining``
+        for the active context.
+
+    Examples
+    --------
+    >>> import flopscope as flops
+    >>> import flopscope.numpy as fnp
+    >>> with flops.BudgetContext(flop_budget=100):
+    ...     _ = fnp.add(fnp.array([1.0]), fnp.array([2.0]))
+    >>> snapshot = flops.current_budget()
+    >>> snapshot.flops_remaining < snapshot.flop_budget
+    True
+    """
     active = get_active_budget()
     if active is None:
         raise NoBudgetContextError()
