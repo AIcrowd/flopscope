@@ -595,6 +595,8 @@ PROBES.update(
         "in1d": lambda: fnp.in1d(V, V3),
         "indices": lambda: fnp.indices((2, 2)),
         "intersect1d": lambda: fnp.intersect1d(V, V3),
+        # Boolean input charges ix_'s nonzero scan; its index output is intp.
+        "ix_": lambda: fnp.ix_(COND),
         "isfinite": lambda: fnp.isfinite(V),
         "isin": lambda: fnp.isin(V, V3),
         "isinf": lambda: fnp.isinf(V),

@@ -183,7 +183,7 @@
     "isscalar": 0.0,
     "issubdtype": 0.0,
     "iterable": 0.0,
-    "ix_": 0.0,
+    "ix_": 1.0,
     "kaiser": 1.0,
     "kron": 1.0,
     "lcm": 16.0,

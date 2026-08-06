@@ -924,7 +924,7 @@ def refuse_non_numeric_source(op_name: str, value: Any) -> _np.dtype:
     return dtype
 
 
-def _counted_wrapper(fn):
+def _counted_wrapper(fn=None, *, preflight=None):
     """Decorator that brackets a flopscope wrapper and bills its non-numpy,
     non-nested-overhead time to flopscope_overhead_time_s.
 
@@ -934,56 +934,66 @@ def _counted_wrapper(fn):
     Per-op attribution: wrapper-own overhead is distributed equally across
     ops created during this call (typically exactly 1 across this codebase).
 
-    Also runs ``_refuse_non_numeric_operands`` as the first thing inside the
-    timed block -- see its docstring. This fires for every registered op,
-    not just billed ones: even a 0-FLOP op like ``zeros`` can be asked to
-    manufacture a non-numeric array, which the cost model cannot price.
+    An optional ``preflight(args, kwargs)`` callback runs first inside the
+    timed block.  The generic ``_refuse_non_numeric_operands`` preflight then
+    fires for every registered op, not just billed ones: even a 0-FLOP op like
+    ``zeros`` can be asked to manufacture a non-numeric array, which the cost
+    model cannot price.
     """
 
-    @functools.wraps(fn)
-    def wrapped(*args, **kwargs):
-        from flopscope._validation import require_budget
+    def decorate(inner_fn):
+        @functools.wraps(inner_fn)
+        def wrapped(*args, **kwargs):
+            from flopscope._validation import require_budget
 
-        budget = require_budget()
-        fs_t0 = time.perf_counter()
-        backend_baseline = budget._total_flopscope_backend_time
-        overhead_baseline = budget._total_flopscope_overhead_time
-        usercode_baseline = budget._total_user_code_time
-        ops_before = len(budget._op_log)
-        try:
-            # wrapped.__name__, not fn.__name__: a factory that renames its
-            # returned wrapper after decorating (`wrapper.__name__ = op_name`)
-            # renames THIS object, not the closure `fn` still refers to --
-            # see _refuse_non_numeric_operands's docstring. Read live, at call
-            # time, so it reflects whatever the factory's rename left behind.
-            _refuse_non_numeric_operands(fn, args, kwargs, wrapped.__name__)
-            return fn(*args, **kwargs)
-        finally:
-            wall = time.perf_counter() - fs_t0
-            backend_delta = budget._total_flopscope_backend_time - backend_baseline
-            overhead_delta = budget._total_flopscope_overhead_time - overhead_baseline
-            usercode_delta = budget._total_user_code_time - usercode_baseline
-            wrapper_own_overhead = max(
-                wall - backend_delta - overhead_delta - usercode_delta, 0.0
-            )
-            with budget._summary_lock:
-                budget._add_flopscope_overhead(wrapper_own_overhead)
-                ops_added = list(range(ops_before, len(budget._op_log)))
-                if ops_added and wrapper_own_overhead > 0:
-                    per_op = wrapper_own_overhead / len(ops_added)
-                    for idx in ops_added:
-                        op = budget._op_log[idx]
-                        budget._replace_op_record(
-                            idx,
-                            op._replace(
-                                flopscope_overhead_duration_s=(
-                                    op.flopscope_overhead_duration_s or 0.0
-                                )
-                                + per_op,
-                            ),
-                        )
+            budget = require_budget()
+            fs_t0 = time.perf_counter()
+            backend_baseline = budget._total_flopscope_backend_time
+            overhead_baseline = budget._total_flopscope_overhead_time
+            usercode_baseline = budget._total_user_code_time
+            ops_before = len(budget._op_log)
+            try:
+                if preflight is not None:
+                    preflight(args, kwargs)
+                # wrapped.__name__, not inner_fn.__name__: a factory that renames
+                # its returned wrapper after decorating (`wrapper.__name__ =
+                # op_name`) renames THIS object, not the closure `inner_fn` still
+                # refers to -- see _refuse_non_numeric_operands's docstring. Read
+                # live, so it reflects the name the factory left behind.
+                _refuse_non_numeric_operands(inner_fn, args, kwargs, wrapped.__name__)
+                return inner_fn(*args, **kwargs)
+            finally:
+                wall = time.perf_counter() - fs_t0
+                backend_delta = budget._total_flopscope_backend_time - backend_baseline
+                overhead_delta = (
+                    budget._total_flopscope_overhead_time - overhead_baseline
+                )
+                usercode_delta = budget._total_user_code_time - usercode_baseline
+                wrapper_own_overhead = max(
+                    wall - backend_delta - overhead_delta - usercode_delta, 0.0
+                )
+                with budget._summary_lock:
+                    budget._add_flopscope_overhead(wrapper_own_overhead)
+                    ops_added = list(range(ops_before, len(budget._op_log)))
+                    if ops_added and wrapper_own_overhead > 0:
+                        per_op = wrapper_own_overhead / len(ops_added)
+                        for idx in ops_added:
+                            op = budget._op_log[idx]
+                            budget._replace_op_record(
+                                idx,
+                                op._replace(
+                                    flopscope_overhead_duration_s=(
+                                        op.flopscope_overhead_duration_s or 0.0
+                                    )
+                                    + per_op,
+                                ),
+                            )
 
-    return wrapped
+        return wrapped
+
+    if fn is None:
+        return decorate
+    return decorate(fn)
 
 
 # ----- Stack-walk tripwire for issue #69 -----

@@ -3794,12 +3794,12 @@
       "free": false,
       "module": "numpy",
       "name": "ix_",
-      "notes": "Construct open mesh from multiple sequences. Free (0 FLOPs) \u2014 index construction from given sequences.",
+      "notes": "Construct open mesh from multiple sequences. Cost: sum(numel(outputs)) + sum(numel(Boolean inputs)); each Boolean input pays for NumPy's internal nonzero scan. Plain ndarray, list-like, and FlopscopeArray inputs are supported; foreign NumPy ndarray subclasses, including MaskedArray and memmap, are unsupported.",
       "numpy_ref": "np.ix_",
       "slug": "ix_",
       "status": "supported",
       "summary": "Construct an open mesh from multiple sequences.",
-      "weight": 0.0
+      "weight": 1.0
     },
     {
       "area": "core",
