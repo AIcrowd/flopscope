@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from copy import deepcopy
 from math import isfinite
-from typing import NoReturn, NamedTuple, TypeGuard
+from typing import NamedTuple, NoReturn, TypeGuard
 
 from flopscope._connection import get_connection
 from flopscope._dispatch import dispatch_span, total_dispatch_ns

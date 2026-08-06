@@ -57,8 +57,8 @@ from flopscope._budget import (  # noqa: F401,E402
     OpRecord,
     budget,
     budget_reset,
-    current_budget,
     budget_summary_dict,
+    current_budget,
     namespace,
 )
 from flopscope._config import configure  # noqa: F401,E402

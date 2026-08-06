@@ -35,8 +35,8 @@ from flopscope._budget import (  # noqa: E402
     OpRecord,
     budget,
     budget_reset,
-    current_budget,
     budget_summary_dict,
+    current_budget,
 )
 from flopscope._config import configure  # noqa: E402,F401
 from flopscope._dispatch import timed_dispatch  # noqa: E402
