@@ -3,7 +3,28 @@
 import pytest
 
 from flopscope._budget import BudgetContext, OpRecord, get_active_budget
-from flopscope.errors import BudgetExhaustedError
+from flopscope.errors import BudgetExhaustedError, NoBudgetContextError
+
+
+def test_current_budget_returns_an_immutable_snapshot_of_the_active_context():
+    import flopscope
+
+    with BudgetContext(flop_budget=100, quiet=True) as budget:
+        snapshot = flopscope.current_budget()
+
+        assert snapshot == flopscope.BudgetSnapshot(100, 0, 100)
+        with pytest.raises(AttributeError):
+            snapshot.flops_used = 1
+
+        budget.deduct("add", flop_cost=25, subscripts=None, shapes=())
+        assert flopscope.current_budget() == flopscope.BudgetSnapshot(100, 25, 75)
+
+
+def test_current_budget_requires_an_explicitly_active_context():
+    import flopscope
+
+    with pytest.raises(NoBudgetContextError):
+        flopscope.current_budget()
 
 
 def test_budget_context_basic():

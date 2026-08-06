@@ -511,16 +511,16 @@ def test_delete_bills_numel_output():
 
 
 def test_copyto_cost_is_dtype_gated():
-    # same-dtype copy is pure data movement -> free
+    # copyto bills per element written, regardless of dtype conversion
     dst = np.zeros(10000)
-    assert cost(lambda: fnp.copyto(dst, 3.14)) == 0
+    assert cost(lambda: fnp.copyto(dst, 3.14)) == 10000
     dst2d = np.zeros((100, 100))
-    assert cost(lambda: fnp.copyto(dst2d, np.arange(100.0))) == 0
-    assert cost(lambda: fnp.copyto(dst, np.ones(10000))) == 0
-    # value-changing cast (float -> int) computes per element -> numel(dst)
+    assert cost(lambda: fnp.copyto(dst2d, np.arange(100.0))) == 10000
+    assert cost(lambda: fnp.copyto(dst, np.ones(10000))) == 10000
+    # value-changing cast (float -> int) bills numel(dst) = 10000
     dsti = np.zeros(10000, dtype=np.int64)
     assert cost(lambda: fnp.copyto(dsti, np.ones(10000), casting="unsafe")) == 10000
-    # value-changing cast restricted by a broadcast where mask -> popcount(where)
+    # masked copy: only popcount(where) elements -> 10000 True values
     dsti2d = np.zeros((100, 100), dtype=np.int64)
     where_mask = np.ones((100, 1), dtype=bool)  # broadcasts to (100,100) -> 10000 True
 

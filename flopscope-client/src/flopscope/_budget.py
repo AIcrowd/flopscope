@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import NamedTuple
 
 from flopscope._connection import get_connection
 from flopscope._dispatch import dispatch_span, total_dispatch_ns
@@ -11,9 +12,37 @@ from flopscope._protocol import (
     encode_budget_open,
     encode_budget_status,
 )
+from flopscope.errors import NoBudgetContextError
 
 # Module-level guard: only one BudgetContext can be active at a time.
 _active_context = None
+
+
+class BudgetSnapshot(NamedTuple):
+    """An immutable, local snapshot of the active budget counters."""
+
+    flop_budget: int
+    flops_used: int
+    flops_remaining: int
+
+
+def _update_active_budget_from_response(response: object) -> None:
+    """Refresh the active context cache from a successful operation response."""
+    if _active_context is None or not isinstance(response, dict):
+        return
+    budget_info = response.get("budget")
+    if isinstance(budget_info, dict):
+        if "flops_used" in budget_info:
+            _active_context._update_budget(budget_info)
+            return
+        budget_info = budget_info.get("flops_remaining")
+    if budget_info is not None:
+        try:
+            _active_context._update_budget(
+                {"flops_used": _active_context.flop_budget - int(budget_info)}
+            )
+        except (TypeError, ValueError):
+            pass
 
 
 def _extract_compute_ns(close_response: object) -> int:
@@ -142,6 +171,8 @@ class BudgetContext:
         self._residual_wall_time: float | None = None
         self._wall_start_ns: int | None = None
         self._dispatch_baseline_ns: int = 0
+        self._diagnostic_flops_baseline: int = 0
+        self._diagnostic_budget_recorded: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -262,6 +293,11 @@ class BudgetContext:
                 "Nested BudgetContext is not supported. "
                 "Only one context can be active at a time."
             )
+        # A BudgetContext can be reused as a decorator.  Each entry opens a
+        # fresh server budget, so its diagnostic delta starts at that session's
+        # cached zero rather than the prior session's closing total.
+        self._diagnostic_flops_baseline = 0
+        self._diagnostic_budget_recorded = False
         self._previous_context = _active_context
         conn = get_connection()
         self._wall_start_ns = time.perf_counter_ns()
@@ -320,75 +356,64 @@ class BudgetContext:
 # ------------------------------------------------------------------
 
 
-class NamespaceRecord:
-    """Snapshot of a BudgetContext's state at close time."""
-
-    def __init__(
-        self,
-        namespace,
-        flop_budget,
-        flops_used,
-        wall_time_s=0.0,
-        backend_time_s=0.0,
-        overhead_time_s=0.0,
-        residual_time_s=0.0,
-    ):
-        self.namespace = namespace
-        self.flop_budget = flop_budget
-        self.flops_used = flops_used
-        self.wall_time_s = wall_time_s
-        self.backend_time_s = backend_time_s
-        self.overhead_time_s = overhead_time_s
-        self.residual_time_s = residual_time_s
-
-
 class BudgetAccumulator:
-    """Collects budget records across multiple BudgetContext sessions."""
+    """Incrementally collects diagnostic totals across budget sessions."""
 
     def __init__(self):
-        self._records = []
+        self.reset()
 
     def record(self, ctx):
-        # `or 0.0` coerces the Optional timing fields (wall_time_s /
-        # residual_wall_time_s are None on a never-closed context) to 0.0.
-        self._records.append(
-            NamespaceRecord(
-                namespace=ctx.namespace,
-                flop_budget=ctx.flop_budget,
-                flops_used=ctx.flops_used,
-                wall_time_s=getattr(ctx, "wall_time_s", 0.0) or 0.0,
-                backend_time_s=getattr(ctx, "flopscope_backend_time_s", 0.0) or 0.0,
-                overhead_time_s=getattr(ctx, "flopscope_overhead_time_s", 0.0) or 0.0,
-                residual_time_s=getattr(ctx, "residual_wall_time_s", 0.0) or 0.0,
-            )
+        # `or 0.0` coerces Optional timing fields on a never-closed context.
+        baseline = getattr(ctx, "_diagnostic_flops_baseline", 0)
+        budget_recorded = getattr(ctx, "_diagnostic_budget_recorded", False)
+        flop_budget = 0 if budget_recorded else ctx.flop_budget
+        flops_used = max(ctx.flops_used - baseline, 0)
+        self._flop_budget += flop_budget
+        self._flops_used += flops_used
+        self._wall_time_s += getattr(ctx, "wall_time_s", 0.0) or 0.0
+        self._backend_time_s += getattr(ctx, "flopscope_backend_time_s", 0.0) or 0.0
+        self._overhead_time_s += getattr(ctx, "flopscope_overhead_time_s", 0.0) or 0.0
+        self._residual_time_s += getattr(ctx, "residual_wall_time_s", 0.0) or 0.0
+
+        bucket = self._by_namespace.setdefault(
+            ctx.namespace,
+            {"flop_budget": 0, "flops_used": 0, "operations": {}},
         )
+        bucket["flop_budget"] += flop_budget
+        bucket["flops_used"] += flops_used
+        if hasattr(ctx, "_diagnostic_flops_baseline"):
+            ctx._diagnostic_flops_baseline = ctx.flops_used
+            ctx._diagnostic_budget_recorded = True
 
     def get_data(self, by_namespace=False):
-        total_budget = sum(r.flop_budget for r in self._records)
-        total_used = sum(r.flops_used for r in self._records)
         result = {
-            "flop_budget": total_budget,
-            "flops_used": total_used,
-            "flops_remaining": total_budget - total_used,
+            "flop_budget": self._flop_budget,
+            "flops_used": self._flops_used,
+            "flops_remaining": self._flop_budget - self._flops_used,
             "operations": {},
-            "wall_time_s": sum(r.wall_time_s for r in self._records),
-            "flopscope_backend_time_s": sum(r.backend_time_s for r in self._records),
-            "flopscope_overhead_time_s": sum(r.overhead_time_s for r in self._records),
-            "residual_wall_time_s": sum(r.residual_time_s for r in self._records),
+            "wall_time_s": self._wall_time_s,
+            "flopscope_backend_time_s": self._backend_time_s,
+            "flopscope_overhead_time_s": self._overhead_time_s,
+            "residual_wall_time_s": self._residual_time_s,
         }
         if by_namespace:
-            by_ns = {}
-            for r in self._records:
-                ns = r.namespace
-                if ns not in by_ns:
-                    by_ns[ns] = {"flop_budget": 0, "flops_used": 0, "operations": {}}
-                by_ns[ns]["flop_budget"] += r.flop_budget
-                by_ns[ns]["flops_used"] += r.flops_used
-            result["by_namespace"] = by_ns
+            result["by_namespace"] = {
+                namespace: {
+                    **bucket,
+                    "operations": dict(bucket["operations"]),
+                }
+                for namespace, bucket in self._by_namespace.items()
+            }
         return result
 
     def reset(self):
-        self._records.clear()
+        self._flop_budget = 0
+        self._flops_used = 0
+        self._wall_time_s = 0.0
+        self._backend_time_s = 0.0
+        self._overhead_time_s = 0.0
+        self._residual_time_s = 0.0
+        self._by_namespace = {}
 
 
 _accumulator = BudgetAccumulator()
@@ -408,7 +433,23 @@ def budget_summary_dict(by_namespace=False):
     return _accumulator.get_data(by_namespace=by_namespace)
 
 
-# Note: No budget_reset() in the client — participants must not clear usage.
+def current_budget() -> BudgetSnapshot:
+    """Return cached counters for the active budget without an RPC."""
+    if _active_context is None:
+        raise NoBudgetContextError()
+    return BudgetSnapshot(
+        flop_budget=int(_active_context.flop_budget),
+        flops_used=int(_active_context.flops_used),
+        flops_remaining=int(_active_context.flops_remaining),
+    )
+
+
+def budget_reset() -> None:
+    """Clear local diagnostic summaries without changing server enforcement."""
+    _accumulator.reset()
+    if _active_context is not None:
+        _active_context._diagnostic_flops_baseline = _active_context.flops_used
+        _active_context._diagnostic_budget_recorded = False
 
 
 _global_default = None

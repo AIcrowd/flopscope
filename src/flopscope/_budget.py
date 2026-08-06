@@ -7,6 +7,7 @@ import sys as _sys
 import threading
 import time
 import weakref
+from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
 from flopscope.errors import BudgetExhaustedError
@@ -30,6 +31,14 @@ class OpRecord(NamedTuple):
     flopscope_overhead_duration_s: float | None = (
         None  # per-op flopscope dispatch time (preamble + deduct body + bookkeeping + postamble)
     )
+
+
+class BudgetSnapshot(NamedTuple):
+    """Immutable view of a budget's enforcement counters."""
+
+    flop_budget: int
+    flops_used: int
+    flops_remaining: int
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +111,15 @@ class _OpTimer:
             self._budget._total_flopscope_overhead_time += in_block_overhead
 
             op = self._budget._op_log[self._op_index]
-            self._budget._op_log[self._op_index] = op._replace(
-                flopscope_backend_duration_s=self._backend_duration_s,
-                flopscope_overhead_duration_s=(op.flopscope_overhead_duration_s or 0.0)
-                + in_block_overhead,
+            self._budget._replace_op_record(
+                self._op_index,
+                op._replace(
+                    flopscope_backend_duration_s=self._backend_duration_s,
+                    flopscope_overhead_duration_s=(
+                        op.flopscope_overhead_duration_s or 0.0
+                    )
+                    + in_block_overhead,
+                ),
             )
 
             # Post-op deadline check (preserves existing behavior)
@@ -284,11 +298,14 @@ def _counted_wrapper(fn):
                 per_op = wrapper_own_overhead / len(ops_added)
                 for idx in ops_added:
                     op = budget._op_log[idx]
-                    budget._op_log[idx] = op._replace(
-                        flopscope_overhead_duration_s=(
-                            op.flopscope_overhead_duration_s or 0.0
-                        )
-                        + per_op
+                    budget._replace_op_record(
+                        idx,
+                        op._replace(
+                            flopscope_overhead_duration_s=(
+                                op.flopscope_overhead_duration_s or 0.0
+                            )
+                            + per_op,
+                        ),
                     )
 
     return wrapped
@@ -345,6 +362,47 @@ _all_budget_contexts: weakref.WeakSet[BudgetContext] = weakref.WeakSet()
 def get_active_budget() -> BudgetContext | None:
     """Return the active BudgetContext, or None if outside any context."""
     return getattr(_thread_local, "active_budget", None)
+
+
+def current_budget() -> BudgetSnapshot:
+    """Return immutable enforcement counters for the active budget context.
+
+    Unlike the implicit default used by counted NumPy wrappers, this accessor
+    never creates a context: callers can use its absence as a control-flow
+    boundary.
+    """
+    from flopscope.errors import NoBudgetContextError
+
+    active = get_active_budget()
+    if active is None:
+        raise NoBudgetContextError()
+    return BudgetSnapshot(active.flop_budget, active.flops_used, active.flops_remaining)
+
+
+def _update_active_budget_from_response(response: object) -> None:
+    """Refresh the active context from a response that carries budget fields."""
+    if not isinstance(response, dict):
+        return
+    budget = get_active_budget()
+    if budget is None:
+        return
+    budget_info = response.get("budget")
+    if not isinstance(budget_info, dict):
+        return
+    if "flops_used" in budget_info:
+        try:
+            budget._flops_used = int(budget_info["flops_used"])
+            budget._flops_used = max(0, budget._flops_used)
+        except (TypeError, ValueError):
+            return
+        return
+    flops_remaining = budget_info.get("flops_remaining")
+    if flops_remaining is None:
+        return
+    try:
+        budget._flops_used = max(0, budget.flop_budget - int(flops_remaining))
+    except (TypeError, ValueError):
+        return
 
 
 class _NamespaceScope:
@@ -471,6 +529,148 @@ def _summarize_by_namespace(op_log: list[OpRecord]) -> dict[str | None, dict]:
     return by_namespace
 
 
+@dataclass
+class _OperationTotals:
+    flop_cost: int = 0
+    calls: int = 0
+    flopscope_backend_time_s: float = 0.0
+    flopscope_overhead_time_s: float = 0.0
+
+    def apply(self, op: OpRecord, sign: int) -> None:
+        self.flop_cost += sign * op.flop_cost
+        self.calls += sign
+        self.flopscope_backend_time_s += sign * (op.flopscope_backend_duration_s or 0.0)
+        self.flopscope_overhead_time_s += sign * (
+            op.flopscope_overhead_duration_s or 0.0
+        )
+
+    def merge(self, other: _OperationTotals, sign: int = 1) -> None:
+        self.flop_cost += sign * other.flop_cost
+        self.calls += sign * other.calls
+        self.flopscope_backend_time_s += sign * other.flopscope_backend_time_s
+        self.flopscope_overhead_time_s += sign * other.flopscope_overhead_time_s
+
+    def to_dict(self) -> dict:
+        return {
+            "flop_cost": self.flop_cost,
+            "calls": self.calls,
+            "flopscope_backend_time_s": self.flopscope_backend_time_s,
+            "flopscope_overhead_time_s": self.flopscope_overhead_time_s,
+        }
+
+    def is_empty(self) -> bool:
+        return (
+            self.flop_cost == 0
+            and self.calls == 0
+            and self.flopscope_backend_time_s == 0.0
+            and self.flopscope_overhead_time_s == 0.0
+        )
+
+
+@dataclass
+class _NamespaceTotals:
+    flops_used: int = 0
+    calls: int = 0
+    flopscope_backend_time_s: float = 0.0
+    flopscope_overhead_time_s: float = 0.0
+    operations: dict[str, _OperationTotals] = field(default_factory=dict)
+
+    def apply(self, op: OpRecord, sign: int) -> None:
+        self.flops_used += sign * op.flop_cost
+        self.calls += sign
+        self.flopscope_backend_time_s += sign * (op.flopscope_backend_duration_s or 0.0)
+        self.flopscope_overhead_time_s += sign * (
+            op.flopscope_overhead_duration_s or 0.0
+        )
+        operation = self.operations.setdefault(op.op_name, _OperationTotals())
+        operation.apply(op, sign)
+        if operation.is_empty():
+            del self.operations[op.op_name]
+
+    def merge(self, other: _NamespaceTotals, sign: int = 1) -> None:
+        self.flops_used += sign * other.flops_used
+        self.calls += sign * other.calls
+        self.flopscope_backend_time_s += sign * other.flopscope_backend_time_s
+        self.flopscope_overhead_time_s += sign * other.flopscope_overhead_time_s
+        for name, source in tuple(other.operations.items()):
+            target = self.operations.setdefault(name, _OperationTotals())
+            target.merge(source, sign)
+            if target.is_empty():
+                del self.operations[name]
+
+    def to_dict(self) -> dict:
+        return {
+            "flops_used": self.flops_used,
+            "calls": self.calls,
+            "flopscope_backend_time_s": self.flopscope_backend_time_s,
+            "flopscope_overhead_time_s": self.flopscope_overhead_time_s,
+            "operations": {
+                name: operation.to_dict() for name, operation in self.operations.items()
+            },
+        }
+
+    def is_empty(self) -> bool:
+        return (
+            self.flops_used == 0
+            and self.calls == 0
+            and self.flopscope_backend_time_s == 0.0
+            and self.flopscope_overhead_time_s == 0.0
+            and not self.operations
+        )
+
+
+class _SummaryRollup:
+    """Incremental operation and namespace summary for one budget epoch."""
+
+    def __init__(self) -> None:
+        self.operations: dict[str, _OperationTotals] = {}
+        self.namespaces: dict[str | None, _NamespaceTotals] = {}
+
+    def _apply(self, op: OpRecord, sign: int) -> None:
+        operation = self.operations.setdefault(op.op_name, _OperationTotals())
+        operation.apply(op, sign)
+        if operation.is_empty():
+            del self.operations[op.op_name]
+
+        namespace = self.namespaces.setdefault(op.namespace, _NamespaceTotals())
+        namespace.apply(op, sign)
+        if namespace.is_empty():
+            del self.namespaces[op.namespace]
+
+    def apply_record(self, old: OpRecord | None, new: OpRecord | None) -> None:
+        if old is not None:
+            self._apply(old, -1)
+        if new is not None:
+            self._apply(new, 1)
+
+    def merge(self, other: _SummaryRollup, sign: int = 1) -> None:
+        for name, source in tuple(other.operations.items()):
+            target = self.operations.setdefault(name, _OperationTotals())
+            target.merge(source, sign)
+            if target.is_empty():
+                del self.operations[name]
+        for name, source in tuple(other.namespaces.items()):
+            target = self.namespaces.setdefault(name, _NamespaceTotals())
+            target.merge(source, sign)
+            if target.is_empty():
+                del self.namespaces[name]
+
+    def copy(self) -> _SummaryRollup:
+        result = _SummaryRollup()
+        result.merge(self)
+        return result
+
+    def clear(self) -> None:
+        self.operations.clear()
+        self.namespaces.clear()
+
+    def operations_dict(self) -> dict[str, dict]:
+        return {name: total.to_dict() for name, total in self.operations.items()}
+
+    def namespaces_dict(self) -> dict[str | None, dict]:
+        return {name: total.to_dict() for name, total in self.namespaces.items()}
+
+
 def _timing_summary(
     wall_time_s: float | None,
     flopscope_backend_time_s: float | None,
@@ -534,6 +734,10 @@ class BudgetContext:
         self._flop_budget = flop_budget
         self._flops_used = 0
         self._op_log: list[OpRecord] = []
+        # Keep diagnostics forever, but materialize user-facing summaries from
+        # this aggregate rather than re-walking that potentially large log.
+        self._summary_rollup = _SummaryRollup()
+        self._unrecorded_summary_rollup = _SummaryRollup()
         self._quiet = quiet
         self._root_namespace = namespace
         self._namespace_stack: list[str] = []
@@ -587,16 +791,14 @@ class BudgetContext:
     def wall_time_s(self) -> float | None:
         """Total wall-clock seconds spanned by the context.
 
-        Measured from ``__init__`` start to the end of ``__exit__`` (after the
-        accumulator-record and active-budget restoration work). ``None`` until
+        Measured from ``__init__`` start through context-close bookkeeping,
+        immediately before the session summary is recorded. ``None`` until
         ``__exit__`` has run.
 
         The decomposition ``wall_time_s == flopscope_backend_time_s
         + flopscope_overhead_time_s + residual_wall_time_s`` holds within numerical
         tolerance. The pre-``__enter__`` slice (``__init__`` body + banner print)
-        and the post-``__exit__`` body slice (accumulator-record,
-        active-budget restore) are both attributed to
-        ``flopscope_overhead_time_s``.
+        is attributed to ``flopscope_overhead_time_s``.
         """
         return self._wall_time_s
 
@@ -650,6 +852,18 @@ class BudgetContext:
             return 0.0
         return max(residual, 0.0)
 
+    def _append_op_record(self, record: OpRecord) -> int:
+        self._op_log.append(record)
+        self._summary_rollup.apply_record(None, record)
+        self._unrecorded_summary_rollup.apply_record(None, record)
+        return len(self._op_log) - 1
+
+    def _replace_op_record(self, index: int, record: OpRecord) -> None:
+        previous = self._op_log[index]
+        self._op_log[index] = record
+        self._summary_rollup.apply_record(previous, record)
+        self._unrecorded_summary_rollup.apply_record(previous, record)
+
     def _charge_op(
         self,
         op_name: str,
@@ -678,7 +892,7 @@ class BudgetContext:
         self._flops_used += adjusted_cost
         now = time.perf_counter()
         offset = now - self._start_time if self._start_time is not None else None
-        self._op_log.append(
+        self._append_op_record(
             OpRecord(
                 op_name=op_name,
                 subscripts=subscripts,
@@ -714,11 +928,14 @@ class BudgetContext:
             self._total_flopscope_overhead_time += deduct_body_time
             if len(self._op_log) > n0:
                 op = self._op_log[-1]
-                self._op_log[-1] = op._replace(
-                    flopscope_overhead_duration_s=(
-                        op.flopscope_overhead_duration_s or 0.0
-                    )
-                    + deduct_body_time
+                self._replace_op_record(
+                    len(self._op_log) - 1,
+                    op._replace(
+                        flopscope_overhead_duration_s=(
+                            op.flopscope_overhead_duration_s or 0.0
+                        )
+                        + deduct_body_time,
+                    ),
                 )
 
     def deduct_after(
@@ -757,14 +974,14 @@ class BudgetContext:
             "flop_budget": self._flop_budget,
             "flops_used": self._flops_used,
             "flops_remaining": self.flops_remaining,
-            "operations": _summarize_operations(self._op_log),
+            "operations": self._summary_rollup.operations_dict(),
             "wall_time_s": wall_time,
             "flopscope_backend_time_s": backend_time,
             "flopscope_overhead_time_s": overhead_time,
             "residual_wall_time_s": residual_wall_time_s,
         }
         if by_namespace:
-            result["by_namespace"] = _summarize_by_namespace(self._op_log)
+            result["by_namespace"] = self._summary_rollup.namespaces_dict()
         return result
 
     def summary(self, by_namespace: bool = False) -> str:
@@ -815,6 +1032,30 @@ class BudgetContext:
             wall_time_s=wall_time,
             total_flopscope_backend_time=max(backend_delta, 0.0),
             total_flopscope_overhead_time=max(overhead_delta, 0.0),
+            summary_rollup=self._unrecorded_summary_rollup.copy(),
+        )
+
+    def _snapshot_summary_record(self) -> NamespaceRecord:
+        """Return the unrecorded summary delta without touching diagnostics."""
+        wall_time = self.wall_time_s
+        if wall_time is None and self._start_time is not None:
+            wall_time = self.elapsed_s
+        return NamespaceRecord(
+            namespace=self.namespace,
+            flop_budget=0 if self._budget_recorded else self.flop_budget,
+            flops_used=max(self._flops_used - self._recorded_flops_used, 0),
+            op_log=[],
+            wall_time_s=wall_time,
+            total_flopscope_backend_time=max(
+                self._total_flopscope_backend_time
+                - self._recorded_flopscope_backend_time,
+                0.0,
+            ),
+            total_flopscope_overhead_time=max(
+                self._total_flopscope_overhead_time - self._recorded_overhead_time,
+                0.0,
+            ),
+            summary_rollup=self._unrecorded_summary_rollup.copy(),
         )
 
     def _has_unrecorded_activity(self) -> bool:
@@ -825,6 +1066,7 @@ class BudgetContext:
         self._recorded_op_count = len(self._op_log)
         self._recorded_flopscope_backend_time = self._total_flopscope_backend_time
         self._recorded_overhead_time = self._total_flopscope_overhead_time
+        self._unrecorded_summary_rollup.clear()
         self._budget_recorded = True
 
     def _mark_reset_baseline(self) -> None:
@@ -832,6 +1074,7 @@ class BudgetContext:
         self._recorded_op_count = len(self._op_log)
         self._recorded_flopscope_backend_time = self._total_flopscope_backend_time
         self._recorded_overhead_time = self._total_flopscope_overhead_time
+        self._unrecorded_summary_rollup.clear()
         self._budget_recorded = False
 
     def __enter__(self) -> BudgetContext:
@@ -865,19 +1108,18 @@ class BudgetContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        # body_end snapshots the user-code window (start_time → here). Then
-        # we do the post-exit accumulator work and snapshot post_exit_end.
-        # wall_time_s spans creation → post_exit_end, and the pre-enter +
-        # post-exit slices are billed to flopscope_overhead_time_s. See #82.
+        # Finalize close timing before recording its summary delta, so the
+        # session-level view includes the same close bookkeeping as this
+        # context's own timing view.
         body_end = time.perf_counter()
         if self._start_time is not None:
-            _accumulator.record(self)
-            _thread_local.active_budget = self._previous_budget
             post_exit_end = time.perf_counter()
             self._wall_time_s = post_exit_end - self._creation_time
             self._total_flopscope_overhead_time += self._pre_enter_overhead + (
                 post_exit_end - body_end
             )
+            _accumulator.record(self)
+            _thread_local.active_budget = self._previous_budget
         else:
             # Defensive: __exit__ called without __enter__.
             _thread_local.active_budget = self._previous_budget
@@ -992,6 +1234,7 @@ class NamespaceRecord(NamedTuple):
     wall_time_s: float | None = None
     total_flopscope_backend_time: float | None = None
     total_flopscope_overhead_time: float | None = None
+    summary_rollup: _SummaryRollup | None = None
 
 
 def _snapshot_namespace_record(ctx: BudgetContext) -> NamespaceRecord:
@@ -1003,75 +1246,111 @@ class BudgetAccumulator:
 
     def __init__(self) -> None:
         self._records: list[NamespaceRecord] = []
+        self._rollup = _SummaryRollup()
+        self._flop_budget = 0
+        self._flops_used = 0
+        self._wall_time_s: float | None = None
+        self._backend_time_s = 0.0
+        self._overhead_time_s = 0.0
 
     def record(self, ctx: BudgetContext) -> None:
-        """Snapshot a BudgetContext and store it."""
-        self._records.append(_snapshot_namespace_record(ctx))
+        """Merge one context's unrecorded summary delta and retain diagnostics."""
+        record = _snapshot_namespace_record(ctx)
+        self._records.append(record)
+        self._merge(record)
         ctx._mark_recorded()
 
-    def get_data(self, by_namespace: bool = False) -> dict:
-        """Return aggregated budget data across all recorded contexts."""
-        total_budget = 0
-        total_used = 0
-        total_wall_time: float | None = None
-        total_backend: float | None = None
-        total_overhead: float | None = None
-        all_ops: list[OpRecord] = []
+    def _merge(self, record: NamespaceRecord) -> None:
+        self._flop_budget += record.flop_budget
+        self._flops_used += record.flops_used
+        if record.summary_rollup is not None:
+            self._rollup.merge(record.summary_rollup)
+        else:  # Backward-compatible fallback for hand-constructed records.
+            for op in record.op_log:
+                self._rollup.apply_record(None, op)
+        if record.wall_time_s is not None:
+            self._wall_time_s = (self._wall_time_s or 0.0) + record.wall_time_s
+        self._backend_time_s += record.total_flopscope_backend_time or 0.0
+        self._overhead_time_s += record.total_flopscope_overhead_time or 0.0
 
-        for rec in self._records:
-            total_budget += rec.flop_budget
-            total_used += rec.flops_used
-            all_ops.extend(rec.op_log)
-            if rec.wall_time_s is not None:
-                total_wall_time = (total_wall_time or 0.0) + rec.wall_time_s
-            if rec.total_flopscope_backend_time is not None:
-                total_backend = (
-                    total_backend or 0.0
-                ) + rec.total_flopscope_backend_time
-            if rec.total_flopscope_overhead_time is not None:
-                total_overhead = (
-                    total_overhead or 0.0
-                ) + rec.total_flopscope_overhead_time
+    def snapshot(
+        self,
+        by_namespace: bool = False,
+        *,
+        live_contexts: tuple[BudgetContext, ...] = (),
+    ) -> dict:
+        rollup = self._rollup.copy()
+        flop_budget = self._flop_budget
+        flops_used = self._flops_used
+        wall_time = self._wall_time_s
+        backend_time = self._backend_time_s
+        overhead_time = self._overhead_time_s
+        for context in live_contexts:
+            record = context._snapshot_summary_record()
+            flop_budget += record.flop_budget
+            flops_used += record.flops_used
+            if record.summary_rollup is not None:
+                rollup.merge(record.summary_rollup)
+            if record.wall_time_s is not None:
+                wall_time = (wall_time or 0.0) + record.wall_time_s
+            backend_time += record.total_flopscope_backend_time or 0.0
+            overhead_time += record.total_flopscope_overhead_time or 0.0
 
         wall_time, backend_time, overhead_time, residual_wall_time_s = _timing_summary(
-            total_wall_time, total_backend, total_overhead
+            wall_time, backend_time, overhead_time
         )
-
         result = {
-            "flop_budget": total_budget,
-            "flops_used": total_used,
-            "flops_remaining": total_budget - total_used,
-            "operations": _summarize_operations(all_ops),
+            "flop_budget": flop_budget,
+            "flops_used": flops_used,
+            "flops_remaining": flop_budget - flops_used,
+            "operations": rollup.operations_dict(),
             "wall_time_s": wall_time,
             "flopscope_backend_time_s": backend_time,
             "flopscope_overhead_time_s": overhead_time,
             "residual_wall_time_s": residual_wall_time_s,
         }
-
         if by_namespace:
-            result["by_namespace"] = _summarize_by_namespace(all_ops)
-
+            result["by_namespace"] = rollup.namespaces_dict()
         return result
+
+    def get_data(self, by_namespace: bool = False) -> dict:
+        """Return data already merged from closed context deltas."""
+        return self.snapshot(by_namespace=by_namespace)
 
     def reset(self) -> None:
         """Clear all recorded data."""
         self._records.clear()
+        self._rollup.clear()
+        self._flop_budget = 0
+        self._flops_used = 0
+        self._wall_time_s = None
+        self._backend_time_s = 0.0
+        self._overhead_time_s = 0.0
 
 
 _accumulator = BudgetAccumulator()
 
 
-def _snapshot_records() -> list[NamespaceRecord]:
-    records = list(_accumulator._records)
+def _live_summary_contexts() -> tuple[BudgetContext, ...]:
+    contexts: list[BudgetContext] = []
     active = get_active_budget()
     if _global_default is not None and _global_default._has_unrecorded_activity():
-        records.append(_snapshot_namespace_record(_global_default))
-    if (
-        active is not None
-        and active is not _global_default
-        and active._has_unrecorded_activity()
-    ):
-        records.append(_snapshot_namespace_record(active))
+        contexts.append(_global_default)
+    if active is not None and active is not _global_default:
+        contexts.append(active)
+    return tuple(contexts)
+
+
+def _snapshot_records() -> list[NamespaceRecord]:
+    """Compatibility helper for display-only budget classification.
+
+    Structured summaries use :meth:`BudgetAccumulator.snapshot` and never
+    call this diagnostic-history helper.
+    """
+    records = list(_accumulator._records)
+    records.extend(
+        _snapshot_namespace_record(context) for context in _live_summary_contexts()
+    )
     return records
 
 
@@ -1102,9 +1381,9 @@ def budget_summary_dict(by_namespace: bool = False) -> dict:
     >>> sorted(summary)
     ['flop_budget', 'flops_remaining', 'flops_used', 'flopscope_backend_time_s', 'flopscope_overhead_time_s', 'operations', 'residual_wall_time_s', 'wall_time_s']
     """
-    acc_copy = BudgetAccumulator()
-    acc_copy._records = _snapshot_records()
-    return acc_copy.get_data(by_namespace=by_namespace)
+    return _accumulator.snapshot(
+        by_namespace=by_namespace, live_contexts=_live_summary_contexts()
+    )
 
 
 def budget_reset() -> None:

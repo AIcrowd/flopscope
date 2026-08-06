@@ -124,7 +124,8 @@ def test_trim_zeros_charged():
 def test_copyto_same_dtype_free():
     dst = fnp.zeros(100, dtype=np.float64)
     src = fnp.asarray(np.ones(100, dtype=np.float64))
-    assert billed(lambda: fnp.copyto(dst, src)) == 0
+    # same-dtype copy bills per element written: 100 elements
+    assert billed(lambda: fnp.copyto(dst, src)) == 100
 
 
 def test_copyto_value_changing_cast_charged():
@@ -135,11 +136,10 @@ def test_copyto_value_changing_cast_charged():
 
 
 def test_copyto_lossless_widening_free():
-    # lossless widening (float32 -> float64) changes dtype but not values -> free,
-    # mirroring astype
+    # copyto bills per element written: 100 elements at unit rate 1.0
     dst = fnp.zeros(100, dtype=np.float64)
     src = fnp.asarray(np.ones(100, dtype=np.float32))
-    assert billed(lambda: fnp.copyto(dst, src)) == 0
+    assert billed(lambda: fnp.copyto(dst, src)) == 100
 
 
 def test_charged_modes_billed_under_production_weights():

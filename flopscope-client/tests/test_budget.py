@@ -404,3 +404,91 @@ class TestBudgetContextTimingProperties:
         assert float(getattr(ctx, "flopscope_overhead_time_s", 0.0)) == 0.0
         assert getattr(ctx, "wall_time_s", None) is None
         assert getattr(ctx, "residual_wall_time_s", None) is None
+
+
+class TestCurrentBudget:
+    """The live accessor is local, immutable, and does not poll the server."""
+
+    def test_outside_context_raises(self):
+        from flopscope._budget import current_budget
+        from flopscope.errors import NoBudgetContextError
+
+        with pytest.raises(NoBudgetContextError):
+            current_budget()
+
+    def test_returns_immutable_cached_snapshot_without_summary(self, monkeypatch):
+        import flopscope._budget as bmod
+
+        ctx = bmod.BudgetContext(flop_budget=1000)
+        ctx._flops_used = 375
+        monkeypatch.setattr(bmod, "_active_context", ctx)
+        monkeypatch.setattr(
+            ctx,
+            "summary",
+            lambda: pytest.fail("current_budget() must not call summary()"),
+        )
+
+        snapshot = bmod.current_budget()
+
+        assert snapshot.flop_budget == 1000
+        assert snapshot.flops_used == 375
+        assert snapshot.flops_remaining == 625
+        with pytest.raises(AttributeError):
+            snapshot.flops_used = 0
+
+    def test_accessor_and_reset_do_not_send_server_requests(self, monkeypatch):
+        import flopscope._budget as bmod
+
+        conn = _make_mock_conn({"status": "ok"})
+        monkeypatch.setattr(bmod, "get_connection", lambda: conn)
+        ctx = bmod.BudgetContext(flop_budget=1000)
+        ctx._flops_used = 75
+        monkeypatch.setattr(bmod, "_active_context", ctx)
+
+        bmod.current_budget()
+        bmod.budget_reset()
+
+        assert conn.send_recv.call_count == 0
+        assert ctx.flops_used == 75
+        assert bmod.budget_summary_dict()["flops_used"] == 0
+
+    def test_proxy_response_refreshes_the_cached_snapshot(self, monkeypatch):
+        import flopscope as flops
+        import flopscope._budget as bmod
+
+        ctx = bmod.BudgetContext(flop_budget=1000)
+        monkeypatch.setattr(bmod, "_active_context", ctx)
+        conn = _make_mock_conn(
+            {
+                "status": "ok",
+                "result": {"value": 3, "dtype": "int64"},
+                "budget": 625,
+            }
+        )
+        monkeypatch.setattr(flops, "get_connection", lambda: conn)
+
+        flops._make_proxy("add")(1, 2)
+
+        assert bmod.current_budget() == bmod.BudgetSnapshot(1000, 375, 625)
+
+    def test_reused_context_records_each_server_session(self, monkeypatch):
+        import flopscope._budget as bmod
+
+        bmod._accumulator.reset()
+        conn = MagicMock()
+        conn.send_recv.side_effect = [
+            {"status": "ok", "flops_used": 0},
+            {"status": "ok", "result": {"budget_breakdown": {"flops_used": 10}}},
+            {"status": "ok", "flops_used": 0},
+            {"status": "ok", "result": {"budget_breakdown": {"flops_used": 10}}},
+        ]
+        monkeypatch.setattr(bmod, "get_connection", lambda: conn)
+
+        ctx = bmod.BudgetContext(flop_budget=100)
+        with ctx:
+            pass
+        with ctx:
+            pass
+
+        assert bmod.budget_summary_dict()["flop_budget"] == 200
+        assert bmod.budget_summary_dict()["flops_used"] == 20

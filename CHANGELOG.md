@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+## v0.11.0 (2026-08-06)
+
+### Added
+
+- **budget**: add `BudgetSnapshot` and `current_budget()` for immutable,
+  explicit-context inspection of enforcement counters.
+
+### Changed
+
+- **budget**: retain full operation diagnostics while incrementally aggregating
+  operation and namespace summaries, so summary access no longer scans the
+  complete operation history. `budget_reset()` clears summary baselines without
+  resetting active enforcement counters.
+
 ## v0.8.0rc5 (2026-06-25)
 
 ### Fix

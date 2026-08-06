@@ -8,6 +8,18 @@ from flopscope._budget import (
 )
 
 
+class _PoisonedHistory(list):
+    """Fail if a summary regresses to scanning diagnostic operation history."""
+
+    def __iter__(self):
+        raise AssertionError("summary traversed historical operation records")
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            raise AssertionError("summary sliced historical operation records")
+        return super().__getitem__(index)
+
+
 def test_namespace_record_fields():
     rec = NamespaceRecord(
         namespace="train",
@@ -115,6 +127,84 @@ def test_budget_reset():
     data = budget_summary_dict()
     assert data["flops_used"] == 0
     assert data["operations"] == {}
+
+
+def test_budget_reset_clears_summary_baselines_without_resetting_enforcement():
+    import flopscope
+
+    with BudgetContext(flop_budget=100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=20, subscripts=None, shapes=())
+        flopscope.budget_reset()
+
+        assert flopscope.budget_summary_dict()["flops_used"] == 0
+        assert flopscope.current_budget() == flopscope.BudgetSnapshot(100, 20, 80)
+
+        ctx.deduct("multiply", flop_cost=30, subscripts=None, shapes=())
+        data = flopscope.budget_summary_dict()
+        assert data["flops_used"] == 30
+        assert set(data["operations"]) == {"multiply"}
+        assert data["operations"]["multiply"]["flop_cost"] == 30
+        assert data["operations"]["multiply"]["calls"] == 1
+
+
+def test_summaries_use_incremental_aggregates_not_operation_history():
+    import flopscope
+
+    with BudgetContext(flop_budget=100, quiet=True) as ctx:
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=())
+        with timer:
+            pass
+
+    ctx._op_log = _PoisonedHistory(ctx._op_log)
+    assert ctx.summary_dict(by_namespace=True)["operations"]["add"]["calls"] == 1
+
+    import flopscope._budget as budget_module
+
+    original_records = budget_module._accumulator._records
+    budget_module._accumulator._records = _PoisonedHistory(original_records)
+    try:
+        assert (
+            flopscope.budget_summary_dict(by_namespace=True)["operations"]["add"][
+                "flop_cost"
+            ]
+            == 5
+        )
+    finally:
+        budget_module._accumulator._records = original_records
+
+
+def test_budget_reset_mid_timer_preserves_post_reset_operation_timing():
+    import time
+
+    import flopscope
+    from flopscope._budget import _call_numpy
+
+    with BudgetContext(flop_budget=100, quiet=True) as ctx:
+        timer = ctx.deduct("add", flop_cost=5, subscripts=None, shapes=())
+        flopscope.budget_reset()
+        with timer:
+            _call_numpy(time.sleep, 0.001)
+
+        operation = flopscope.budget_summary_dict()["operations"]["add"]
+        assert operation["calls"] == 0
+        assert operation["flop_cost"] == 0
+        assert operation["flopscope_backend_time_s"] >= 0.001
+        assert operation["flopscope_overhead_time_s"] >= 0.0
+
+
+def test_closed_summary_includes_context_close_bookkeeping_time():
+    import pytest
+
+    import flopscope
+
+    with BudgetContext(flop_budget=100, quiet=True) as ctx:
+        ctx.deduct("add", flop_cost=5, subscripts=None, shapes=())
+
+    summary = flopscope.budget_summary_dict()
+    assert summary["wall_time_s"] == pytest.approx(ctx.wall_time_s, abs=1e-9)
+    assert summary["flopscope_overhead_time_s"] == pytest.approx(
+        ctx.flopscope_overhead_time_s, abs=1e-9
+    )
 
 
 def test_budget_summary_dict_does_not_double_count_reused_decorator_context():

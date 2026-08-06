@@ -32,7 +32,7 @@ import numpy as _np
 
 from flopscope._registry import REGISTRY_META as _REGISTRY_META
 
-__version__ = f"0.8.0rc5+np{_np.__version__}"
+__version__ = f"0.11.0+np{_np.__version__}"
 __numpy_version__ = _np.__version__
 __numpy_pinned__ = _REGISTRY_META["numpy_version"]
 __numpy_supported__ = _REGISTRY_META.get("numpy_supported", ">=2.0.0,<2.5.0")
@@ -53,10 +53,12 @@ from flopscope._accumulation import (  # noqa: F401,E402
 # --- Budget and diagnostics ---
 from flopscope._budget import (  # noqa: F401,E402
     BudgetContext,
+    BudgetSnapshot,
     OpRecord,
     budget,
     budget_reset,
     budget_summary_dict,
+    current_budget,
     namespace,
 )
 from flopscope._config import configure  # noqa: F401,E402
@@ -234,6 +236,7 @@ _LAZY_SUBMODULES = frozenset({"numpy", "accounting", "stats"})
 __all__ = [
     "AccumulationCost",
     "BudgetContext",
+    "BudgetSnapshot",
     "BudgetExhaustedError",
     "ComponentCost",
     "FlopscopeArray",
@@ -266,6 +269,7 @@ __all__ = [
     "budget_summary_dict",
     "clear_cache",
     "configure",
+    "current_budget",
     "einsum_accumulation_cost",
     "einsum_cache_info",
     "einsum_clear_caches",

@@ -18,7 +18,7 @@ import builtins
 import struct
 from typing import Any
 
-__version__ = "0.8.0rc5"
+__version__ = "0.11.0"
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -29,9 +29,12 @@ __version__ = "0.8.0rc5"
 # ---------------------------------------------------------------------------
 from flopscope._budget import (  # noqa: E402
     BudgetContext,
+    BudgetSnapshot,
     OpRecord,
     budget,
+    budget_reset,
     budget_summary_dict,
+    current_budget,
 )
 from flopscope._config import configure  # noqa: E402,F401
 from flopscope._dispatch import timed_dispatch  # noqa: E402

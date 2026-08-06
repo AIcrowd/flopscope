@@ -17,7 +17,6 @@ SERVER_ONLY: frozenset[str] = frozenset(
         "PathInfo",
         "StepInfo",
         # accounting / cache tooling
-        "budget_reset",
         "namespace",
         "clear_einsum_cache",
         "einsum_cache_info",

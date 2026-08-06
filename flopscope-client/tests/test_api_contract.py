@@ -75,5 +75,14 @@ def test_top_level_submission_api_present():
     # this phase; this test guards that the top-level surface stays intact.
     import flopscope as flops
 
-    for name in ("BudgetContext", "SymmetryGroup", "array", "einsum", "configure"):
+    for name in (
+        "BudgetContext",
+        "BudgetSnapshot",
+        "SymmetryGroup",
+        "array",
+        "budget_reset",
+        "configure",
+        "current_budget",
+        "einsum",
+    ):
         assert hasattr(flops, name), f"top-level flopscope missing: {name}"

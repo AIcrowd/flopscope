@@ -1253,6 +1253,12 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
     * ``"id"``   present  -> single :class:`RemoteArray`
     * otherwise           -> raw dict
     """
+    # Every successful operation response carries a budget status.  Updating
+    # the local cache here covers every proxy/result shape without a polling
+    # RPC, so ``current_budget()`` remains O(1).
+    from ._budget import _update_active_budget_from_response
+
+    _update_active_budget_from_response(resp)
     result = resp.get("result", {})
 
     if "gen_id" in result:
