@@ -853,7 +853,7 @@ DEFERRED: dict[str, str] = {
     "diag_indices_from": "numel(output) = numel of the returned index arrays; dtype-neutral (only arr.shape is read)",
     "unravel_index": "numel(output) = numel of the returned index arrays; dtype-neutral",
     "broadcast_shapes": "sum of len(shape) across input shape tuples (floor 1); dtype-neutral, no array operands",
-    "ix_": "numel(output)",
+    "ix_": "sum(numel(outputs)) + sum(numel(Boolean inputs)); Boolean inputs pay the nonzero scan convention",
     "diagflat": "numel(v)",
     "fill_diagonal": "min(m,n)",
     "packbits": "pinned in OP_EXPECTATIONS (numel(input) weight 1.0)",

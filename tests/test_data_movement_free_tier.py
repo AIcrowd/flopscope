@@ -3,6 +3,7 @@
 See .aicrowd/superpowers/specs/2026-06-15-data-movement-free-tier-design.md.
 """
 
+import numpy as np
 import pytest
 
 import flopscope as flops
@@ -32,7 +33,6 @@ FREE_DATA_MOVEMENT_OPS = [
     # tests/test_triage_price_pins.py::test_select_and_piecewise_bill_per_condition,
     # test_where_three_arg_bills_4x_broadcast_output.
     "unstack",
-    "ix_",
 ]
 
 
@@ -50,6 +50,16 @@ def production_weights(monkeypatch):
 @pytest.mark.parametrize("op", FREE_DATA_MOVEMENT_OPS)
 def test_data_movement_op_is_weight_zero(production_weights, op):
     assert get_weight(op) == 0.0, f"{op} should be free (weight 0.0)"
+
+
+def test_ix_uses_production_weight_one(production_weights):
+    assert get_weight("ix_") == 1.0
+    mask = fnp.asarray([True, False, True, False])
+    with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
+        outputs = fnp.ix_(mask)
+    intp_rate = 2 if np.dtype(np.intp).itemsize == 8 else 1
+    assert sum(output.size for output in outputs) == 2
+    assert ctx.flops_used == (mask.size + 2) * intp_rate
 
 
 def test_row_stack_bills_same_as_vstack_under_production_rates(production_weights):

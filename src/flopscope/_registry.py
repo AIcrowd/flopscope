@@ -2227,7 +2227,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Construct open mesh from multiple sequences. Free (0 FLOPs) — index construction from given sequences.",
+        "notes": "Construct open mesh from multiple sequences. Cost: sum(numel(outputs)) + sum(numel(Boolean inputs)); each Boolean input pays for NumPy's internal nonzero scan. Plain ndarray, list-like, and FlopscopeArray inputs are supported; foreign NumPy ndarray subclasses, including MaskedArray and memmap, are unsupported.",
     },
     "rollaxis": {
         "category": "free",
