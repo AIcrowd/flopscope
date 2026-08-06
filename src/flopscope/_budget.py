@@ -18,7 +18,7 @@ from typing import Any, Literal, NamedTuple
 import numpy as _np
 
 from flopscope._write_epoch import note_write
-from flopscope.errors import BudgetExhaustedError
+from flopscope.errors import BudgetExhaustedError, NoBudgetContextError
 
 
 class OpRecord(NamedTuple):
@@ -40,6 +40,14 @@ class OpRecord(NamedTuple):
         None  # per-op flopscope dispatch time (preamble + deduct body + bookkeeping + postamble)
     )
     resolved_dtype: str | None = None  # np.result_type name over declared operands
+
+
+class BudgetSnapshot(NamedTuple):
+    """Immutable view of live enforcement counters."""
+
+    flop_budget: int
+    flops_used: int
+    flops_remaining: int
 
 
 # ---------------------------------------------------------------------------
@@ -2489,6 +2497,18 @@ def budget_summary_dict(by_namespace: bool = False) -> dict:
             by_namespace=by_namespace,
             live_contexts=_live_summary_contexts(),
         )
+
+
+def current_budget() -> BudgetSnapshot:
+    """Return enforcement counters for the active budget context."""
+    active = get_active_budget()
+    if active is None:
+        raise NoBudgetContextError()
+    return BudgetSnapshot(
+        flop_budget=active.flop_budget,
+        flops_used=active.flops_used,
+        flops_remaining=active.flops_remaining,
+    )
 
 
 def budget_reset() -> None:

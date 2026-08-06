@@ -626,6 +626,38 @@ def test_budget_open_transports_literal_root_namespace(monkeypatch) -> None:
     assert request["kwargs"]["namespace"] == "predict..raw"
 
 
+class TestCurrentBudgetAccessor:
+    """``current_budget()`` returns an immutable active-context snapshot."""
+
+    def test_current_budget_is_live_and_non_networking(self, monkeypatch) -> None:
+        from flopscope.errors import NoBudgetContextError
+
+        with pytest.raises(NoBudgetContextError):
+            budget_module.current_budget()
+
+        ctx, conn = _open_mock_context(monkeypatch)
+        conn.send_recv.reset_mock()
+
+        ctx._flops_used = 5
+        snap = budget_module.current_budget()
+        assert isinstance(snap, budget_module.BudgetSnapshot)
+        assert snap.flop_budget == 100
+        assert snap.flops_used == 5
+        assert snap.flops_remaining == 95
+
+        ctx._update_budget({"flops_used": 9})
+        snap2 = budget_module.current_budget()
+        assert snap2.flops_used == 9
+        assert snap2.flops_remaining == 91
+        assert conn.send_recv.call_count == 0
+
+    def test_current_budget_snapshot_is_immutable(self, monkeypatch) -> None:
+        ctx, _ = _open_mock_context(monkeypatch)
+        snap = budget_module.current_budget()
+        with pytest.raises((TypeError, AttributeError)):
+            snap.flops_used = 999
+
+
 class TestDecomposeTiming:
     """_decompose_timing splits wall into (wall, backend, overhead, residual)."""
 

@@ -31,8 +31,11 @@ __version__ = "0.10.0"
 # ---------------------------------------------------------------------------
 from flopscope._budget import (  # noqa: E402
     BudgetContext,
+    BudgetSnapshot,
     OpRecord,
     budget,
+    budget_reset,
+    current_budget,
     budget_summary_dict,
 )
 from flopscope._config import configure  # noqa: E402,F401
