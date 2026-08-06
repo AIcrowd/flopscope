@@ -1161,6 +1161,37 @@ def test_deduct_after_attributes_backend_even_when_block_raises():
     assert all(rec.op_name != "tile" for rec in b.op_log)  # nothing recorded
 
 
+def test_counted_wrapper_preflight_preserves_incremental_op_timing():
+    """A custom preflight and incremental timing attribution compose safely."""
+    events = []
+
+    def preflight(args, kwargs):
+        events.append(("preflight", args, kwargs))
+
+    @_counted_wrapper(preflight=preflight)
+    def fake(value, *, scale=1):
+        events.append(("body", value, scale))
+        budget = get_active_budget()
+        assert budget is not None
+        with budget.deduct(
+            "preflight_test", flop_cost=3, subscripts=None, shapes=(), dtypes=()
+        ):
+            pass
+        return value * scale
+
+    with flops.BudgetContext(flop_budget=100, quiet=True) as budget:
+        assert fake(4, scale=2) == 8
+
+    assert events == [("preflight", (4,), {"scale": 2}), ("body", 4, 2)]
+    summary = budget.summary_dict()
+    operation = summary["operations"]["preflight_test"]
+    assert summary["flops_used"] == 3
+    assert operation["calls"] == 1
+    assert operation["flopscope_overhead_time_s"] == pytest.approx(
+        budget.op_log[0].flopscope_overhead_duration_s
+    )
+
+
 @pytest.mark.parametrize(
     "invoke",
     [
