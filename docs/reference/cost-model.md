@@ -772,7 +772,7 @@ each backed by a CI-enforced test you can open and read:
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a zero-itemsize dtype is the one exception, since it carries no data either way | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
-| **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1. Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
+| **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
 | **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
@@ -782,6 +782,45 @@ An auditor can read this table top-to-bottom and, for each claim, open the named
 to see exactly what guarantees it. The first two rows are the load-bearing ones: an exact
 `flop_cost` defeats under-count, and the weight-tier policy (no constant in a weight)
 defeats the family of arbitrage exploits where a high-constant op is re-tiered cheaply.
+
+### The meter boundary
+
+Every invariant above scopes to **metered** ops — the `fnp.*` surface that routes
+through flopscope. `FlopscopeArray` is an `np.ndarray` subclass that intercepts the
+ufunc/operator protocol, so arithmetic is counted; methods it inherits unchanged from
+numpy are not. `.tobytes()`, `.tolist()`, `.data` and `__array__` therefore write a new
+buffer for 0 billed FLOPs, and `fnp.frombuffer(a.tobytes())` reproduces `fnp.copy(a)`
+without the `numel` charge.
+
+This is deliberate, and it is contained by **residual billing rather than by weight**.
+Whestbench scores effective compute as `C = F + λ·R`, where `R` is participant wall time
+outside metered dispatch and `λ = 1e11` FLOP/s. Anything materialised in participant
+Python is paid for in `R`, and λ sits far above the rate at which data movement converts
+wall time into saved FLOPs:
+
+| achievable memory bandwidth | billed FLOP/s saved | residual FLOP/s charged | net |
+|---|---|---|---|
+| 1 GB/s | 2.50e8 | 1.00e11 | 400× loss |
+| 5 GB/s | 1.25e9 | 1.00e11 | 80× loss |
+| 10 GB/s | 2.50e9 | 1.00e11 | 40× loss |
+| 20 GB/s | 5.00e9 | 1.00e11 | 20× loss |
+
+So the free-copy channel is real but strictly losing: at 1 billed FLOP per float32
+element, substituting `fnp.frombuffer(a.tobytes() + b.tobytes())` for
+`fnp.concatenate([a, b])` saves 2e6 FLOPs and costs ~1.8e8 residual FLOP-equivalents —
+about 92× worse. Overlapping the copy with an in-flight metered op does not rescue it:
+`tobytes` holds the GIL, and breaking even requires hiding ~99% of the copy.
+
+Metering these methods would also be actively harmful, not merely conservative.
+`tobytes()` is on flopscope's own wire path (`_request_handler.py` serialises arrays with
+`arr.tobytes()`), so billing it would make the transport bill itself on every array
+transfer, and `.tolist()` is the documented way to read outputs back at the end of
+`predict()`. The boundary is drawn where it is so that getting data *out* is never a
+charged operation.
+
+The place the cost model is genuinely sensitive is the narrower one where work happens
+*inside* the meter for a mispriced amount — which is what every invariant in the table
+above is defending.
 
 ---
 
