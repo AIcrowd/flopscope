@@ -387,3 +387,38 @@ def test_tensordot_accumulation_for_billing_guard_stays_none_when_symmetry_scale
     with flops.BudgetContext(flop_budget=10**16, quiet=True):
         with pytest.raises(RuntimeError, match="computes its complex cost exactly"):
             fnp.tensordot(a, b, axes=([50], [0]))
+
+
+@pytest.mark.parametrize("n_pad", [0, 10, 24, 25, 26, 30])
+def test_full_inner_tensordot_bills_consistently(n_pad):
+    """Contracting every axis: 2*numel - 1, at any rank.
+
+    This path allocated only 26 letters, so above 26 dims it truncated the
+    subscript string and leaked a numpy ValueError.
+    """
+    rng = np.random.default_rng(0)
+    base = rng.standard_normal((16, 16))
+    ndim = base.ndim + n_pad
+    got = billed(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(base), n_pad),
+            _pad_end(fnp.asarray(base), n_pad),
+            axes=ndim,
+        )
+    )
+    assert got == 2 * base.size - 1
+
+
+def test_full_inner_tensordot_above_budget_is_correct():
+    """It must still compute the right number, not just bill one."""
+    rng = np.random.default_rng(0)
+    base = rng.standard_normal((16, 16))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            got = fnp.tensordot(
+                _pad_end(fnp.asarray(base), 30),
+                _pad_end(fnp.asarray(base), 30),
+                axes=32,
+            )
+    assert np.isclose(float(np.asarray(got)), float((base * base).sum()))

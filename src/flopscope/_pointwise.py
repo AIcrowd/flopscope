@@ -5074,18 +5074,27 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         and a.ndim >= 1
     )
     if is_full_inner:
-        # Build matching einsum subscripts (e.g. ndim=2 -> "ij,ij->").
-        letters = "abcdefghijklmnopqrstuvwxyz"[: a.ndim]
-        subs = f"{letters},{letters}->"
-        from flopscope._einsum import _resolve_cost_and_output_symmetry
+        # Every axis contracted on both sides (e.g. ndim=2 -> "ij,ij->").
+        subs = _contraction_subscripts(
+            a.ndim, b.ndim, tuple(range(a.ndim)), tuple(range(b.ndim))
+        )
+        if subs is not None:
+            from flopscope._einsum import _resolve_cost_and_output_symmetry
 
-        info = _resolve_cost_and_output_symmetry(subs, a, b)
-        cost = info.accumulation.total
-        canonical_subs = info.canonical_subscripts
-        out_sym = info.output_symmetry  # scalar output — always None
+            info = _resolve_cost_and_output_symmetry(subs, a, b)
+            accumulation = info.accumulation
+            canonical_subs = info.canonical_subscripts
+            out_sym = info.output_symmetry  # scalar output — always None
+        else:
+            # Out of letters. Contracting every axis means K = a.size and a
+            # scalar output, so the honest price is 2 * numel - 1.
+            accumulation = _dense_accumulation_cost(a.size, b.size, a.size, ())
+            canonical_subs = None
+            out_sym = None
+        cost = accumulation.total
         billing_dtypes = (a.dtype, b.dtype)
         resolved = resolve_billing_dtype(billing_dtypes)
-        complex_override = contraction_complex_override(info.accumulation, resolved)
+        complex_override = contraction_complex_override(accumulation, resolved)
         with budget.deduct(
             "tensordot",
             flop_cost=cost,
