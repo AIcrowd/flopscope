@@ -435,10 +435,10 @@ def _seen_label_budget(op_name: str) -> bool:
 def _warn_label_budget_once(op_name: str) -> None:
     """Emit :class:`CostFallbackWarning` once per op for a label-budget fallback.
 
-    Only called when precision is actually lost — symmetry savings or
-    repeated-operand savings are forfeited. When neither applies the
-    arithmetic fallback is exact and stays silent, so this does not fire on
-    the common path.
+    Called when symmetry savings or repeated-operand savings *could* be
+    forfeited, which is broader than when they actually are: the charge is
+    often the same either way. When neither could apply the arithmetic
+    fallback is exact, so this does not fire on the common path.
 
     The warning is a diagnostic, not a control: it is suppressible via
     ``flops.configure(symmetry_warnings=False)``, and correct billing must
@@ -451,10 +451,10 @@ def _warn_label_budget_once(op_name: str) -> None:
     if _seen_label_budget.cache_info().hits > info_before.hits:
         return  # already warned for this op
     _warnings.warn(
-        f"{op_name}: operand rank exceeds the {_SUBSCRIPT_BUDGET}-letter "
-        f"einsum subscript budget, so this contraction is priced without an "
-        f"einsum subscript string. The resulting charge may be higher than "
-        f"what the einsum path would compute, and is never lower.",
+        f"{op_name}: combined operand rank exceeds the {_SUBSCRIPT_BUDGET}-"
+        f"letter einsum subscript budget, so this contraction is priced "
+        f"without a subscript string. The charge may be higher than what the "
+        f"einsum path would compute, and is never lower.",
         CostFallbackWarning,
         stacklevel=4,
     )
@@ -4700,9 +4700,9 @@ def _einsum_routed_binary(
         canonical_subs = info.canonical_subscripts
         output_symmetry = info.output_symmetry
     else:
-        # Out of subscript letters. Price it arithmetically at the same
-        # FMA=2 total the einsum path would have charged; symmetry and
-        # repeated-operand savings are forfeited, which errs expensive.
+        # Out of subscript letters. Price it arithmetically from the same
+        # FMA=2 model; symmetry and repeated-operand savings are forfeited,
+        # which errs expensive.
         if fallback_contracted is None or fallback_output_shape is None:
             raise ValueError(
                 f"{op_name}: subs=None requires fallback_contracted and "
@@ -5044,8 +5044,9 @@ def _dense_accumulation_cost(
     multiplies plus ``alpha - M`` accumulations, where ``alpha`` is the
     multiply count and ``M`` the number of output cells. Used when the
     52-letter subscript budget is exceeded and no einsum string can be
-    built — the price must match what the einsum path would have charged,
-    so running out of letters costs precision but never price.
+    built — the price is never below what the einsum path would have
+    charged for the same operands, so running out of letters costs
+    precision, never a discount.
 
     Returns a real ``AccumulationCost`` rather than an int so the caller can
     hand it to ``contraction_complex_override`` exactly as it would the
@@ -5110,17 +5111,21 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
 
     The FLOP cost is ``(2K - 1) x M`` for contracted extent ``K`` and ``M``
     output cells — ``K`` multiplies and ``K - 1`` accumulations per cell
-    (FMA = 2). When either operand carries a :class:`SymmetricTensor`
-    symmetry, flopscope composes the surviving (post-contraction) symmetry
-    on the output axes via
-    :func:`flopscope._symmetry_utils.direct_product_groups` and scales the
-    cost by the unique-element fraction of the output (see
-    :func:`_symmetry_adjusted_cost`). Above degree 12 the adjustment is
-    skipped and :class:`flopscope.errors.CostFallbackWarning` fires.
+    (FMA = 2). A zero-sized contraction costs 0, never a negative amount.
 
-    Operand rank does not affect the price. Above the 52-letter einsum
-    subscript budget the cost is computed arithmetically instead of through
-    a subscript string, at the same total.
+    A :class:`SymmetricTensor` symmetry on either operand, or the same array
+    passed as both operands, can bring the charge below that figure. When
+    the surviving (post-contraction) symmetry can be composed on the output
+    axes via :func:`flopscope._symmetry_utils.direct_product_groups`, the
+    cost follows the unique-element fraction of the output (see
+    :func:`_symmetry_adjusted_cost`). That composition is skipped, and
+    :class:`flopscope.errors.CostFallbackWarning` fires, when a group's
+    order exceeds the configured ``dimino_budget``.
+
+    Above the 52-letter einsum subscript budget the cost is computed
+    arithmetically instead of through a subscript string. The charge is
+    then never lower than what the einsum path would compute for the same
+    operands, and can be higher.
     """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
@@ -5195,8 +5200,8 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     output_shape = tuple(a.shape[i] for i in a_surviving) + tuple(
         b.shape[j] for j in b_surviving
     )
-    # Route cost through einsum when possible (FMA=2 correct); fall back to
-    # the old multiply-only dense formula only for rank >52 operands.
+    # Route cost through einsum when possible (FMA=2 correct); above the
+    # 52-letter budget, price the same FMA=2 model without subscripts.
     _subs = _contraction_subscripts(
         a.ndim, b.ndim, tuple(a_contract_axes), tuple(b_contract_axes)
     )
