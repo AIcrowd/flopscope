@@ -96,3 +96,38 @@ def test_dense_cost_exposes_multiply_add_split():
     assert cost.total == 2 * 240 - 40
     assert cost.num_terms == 2
     assert cost.fallback_used is False
+
+
+from flopscope._pointwise import _contraction_subscripts
+
+
+def test_subscripts_ties_contracted_pairs():
+    """Contracted axis pairs share a label; free axes get distinct ones.
+
+    b's labels start at offset a_ndim, so for two rank-2 operands b is
+    initially 'cd'; tying b's axis 0 to a's axis 1 rewrites it to 'bd'.
+    """
+    assert _contraction_subscripts(2, 2, (1,), (0,)) == "ab,bd->ad"
+
+
+def test_subscripts_handles_multiple_contracted_axes():
+    assert _contraction_subscripts(3, 3, (1, 2), (0, 1)) == "abc,bcf->af"
+
+
+def test_subscripts_normalises_negative_axes():
+    """Negative axis indices mean the same thing as their positive form."""
+    assert _contraction_subscripts(2, 2, (-1,), (-2,)) == _contraction_subscripts(
+        2, 2, (1,), (0,)
+    )
+
+
+def test_subscripts_returns_none_above_budget():
+    """52 letters exist, so a rank sum above 52 has no representation."""
+    assert _contraction_subscripts(26, 26, (1,), (0,)) is not None
+    assert _contraction_subscripts(27, 26, (1,), (0,)) is None
+    assert _contraction_subscripts(27, 27, (1,), (0,)) is None
+
+
+def test_subscripts_full_contraction_to_scalar():
+    """All axes contracted on both sides gives an empty output."""
+    assert _contraction_subscripts(3, 3, (0, 1, 2), (0, 1, 2)) == "abc,abc->"

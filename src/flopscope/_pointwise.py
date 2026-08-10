@@ -6,6 +6,7 @@ import builtins as _builtins
 import functools as _functools
 import inspect as _inspect
 import operator as _operator
+import string as _string
 import warnings as _warnings
 from math import prod as _math_prod
 from typing import Any
@@ -4966,25 +4967,38 @@ def _dense_accumulation_cost(
     )
 
 
-def _tensordot_einsum_subscripts(a_ndim, b_ndim, a_axes, b_axes):
-    """Build einsum subscripts equivalent to a tensordot contraction.
+_SUBSCRIPT_LETTERS = _string.ascii_letters
+_SUBSCRIPT_BUDGET = len(_SUBSCRIPT_LETTERS)  # 52
 
-    Returns None if operand rank exceeds the 52-letter budget (caller falls
-    back to the dense estimate then).
+
+def _contraction_subscripts(
+    a_ndim: int,
+    b_ndim: int,
+    a_axes: tuple[int, ...],
+    b_axes: tuple[int, ...],
+) -> str | None:
+    """Einsum subscripts for a two-operand contraction, or ``None``.
+
+    ``a_axes``/``b_axes`` are the paired contracted axis indices; negatives
+    are normalised. Returns ``None`` when ``a_ndim + b_ndim`` exceeds the
+    52-letter budget.
+
+    ``None`` is the *only* out-of-letters signal in this module: callers
+    price the contraction with :func:`_dense_accumulation_cost` instead.
+    Every contraction wrapper that needs generated labels routes through
+    here, so they cannot drift apart on what "out of letters" means or on
+    what it costs.
     """
-    import string as _string
-
-    if a_ndim + b_ndim > 52:
+    if a_ndim + b_ndim > _SUBSCRIPT_BUDGET:
         return None
-    letters = _string.ascii_letters
-    a_labels = list(letters[:a_ndim])
-    b_labels = list(letters[a_ndim : a_ndim + b_ndim])
+    a_labels = list(_SUBSCRIPT_LETTERS[:a_ndim])
+    b_labels = list(_SUBSCRIPT_LETTERS[a_ndim : a_ndim + b_ndim])
     a_ax = [ax % a_ndim for ax in a_axes]
     b_ax = [ax % b_ndim for ax in b_axes]
     for ai, bi in zip(a_ax, b_ax, strict=False):
         b_labels[bi] = a_labels[ai]  # tie contracted pairs
     out = [a_labels[i] for i in range(a_ndim) if i not in a_ax]
-    out += [b_labels[i] for i in range(b_ndim) if i not in b_ax]
+    out += [b_labels[j] for j in range(b_ndim) if j not in b_ax]
     return f"{''.join(a_labels)},{''.join(b_labels)}->{''.join(out)}"
 
 
@@ -5055,8 +5069,8 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     )
     # Route cost through einsum when possible (FMA=2 correct); fall back to
     # the old multiply-only dense formula only for rank >52 operands.
-    _subs = _tensordot_einsum_subscripts(
-        a.ndim, b.ndim, a_contract_axes, b_contract_axes
+    _subs = _contraction_subscripts(
+        a.ndim, b.ndim, tuple(a_contract_axes), tuple(b_contract_axes)
     )
     # Compose output symmetry from each input's surviving symmetry, with
     # b's axes lifted past a's surviving count so they refer to their
