@@ -5109,10 +5109,10 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             cost = einsum_cost(_subs, [tuple(a.shape), tuple(b.shape)])
             canonical_subs = _subs
         else:
-            dense = (
-                _builtins.max(a.size * b.size // contracted, 1) if contracted > 0 else 1
+            accumulation = _dense_accumulation_cost(
+                a.size, b.size, contracted, output_shape
             )
-            cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
+            cost = _symmetry_adjusted_cost(accumulation.total, output_shape, out_sym)
             canonical_subs = None
     else:
         a_sym_kept = _surviving_symmetry_after_contraction(a_sym, a_surviving)
@@ -5142,11 +5142,19 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             canonical_subs = _subs
             accumulation_for_billing = _info.accumulation
         else:
-            dense = (
-                _builtins.max(a.size * b.size // contracted, 1) if contracted > 0 else 1
+            accumulation = _dense_accumulation_cost(
+                a.size, b.size, contracted, output_shape
             )
-            cost = _symmetry_adjusted_cost(dense, output_shape, out_sym)
+            cost = _symmetry_adjusted_cost(accumulation.total, output_shape, out_sym)
             canonical_subs = None
+            # Only claim an exact complex override when the symmetry adjustment
+            # was a no-op. When it scales `cost` down, the accumulation's
+            # mu/total split no longer describes what is being charged, so leave
+            # the override None and let complex_factor_for's fail-closed guard
+            # fire rather than bill a ratio derived from the wrong total.
+            accumulation_for_billing = (
+                accumulation if cost == accumulation.total else None
+            )
     billing_dtypes = (a.dtype, b.dtype)
     resolved = resolve_billing_dtype(billing_dtypes)
     # accumulation_for_billing is None for the oversized-symmetry / rank>52

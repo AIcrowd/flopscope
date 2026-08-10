@@ -131,3 +131,85 @@ def test_subscripts_returns_none_above_budget():
 def test_subscripts_full_contraction_to_scalar():
     """All axes contracted on both sides gives an empty output."""
     assert _contraction_subscripts(3, 3, (0, 1, 2), (0, 1, 2)) == "abc,abc->"
+
+
+def _pad_end(arr, n):
+    """Append n singleton axes via basic indexing — a free, unmetered view."""
+    return arr[(slice(None),) * arr.ndim + (None,) * n]
+
+
+def _pad_front(arr, n):
+    return arr[(None,) * n + (slice(None),) * arr.ndim]
+
+
+@pytest.mark.parametrize("n_pad", [0, 10, 24, 25, 26, 30])
+def test_tensordot_padding_does_not_change_bill(n_pad):
+    """Singleton axes carry no arithmetic, so they must carry no price.
+
+    Padding to 25+ per operand pushes the rank sum past 52, which is where
+    the subscript budget runs out. Rank must not be a discount.
+    """
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    baseline = billed(
+        lambda: fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=([1], [0]))
+    )
+    padded = billed(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(a), n_pad),
+            _pad_end(fnp.asarray(b), n_pad),
+            axes=([1], [0]),
+        )
+    )
+    assert padded == baseline
+
+
+def test_tensordot_above_budget_bills_fma_not_multiplies_only():
+    """Above the budget the bill is 2*alpha - M, not the multiply count."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    got = billed(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(a), 25),
+            _pad_end(fnp.asarray(b), 25),
+            axes=([1], [0]),
+        )
+    )
+    alpha, m = 32 * 8 * 16, 32 * 8
+    assert got == 2 * alpha - m
+    assert got != alpha  # the old multiply-only price
+
+
+@pytest.mark.parametrize("n_pad", [0, 25])
+def test_tensordot_padding_preserves_values(n_pad):
+    """The fix must not change what the operation computes."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            got = fnp.tensordot(
+                _pad_end(fnp.asarray(a), n_pad),
+                _pad_end(fnp.asarray(b), n_pad),
+                axes=([1], [0]),
+            )
+    assert np.allclose(np.squeeze(np.asarray(got)), a @ b)
+
+
+@pytest.mark.parametrize("n_pad", [0, 25])
+def test_complex_tensordot_above_budget_bills_exactly(n_pad):
+    """Complex operands must bill, not raise fail-closed, above the budget."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((8, 6)) + 1j * rng.standard_normal((8, 6))
+    b = rng.standard_normal((6, 5)) + 1j * rng.standard_normal((6, 5))
+    got = billed(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(a), n_pad),
+            _pad_end(fnp.asarray(b), n_pad),
+            axes=([1], [0]),
+        )
+    )
+    assert got > 0
