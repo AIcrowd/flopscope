@@ -4625,13 +4625,15 @@ def _ensure_contraction_out_written(dest, result) -> None:
 def _einsum_routed_binary(
     op_name: str,
     np_fn: Any,
-    subs: str,
+    subs: str | None,
     a: Any,
     b: Any,
     *,
     errstate: bool = False,
     nan_check: bool = False,
     out: Any = None,
+    fallback_contracted: int | None = None,
+    fallback_output_shape: tuple[int, ...] | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -4654,13 +4656,31 @@ def _einsum_routed_binary(
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    info = _resolve_cost_and_output_symmetry(subs, a, b)
+    if subs is not None:
+        info = _resolve_cost_and_output_symmetry(subs, a, b)
+        accumulation = info.accumulation
+        canonical_subs = info.canonical_subscripts
+        output_symmetry = info.output_symmetry
+    else:
+        # Out of subscript letters. Price it arithmetically at the same
+        # FMA=2 total the einsum path would have charged; symmetry and
+        # repeated-operand savings are forfeited, which errs expensive.
+        if fallback_contracted is None or fallback_output_shape is None:
+            raise ValueError(
+                f"{op_name}: subs=None requires fallback_contracted and "
+                f"fallback_output_shape"
+            )
+        accumulation = _dense_accumulation_cost(
+            a.size, b.size, fallback_contracted, fallback_output_shape
+        )
+        canonical_subs = None
+        output_symmetry = None
     # The gate the pointwise factories already apply: a tag the caller paid
     # ``as_symmetric`` to validate is a claim about this buffer, so a result
     # that contradicts it is an error; a tag merely inferred from a constant
     # fill is dropped quietly, which keeps a scratch arena usable.
     if out is not None:
-        _prepare_symmetric_out(out, info.output_symmetry)
+        _prepare_symmetric_out(out, output_symmetry)
     inputs_were_whest = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
@@ -4668,13 +4688,13 @@ def _einsum_routed_binary(
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
     resolved = resolve_billing_dtype(billing_dtypes)
-    complex_override = contraction_complex_override(info.accumulation, resolved)
+    complex_override = contraction_complex_override(accumulation, resolved)
     if out is not None:
         call_kwargs = {**call_kwargs, "out": _to_base_ndarray(out)}
     with budget.deduct(
         op_name,
-        flop_cost=info.accumulation.total,
-        subscripts=info.canonical_subscripts,
+        flop_cost=accumulation.total,
+        subscripts=canonical_subs,
         shapes=(a.shape, b.shape),
         dtypes=billing_dtypes,
         complex_factor_override=complex_override,
@@ -4693,38 +4713,17 @@ def _einsum_routed_binary(
     if out is not None:
         _ensure_contraction_out_written(_to_base_ndarray(out), result)
         result = out
-    if info.output_symmetry is not None and _validate_result_symmetry(
-        result, info.output_symmetry
+    if output_symmetry is not None and _validate_result_symmetry(
+        result, output_symmetry
     ):
         # Only when the caller supplied no destination. Wrapping ``out`` would
         # hand back a second object of a different type over the caller's own
         # buffer; numpy and fnp.einsum both return the destination itself.
         if out is None:
-            return SymmetricTensor(_np.asarray(result), symmetry=info.output_symmetry)
+            return SymmetricTensor(_np.asarray(result), symmetry=output_symmetry)
     if out is not None:
         return out
     return _asflopscope(result) if inputs_were_whest else result
-
-
-def _outer_contract_subscripts(
-    a_ndim: int, b_ndim: int, *, b_contract_axis: int
-) -> str:
-    """Distinct-label einsum subscripts for an outer-product-style contraction
-    (np.dot / np.inner, ndim >= 2): contract a's last axis with b's
-    `b_contract_axis` (e.g. -1 for inner, -2 for dot). Output = a's free axes
-    then b's free axes.
-    """
-    import string as _string
-
-    letters = iter(_string.ascii_lowercase + _string.ascii_uppercase)
-    a_labels = [next(letters) for _ in range(a_ndim)]
-    b_labels = [next(letters) for _ in range(b_ndim)]
-    b_ax = b_contract_axis % b_ndim
-    b_labels[b_ax] = a_labels[-1]  # tie the contracted axes
-    out = "".join(a_labels[:-1]) + "".join(
-        lab for ax, lab in enumerate(b_labels) if ax != b_ax
-    )
-    return f"{''.join(a_labels)},{''.join(b_labels)}->{out}"
 
 
 @_counted_wrapper
@@ -4734,16 +4733,30 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
+    fallback_contracted = None
+    fallback_output_shape = None
     if a.ndim == 2 and b.ndim == 2:
         subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
     elif b.ndim == 1:
-        subs = _outer_contract_subscripts(a.ndim, 1, b_contract_axis=-1)
+        subs = _contraction_subscripts(a.ndim, 1, (a.ndim - 1,), (0,))
+        fallback_contracted = a.shape[-1]
+        fallback_output_shape = a.shape[:-1]
     else:
-        subs = _outer_contract_subscripts(a.ndim, b.ndim, b_contract_axis=-2)
+        subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 2,))
+        fallback_contracted = a.shape[-1]
+        fallback_output_shape = a.shape[:-1] + b.shape[:-2] + b.shape[-1:]
     return _einsum_routed_binary(  # type: ignore[return-value]
-        "dot", _np.dot, subs, a, b, errstate=False, nan_check=True
+        "dot",
+        _np.dot,
+        subs,
+        a,
+        b,
+        errstate=False,
+        nan_check=True,
+        fallback_contracted=fallback_contracted,
+        fallback_output_shape=fallback_output_shape,
     )
 
 
@@ -4794,14 +4807,26 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
+    fallback_contracted = None
+    fallback_output_shape = None
     if a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
     elif a.ndim == 2 and b.ndim == 2:
         subs = "ij,kj->ik"
     else:
-        subs = _outer_contract_subscripts(a.ndim, b.ndim, b_contract_axis=-1)
+        subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 1,))
+        fallback_contracted = a.shape[-1]
+        fallback_output_shape = a.shape[:-1] + b.shape[:-1]
     return _einsum_routed_binary(  # type: ignore[return-value]
-        "inner", _np.inner, subs, a, b, errstate=False, nan_check=False
+        "inner",
+        _np.inner,
+        subs,
+        a,
+        b,
+        errstate=False,
+        nan_check=False,
+        fallback_contracted=fallback_contracted,
+        fallback_output_shape=fallback_output_shape,
     )
 
 

@@ -422,3 +422,65 @@ def test_full_inner_tensordot_above_budget_is_correct():
                 axes=32,
             )
     assert np.isclose(float(np.asarray(got)), float((base * base).sum()))
+
+
+@pytest.mark.parametrize("n_pad", [0, 10, 24, 25, 26, 30])
+def test_dot_padding_does_not_change_bill(n_pad):
+    """dot contracts trailing axes, so pad at the FRONT to keep them in place."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    baseline = billed(lambda: fnp.dot(fnp.asarray(a), fnp.asarray(b)))
+    padded = billed(
+        lambda: fnp.dot(
+            _pad_front(fnp.asarray(a), n_pad), _pad_front(fnp.asarray(b), n_pad)
+        )
+    )
+    assert padded == baseline
+
+
+@pytest.mark.parametrize("n_pad", [0, 10, 24, 25, 26, 30])
+def test_inner_padding_does_not_change_bill(n_pad):
+    """inner contracts the last axis of both operands; pad at the front."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((8, 16))
+    baseline = billed(lambda: fnp.inner(fnp.asarray(a), fnp.asarray(b)))
+    padded = billed(
+        lambda: fnp.inner(
+            _pad_front(fnp.asarray(a), n_pad), _pad_front(fnp.asarray(b), n_pad)
+        )
+    )
+    assert padded == baseline
+
+
+@pytest.mark.parametrize("op_name", ["dot", "inner"])
+def test_dot_inner_above_budget_do_not_raise_stopiteration(op_name):
+    """Running out of letters must not surface as a bare StopIteration."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((8, 6))
+    b = rng.standard_normal((6, 5)) if op_name == "dot" else rng.standard_normal((5, 6))
+    fn = getattr(fnp, op_name)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fn(_pad_front(fnp.asarray(a), 25), _pad_front(fnp.asarray(b), 25))
+            assert budget.flops_used > 0
+    expected = a @ b if op_name == "dot" else np.inner(a, b)
+    assert np.allclose(np.squeeze(np.asarray(got)), expected)
+
+
+def test_linalg_tensordot_padding_does_not_change_bill():
+    """The linalg alias delegates, so it inherits the fix."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    baseline = billed(
+        lambda: fnp.linalg.tensordot(fnp.asarray(a), fnp.asarray(b), axes=([1], [0]))
+    )
+    padded = billed(
+        lambda: fnp.linalg.tensordot(
+            _pad_end(fnp.asarray(a), 25), _pad_end(fnp.asarray(b), 25), axes=([1], [0])
+        )
+    )
+    assert padded == baseline
