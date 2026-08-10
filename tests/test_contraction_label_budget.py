@@ -11,6 +11,7 @@ import pytest
 import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._pointwise import _dense_accumulation_cost
+from flopscope.errors import CostFallbackWarning
 
 
 def billed(fn) -> int:
@@ -484,3 +485,105 @@ def test_linalg_tensordot_padding_does_not_change_bill():
         )
     )
     assert padded == baseline
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic warning: fires only when the label-budget fallback actually
+# loses precision (symmetry savings or repeated-operand savings forfeited).
+# ---------------------------------------------------------------------------
+
+
+def _warns_cost_fallback(fn) -> bool:
+    from flopscope._pointwise import _seen_label_budget
+
+    _seen_label_budget.cache_clear()  # dedup is per-process
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            fn()
+    return any(issubclass(c.category, CostFallbackWarning) for c in caught)
+
+
+def test_no_warning_when_fallback_is_exact():
+    """No symmetry and no aliasing means the fallback price is exact."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((32, 16))
+    b = rng.standard_normal((16, 8))
+    assert not _warns_cost_fallback(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(a), 25), _pad_end(fnp.asarray(b), 25), axes=([1], [0])
+        )
+    )
+
+
+def test_warns_when_operands_alias():
+    """tensordot(x, x) forfeits repeated-operand savings above the budget."""
+    rng = np.random.default_rng(0)
+    x = fnp.asarray(rng.standard_normal((16, 16)))
+    padded = _pad_end(x, 25)
+    assert _warns_cost_fallback(lambda: fnp.tensordot(padded, padded, axes=([1], [0])))
+
+
+def test_tensordot_oversized_symmetry_arm_warns():
+    """The oversized-symmetry branch always forfeits savings, so it always warns.
+
+    Same construction as
+    ``test_tensordot_oversized_symmetry_arm_bills_fma_not_multiplies_only``:
+    a genuine SymmetricTensor whose group is too large to enumerate, padded
+    past the 52-letter subscript budget too, so this lands in the
+    oversized-symmetry branch's dense-fallback arm. That branch only runs
+    when at least one operand's symmetry is oversized (non-None), so the
+    precision-loss guard is always true there.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=tuple(range(12)))
+    a = wrap_with_symmetry(np.ones((2,) * 12 + (1,) * 44 + (5,)), group)
+    b = np.ones((5, 3))
+    assert a.ndim + b.ndim > 52
+
+    assert _warns_cost_fallback(lambda: fnp.tensordot(a, b, axes=([56], [0])))
+
+
+def test_full_inner_tensordot_no_warning_when_fallback_is_exact():
+    """Full-inner fallback (Task 4's fast path) is exact without symmetry/aliasing."""
+    rng = np.random.default_rng(0)
+    base_a = rng.standard_normal((16, 16))
+    base_b = rng.standard_normal((16, 16))
+    ndim = base_a.ndim + 30
+    assert not _warns_cost_fallback(
+        lambda: fnp.tensordot(
+            _pad_end(fnp.asarray(base_a), 30),
+            _pad_end(fnp.asarray(base_b), 30),
+            axes=ndim,
+        )
+    )
+
+
+def test_full_inner_tensordot_warns_when_operands_alias():
+    """Full-inner tensordot(x, x) above budget forfeits repeated-operand savings."""
+    rng = np.random.default_rng(0)
+    base = rng.standard_normal((16, 16))
+    padded = _pad_end(fnp.asarray(base), 30)
+    ndim = base.ndim + 30
+    assert _warns_cost_fallback(lambda: fnp.tensordot(padded, padded, axes=ndim))
+
+
+def test_dot_no_warning_when_fallback_is_exact():
+    """dot's label-budget fallback (routed through _einsum_routed_binary) is
+    exact without symmetry or aliasing."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((16, 16))
+    b = rng.standard_normal((16, 16))
+    assert not _warns_cost_fallback(
+        lambda: fnp.dot(_pad_front(fnp.asarray(a), 25), _pad_front(fnp.asarray(b), 25))
+    )
+
+
+def test_dot_warns_when_operands_alias():
+    """dot(x, x) above the label budget forfeits repeated-operand savings."""
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((16, 16))
+    padded = _pad_front(fnp.asarray(x), 25)
+    assert _warns_cost_fallback(lambda: fnp.dot(padded, padded))

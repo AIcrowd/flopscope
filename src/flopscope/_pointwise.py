@@ -422,6 +422,43 @@ def _warn_oversized_once(op_name: str, group_order: int) -> None:
     )
 
 
+@_functools.cache
+def _seen_label_budget(op_name: str) -> bool:
+    """Return ``True`` once per op, ``False`` thereafter.
+
+    Deduplicates :func:`_warn_label_budget_once` per process, using the same
+    miss-vs-hit discipline as :func:`_seen_oversized`.
+    """
+    return True
+
+
+def _warn_label_budget_once(op_name: str) -> None:
+    """Emit :class:`CostFallbackWarning` once per op for a label-budget fallback.
+
+    Only called when precision is actually lost — symmetry savings or
+    repeated-operand savings are forfeited. When neither applies the
+    arithmetic fallback is exact and stays silent, so this does not fire on
+    the common path.
+
+    The warning is a diagnostic, not a control: it is suppressible via
+    ``flops.configure(symmetry_warnings=False)``, and correct billing must
+    not depend on anyone seeing it.
+    """
+    if not _get_setting("symmetry_warnings"):
+        return
+    info_before = _seen_label_budget.cache_info()
+    _seen_label_budget(op_name)
+    if _seen_label_budget.cache_info().hits > info_before.hits:
+        return  # already warned for this op
+    _warnings.warn(
+        f"{op_name}: operand rank exceeds the {_SUBSCRIPT_BUDGET}-letter "
+        f"einsum subscript budget; charging the dense FMA cost without "
+        f"symmetry or repeated-operand savings.",
+        CostFallbackWarning,
+        stacklevel=4,
+    )
+
+
 def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
     """Scale a dense FLOP cost by the output's symmetry-savings ratio.
 
@@ -4670,6 +4707,8 @@ def _einsum_routed_binary(
                 f"{op_name}: subs=None requires fallback_contracted and "
                 f"fallback_output_shape"
             )
+        if _symmetry_of(a) is not None or _symmetry_of(b) is not None or a is b:
+            _warn_label_budget_once(op_name)
         accumulation = _dense_accumulation_cost(
             a.size, b.size, fallback_contracted, fallback_output_shape
         )
@@ -5113,6 +5152,8 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         else:
             # Out of letters. Contracting every axis means K = a.size and a
             # scalar output, so the honest price is 2 * numel - 1.
+            if _symmetry_of(a) is not None or _symmetry_of(b) is not None or a is b:
+                _warn_label_budget_once("tensordot")
             accumulation = _dense_accumulation_cost(a.size, b.size, a.size, ())
             canonical_subs = None
             out_sym = None
@@ -5189,6 +5230,8 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             cost = einsum_cost(_subs, [tuple(a.shape), tuple(b.shape)])
             canonical_subs = _subs
         else:
+            if a_sym is not None or b_sym is not None or a is b:
+                _warn_label_budget_once("tensordot")
             accumulation = _dense_accumulation_cost(
                 a.size, b.size, contracted, output_shape
             )
@@ -5222,6 +5265,8 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             canonical_subs = _subs
             accumulation_for_billing = _info.accumulation
         else:
+            if a_sym is not None or b_sym is not None or a is b:
+                _warn_label_budget_once("tensordot")
             accumulation = _dense_accumulation_cost(
                 a.size, b.size, contracted, output_shape
             )
