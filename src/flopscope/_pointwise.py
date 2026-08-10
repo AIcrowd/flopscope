@@ -14,7 +14,7 @@ import numpy as _np
 from numpy.exceptions import AxisError as _AxisError
 from numpy.typing import ArrayLike
 
-from flopscope._accumulation._cost import contraction_complex_override
+from flopscope._accumulation._cost import AccumulationCost, contraction_complex_override
 from flopscope._budget import (
     _call_numpy,
     _call_numpy_with_python_callbacks,
@@ -4930,6 +4930,40 @@ def _surviving_symmetry_after_contraction(group, surviving_axes):
     if len(wanted) < 2:
         return None
     return restrict_group_to_axes(group, axes=wanted)
+
+
+def _dense_accumulation_cost(
+    a_size: int, b_size: int, contracted: int, output_shape: tuple[int, ...]
+) -> AccumulationCost:
+    """FLOP cost of a two-operand contraction, without needing subscripts.
+
+    Mirrors ``aggregate_einsum`` for ``k=2`` with no symmetry: ``alpha``
+    multiplies plus ``alpha - M`` accumulations, where ``alpha`` is the
+    multiply count and ``M`` the number of output cells. Used when the
+    52-letter subscript budget is exceeded and no einsum string can be
+    built — the price must match what the einsum path would have charged,
+    so running out of letters costs precision but never price.
+
+    Returns a real ``AccumulationCost`` rather than an int so the caller can
+    hand it to ``contraction_complex_override`` exactly as it would the
+    einsum path's, keeping complex billing exact on this branch too.
+    """
+    alpha = (a_size * b_size // contracted) if contracted > 0 else 0
+    m = _math_prod(output_shape)
+    # Zero-sized arithmetic domain: no multiply or accumulation events occur,
+    # and there is no first term to receive the free initial-copy correction.
+    # Without this guard ``2 * alpha - m`` goes NEGATIVE and refunds budget.
+    total = 0 if alpha == 0 else 2 * alpha - m
+    return AccumulationCost(
+        total=total,
+        mu=alpha,
+        alpha=alpha,
+        m_total=alpha,
+        dense_baseline=alpha,
+        num_terms=2,
+        per_component=(),
+        fallback_used=False,
+    )
 
 
 def _tensordot_einsum_subscripts(a_ndim, b_ndim, a_axes, b_axes):
