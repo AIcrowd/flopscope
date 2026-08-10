@@ -524,6 +524,34 @@ def test_warns_when_operands_alias():
     assert _warns_cost_fallback(lambda: fnp.tensordot(padded, padded, axes=([1], [0])))
 
 
+def test_tensordot_warns_with_symmetric_operand_not_aliased():
+    """The symmetry half of the warning predicate, not just the alias half.
+
+    Mutation-tested gap: `_pointwise.py:5275`'s predicate is
+    ``a_sym is not None or b_sym is not None or a is b``. Only the ``a is b``
+    disjunct was covered above (`test_warns_when_operands_alias`); replacing
+    the whole predicate with plain ``a is b`` still passed the entire suite.
+    Uses a small, non-oversized S_2 symmetry (order 2, far under
+    ``dimino_budget``) on axes disjoint from the contracted axis, so it
+    survives the contraction and lands in the non-oversized ``else`` branch
+    beside ``_symmetry_adjusted_cost`` (:5280) -- not the oversized-symmetry
+    arm (:5240, already covered by
+    ``test_tensordot_oversized_symmetry_arm_warns``), and not the full-inner
+    fast path (:5162, covered separately below).
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=(0, 1))
+    a = wrap_with_symmetry(np.ones((5, 5) + (1,) * 48 + (3,)), group)
+    b = np.ones((3, 4))
+    assert a is not b
+    assert a.ndim != b.ndim  # not the full-inner path
+    assert a.ndim + b.ndim > 52
+
+    assert _warns_cost_fallback(lambda: fnp.tensordot(a, b, axes=([50], [0])))
+
+
 def test_tensordot_oversized_symmetry_arm_warns():
     """The oversized-symmetry branch always forfeits savings, so it always warns.
 
@@ -570,6 +598,34 @@ def test_full_inner_tensordot_warns_when_operands_alias():
     assert _warns_cost_fallback(lambda: fnp.tensordot(padded, padded, axes=ndim))
 
 
+def test_full_inner_tensordot_warns_with_symmetric_operand_not_aliased():
+    """The symmetry half of the warning predicate at the full-inner site.
+
+    Mutation-tested gap: `_pointwise.py:5162`'s predicate is
+    ``_symmetry_of(a) is not None or _symmetry_of(b) is not None or a is b``.
+    Only the ``a is b`` disjunct was covered above
+    (`test_full_inner_tensordot_warns_when_operands_alias`); replacing the
+    whole predicate with plain ``a is b`` still passed the entire suite. A
+    genuinely symmetric, non-aliased operand contracted over every axis
+    (full inner) above the label budget must warn too, even though a scalar
+    output leaves no unique-element savings for ``_symmetry_adjusted_cost``
+    to realise here -- the predicate fires on the presence of the tag, not
+    on whether it changes the price.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=(0, 1))
+    shape = (5, 5) + (1,) * 25  # ndim=27; both operands fully contracted -> 54 > 52
+    a = wrap_with_symmetry(np.ones(shape), group)
+    b = np.ones(shape) * 2.0
+    assert a is not b
+    assert a.ndim == b.ndim
+    assert a.ndim + b.ndim > 52
+
+    assert _warns_cost_fallback(lambda: fnp.tensordot(a, b, axes=a.ndim))
+
+
 def test_dot_no_warning_when_fallback_is_exact():
     """dot's label-budget fallback (routed through _einsum_routed_binary) is
     exact without symmetry or aliasing."""
@@ -587,3 +643,33 @@ def test_dot_warns_when_operands_alias():
     x = rng.standard_normal((16, 16))
     padded = _pad_front(fnp.asarray(x), 25)
     assert _warns_cost_fallback(lambda: fnp.dot(padded, padded))
+
+
+def test_dot_warns_with_symmetric_operand_not_aliased():
+    """The symmetry half of the warning predicate in ``_einsum_routed_binary``.
+
+    Mutation-tested gap: `_pointwise.py:4711`'s predicate is
+    ``_symmetry_of(a) is not None or _symmetry_of(b) is not None or a is b``.
+    Only the ``a is b`` disjunct was covered above
+    (`test_dot_warns_when_operands_alias`); replacing the whole predicate
+    with plain ``a is b`` still passed the entire suite. This site is shared
+    by ``dot`` and ``inner`` -- exercising it through ``dot`` covers both.
+
+    Padding is split across both operands (27 + 26, each under NumPy's
+    32-dimension ceiling for a raw ``np.dot`` call) rather than concentrated
+    on one -- unlike ``tensordot``, which reshapes to a 2-D matmul before
+    calling into NumPy and tolerates a single operand past 32 dims (see the
+    oversized-symmetry test above), ``np.dot``'s own N-D code path enforces
+    ``NPY_MAXDIMS`` per operand.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=(0, 1))
+    a = wrap_with_symmetry(np.ones((5, 5) + (1,) * 24 + (3,)), group)  # ndim=27
+    b = np.ones((1,) * 24 + (3, 4))  # ndim=26; contracted axis is b.shape[-2]
+    assert a is not b
+    assert a.ndim <= 32 and b.ndim <= 32
+    assert a.ndim + b.ndim > 52
+
+    assert _warns_cost_fallback(lambda: fnp.dot(a, b))

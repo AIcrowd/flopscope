@@ -82,13 +82,25 @@
   26 letters and leaked a NumPy `ValueError` above 26 dimensions. All four
   call sites now route through `_contraction_subscripts`, and when it runs
   out of letters the cost is computed arithmetically at the same FMA=2
-  total the einsum path would have charged. Because that total depends only
-  on operand sizes and the output shape, both invariant under size-1 axes,
-  operand rank no longer affects the price of a contraction. Complex
-  operands on this branch now bill at the exact `(8K - 2) / (2K - 1)` ratio
-  instead of raising. Symmetry and repeated-operand savings are still
-  forfeited above the budget — erring expensive — and a
-  `CostFallbackWarning` fires when that costs anything.
+  total the einsum path would have charged. Operand rank no longer affects
+  the price of a contraction. Complex operands on this branch now bill at
+  the exact `(8K - 2) / (2K - 1)` ratio instead of raising. Repeated-operand
+  savings are still forfeited above the budget on all four call sites, and
+  symmetry savings are forfeited on `dot`, `inner`, and `tensordot`'s
+  full-inner path — `tensordot`'s partial-contraction fallback keeps them —
+  erring expensive where lost; a `CostFallbackWarning` fires when that
+  costs anything.
+- **cost-model**: `tensordot`'s label-budget fallback never normalised
+  negative axis indices, mispricing partial contractions above the
+  52-letter budget in both directions. A negative axis skipped by the
+  contracted-size divisor left it at 1, over-billing (a reproduced 256x
+  ratio at rank sum 54, `axes=([-26], [0])`: 33,488,896 instead of
+  130,816); a negative axis that leaked into the output shape inflated `M`
+  until `2*alpha - M` collapsed to the old multiply-only price,
+  under-billing (`axes=([1], [-27])`: 65,536 instead of 130,816). Both now
+  bill 130,816, matching the positive-axis spelling. An axis still
+  out-of-range after normalisation now raises `IndexError` before
+  `budget.deduct` runs, rather than being silently skipped.
 
 ## v0.10.0 (2026-07-31)
 
