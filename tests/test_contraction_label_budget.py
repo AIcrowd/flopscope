@@ -787,6 +787,92 @@ def test_untagged_operand_above_budget_still_pays_the_dense_price(
     assert tagged < dense  # the symmetry genuinely scales this contraction
 
 
+# ---------------------------------------------------------------------------
+# Every SYMMETRIC_FALLBACK_CASES/RIGHT_OPERAND_CASES entry above puts the
+# size-1 pad in contracted position, so K=1 and nothing is ever actually
+# summed. The two clusters below put a genuine (size-3) extent there instead,
+# pinning the properties the reviewer checked out of band: a real contraction
+# still gets the composed-symmetry discount, and a tag that only covers the
+# axis about to be contracted away buys nothing.
+# ---------------------------------------------------------------------------
+
+# op, big a shape, big b shape, small a shape, small b shape. The real
+# contracted extent (3) sits last on both operands -- where `inner` contracts
+# and where `dot` contracts a's last against b's -2 -- with K=3, not 1. The
+# small pair is the same contraction with the singleton padding removed.
+REAL_CONTRACTION_CASES = [
+    ("inner", (4, 4) + (1,) * 24 + (3,), (5,) + (1,) * 25 + (3,), (4, 4, 3), (5, 3)),
+    (
+        "dot",
+        (4, 4) + (1,) * 24 + (3,),
+        (5,) + (1,) * 24 + (3, 1),
+        (4, 4, 3),
+        (5, 3, 1),
+    ),
+]
+
+
+@pytest.mark.parametrize("op_name,a_big,b_big,a_small,b_small", REAL_CONTRACTION_CASES)
+def test_symmetric_operand_above_budget_with_real_contraction_matches_einsum_path(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """Same property as ``test_symmetric_operand_above_budget_bills_like_einsum_path``,
+    but with K=3 actually summed instead of K=1.
+
+    Asserts both that the fallback matches the identical below-budget
+    contraction, and that it is strictly cheaper than the same shapes with no
+    symmetry tag -- so the test cannot pass if the discount silently stops
+    applying (it would still equal a *different*, undiscounted, `below`).
+    """
+    fn = getattr(fnp, op_name)
+    a_p, b_p = _sym_ones(a_big, (0, 1)), fnp.asarray(np.ones(b_big))
+    assert a_p.ndim + b_p.ndim > 52
+    above = billed(lambda: fn(a_p, b_p))
+
+    a_u, b_u = _sym_ones(a_small, (0, 1)), fnp.asarray(np.ones(b_small))
+    assert a_u.ndim + b_u.ndim <= 52
+    below = billed(lambda: fn(a_u, b_u))
+    assert above == below
+
+    plain_a = fnp.asarray(np.ones(a_big))
+    undiscounted = billed(lambda: fn(plain_a, b_p))
+    assert above < undiscounted  # otherwise the discount could be gone
+
+
+# op, big a shape (symmetric pair spans the contracted axis), big b shape
+# with a matching contracted extent. `a`'s tag is axes (0, a.ndim - 1): the
+# last axis is always the one both `dot` and `inner` contract, so once it's
+# contracted away only axis 0 still carries the group -- fewer than 2
+# surviving axes, the case `_surviving_symmetry_after_contraction` returns
+# `None` for.
+SYMMETRY_ON_CONTRACTED_AXIS_CASES = [
+    ("inner", (3,) + (1,) * 25 + (3,), (5,) + (1,) * 25 + (3,)),
+    ("dot", (3,) + (1,) * 25 + (3,), (5,) + (1,) * 24 + (3, 1)),
+]
+
+
+@pytest.mark.parametrize("op_name,a_big,b_big", SYMMETRY_ON_CONTRACTED_AXIS_CASES)
+def test_symmetry_spanning_the_contracted_axis_buys_no_discount(op_name, a_big, b_big):
+    """A symmetry tag that only covers the axis being contracted away is worthless.
+
+    Once the last axis (the contracted one) is gone, the tagged pair has
+    fewer than 2 surviving axes, so the composition bails to `None` and the
+    fallback must fall through to the same full dense price an untagged
+    operand of the identical shape pays -- this is the guard that stops an
+    unearned discount, not just a case the discount happens not to reach.
+    """
+    fn = getattr(fnp, op_name)
+    tagged = _sym_ones(a_big, (0, len(a_big) - 1))
+    b_p = fnp.asarray(np.ones(b_big))
+    assert tagged.ndim + b_p.ndim > 52
+    with_tag = billed(lambda: fn(tagged, b_p))
+
+    plain_a = fnp.asarray(np.ones(a_big))
+    without_tag = billed(lambda: fn(plain_a, b_p))
+
+    assert with_tag == without_tag  # the tag bought nothing
+
+
 # op, plain a shape, symmetric b shape, plain small a, symmetric small b.
 # `b`'s symmetric pair is axes (0, 1) in both; the contracted axis is a
 # singleton so both survive into the output.
