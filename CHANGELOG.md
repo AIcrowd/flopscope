@@ -84,12 +84,11 @@
   out of letters the cost is computed arithmetically at the same FMA=2
   total the einsum path would have charged. Operand rank no longer affects
   the price of a contraction. Complex operands on this branch now bill at
-  the exact `(8K - 2) / (2K - 1)` ratio instead of raising. Repeated-operand
-  savings are still forfeited above the budget on all four call sites, and
-  symmetry savings are forfeited on `dot`, `inner`, and `tensordot`'s
-  full-inner path — `tensordot`'s partial-contraction fallback keeps them —
-  erring expensive where lost; a `CostFallbackWarning` fires when that
-  costs anything.
+  the exact `(8K - 2) / (2K - 1)` ratio instead of raising. Above the
+  budget, all four call sites price the contraction without an einsum
+  subscript string: the resulting charge may be higher than what the
+  einsum path would compute for the same operands, and is never lower;
+  a `CostFallbackWarning` fires when that costs anything.
 - **cost-model**: `tensordot`'s label-budget fallback never normalised
   negative axis indices, mispricing partial contractions above the
   52-letter budget in both directions. A negative axis skipped by the

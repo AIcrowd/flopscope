@@ -452,9 +452,9 @@ def _warn_label_budget_once(op_name: str) -> None:
         return  # already warned for this op
     _warnings.warn(
         f"{op_name}: operand rank exceeds the {_SUBSCRIPT_BUDGET}-letter "
-        f"einsum subscript budget; repeated-operand savings are forfeited, "
-        f"and symmetry savings are forfeited too except on tensordot's "
-        f"partial-contraction fallback, which keeps them.",
+        f"einsum subscript budget, so this contraction is priced without an "
+        f"einsum subscript string. The resulting charge may be higher than "
+        f"what the einsum path would compute, and is never lower.",
         CostFallbackWarning,
         stacklevel=4,
     )
