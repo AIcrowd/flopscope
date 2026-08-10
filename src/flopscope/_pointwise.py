@@ -4916,6 +4916,43 @@ def _tensordot_parse_axes(a_ndim, b_ndim, axes):
     return a_axes, b_axes
 
 
+def _tensordot_normalize_axis(ax: int, ndim: int) -> int:
+    """Normalise one tensordot axis index to ``[0, ndim)``, numpy-style.
+
+    ``-ndim <= ax < ndim`` is the valid range (matching how ``a.shape[ax]``
+    would resolve); anything else raises, because ``np.tensordot`` itself
+    indexes the shape tuple directly (``as_[axes_a[k]]``) and lets Python's
+    tuple indexing fail with exactly this exception. Raising here means the
+    caller never reaches ``budget.deduct`` for a call that was always going
+    to fail — refuse before charging, never charge for a call you're about
+    to fail.
+
+    When ``ndim == 0`` the range ``-0 <= ax < 0`` is never satisfiable, so
+    every axis is rejected here — this also guards the ``ax % ndim``
+    below from ``ZeroDivisionError`` without a separate ``ndim == 0``
+    special case (a 0-d operand with the default ``axes=2`` hits this: raw
+    axes ``(-2, -1)`` against ``ndim=0``, same as real ``np.tensordot``).
+    """
+    if -ndim <= ax < ndim:
+        return ax % ndim if ax < 0 else ax
+    raise IndexError("tuple index out of range")
+
+
+def _tensordot_normalize_axes(a_ndim, b_ndim, a_axes, b_axes):
+    """Normalise both operands' contracted-axis tuples to non-negative form.
+
+    Must run immediately after ``_tensordot_parse_axes`` and before any of
+    ``contracted``, ``a_surviving``/``b_surviving``, ``output_shape``, or the
+    symmetry restriction read the raw axes — those all index with
+    ``0 <= ax < ndim`` or membership-test against the raw tuple, both of
+    which silently mistreat an un-normalised negative axis (see the
+    tensordot docstring for the resulting mispricing).
+    """
+    a_norm = tuple(_tensordot_normalize_axis(ax, a_ndim) for ax in a_axes)
+    b_norm = tuple(_tensordot_normalize_axis(ax, b_ndim) for ax in b_axes)
+    return a_norm, b_norm
+
+
 def _surviving_symmetry_after_contraction(group, surviving_axes):
     """Restrict ``group`` to the axes that remain after contraction.
 
@@ -5020,6 +5057,14 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     a_contract_axes, b_contract_axes = _tensordot_parse_axes(a.ndim, b.ndim, axes)
+    # Normalise before anything below reads these: `contracted`,
+    # `a_surviving`/`b_surviving`, `output_shape`, and the `is_full_inner`
+    # check all assume non-negative axes. Raises IndexError (matching what
+    # `np.tensordot` itself raises for an out-of-range axis) before any
+    # budget is charged.
+    a_contract_axes, b_contract_axes = _tensordot_normalize_axes(
+        a.ndim, b.ndim, a_contract_axes, b_contract_axes
+    )
     # Fast path: a full inner contraction over all axes maps cleanly to
     # einsum and benefits from joint-operand savings when a is b.
     is_full_inner = (
@@ -5057,10 +5102,11 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         return result  # type: ignore[return-value]
     # Fallback: keep the existing sophisticated direct_product_groups path
     # for partial contractions and unusual axes specs.
+    # `a_contract_axes` is already normalised to `[0, a.ndim)` above, so
+    # every entry indexes `a.shape` validly here.
     contracted = 1
     for ax in a_contract_axes:
-        if 0 <= ax < a.ndim:
-            contracted *= a.shape[ax]
+        contracted *= a.shape[ax]
     # Surviving (non-contracted) axes for each operand.
     a_surviving = tuple(i for i in range(a.ndim) if i not in a_contract_axes)
     b_surviving = tuple(i for i in range(b.ndim) if i not in b_contract_axes)
