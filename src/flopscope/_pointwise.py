@@ -5107,13 +5107,19 @@ def _contraction_subscripts(
 def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     """Counted version of ``np.tensordot``.
 
-    The dense FLOP cost is ``a.size * b.size / contracted_size``. When
-    either operand carries a :class:`SymmetricTensor` symmetry, flopscope
-    composes the surviving (post-contraction) symmetry on the output
-    axes via :func:`flopscope._symmetry_utils.direct_product_groups` and
-    scales the cost by the unique-element fraction of the output (see
+    The FLOP cost is ``(2K - 1) x M`` for contracted extent ``K`` and ``M``
+    output cells — ``K`` multiplies and ``K - 1`` accumulations per cell
+    (FMA = 2). When either operand carries a :class:`SymmetricTensor`
+    symmetry, flopscope composes the surviving (post-contraction) symmetry
+    on the output axes via
+    :func:`flopscope._symmetry_utils.direct_product_groups` and scales the
+    cost by the unique-element fraction of the output (see
     :func:`_symmetry_adjusted_cost`). Above degree 12 the adjustment is
     skipped and :class:`flopscope.errors.CostFallbackWarning` fires.
+
+    Operand rank does not affect the price. Above the 52-letter einsum
+    subscript budget the cost is computed arithmetically instead of through
+    a subscript string, at the same total.
     """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):

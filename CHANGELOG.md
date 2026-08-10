@@ -72,6 +72,23 @@
   the "fixed output dtype ⇒ not neutral" rule to the *distribution* samplers,
   which the Random section had already carved `choice`/`shuffle`/
   `permutation`/`permuted` out of. Reported in #176.
+- **cost-model**: contraction wrappers now share one einsum subscript
+  allocator and one out-of-letters price. Previously `tensordot`, `dot`/
+  `inner`, and `tensordot`'s full-inner fast path each allocated subscript
+  labels independently and disagreed about what to do when the 52-letter
+  alphabet ran out: `tensordot` fell back to a multiply-only formula that
+  charged `alpha` instead of the honest `2 * alpha - M`, `dot` and `inner`
+  let a bare `StopIteration` escape, and the full-inner path allocated only
+  26 letters and leaked a NumPy `ValueError` above 26 dimensions. All four
+  call sites now route through `_contraction_subscripts`, and when it runs
+  out of letters the cost is computed arithmetically at the same FMA=2
+  total the einsum path would have charged. Because that total depends only
+  on operand sizes and the output shape, both invariant under size-1 axes,
+  operand rank no longer affects the price of a contraction. Complex
+  operands on this branch now bill at the exact `(8K - 2) / (2K - 1)` ratio
+  instead of raising. Symmetry and repeated-operand savings are still
+  forfeited above the budget — erring expensive — and a
+  `CostFallbackWarning` fires when that costs anything.
 
 ## v0.10.0 (2026-07-31)
 
