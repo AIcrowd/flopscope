@@ -673,3 +673,287 @@ def test_dot_warns_with_symmetric_operand_not_aliased():
     assert a.ndim + b.ndim > 52
 
     assert _warns_cost_fallback(lambda: fnp.dot(a, b))
+
+
+# ---------------------------------------------------------------------------
+# Surviving output symmetry on the dot/inner label-budget fallback
+# ---------------------------------------------------------------------------
+#
+# ``_einsum_routed_binary``'s ``subs is None`` arm used to hardcode
+# ``output_symmetry = None``, so a symmetric operand paid the full dense price
+# above the 52-letter budget while the identical contraction below it paid the
+# symmetry-adjusted one -- rank acting as a surcharge. The arm now composes the
+# surviving group the way ``tensordot``'s non-oversized arm already did.
+#
+# NumPy caps ``dot``/``inner`` at 32 dimensions PER OPERAND, so the budget can
+# only be exceeded by splitting rank across both (27 + 27 below). That also
+# rules out reaching the fallback through ``dot``'s 1-D-``b`` arm, which would
+# need ``a.ndim >= 52``; that arm's axis pair is covered by construction, not
+# by a test.
+
+
+def _sym_ones(shape, axes):
+    """Constant array tagged with a genuine symmetry (constants are symmetric)."""
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    return wrap_with_symmetry(np.ones(shape), SymmetryGroup.symmetric(axes=axes))
+
+
+# op, big a shape, big b shape, small a shape, small b shape. The small pair is
+# the same contraction with the singleton padding removed, i.e. below the
+# letter budget and therefore priced by the einsum path.
+SYMMETRIC_FALLBACK_CASES = [
+    ("inner", (4, 4) + (1,) * 25, (4,) + (1,) * 26, (4, 4, 1), (4, 1)),
+    ("dot", (4, 4) + (1,) * 25, (1,) * 26 + (4,), (4, 4, 1), (1, 4)),
+]
+
+
+@pytest.mark.parametrize(
+    "op_name,a_big,b_big,a_small,b_small", SYMMETRIC_FALLBACK_CASES
+)
+def test_symmetric_operand_above_budget_bills_like_einsum_path(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """Padding a symmetric operand past the letter budget must not raise the bill.
+
+    Singleton axes carry no arithmetic, so the padded (fallback) contraction
+    and the unpadded (einsum) one are the same work and must cost the same.
+    Before the fix the fallback discarded the surviving symmetry and charged
+    the dense price instead.
+    """
+    fn = getattr(fnp, op_name)
+    a_p, b_p = _sym_ones(a_big, (0, 1)), fnp.asarray(np.ones(b_big))
+    assert a_p.ndim + b_p.ndim > 52
+    above = billed(lambda: fn(a_p, b_p))
+
+    a_u, b_u = _sym_ones(a_small, (0, 1)), fnp.asarray(np.ones(b_small))
+    assert a_u.ndim + b_u.ndim <= 52
+    below = billed(lambda: fn(a_u, b_u))
+
+    assert above == below
+
+
+@pytest.mark.parametrize(
+    "op_name,a_big,b_big,a_small,b_small", SYMMETRIC_FALLBACK_CASES
+)
+def test_symmetric_operand_above_budget_keeps_symmetry_on_the_result(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """The surviving group is composed, so the result comes back tagged.
+
+    The fallback previously returned a plain array, silently dropping a
+    symmetry the einsum path preserves for the identical contraction.
+    """
+    from flopscope._symmetric import SymmetricTensor
+
+    fn = getattr(fnp, op_name)
+    a_p, b_p = _sym_ones(a_big, (0, 1)), fnp.asarray(np.ones(b_big))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            got = fn(a_p, b_p)
+    assert isinstance(got, SymmetricTensor)
+    # The two symmetric axes of `a` lead the output, so they keep slots 0/1.
+    assert got.symmetry is not None
+    assert got.symmetry.axes == (0, 1)
+    assert got.symmetry.order() == 2
+
+
+@pytest.mark.parametrize(
+    "op_name,a_big,b_big,a_small,b_small", SYMMETRIC_FALLBACK_CASES
+)
+def test_untagged_operand_above_budget_still_pays_the_dense_price(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """Only a real symmetry tag buys the adjustment; bare data pays 2*alpha - M.
+
+    The guard against the fix becoming a discount: identical shapes and
+    identical values, differing only in whether the symmetry was declared.
+    """
+    fn = getattr(fnp, op_name)
+    plain_a, plain_b = fnp.asarray(np.ones(a_big)), fnp.asarray(np.ones(b_big))
+    dense = billed(lambda: fn(plain_a, plain_b))
+
+    a_size, b_size = math.prod(a_big), math.prod(b_big)
+    contracted = a_big[-1]
+    alpha = a_size * b_size // contracted
+    m = math.prod(a_big[:-1]) * (
+        math.prod(b_big[:-1]) if op_name == "inner" else math.prod(b_big) // b_big[-2]
+    )
+    assert dense == 2 * alpha - m
+
+    tagged = billed(lambda: fn(_sym_ones(a_big, (0, 1)), plain_b))
+    assert tagged < dense  # the symmetry genuinely scales this contraction
+
+
+# op, plain a shape, symmetric b shape, plain small a, symmetric small b.
+# `b`'s symmetric pair is axes (0, 1) in both; the contracted axis is a
+# singleton so both survive into the output.
+RIGHT_OPERAND_CASES = [
+    ("inner", (4,) + (1,) * 26, (4, 4) + (1,) * 25, (4, 1), (4, 4, 1)),
+    ("dot", (5,) + (1,) * 26, (4, 4) + (1,) * 25, (5, 1), (4, 4, 1, 1)),
+]
+
+
+@pytest.mark.parametrize("op_name,a_big,b_big,a_small,b_small", RIGHT_OPERAND_CASES)
+def test_right_operand_symmetry_lands_in_the_offset_output_slots(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """``b``'s surviving axes are relabelled past ``a``'s, not from zero.
+
+    Mutation-tested gap: with the symmetry only ever on ``a``, ``b_offset``
+    is dead -- zeroing it passed every other test here. The output
+    concatenates ``a``'s surviving axes then ``b``'s, so ``b``'s symmetric
+    pair belongs at slots ``len(a_surviving) + 0/1``; landing it at 0/1
+    instead would claim a symmetry between two axes that are not exchangeable
+    (different operands, and here different lengths) and misprice on shapes
+    where those slots differ in size.
+    """
+    fn = getattr(fnp, op_name)
+    a_p, b_p = fnp.asarray(np.ones(a_big)), _sym_ones(b_big, (0, 1))
+    assert a_p.ndim + b_p.ndim > 52
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            result = fn(a_p, b_p)
+            above = budget.flops_used
+
+    a_u, b_u = fnp.asarray(np.ones(a_small)), _sym_ones(b_small, (0, 1))
+    assert a_u.ndim + b_u.ndim <= 52
+    below = billed(lambda: fn(a_u, b_u))
+    assert above == below
+
+    # a contributes len(a_big) - 1 surviving axes, so b's pair starts there.
+    offset = len(a_big) - 1
+    assert result.symmetry is not None
+    assert result.symmetry.axes == (offset, offset + 1)
+
+
+def test_oversized_symmetry_above_budget_bills_dense_without_raising():
+    """An unenumerable group must degrade to the dense price, not crash.
+
+    ``dot``/``inner`` are exactly the two ops this branch stopped crashing, so
+    the symmetry composition must not reintroduce a crash class.
+    ``_is_oversized_for_cost_model`` is the pre-guard: S_12 (order 479_001_600)
+    is far past the default ``dimino_budget`` of 50_000. Both operands stay
+    under NumPy's 32-dimension ceiling while their sum clears 52.
+
+    The result type is what pins the pre-guard, not the price. Composing an
+    oversized group anyway still lands on the dense price -- ``_symmetry_
+    adjusted_cost`` -> ``unique_elements_for_shape`` has its own budget guard
+    and degrades to the dense element count -- but it would stamp the result
+    with a group nothing downstream can enumerate, which is the opposite of
+    what ``tensordot``'s oversized arm does (``out_sym = None``). Bailing
+    before composition keeps the two ops' answers to the same question the
+    same, so this asserts on the wrapper, which is the only place the two
+    spellings differ.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetric import SymmetricTensor
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=tuple(range(12)))
+    a = wrap_with_symmetry(np.ones((2,) * 12 + (1,) * 19 + (5,)), group)  # ndim 32
+    b = np.ones((1,) * 21 + (5,))  # ndim 22
+    assert a.ndim <= 32 and b.ndim <= 32
+    assert a.ndim + b.ndim > 52
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            result = fnp.inner(a, b)  # must not raise
+            got = budget.flops_used
+
+    alpha = a.size * b.size // 5
+    m = math.prod(a.shape[:-1]) * math.prod(b.shape[:-1])
+    assert got == 2 * alpha - m
+    assert not isinstance(result, SymmetricTensor)
+
+
+@pytest.mark.parametrize(
+    "op_name,a_big,b_big,a_small,b_small", SYMMETRIC_FALLBACK_CASES
+)
+def test_dimino_budget_exceeded_mid_composition_falls_back_to_dense(
+    op_name, a_big, b_big, a_small, b_small, monkeypatch
+):
+    """The try/except behind the oversized pre-guard, exercised directly.
+
+    ``_is_oversized_for_cost_model`` screens each operand's group in
+    isolation; restriction, remapping and the direct product can still blow
+    ``dimino_budget`` mid-composition. Anything escaping there would land on
+    the caller as a bare private exception, so the arm swallows it and charges
+    dense. Constructing a group that trips it only during composition is
+    fiddly, so the raise is injected at the first composition step.
+    """
+    import flopscope._pointwise as pw
+    from flopscope._perm_group import _DiminoBudgetExceeded
+
+    def _boom(group, surviving_axes):
+        raise _DiminoBudgetExceeded(99_999, 50_000)
+
+    monkeypatch.setattr(pw, "_surviving_symmetry_after_contraction", _boom)
+
+    fn = getattr(fnp, op_name)
+    a = _sym_ones(a_big, (0, 1))
+    b = fnp.asarray(np.ones(b_big))
+
+    got = billed(lambda: fn(a, b))  # must not raise
+
+    alpha = math.prod(a_big) * math.prod(b_big) // a_big[-1]
+    m = math.prod(a_big[:-1]) * (
+        math.prod(b_big[:-1]) if op_name == "inner" else math.prod(b_big) // b_big[-2]
+    )
+    assert got == 2 * alpha - m
+
+
+@pytest.mark.parametrize(
+    "op_name,a_big,b_big,a_small,b_small", SYMMETRIC_FALLBACK_CASES
+)
+def test_complex_above_budget_bills_exactly_when_symmetry_is_a_no_op(
+    op_name, a_big, b_big, a_small, b_small
+):
+    """No symmetry to adjust for => the exact complex override still applies.
+
+    The `cost == accumulation.total` guard must not cost untagged complex
+    operands their exact ratio: the padded bill has to match the unpadded one,
+    not fail closed.
+    """
+    fn = getattr(fnp, op_name)
+    rng = np.random.default_rng(0)
+
+    def _cplx(shape):
+        return fnp.asarray(rng.standard_normal(shape) + 1j * rng.standard_normal(shape))
+
+    above = billed(lambda: fn(_cplx(a_big), _cplx(b_big)))
+    below = billed(lambda: fn(_cplx(a_small), _cplx(b_small)))
+    assert below > 0
+    assert above == below
+
+
+def test_complex_above_budget_fails_closed_when_symmetry_scales_the_cost():
+    """The other half of the guard: a scaled cost must not claim an exact ratio.
+
+    Once symmetry scales `cost` below `accumulation.total`, the accumulation's
+    mu/total split no longer describes what is being charged, so the override
+    goes `None` and ``complex_factor_for``'s fail-closed check must fire rather
+    than bill a ratio derived from the pre-scaling total.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    rng = np.random.default_rng(0)
+    v = rng.standard_normal((4, 4)) + 1j * rng.standard_normal((4, 4))
+    sym = v + v.T  # genuinely symmetric complex data
+    a = wrap_with_symmetry(
+        sym.reshape((4, 4) + (1,) * 25), SymmetryGroup.symmetric(axes=(0, 1))
+    )
+    b_vals = rng.standard_normal((4,) + (1,) * 26)
+    b = b_vals + 1j * b_vals
+    assert a.ndim + b.ndim > 52
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            with pytest.raises(RuntimeError, match="computes its complex cost exactly"):
+                fnp.inner(a, b)

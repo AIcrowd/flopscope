@@ -91,6 +91,19 @@
   operands now bill at the exact `(8K - 2) / (2K - 1)` ratio instead of
   raising; where a symmetry adjustment moves the charge off that total,
   they still fail closed with the existing `RuntimeError`.
+- **cost-model**: `dot` and `inner` now keep a `SymmetricTensor` operand's
+  surviving symmetry when the 52-letter budget is exceeded, instead of
+  dropping it. `tensordot`'s fallback already composed the post-contraction
+  group onto the output axes and priced the unique-element fraction; the
+  shared `dot`/`inner` fallback discarded it, so the same contraction cost
+  more above the budget than below it purely because of rank, and returned a
+  plain array where the einsum path returns a `SymmetricTensor` (measured:
+  64 versus 40 FLOPs on a 2-axis-symmetric rank-27 operand). The direction
+  was over-billing, never under-billing. The composition bails to the dense
+  price — unchanged from before — when a group's order exceeds
+  `dimino_budget` or the enumeration exceeds it mid-composition, so neither
+  operation gains a failure mode above the budget. Repeated-operand
+  (`dot(x, x)`) savings are still forfeited there, and still warned about.
 - **cost-model**: `tensordot`'s label-budget fallback never normalised
   negative axis indices, mispricing partial contractions above the
   52-letter budget in both directions. A negative axis skipped by the

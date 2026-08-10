@@ -4660,6 +4660,75 @@ def _ensure_contraction_out_written(dest, result) -> None:
     _call_numpy(_np.copyto, dest, result, casting="same_kind")
 
 
+def _fallback_contraction_output_symmetry(
+    op_name: str,
+    a: Any,
+    b: Any,
+    a_contract_axis: int | None,
+    b_contract_axis: int | None,
+):
+    """Output symmetry surviving a single contracted axis pair, or ``None``.
+
+    The label-budget fallback's counterpart to what
+    ``_resolve_cost_and_output_symmetry`` derives from a subscript string,
+    and a direct mirror of ``tensordot``'s non-oversized arm restricted to
+    one contracted axis per operand: restrict each operand's group to its
+    surviving axes, relabel those axes to their slots in the concatenated
+    output (b's offset past a's surviving count), then compose.
+
+    ``None`` -- the dense price -- is returned whenever the composition
+    cannot be completed: no symmetry to carry, a caller that supplied no
+    axis pair, an oversized group, or an enumeration that blows
+    ``dimino_budget`` mid-composition. Every group operation below can raise
+    ``_DiminoBudgetExceeded``; ``dot`` and ``inner`` reach this function on
+    exactly the high-rank operands that provoke it, and this branch exists
+    to stop those two crashing, so the exception must not escape. Falling
+    back to ``None`` charges the full dense accumulation, which is the
+    never-under-bill direction.
+    """
+    if a_contract_axis is None or b_contract_axis is None:
+        return None
+    a_sym = _symmetry_of(a)
+    b_sym = _symmetry_of(b)
+    if a_sym is None and b_sym is None:
+        return None
+    if _is_oversized_for_cost_model(a_sym) or _is_oversized_for_cost_model(b_sym):
+        try:
+            oversized_order = (
+                a_sym.order() if _is_oversized_for_cost_model(a_sym) else b_sym.order()  # type: ignore[union-attr]
+            )
+        except _DiminoBudgetExceeded:
+            # Unknown-kind group exceeds budget mid-enumeration; can't compute
+            # exact |G|. Sentinel keeps all such groups in one dedup slot.
+            oversized_order = -1
+        _warn_oversized_once(op_name, oversized_order)
+        return None
+    a_surviving = tuple(i for i in range(a.ndim) if i != a_contract_axis)
+    b_surviving = tuple(j for j in range(b.ndim) if j != b_contract_axis)
+    try:
+        a_sym_kept = _surviving_symmetry_after_contraction(a_sym, a_surviving)
+        b_sym_kept = _surviving_symmetry_after_contraction(b_sym, b_surviving)
+        a_sym_remapped = (
+            remap_group_axes(
+                a_sym_kept, {ax: new for new, ax in enumerate(a_surviving)}
+            )
+            if a_sym_kept is not None
+            else None
+        )
+        b_offset = len(a_surviving)
+        b_sym_remapped = (
+            remap_group_axes(
+                b_sym_kept,
+                {ax: new + b_offset for new, ax in enumerate(b_surviving)},
+            )
+            if b_sym_kept is not None
+            else None
+        )
+        return direct_product_groups(a_sym_remapped, b_sym_remapped)
+    except _DiminoBudgetExceeded:
+        return None
+
+
 def _einsum_routed_binary(
     op_name: str,
     np_fn: Any,
@@ -4672,6 +4741,8 @@ def _einsum_routed_binary(
     out: Any = None,
     fallback_contracted: int | None = None,
     fallback_output_shape: tuple[int, ...] | None = None,
+    fallback_a_contract_axis: int | None = None,
+    fallback_b_contract_axis: int | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -4682,6 +4753,14 @@ def _einsum_routed_binary(
     (so each op keeps its own weight), preserves operand symmetry/aliasing via
     `_resolve_cost_and_output_symmetry`, and wraps a symmetric result as
     `SymmetricTensor` — mirroring the existing matmul/dot 2-D behavior.
+
+    `subs=None` means the operands' combined rank exceeded the 52-letter
+    subscript budget. That path needs `fallback_contracted` and
+    `fallback_output_shape` for the arithmetic price, and takes the
+    `fallback_*_contract_axis` pair to compose the surviving output symmetry
+    (see `_fallback_contraction_output_symmetry`). Callers that pass a
+    literal `subs` need none of the four: every fallback keyword is read only
+    under `subs is None`.
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -4699,10 +4778,14 @@ def _einsum_routed_binary(
         accumulation = info.accumulation
         canonical_subs = info.canonical_subscripts
         output_symmetry = info.output_symmetry
+        cost = accumulation.total
+        accumulation_for_billing = accumulation
     else:
         # Out of subscript letters. Price it arithmetically from the same
-        # FMA=2 model; symmetry and repeated-operand savings are forfeited,
-        # which errs expensive.
+        # FMA=2 model; repeated-operand savings are forfeited, which errs
+        # expensive. Operand symmetry is not: composing the surviving group
+        # keeps a symmetric contraction priced the same either side of the
+        # letter budget, which is what stops rank from being a surcharge.
         if fallback_contracted is None or fallback_output_shape is None:
             raise ValueError(
                 f"{op_name}: subs=None requires fallback_contracted and "
@@ -4714,7 +4797,19 @@ def _einsum_routed_binary(
             a.size, b.size, fallback_contracted, fallback_output_shape
         )
         canonical_subs = None
-        output_symmetry = None
+        output_symmetry = _fallback_contraction_output_symmetry(
+            op_name, a, b, fallback_a_contract_axis, fallback_b_contract_axis
+        )
+        cost = _symmetry_adjusted_cost(
+            accumulation.total, fallback_output_shape, output_symmetry
+        )
+        # Only claim an exact complex override when the symmetry adjustment
+        # was a no-op. When it scales `cost` down, the accumulation's mu/total
+        # split no longer describes what is being charged, so leave the
+        # override None and let complex_factor_for's fail-closed guard fire
+        # rather than bill a ratio derived from the wrong total. Same
+        # reasoning as tensordot's `accumulation_for_billing`.
+        accumulation_for_billing = accumulation if cost == accumulation.total else None
     # The gate the pointwise factories already apply: a tag the caller paid
     # ``as_symmetric`` to validate is a claim about this buffer, so a result
     # that contradicts it is an error; a tag merely inferred from a constant
@@ -4728,12 +4823,16 @@ def _einsum_routed_binary(
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
     resolved = resolve_billing_dtype(billing_dtypes)
-    complex_override = contraction_complex_override(accumulation, resolved)
+    complex_override = (
+        contraction_complex_override(accumulation_for_billing, resolved)
+        if accumulation_for_billing is not None
+        else None
+    )
     if out is not None:
         call_kwargs = {**call_kwargs, "out": _to_base_ndarray(out)}
     with budget.deduct(
         op_name,
-        flop_cost=accumulation.total,
+        flop_cost=cost,
         subscripts=canonical_subs,
         shapes=(a.shape, b.shape),
         dtypes=billing_dtypes,
@@ -4775,6 +4874,8 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     fallback_contracted = None
     fallback_output_shape = None
+    fallback_a_axis = None
+    fallback_b_axis = None
     if a.ndim == 2 and b.ndim == 2:
         subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
@@ -4783,10 +4884,12 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         subs = _contraction_subscripts(a.ndim, 1, (a.ndim - 1,), (0,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1]
+        fallback_a_axis, fallback_b_axis = a.ndim - 1, 0
     else:
         subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 2,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1] + b.shape[:-2] + b.shape[-1:]
+        fallback_a_axis, fallback_b_axis = a.ndim - 1, b.ndim - 2
     return _einsum_routed_binary(  # type: ignore[return-value]
         "dot",
         _np.dot,
@@ -4797,6 +4900,8 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         nan_check=True,
         fallback_contracted=fallback_contracted,
         fallback_output_shape=fallback_output_shape,
+        fallback_a_contract_axis=fallback_a_axis,
+        fallback_b_contract_axis=fallback_b_axis,
     )
 
 
@@ -4849,6 +4954,8 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     fallback_contracted = None
     fallback_output_shape = None
+    fallback_a_axis = None
+    fallback_b_axis = None
     if a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
     elif a.ndim == 2 and b.ndim == 2:
@@ -4857,6 +4964,7 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 1,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1] + b.shape[:-1]
+        fallback_a_axis, fallback_b_axis = a.ndim - 1, b.ndim - 1
     return _einsum_routed_binary(  # type: ignore[return-value]
         "inner",
         _np.inner,
@@ -4867,6 +4975,8 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         nan_check=False,
         fallback_contracted=fallback_contracted,
         fallback_output_shape=fallback_output_shape,
+        fallback_a_contract_axis=fallback_a_axis,
+        fallback_b_contract_axis=fallback_b_axis,
     )
 
 
