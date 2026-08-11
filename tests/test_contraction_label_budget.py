@@ -1741,8 +1741,10 @@ def test_unsigned_scalar_axes_follows_numpy_rather_than_looking_plausible(pad):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # numpy's own unsigned-negation overflow
         with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
-            np.tensordot(a, b, axes=np.uint8(1))
-        expected = np.tensordot(a, b, axes=np.uint8(0))  # ground truth: it runs
+            # numpy's stubs type `axes` as int | tuple[...], not np.unsignedinteger,
+            # but the runtime accepts it -- that gap is exactly what this test pins.
+            np.tensordot(a, b, axes=np.uint8(1))  # type: ignore[reportCallIssue]
+        expected = np.tensordot(a, b, axes=np.uint8(0))  # type: ignore[reportCallIssue]  # ground truth: it runs
     assert np.array_equal(expected, np.tensordot(a, b, axes=0))
 
     fa, fb = fnp.asarray(a), fnp.asarray(b)
