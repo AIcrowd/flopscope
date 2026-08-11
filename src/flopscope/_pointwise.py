@@ -4696,8 +4696,8 @@ def _validate_contracted_extents(
     call raises, so pricing first would make an impossible contraction consume
     budget -- or raise ``BudgetExhaustedError`` in place of numpy's shape
     error. Refuse before charging, never charge for a call you are about to
-    fail; same rule, and same ordering, as the out-of-range axis rejection in
-    :func:`_tensordot_normalize_axis`.
+    fail; same rule as the out-of-range axis rejection in
+    :func:`_tensordot_axis_index`.
 
     Neither of the two paths that reach here validates on its own. Above the
     52-letter subscript budget the arithmetic fallback prices from shapes and
@@ -4708,7 +4708,11 @@ def _validate_contracted_extents(
     Checking here covers both, which is also what keeps the refusal identical
     either side of the letter budget.
 
-    ``a_axes``/``b_axes`` must already be normalised to ``[0, ndim)``.
+    ``a_axes``/``b_axes`` index the two shapes directly, so a negative axis
+    resolves the way ``shape[ax]`` does; anything out of range is the caller's
+    to reject first. :func:`_tensordot_pair_axes` has already range-checked
+    and normalised its pair by the time it calls here, and `dot`/`inner` pass
+    axes they derived from the ranks themselves.
     """
     if len(a_axes) != len(b_axes):
         raise ValueError(
@@ -5158,59 +5162,182 @@ def outer(
 attach_docstring(outer, _np.outer, "counted_custom", "n(n+1)/2 FLOPs when v outer v")
 
 
-def _tensordot_parse_axes(a_ndim, b_ndim, axes):
-    """Parse ``np.tensordot``'s ``axes`` argument into ``(a_axes, b_axes)``.
+def _tensordot_spec_axes(spec):
+    """One operand's contracted-axis tuple, by ``np.tensordot``'s own rule.
 
-    Accepts the same forms as numpy: ``int N`` (contract last N of ``a``
-    with first N of ``b``), ``(int, int)`` (single-axis pair), or
-    ``(iterable, iterable)`` (per-axis pairing). Returns a pair of
-    tuples of contracted axis indices.
+    numpy decides "one axis or many" with a ``len()`` probe, not a type test::
+
+        try:
+            na = len(axes_a); axes_a = list(axes_a)
+        except TypeError:
+            axes_a = [axes_a]; na = 1
+
+    Mirroring that is what makes every per-operand spelling numpy takes --
+    ``int``, any numpy integer scalar, a list, tuple, set, range or ndarray --
+    land here with the meaning it has there, and it needs no integer test of
+    its own. The predicate this replaces was ``isinstance(spec, int)``, which
+    is ``False`` for every numpy integer scalar and so rejected, with
+    ``TypeError``, calls numpy runs.
+
+    It also preserves numpy's treatment of a spec with no ``__len__`` that is
+    *not* an integer, such as a drained iterator: numpy wraps it in a
+    one-element list and then uses it as an index, which fails. Returning
+    ``(spec,)`` keeps that failure and moves it into
+    :func:`_tensordot_axis_index`, which runs before any budget is
+    charged. Draining the iterator into a tuple instead -- what this used to
+    do -- both hid the error and left the exhausted object to be forwarded to
+    numpy, so the call was priced and charged and only then refused.
     """
-    if isinstance(axes, int):
-        return (
-            tuple(range(a_ndim - axes, a_ndim)),
-            tuple(range(axes)),
-        )
+    try:
+        len(spec)
+    except TypeError:
+        return (spec,)
+    return tuple(spec)
+
+
+def _tensordot_parse_axes(axes):
+    """Split ``np.tensordot``'s ``axes`` argument into two per-operand specs.
+
+    Accepts the same forms as numpy: an integer ``N`` (contract the last
+    ``N`` axes of ``a`` with the first ``N`` of ``b``), or a pair of
+    per-operand specs. Returns a pair of tuples of raw -- possibly negative,
+    possibly not even integers -- contracted axis indices;
+    :func:`_tensordot_pair_axes` vets and normalises them.
+
+    The arm is chosen with numpy's own ``try: iter(axes)`` probe rather than
+    a type test. Any type test is wrong in one direction or the other: an
+    ``isinstance(axes, int)`` test rejects every numpy integer scalar numpy
+    accepts, and widening it to ``np.integer`` still sends a 0-d array --
+    which numpy reads as a count, since a 0-d array is not iterable -- down
+    the unpacking arm to fail with the wrong exception. Probing for iteration
+    reproduces numpy's split exactly and needs no list of accepted types.
+
+    The integer arm expands to numpy's own ``range(-axes, 0)`` /
+    ``range(0, axes)`` rather than the equivalent-looking
+    ``range(a_ndim - axes, a_ndim)``. For every ``axes`` numpy actually runs
+    the two agree once normalised, but they part company on an *unsigned*
+    scalar: numpy negates it, the value wraps, and the a-side list comes out
+    empty, so the pairing count never matches and the call is a
+    ``ValueError``. Deriving the axes from ``a_ndim`` instead would invent a
+    plausible axis, price the contraction, and only then let numpy refuse it
+    -- a charge for work that never ran. Taking numpy's expression verbatim
+    needs no unsigned special case.
+    """
+    try:
+        iter(axes)
+    except Exception:  # noqa: BLE001 -- numpy's own predicate, verbatim
+        return tuple(range(-axes, 0)), tuple(range(axes))
     a_spec, b_spec = axes
-    a_axes = (a_spec,) if isinstance(a_spec, int) else tuple(a_spec)
-    b_axes = (b_spec,) if isinstance(b_spec, int) else tuple(b_spec)
-    return a_axes, b_axes
+    return _tensordot_spec_axes(a_spec), _tensordot_spec_axes(b_spec)
 
 
-def _tensordot_normalize_axis(ax: int, ndim: int) -> int:
-    """Normalise one tensordot axis index to ``[0, ndim)``, numpy-style.
+def _tensordot_axis_index(ax, ndim: int, operand: str) -> int:
+    """One contracted axis, canonicalised to a plain non-negative ``int``.
 
-    ``-ndim <= ax < ndim`` is the valid range (matching how ``a.shape[ax]``
-    would resolve); anything else raises, because ``np.tensordot`` itself
-    indexes the shape tuple directly (``as_[axes_a[k]]``) and lets Python's
-    tuple indexing fail with exactly this exception. Raising here means the
-    caller never reaches ``budget.deduct`` for a call that was always going
-    to fail — refuse before charging, never charge for a call you're about
-    to fail.
+    Refuses exactly what ``np.tensordot`` refuses for a per-operand axis, and
+    with numpy's exception types:
 
-    When ``ndim == 0`` the range ``-0 <= ax < 0`` is never satisfiable, so
-    every axis is rejected here — this also guards the ``ax % ndim``
-    below from ``ZeroDivisionError`` without a separate ``ndim == 0``
-    special case (a 0-d operand with the default ``axes=2`` hits this: raw
-    axes ``(-2, -1)`` against ``ndim=0``, same as real ``np.tensordot``).
+    * ``TypeError`` for anything that is not an index at all -- a float, a
+      string, a ``None``, a nested list, a drained iterator. numpy reaches
+      this when it writes ``as_[axes_a[k]]`` and Python's tuple indexing
+      fails.
+    * ``TypeError`` for a **boolean**. ``bool`` is an ``int`` subclass and
+      ``np.bool_`` implements ``__index__``, so a boolean indexes a shape
+      tuple happily and survives as far as numpy's internal ``transpose``,
+      which refuses it outright. (numpy's whole-``axes`` integer arm still
+      takes a ``bool`` -- ``-True`` is ``-1`` -- and must keep taking it;
+      ``range`` hands this function plain ints there, so it never sees one.)
+    * ``IndexError`` for an integer outside the operand's rank. A 0-d operand
+      needs no special case: every index is out of range at rank 0, which is
+      what ``np.tensordot`` reports too.
+
+    The plain ``int`` it returns is what keeps the rest of this module -- and
+    the pairing eventually handed back to ``np.tensordot`` -- independent of
+    how the caller spelled the axis. numpy accepts several spellings of the
+    same axis (``int``, ``np.int64``, a 0-d ``ndarray``) but does not treat
+    them alike in every release: numpy 2.4 added a duplicate check that puts
+    the axis objects in a ``set``, so a 0-d ``ndarray`` -- a perfectly valid
+    index, but unhashable -- is refused there and accepted by 2.0 through
+    2.3. Canonicalising here means flopscope prices, bills and runs every
+    spelling identically on every supported numpy rather than inheriting that
+    split (see ``test_zero_d_array_axis_runs_on_every_supported_numpy``).
     """
-    if -ndim <= ax < ndim:
-        return ax % ndim if ax < 0 else ax
-    raise IndexError("tuple index out of range")
+    if isinstance(ax, (bool, _np.bool_)):
+        raise TypeError(
+            f"tensordot: {ax!r} is not a valid contracted axis for the "
+            f"{operand} operand; numpy refuses a boolean axis (pass an integer)"
+        )
+    try:
+        index = _operator.index(ax)
+    except TypeError:
+        raise TypeError(
+            f"tensordot: contracted axes must be integers, got {type(ax).__name__}"
+        ) from None
+    if not -ndim <= index < ndim:
+        raise IndexError(
+            f"tensordot: axis {index} is out of range for the {operand} operand, "
+            f"which has {ndim} axes"
+        )
+    return index + ndim if index < 0 else index
 
 
-def _tensordot_normalize_axes(a_ndim, b_ndim, a_axes, b_axes):
-    """Normalise both operands' contracted-axis tuples to non-negative form.
+def _tensordot_pair_axes(
+    op_name: str,
+    a_shape: tuple[int, ...],
+    b_shape: tuple[int, ...],
+    a_axes,
+    b_axes,
+):
+    """Vet and normalise a ``tensordot`` pairing, before anything is priced.
 
-    Must run immediately after ``_tensordot_parse_axes`` and before any of
-    ``contracted``, ``a_surviving``/``b_surviving``, ``output_shape``, or the
-    symmetry restriction read the raw axes — those all index with
-    ``0 <= ax < ndim`` or membership-test against the raw tuple, both of
-    which silently mistreat an un-normalised negative axis (see the
-    tensordot docstring for the resulting mispricing).
+    Four checks, in one pass: the two axis counts must match, every axis must
+    be an in-range integer, neither operand may name the same axis twice, and
+    each pair's extents must be equal. Returns both axis tuples as plain
+    non-negative ``int``s, which is what everything downstream (``contracted``,
+    ``a_surviving``/``b_surviving``, ``output_shape``, the symmetry
+    restriction, and the pairing forwarded to numpy) assumes.
+
+    A spec that fails any of them fails *here*, above every pricing arm and
+    every ``budget.deduct`` in :func:`tensordot`. That is what this function
+    exists for -- refuse before charging, never charge for a call you are
+    about to fail -- and it holds on every numpy in the support range.
+
+    The order is numpy 2.4's: an explicit duplicate check that raises
+    ``ValueError`` ahead of the shape work, rather than a repeat falling
+    through to the ``transpose`` that refuses it (which is how 2.0 through 2.3
+    reach the same ``ValueError``, with no duplicate check of their own).
+    numpy reorders these checks between its own releases, so the exception
+    *type* for a spec that is wrong in more than one way is numpy's to change
+    and is deliberately not something flopscope pins: on
+    ``tensordot(zeros((2,3,4)), zeros((3,)), axes=([0,0],[0,1]))`` numpy 2.2
+    raises ``IndexError`` and numpy 2.4 ``ValueError``. *Which* specs are
+    refused is pinned; which of ``ValueError`` / ``IndexError`` / ``TypeError``
+    a given bad one gets is not.
     """
-    a_norm = tuple(_tensordot_normalize_axis(ax, a_ndim) for ax in a_axes)
-    b_norm = tuple(_tensordot_normalize_axis(ax, b_ndim) for ax in b_axes)
+    if len(a_axes) != len(b_axes):
+        # Raised through the shared helper so the wording matches what
+        # `dot`/`inner` give for the same mis-pairing. numpy compares the two
+        # counts before it indexes either shape, and so does this.
+        _validate_contracted_extents(op_name, a_shape, b_shape, a_axes, b_axes)
+    a_norm = tuple(_tensordot_axis_index(ax, len(a_shape), "first") for ax in a_axes)
+    b_norm = tuple(_tensordot_axis_index(bx, len(b_shape), "second") for bx in b_axes)
+    for operand, axes in (("first", a_norm), ("second", b_norm)):
+        # Normalised, so `([0, -2], ...)` on a rank-2 operand is caught as the
+        # duplicate it is rather than slipping through as two distinct labels.
+        # numpy's own 2.4 check runs on the raw axes and misses that spelling,
+        # leaving its `transpose` to raise the same ValueError one step later.
+        # Without the check the duplicate was priced as though the axis really
+        # were contracted twice -- its extent multiplied into `contracted`
+        # twice, the axis dropped from `a_surviving` once -- and
+        # `budget.deduct` charged that on entry, on both sides of the
+        # 52-letter budget, for a call numpy then refused.
+        if len(set(axes)) != len(axes):
+            raise ValueError(
+                f"{op_name}: the {operand} operand contracts the same axis "
+                f"more than once (axes {axes}); each contracted axis may "
+                "appear only once"
+            )
+    _validate_contracted_extents(op_name, a_shape, b_shape, a_norm, b_norm)
     return a_norm, b_norm
 
 
@@ -5323,40 +5450,55 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     then never lower than what the einsum path would compute for the same
     operands, and can be higher.
 
-    A contraction whose paired axes do not line up -- unequal counts, or a
-    pair whose extents differ -- raises :class:`ValueError` before any cost
-    is computed and before any budget is charged, matching what
-    ``np.tensordot`` raises for the same call.
+    An ``axes`` spec ``np.tensordot`` would refuse is refused here too, and
+    before any cost is computed or any budget is charged, so a call that was
+    never going to run leaves ``flops_used`` untouched. The exception is
+    :class:`ValueError` for unequal axis counts, a pair whose extents differ,
+    or the same axis contracted twice on one operand; :class:`IndexError` for
+    an axis outside the operand's rank; :class:`TypeError` for something that
+    is not an axis at all (a float, a one-shot iterator, or a boolean in the
+    per-operand form).
+
+    Which of the three a *particular* bad spec gets is not promised to match
+    ``np.tensordot``. numpy reorders these checks between its own releases --
+    2.4 added an explicit duplicate check ahead of the shape indexing that
+    2.0 through 2.3 reach first -- so no fixed order can agree with the whole
+    support range. What is promised is the refusal itself, and that it costs
+    nothing.
+
+    ``axes`` accepts what ``np.tensordot`` accepts, numpy integer scalars
+    (``np.int64``, ``np.int32``, ...) included, in both the whole-``axes``
+    form and the per-operand form. One spelling is deliberately more
+    permissive than the newest numpy: a per-operand axis given as a 0-d
+    ``ndarray`` runs here on every supported numpy, where numpy itself accepts
+    it up to 2.3 and refuses it from 2.4 (its duplicate check hashes the axis
+    objects, and a 0-d ``ndarray`` is unhashable). Accepting it uniformly is
+    what keeps the same program billed the same amount on every numpy in the
+    support range.
     """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
-    a_contract_axes, b_contract_axes = _tensordot_parse_axes(a.ndim, b.ndim, axes)
-    # Ahead of the normalisation below, because that is numpy's own order:
-    # `np.tensordot` compares `len(axes_a)` to `len(axes_b)` before it indexes
-    # either shape, so a call that is both mis-paired and out of range gets
-    # the ValueError, not the IndexError.
-    if len(a_contract_axes) != len(b_contract_axes):
-        _validate_contracted_extents(
-            "tensordot", a.shape, b.shape, a_contract_axes, b_contract_axes
-        )
-    # Normalise before anything below reads these: `contracted`,
-    # `a_surviving`/`b_surviving`, `output_shape`, and the `is_full_inner`
-    # check all assume non-negative axes. Raises IndexError (matching what
-    # `np.tensordot` itself raises for an out-of-range axis) before any
-    # budget is charged.
-    a_contract_axes, b_contract_axes = _tensordot_normalize_axes(
-        a.ndim, b.ndim, a_contract_axes, b_contract_axes
-    )
-    # Above all three pricing arms -- full-inner, oversized-symmetry and the
-    # ordinary partial contraction -- and above every `budget.deduct` in this
-    # function, so a contraction numpy is going to refuse costs nothing on
-    # either side of the 52-letter budget.
-    _validate_contracted_extents(
+    a_contract_axes, b_contract_axes = _tensordot_parse_axes(axes)
+    # Counts, axis validity, duplicates, extents -- all of it above all three
+    # pricing arms (full-inner, oversized-symmetry and the ordinary partial
+    # contraction) and above every `budget.deduct` in this function, so a
+    # contraction numpy is going to refuse costs nothing on either side of the
+    # 52-letter budget.
+    a_contract_axes, b_contract_axes = _tensordot_pair_axes(
         "tensordot", a.shape, b.shape, a_contract_axes, b_contract_axes
     )
+    # Everything below hands numpy the normalised pairing rather than the
+    # caller's `axes` object, so the spec is parsed exactly once. Re-parsing it
+    # was its own defect: a one-shot spec (an iterator, a generator) is already
+    # drained by the time numpy sees it, so a call flopscope had just priced
+    # and charged was then refused for running out of values. The two forms are
+    # interchangeable for every spec numpy accepts -- `_tensordot_parse_axes`
+    # reproduces numpy's own expansion, normalisation preserves each pair's
+    # position, and numpy treats `axes=((), ())` exactly as `axes=0`.
+    numpy_axes = (a_contract_axes, b_contract_axes)
     # Fast path: a full inner contraction over all axes maps cleanly to
     # einsum and benefits from joint-operand savings when a is b.
     is_full_inner = (
@@ -5398,7 +5540,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             complex_factor_override=complex_override,
         ):
             result = _call_numpy(
-                _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
+                _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=numpy_axes
             )
         if out_sym is not None:
             return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]
@@ -5529,7 +5671,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         complex_factor_override=complex_override,
     ):
         result = _call_numpy(
-            _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=axes
+            _np.tensordot, _to_base_ndarray(a), _to_base_ndarray(b), axes=numpy_axes
         )
     if out_sym is not None:
         return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]

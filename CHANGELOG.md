@@ -57,6 +57,41 @@
 
 ### Fix
 
+- **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
+  it, and refuses what numpy refuses before any budget is charged. Three
+  measured gaps, all of them a charge for work that never ran or a rejection
+  of work numpy runs: a repeated contracted axis (`axes=([0, 0], [0, 0])`) was
+  priced as a genuine double contraction and charged before numpy's
+  `ValueError`; numpy integer scalars (`np.int64`, `np.int32`, ...) failed an
+  `isinstance(..., int)` test and were rejected with `TypeError` in both the
+  whole-`axes` and per-operand spellings, though numpy accepts them; and a
+  one-shot `axes` spec was drained for flopscope's own geometry and the
+  exhausted object then forwarded on, so the contraction was priced and
+  charged and only afterwards refused. numpy now receives the normalised
+  pairing rather than the caller's object, so the spec is read exactly once.
+  Every `axes` spelling numpy accepts is still accepted and bills exactly what
+  it billed before. What is guaranteed for an *invalid* spec is that it is
+  refused before `budget.deduct`, so `flops_used` is untouched; the exception
+  **type** is not guaranteed to match `np.tensordot`'s, because numpy reorders
+  these checks between its own releases. numpy 2.4 added an explicit
+  duplicate-axis check ahead of the shape indexing that 2.0-2.3 reach first,
+  so `axes=([0, 0], [0, 1])` against a rank-1 second operand is an `IndexError`
+  on numpy 2.2 and a `ValueError` on 2.4; no single fixed order can match the
+  supported range. flopscope validates in one order on every numpy -- axis
+  counts, then axis validity and range, then duplicates, then extents -- and a
+  differential sweep against live `np.tensordot` runs as a test, asserting the
+  accept/reject decision, `flops_used == 0` on every refusal, and identical
+  results, but not the exception type.
+- **cost-model**: a `tensordot` contracted axis given as a 0-d `ndarray` no
+  longer charges for a call that then fails on numpy 2.4. numpy accepts that
+  spelling up to 2.3 and refuses it from 2.4, where its new duplicate check
+  hashes the axis objects and a 0-d `ndarray` is unhashable — so the raw
+  object being forwarded meant `budget.deduct` had already charged the
+  contraction when numpy raised. Each axis is now canonicalised to a plain
+  `int` before pricing and before being handed back to numpy, so the call runs,
+  and bills the same amount, on every supported numpy. This is deliberately
+  more permissive than numpy 2.4 on that one spelling; refusing it instead
+  would break working code on the numpy currently pinned in production.
 - **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
 - **billing**: route `fnp.ix_` through the NumPy timing boundary so Boolean-mask
   scans count as backend time instead of Flopscope overhead.
