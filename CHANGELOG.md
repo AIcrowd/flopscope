@@ -57,6 +57,20 @@
 
 ### Fix
 
+- **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
+  it, and refuses what numpy refuses before any budget is charged. Three
+  measured gaps, all of them a charge for work that never ran or a rejection
+  of work numpy runs: a repeated contracted axis (`axes=([0, 0], [0, 0])`) was
+  priced as a genuine double contraction and charged before numpy's
+  `ValueError`; numpy integer scalars (`np.int64`, `np.int32`, ...) failed an
+  `isinstance(..., int)` test and were rejected with `TypeError` in both the
+  whole-`axes` and per-operand spellings, though numpy accepts them; and a
+  one-shot `axes` spec was drained for flopscope's own geometry and the
+  exhausted object then forwarded on, so the contraction was priced and
+  charged and only afterwards refused. numpy now receives the normalised
+  pairing rather than the caller's object, so the spec is read exactly once.
+  Every `axes` spelling numpy accepts is still accepted and bills exactly what
+  it billed before.
 - **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
 - **billing**: route `fnp.ix_` through the NumPy timing boundary so Boolean-mask
   scans count as backend time instead of Flopscope overhead.

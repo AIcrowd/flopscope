@@ -1406,3 +1406,318 @@ def test_symmetry_adjusted_cost_preserves_zero_but_keeps_the_floor():
     assert _symmetry_adjusted_cost(1, (5, 5), group) == 1
     assert _symmetry_adjusted_cost(2, (5, 5), group) == 1  # 2*15//25 == 1
     assert _symmetry_adjusted_cost(100, (5, 5), group) == 60
+
+
+# --- `axes` spellings: what numpy takes, what it refuses, what each costs ----
+#
+# Ground truth measured against plain numpy 2.2.6 for every spelling below,
+# and each test re-checks its own case against `np.tensordot` before asserting
+# anything about `fnp.tensordot`, so the pin cannot drift away from numpy.
+# Assertions are on exception TYPE and on `flops_used`, never on message text:
+# CI spans numpy 2.0 through 2.4 and the wording differs across it.
+#
+# The measured gaps these cover, all of them charges for work that never ran:
+#   * a duplicated contracted axis (`axes=([0, 0], [0, 0])`) was priced as if
+#     the axis really did contract twice, and charged, before numpy refused it;
+#   * every numpy integer scalar failed `isinstance(..., int)` and was rejected
+#     with `TypeError` -- an over-rejection, in BOTH the whole-`axes` form and
+#     the per-operand form;
+#   * a one-shot `axes` spec was drained for flopscope's own geometry and the
+#     exhausted object forwarded on, so the call was priced and charged and
+#     only then refused.
+
+AXES_PAD = 25
+# `2*alpha - M` for (3,4) against (4,5) contracting the shared extent 4:
+# alpha = 12*20//4 = 60, M = 3*5 = 15. Padding with singleton axes changes
+# neither, so this is the price on both sides of the 52-letter budget.
+AXES_HONEST_COST = 105
+# `axes=0` is an outer product: nothing is contracted, so alpha = M = 240.
+AXES_OUTER_COST = 240
+
+
+def _axes_operands(pad, form):
+    """(a, b) contracting a shared extent-4 axis, optionally past the budget.
+
+    The whole-`axes` integer form contracts a's LAST axes against b's FIRST,
+    so a's padding has to go in front and b's behind for the pairing to
+    survive it; the per-operand form names axes 1 and 0 explicitly and takes
+    trailing padding on both.
+    """
+    a, b = np.ones((3, 4)), np.ones((4, 5))
+    if pad == 0:
+        return a, b
+    if form == "scalar":
+        return _pad_front(a, pad), _pad_end(b, pad)
+    return _pad_end(a, pad), _pad_end(b, pad)
+
+
+def _square_axes_operands(pad):
+    """Two equal (3,3) operands, so an extent check can never fire first.
+
+    The duplicate-axis cases need every contracted pair to line up, otherwise
+    they would be testing `_validate_contracted_extents` instead.
+    """
+    a, b = np.ones((3, 3)), np.ones((3, 3))
+    return (a, b) if pad == 0 else (_pad_end(a, pad), _pad_end(b, pad))
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize("np_int", [np.int64, np.int32])
+def test_numpy_integer_scalar_axes_is_priced_like_the_plain_int(pad, np_int):
+    """`axes=np.int64(1)` is a working call in numpy, so it must work here.
+
+    This is the whole-`axes` spelling. It and the per-operand spelling below
+    are separate `isinstance(..., int)` tests in the parser, and fixing either
+    one alone leaves the other rejecting a call numpy runs -- which is worse
+    than the over-charge being fixed, because it turns working code into a
+    hard failure. `np.int32` is in the parametrisation because numpy accepts
+    the whole integer family, not just the platform-default width.
+    """
+    a, b = _axes_operands(pad, "scalar")
+    assert (a.ndim + b.ndim > 52) is (pad == AXES_PAD)
+    expected = np.tensordot(a, b, axes=np_int(1))  # ground truth: numpy runs it
+    assert np.array_equal(expected, np.tensordot(a, b, axes=1))
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    numpy_int_bill = billed(lambda: fnp.tensordot(a, b, axes=np_int(1)))
+    plain_int_bill = billed(lambda: fnp.tensordot(a, b, axes=1))
+    assert numpy_int_bill == plain_int_bill == AXES_HONEST_COST
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize("np_int", [np.int64, np.int32])
+def test_numpy_integer_pair_axes_is_priced_like_the_plain_int(pad, np_int):
+    """The per-operand spelling: `axes=(np.int64(1), np.int64(0))`.
+
+    The other half of the same defect. numpy takes a numpy integer here just
+    as readily -- it decides "one axis or many" with a `len()` probe, not a
+    type test, so any integer scalar lands in the one-axis branch.
+    """
+    a, b = _axes_operands(pad, "pair")
+    assert (a.ndim + b.ndim > 52) is (pad == AXES_PAD)
+    expected = np.tensordot(a, b, axes=(np_int(1), np_int(0)))  # numpy runs it
+    assert np.array_equal(expected, np.tensordot(a, b, axes=(1, 0)))
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    numpy_int_bill = billed(lambda: fnp.tensordot(a, b, axes=(np_int(1), np_int(0))))
+    nested_bill = billed(lambda: fnp.tensordot(a, b, axes=([np_int(1)], [np_int(0)])))
+    plain_int_bill = billed(lambda: fnp.tensordot(a, b, axes=(1, 0)))
+    assert numpy_int_bill == nested_bill == plain_int_bill == AXES_HONEST_COST
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize("np_int", [np.int64, np.int32])
+def test_numpy_integer_axes_computes_the_same_answer(pad, np_int):
+    """Accepting the spelling is only half of it -- the result must match."""
+    a, b = _axes_operands(pad, "pair")
+    expected = np.tensordot(a, b, axes=(1, 0))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            got = fnp.tensordot(
+                fnp.asarray(a), fnp.asarray(b), axes=(np_int(1), np_int(0))
+            )
+    assert np.array_equal(np.asarray(got), expected)
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize(
+    "axes_for",
+    [
+        pytest.param(lambda a: ([0, 0], [0, 1]), id="duplicate-on-a"),
+        pytest.param(lambda a: ([0, 1], [0, 0]), id="duplicate-on-b"),
+        pytest.param(lambda a: ([0, 0], [0, 0]), id="duplicate-on-both"),
+        # Normalises to axis 0 at any rank, so it stays a duplicate of the
+        # leading 0 whether or not the operands are padded. A duplicate check
+        # written against the RAW axes would let this one through.
+        pytest.param(lambda a: ([0, -a.ndim], [0, 1]), id="duplicate-via-negative"),
+    ],
+)
+def test_duplicate_contracted_axis_refuses_before_charging(pad, axes_for):
+    """numpy has no accepting case for a repeated contracted axis.
+
+    It builds `newaxes_a = notin + axes_a` with `notin` excluding everything
+    already named, so a repeat makes that permutation longer than the operand
+    and the internal `transpose` always raises. The operands are square and
+    the pairs all line up, so the extent check ahead of it cannot be what
+    fires -- this really is the duplicate being refused.
+
+    Before the fix the duplicate was priced as a genuine double contraction
+    (its extent multiplied into `contracted` twice, the axis dropped from
+    `a_surviving` once) and `budget.deduct` charged that on entry, on both
+    sides of the letter budget.
+    """
+    a, b = _square_axes_operands(pad)
+    axes = axes_for(a)
+    assert (a.ndim + b.ndim > 52) is (pad == AXES_PAD)
+    with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+        np.tensordot(a, b, axes=axes)
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=axes)) == 0
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+def test_distinct_axes_on_the_same_operands_still_run(pad):
+    """The over-rejection guard for the duplicate check: no repeat, no refusal.
+
+    Same square operands, same shape of spec, every axis named once. A check
+    that keyed on "two contracted axes" rather than on a repeat would break
+    this, and breaking a working contraction is worse than the over-charge.
+    """
+    a, b = _square_axes_operands(pad)
+    expected = np.tensordot(a, b, axes=([0, 1], [0, 1]))  # numpy runs it
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=([0, 1], [0, 1]))
+            # alpha = 9*9//9 = 9 multiplies into a scalar output: 2*9 - 1.
+            assert budget.flops_used == 17
+    assert np.array_equal(np.asarray(got), expected)
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize(
+    "axes_factory",
+    [
+        pytest.param(lambda: (iter([1]), iter([0])), id="iterators"),
+        pytest.param(lambda: ((x for x in [1]), (x for x in [0])), id="generators"),
+    ],
+)
+def test_one_shot_per_operand_axes_refuses_before_charging(pad, axes_factory):
+    """A per-operand spec that cannot be re-read is numpy's own TypeError.
+
+    numpy wraps a spec with no `__len__` in a one-element list and then uses
+    it as an index into the shape tuple, which fails. flopscope used to drain
+    the iterator into a tuple for its own geometry -- hiding that -- price the
+    contraction, charge it, and only then hand numpy the now-empty original.
+    The exception the caller saw was already right; what was wrong was that
+    the budget had been spent by the time it arrived.
+    """
+    a, b = _axes_operands(pad, "pair")
+    assert (a.ndim + b.ndim > 52) is (pad == AXES_PAD)
+    with pytest.raises(TypeError):  # ground truth: plain numpy refuses it
+        np.tensordot(a, b, axes=axes_factory())
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    assert (
+        _raises_billing(lambda: fnp.tensordot(a, b, axes=axes_factory()), TypeError)
+        == 0
+    )
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize(
+    "axes_factory",
+    [
+        pytest.param(lambda: iter([[1], [0]]), id="iterator"),
+        pytest.param(lambda: (spec for spec in ([1], [0])), id="generator"),
+    ],
+)
+def test_one_shot_whole_axes_spec_still_runs(pad, axes_factory):
+    """numpy DOES accept a one-shot spec at the top level, so we must too.
+
+    It unpacks `axes_a, axes_b = axes` once and never looks at the object
+    again. flopscope unpacked it too, then forwarded the drained original and
+    got refused for running out of values -- after charging. Forwarding the
+    normalised pairing instead is what makes this the working call numpy says
+    it is; refusing every one-shot spec outright would have "fixed" the
+    over-charge by breaking a call numpy runs.
+    """
+    a, b = _axes_operands(pad, "pair")
+    expected = np.tensordot(a, b, axes=axes_factory())  # ground truth: it runs
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=axes_factory())
+            assert budget.flops_used == AXES_HONEST_COST
+    assert np.array_equal(np.asarray(got), expected)
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+def test_boolean_axes_follow_numpy_on_both_spellings(pad):
+    """`bool` is an `int` subclass, and numpy treats the two spellings apart.
+
+    The whole-`axes` form negates its argument, and `-True` is `-1`, so
+    `axes=True` is a working one-axis contraction. Every per-operand axis, by
+    contrast, ends up in `ndarray.transpose`, which refuses a boolean
+    outright. Widening an integer predicate without noticing that would have
+    silently changed the first; leaving the second alone would keep charging
+    for a call numpy always refuses.
+    """
+    a, b = _axes_operands(pad, "scalar")
+    expected = np.tensordot(a, b, axes=True)  # ground truth: numpy runs it
+    assert np.array_equal(expected, np.tensordot(a, b, axes=1))
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=True)) == AXES_HONEST_COST
+
+    a, b = _axes_operands(pad, "pair")
+    with pytest.raises(TypeError):  # ground truth: plain numpy refuses it
+        np.tensordot(a, b, axes=(True, False))
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    assert (
+        _raises_billing(lambda: fnp.tensordot(fa, fb, axes=(True, False)), TypeError)
+        == 0
+    )
+    assert (
+        _raises_billing(
+            lambda: fnp.tensordot(fa, fb, axes=([True], [False])), TypeError
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+@pytest.mark.parametrize(
+    "axes_factory",
+    [
+        pytest.param(lambda: (1, 0), id="int-pair"),
+        pytest.param(lambda: ([1], [0]), id="list-pair"),
+        pytest.param(lambda: ((1,), (0,)), id="tuple-pair"),
+        pytest.param(lambda: ({1}, {0}), id="set-pair"),
+        pytest.param(lambda: (range(1, 2), range(0, 1)), id="range-pair"),
+        pytest.param(lambda: (np.array([1]), np.array([0])), id="ndarray-pair"),
+        pytest.param(lambda: (np.int64(1), np.int64(0)), id="numpy-int-pair"),
+        pytest.param(lambda: ([np.int32(1)], [np.int32(0)]), id="numpy-int-in-list"),
+    ],
+)
+def test_every_accepted_pair_spelling_bills_the_honest_price(pad, axes_factory):
+    """Pin the price of every spelling numpy accepts, on both sides.
+
+    This is the regression an over-rejecting -- or over-charging -- fix would
+    cause. All of these name the same single pair of axes, so all of them must
+    cost the same `2*alpha - M`, unchanged by the fixes above and unchanged by
+    rank.
+    """
+    a, b = _axes_operands(pad, "pair")
+    expected = np.tensordot(a, b, axes=axes_factory())  # numpy accepts them all
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=axes_factory())
+            assert budget.flops_used == AXES_HONEST_COST
+    assert np.array_equal(np.asarray(got), expected)
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+def test_negative_and_zero_axes_spellings_are_unchanged(pad):
+    """The rest of the sweep: negative axes, and `axes=0`'s outer product.
+
+    `axes=0` contracts nothing, so it must stay an outer product rather than
+    be caught by any of the new refusals -- the empty pairing has no duplicate
+    and no axis to type-check. The forwarded pairing for it is `((), ())`,
+    which numpy treats identically to the integer `0`.
+    """
+    # a's last axis carries the contracted extent in the "scalar" layout, so
+    # -1 names it at either rank -- the same pairing `axes=1` expands to.
+    a, b = _axes_operands(pad, "scalar")
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=([-1], [0]))) == AXES_HONEST_COST
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=(-1, 0))) == AXES_HONEST_COST
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=1)) == AXES_HONEST_COST
+
+    a, b = _axes_operands(pad, "pair")
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=0)) == AXES_OUTER_COST
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=((), ()))) == AXES_OUTER_COST
+    assert np.array_equal(np.tensordot(a, b, axes=((), ())), np.tensordot(a, b, axes=0))
