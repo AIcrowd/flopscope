@@ -1721,3 +1721,30 @@ def test_negative_and_zero_axes_spellings_are_unchanged(pad):
     assert billed(lambda: fnp.tensordot(fa, fb, axes=0)) == AXES_OUTER_COST
     assert billed(lambda: fnp.tensordot(fa, fb, axes=((), ()))) == AXES_OUTER_COST
     assert np.array_equal(np.tensordot(a, b, axes=((), ())), np.tensordot(a, b, axes=0))
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
+def test_unsigned_scalar_axes_follows_numpy_rather_than_looking_plausible(pad):
+    """The reason the integer arm uses numpy's `range(-axes, 0)` verbatim.
+
+    numpy negates the whole-`axes` argument, and negating an unsigned scalar
+    wraps: the a-side list comes out empty, its length never matches the
+    b-side, and the call is a `ValueError`. Deriving the axes from
+    `a_ndim - axes` instead looks equivalent -- and is, for every `axes` numpy
+    actually runs -- but it would invent a perfectly plausible axis here,
+    price the contraction, charge it, and only then let numpy refuse the call.
+
+    `np.uint8(0)` is the control: negating it wraps to nothing, so numpy runs
+    it as the outer product `axes=0` names, and so must we.
+    """
+    a, b = _axes_operands(pad, "scalar")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # numpy's own unsigned-negation overflow
+        with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+            np.tensordot(a, b, axes=np.uint8(1))
+        expected = np.tensordot(a, b, axes=np.uint8(0))  # ground truth: it runs
+    assert np.array_equal(expected, np.tensordot(a, b, axes=0))
+
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    assert _raises_billing(lambda: fnp.tensordot(fa, fb, axes=np.uint8(1))) == 0
+    assert billed(lambda: fnp.tensordot(fa, fb, axes=np.uint8(0))) == AXES_OUTER_COST
