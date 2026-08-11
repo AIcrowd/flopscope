@@ -1067,8 +1067,13 @@ def test_complex_above_budget_fails_closed_when_symmetry_scales_the_cost():
 # message text, which differs per op and across the numpy support matrix.
 
 
-def _raises_billing(fn, exc=ValueError):
-    """Assert `fn` raises `exc`, and return what it billed before doing so."""
+def _raises_billing(fn, exc: type[Exception] = ValueError) -> int:
+    """Assert `fn` raises `exc`, and return what it billed before doing so.
+
+    `exc` is annotated rather than left to inference: the default would
+    otherwise narrow the parameter to `type[ValueError]` and reject the
+    `IndexError` call below.
+    """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with flops.BudgetContext(flop_budget=10**16, quiet=True) as b:
