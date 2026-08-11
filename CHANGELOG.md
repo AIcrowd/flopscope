@@ -70,7 +70,16 @@
   charged and only afterwards refused. numpy now receives the normalised
   pairing rather than the caller's object, so the spec is read exactly once.
   Every `axes` spelling numpy accepts is still accepted and bills exactly what
-  it billed before.
+  it billed before. Refusing early only helps if it refuses the same way, so
+  the validation now reproduces `np.tensordot`'s own ORDER of checks -- axis
+  counts, then extents against the raw (still signed, possibly `bool`) index,
+  then negative normalisation, and its two internal transposes last -- and
+  therefore its exception type: `ValueError` where numpy stops at an extent
+  mismatch it reaches first, `IndexError` for an axis genuinely out of range,
+  `TypeError` for a boolean or a non-index in the per-operand form. Validating
+  in a different order refused the same calls but reported the wrong one of
+  the three for 341 spellings in a differential sweep against numpy 2.2.6;
+  that sweep now runs as a test and is at zero.
 - **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
 - **billing**: route `fnp.ix_` through the NumPy timing boundary so Boolean-mask
   scans count as backend time instead of Flopscope overhead.

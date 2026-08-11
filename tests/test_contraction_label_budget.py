@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -1750,3 +1751,217 @@ def test_unsigned_scalar_axes_follows_numpy_rather_than_looking_plausible(pad):
     fa, fb = fnp.asarray(a), fnp.asarray(b)
     assert _raises_billing(lambda: fnp.tensordot(fa, fb, axes=np.uint8(1))) == 0
     assert billed(lambda: fnp.tensordot(fa, fb, axes=np.uint8(0))) == AXES_OUTER_COST
+
+
+# --- the differential sweep: same call, same outcome, nothing charged --------
+#
+# The case-by-case pins above each cover one spelling. This drives a grid of
+# them against plain `np.tensordot` on the same operands and asserts three
+# things per case: identical outcome (both run, or both raise the SAME
+# exception TYPE), `flops_used == 0` whenever either side raises, and identical
+# shape and values whenever both run.
+#
+# It exists because the order of `tensordot`'s own checks is load-bearing and
+# is not something a hand-picked case list keeps honest. numpy pairs the axis
+# counts, then indexes each shape with the RAW (still signed, possibly `bool`)
+# index, then compares the extents, and only then normalises a negative axis;
+# its two internal transposes run last, after all of that. Validating in any
+# other order still refuses the same calls -- and still charges nothing, which
+# is what the fix was for -- but hands the caller the wrong exception type: an
+# `IndexError` where numpy stops earlier at a `ValueError` extent mismatch, or
+# a `TypeError` for a boolean numpy indexes happily and rejects two steps
+# later. Measured against numpy 2.2.6, that ordering alone accounted for 341
+# type mismatches across this grid.
+#
+# TYPE only, never message text: CI spans numpy 2.0 through 2.4 and the wording
+# differs across it.
+
+PARITY_SHAPES = [(2, 3), (3, 2, 3), (3,), (2, 3, 4), (4,), (3, 3), (2, 2, 2, 2)]
+
+# Factories, not values: a one-shot spec has to be built fresh for each of the
+# two calls, and a spec that numpy mutates in place must not leak between them.
+PARITY_AXES_SPECS = {
+    # Whole-`axes` integer form, including the counts that overrun one operand.
+    **{f"int-{n}": (lambda n=n: n) for n in range(6)},
+    # Every numpy integer scalar numpy itself accepts here. `uint` is not a
+    # decoration: numpy negates the argument, so an unsigned one wraps.
+    **{
+        f"{np_int.__name__}-{n}": (lambda np_int=np_int, n=n: np_int(n))
+        for np_int in (np.int64, np.int32, np.int16, np.uint8)
+        for n in (0, 1, 2)
+    },
+    # `-True` is `-1`, so the integer arm takes a boolean; the per-operand arm
+    # does not (see below). `np.bool_` has no `__neg__` at all.
+    "bool-scalar-true": lambda: True,
+    "bool-scalar-false": lambda: False,
+    "np-bool-scalar": lambda: np.True_,
+    # A 0-d array is not iterable, so numpy reads it as a count, not a pair.
+    "zero-d-array-count": lambda: np.array(1),
+    # Per-operand spellings: lists, tuples, bare scalars, and the containers
+    # numpy's `len()` probe accepts.
+    "list-pair": lambda: ([1], [0]),
+    "tuple-pair": lambda: ((1,), (0,)),
+    "int-pair": lambda: (1, 0),
+    "set-pair": lambda: ({1}, {0}),
+    "range-pair": lambda: (range(1, 2), range(0, 1)),
+    "ndarray-pair": lambda: (np.array([1]), np.array([0])),
+    "numpy-int-pair": lambda: (np.int64(1), np.int64(0)),
+    "numpy-int-in-list": lambda: ([np.int32(1)], [np.int32(0)]),
+    "zero-d-array-in-pair": lambda: (np.array(1), np.array(0)),
+    "empty-pair": lambda: ([], []),
+    # Negatives, which numpy normalises only AFTER the extent comparison.
+    "negative-a": lambda: ([-1], [0]),
+    "negative-b": lambda: ([0], [-1]),
+    "negative-both": lambda: ([-1, -2], [-1, -2]),
+    "negative-out-of-range": lambda: ([-3], [0]),
+    # Out-of-range positives, whose exception type depends on whether an
+    # earlier pair mismatches first.
+    "out-of-range-a": lambda: ([5], [0]),
+    "out-of-range-b": lambda: ([0], [5]),
+    "out-of-range-both": lambda: ([5], [5]),
+    # Duplicates, which survive to numpy's transpose and fail there.
+    "duplicate-a": lambda: ([0, 0], [0, 1]),
+    "duplicate-b": lambda: ([0, 1], [1, 1]),
+    "duplicate-via-negative": lambda: ([0, -2], [0, 1]),
+    "duplicate-unhashable": lambda: ([np.array(0), np.array(0)], [0, 1]),
+    # Mis-paired counts, refused before either shape is indexed.
+    "count-mismatch-short-a": lambda: ([0], [0, 1]),
+    "count-mismatch-short-b": lambda: ([0, 1], [0]),
+    # Longer pairings, valid only at the higher ranks in the grid.
+    "pair-two": lambda: ([0, 1], [0, 1]),
+    "pair-three": lambda: ([0, 1, 2], [0, 1, 2]),
+    # Booleans per-operand: indexable, so they reach the transpose that
+    # refuses them.
+    "bool-pair": lambda: (True, False),
+    "bool-pair-reversed": lambda: (False, True),
+    "bool-in-list": lambda: ([True], [False]),
+    "bool-list-two": lambda: ([True, False], [False, True]),
+    "np-bool-pair": lambda: (np.bool_(True), np.bool_(False)),
+    "bool-mixed-with-int": lambda: ([True, 0], [0, 1]),
+    # Not axes at all.
+    "float-in-list": lambda: ([1.0], [0]),
+    "float-pair": lambda: (1.0, 0),
+    "none-pair": lambda: (None, 0),
+    "nested-list": lambda: ([[0]], [0]),
+    "string-pair": lambda: ("a", "b"),
+    # One-shot specs. numpy accepts the whole-spec form (it unpacks once) and
+    # refuses the per-operand form (it indexes the iterator itself).
+    "whole-spec-iterator": lambda: iter([[1], [0]]),
+    "whole-spec-generator": lambda: (spec for spec in ([1], [0])),
+    "whole-spec-iterator-of-ints": lambda: iter([1, 0]),
+    "whole-spec-range": lambda: range(2),
+    "whole-spec-ndarray": lambda: np.array([1, 0]),
+    "per-operand-iterators": lambda: (iter([1]), iter([0])),
+    "per-operand-generators": lambda: ((x for x in [1]), (x for x in [0])),
+    "iterator-in-list": lambda: ([iter([1])], [0]),
+}
+
+
+class _Outcome(NamedTuple):
+    """What one `tensordot` call did: raised this type, or returned this array.
+
+    `raised` is the exception TYPE, never an instance and never a message --
+    the type is the whole assertion. `billed` is 0 for plain numpy, which has
+    no meter.
+    """
+
+    raised: type[BaseException] | None
+    result: np.ndarray | None
+    billed: int
+
+
+def _numpy_outcome(a, b, axes) -> _Outcome:
+    """Run plain `np.tensordot`: the ground truth this sweep compares against."""
+    with warnings.catch_warnings():
+        # numpy's own unsigned-negation overflow, among others.
+        warnings.simplefilter("ignore")
+        try:
+            return _Outcome(None, np.asarray(np.tensordot(a, b, axes=axes)), 0)
+        except Exception as exc:  # noqa: BLE001 -- the type IS the assertion
+            return _Outcome(type(exc), None, 0)
+
+
+def _flopscope_outcome(a, b, axes) -> _Outcome:
+    """The same call through `fnp.tensordot`, with what it billed."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            try:
+                got = fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=axes)
+                return _Outcome(None, np.asarray(got), budget.flops_used)
+            except Exception as exc:  # noqa: BLE001
+                return _Outcome(type(exc), None, budget.flops_used)
+
+
+@pytest.mark.parametrize("spec_id", sorted(PARITY_AXES_SPECS))
+def test_tensordot_axes_outcome_matches_numpy_on_every_shape_pair(spec_id):
+    """One `axes` spelling against the whole shape grid, both directions.
+
+    Every mismatch in the grid is collected rather than raised on sight, so a
+    regression reports the whole family it broke instead of one arbitrary
+    member of it.
+    """
+    make_axes = PARITY_AXES_SPECS[spec_id]
+    rng = np.random.default_rng(0)
+    operands = {shape: rng.standard_normal(shape) for shape in PARITY_SHAPES}
+    mismatches = []
+    for a_shape in PARITY_SHAPES:
+        for b_shape in PARITY_SHAPES:
+            a, b = operands[a_shape], operands[b_shape]
+            expected = _numpy_outcome(a, b, make_axes())
+            got = _flopscope_outcome(a, b, make_axes())
+            where = f"a={a_shape} b={b_shape} axes={spec_id}"
+            if (expected.raised is None) != (got.raised is None):
+                mismatches.append(
+                    f"{where}: numpy {expected.raised}, flopscope {got.raised}"
+                )
+                continue
+            if expected.raised is not None:
+                assert got.raised is not None  # the branch above settled this
+                if expected.raised is not got.raised:
+                    mismatches.append(
+                        f"{where}: numpy {expected.raised.__name__}, "
+                        f"flopscope {got.raised.__name__}"
+                    )
+                # Refuse before charging: a call numpy was always going to
+                # refuse must leave the budget untouched.
+                if got.billed != 0:
+                    mismatches.append(f"{where}: refused but billed {got.billed}")
+                continue
+            assert expected.result is not None and got.result is not None
+            if expected.result.shape != got.result.shape:
+                mismatches.append(
+                    f"{where}: shape {expected.result.shape} vs {got.result.shape}"
+                )
+            elif not np.allclose(expected.result, got.result):
+                mismatches.append(f"{where}: values differ")
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_tensordot_axes_parity_sweep_covers_both_outcomes():
+    """The guard on the sweep above: it must exercise more than one branch.
+
+    A grid that only ever raised -- or only ever ran -- would pass the parity
+    assertions while pinning nothing. This counts the outcomes to prove the
+    grid straddles the boundary, and that all three exception types the
+    ordering decides between actually occur in it.
+    """
+    rng = np.random.default_rng(0)
+    operands = {shape: rng.standard_normal(shape) for shape in PARITY_SHAPES}
+    ran = 0
+    raised: dict[str, int] = {}
+    for make_axes in PARITY_AXES_SPECS.values():
+        for a_shape in PARITY_SHAPES:
+            for b_shape in PARITY_SHAPES:
+                outcome = _numpy_outcome(
+                    operands[a_shape], operands[b_shape], make_axes()
+                )
+                if outcome.raised is None:
+                    ran += 1
+                else:
+                    name = outcome.raised.__name__
+                    raised[name] = raised.get(name, 0) + 1
+    assert ran > 100
+    assert raised["ValueError"] > 100
+    assert raised["IndexError"] > 10
+    assert raised["TypeError"] > 10
