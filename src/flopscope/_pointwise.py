@@ -4660,6 +4660,57 @@ def _ensure_contraction_out_written(dest, result) -> None:
     _call_numpy(_np.copyto, dest, result, casting="same_kind")
 
 
+def _validate_contracted_extents(
+    op_name: str,
+    a_shape: tuple[int, ...],
+    b_shape: tuple[int, ...],
+    a_axes: tuple[int, ...],
+    b_axes: tuple[int, ...],
+) -> None:
+    """Refuse a contraction whose paired axes have different extents.
+
+    ``np.dot``, ``np.inner`` and ``np.tensordot`` all require each contracted
+    pair to match *exactly*: measured against numpy 2.x, none of the three
+    broadcasts a size-1 contracted axis against a size-n one, and every
+    unequal pair -- including ``0`` against ``n`` -- is a ``ValueError``.
+    Equal extents are always accepted, ``0`` against ``0`` included (the
+    contraction is empty and the result is a zero fill), so this check is
+    exactly numpy's predicate and cannot refuse a call numpy would have run.
+
+    It has to run *before* the cost is computed and before ``budget.deduct``.
+    ``deduct`` charges on entry and does not roll back when the wrapped numpy
+    call raises, so pricing first would make an impossible contraction consume
+    budget -- or raise ``BudgetExhaustedError`` in place of numpy's shape
+    error. Refuse before charging, never charge for a call you are about to
+    fail; same rule, and same ordering, as the out-of-range axis rejection in
+    :func:`_tensordot_normalize_axis`.
+
+    Neither of the two paths that reach here validates on its own. Above the
+    52-letter subscript budget the arithmetic fallback prices from shapes and
+    never inspects the pairing at all. Below it the einsum route only *looks*
+    like it validates: ``_build_size_map`` rejects two different label sizes,
+    but einsum broadcasts an extent of 1, so ``ij,jk->ik`` happily prices
+    ``j=1`` against ``j=7`` and leaves numpy to reject the call afterwards.
+    Checking here covers both, which is also what keeps the refusal identical
+    either side of the letter budget.
+
+    ``a_axes``/``b_axes`` must already be normalised to ``[0, ndim)``.
+    """
+    if len(a_axes) != len(b_axes):
+        raise ValueError(
+            f"{op_name}: contraction pairs {len(a_axes)} axes of the first "
+            f"operand with {len(b_axes)} of the second; the counts must match"
+        )
+    for ax, bx in zip(a_axes, b_axes, strict=True):
+        if a_shape[ax] != b_shape[bx]:
+            raise ValueError(
+                f"{op_name}: contracted axis {ax} of the first operand has "
+                f"extent {a_shape[ax]}, but axis {bx} of the second operand "
+                f"has extent {b_shape[bx]}; contracted extents must be equal "
+                f"(shapes {a_shape} and {b_shape})"
+            )
+
+
 def _fallback_contraction_output_symmetry(
     op_name: str,
     a: Any,
@@ -4741,8 +4792,8 @@ def _einsum_routed_binary(
     out: Any = None,
     fallback_contracted: int | None = None,
     fallback_output_shape: tuple[int, ...] | None = None,
-    fallback_a_contract_axis: int | None = None,
-    fallback_b_contract_axis: int | None = None,
+    a_contract_axis: int | None = None,
+    b_contract_axis: int | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -4757,10 +4808,18 @@ def _einsum_routed_binary(
     `subs=None` means the operands' combined rank exceeded the 52-letter
     subscript budget. That path needs `fallback_contracted` and
     `fallback_output_shape` for the arithmetic price, and takes the
-    `fallback_*_contract_axis` pair to compose the surviving output symmetry
-    (see `_fallback_contraction_output_symmetry`). Callers that pass a
-    literal `subs` need none of the four: every fallback keyword is read only
-    under `subs is None`.
+    `*_contract_axis` pair to compose the surviving output symmetry (see
+    `_fallback_contraction_output_symmetry`). Callers that pass a literal
+    `subs` need neither `fallback_` keyword: both are read only under
+    `subs is None`.
+
+    `a_contract_axis`/`b_contract_axis` are NOT fallback-only. When a caller
+    supplies the pair it is validated against the operand shapes on every
+    path, before any cost is computed and before `budget.deduct` -- see
+    `_validate_contracted_extents` for why neither path validates on its own.
+    Callers whose contracted pairing is implicit in a broadcasting `subs`
+    (`matmul`, `vecdot`, `matvec`, `vecmat`) leave both `None` and are
+    unaffected.
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -4773,6 +4832,13 @@ def _einsum_routed_binary(
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
+    # Above every pricing branch below and above ``budget.deduct``: an
+    # impossible contraction must cost nothing, whichever side of the letter
+    # budget it lands on.
+    if a_contract_axis is not None and b_contract_axis is not None:
+        _validate_contracted_extents(
+            op_name, a.shape, b.shape, (a_contract_axis,), (b_contract_axis,)
+        )
     if subs is not None:
         info = _resolve_cost_and_output_symmetry(subs, a, b)
         accumulation = info.accumulation
@@ -4798,7 +4864,7 @@ def _einsum_routed_binary(
         )
         canonical_subs = None
         output_symmetry = _fallback_contraction_output_symmetry(
-            op_name, a, b, fallback_a_contract_axis, fallback_b_contract_axis
+            op_name, a, b, a_contract_axis, b_contract_axis
         )
         cost = _symmetry_adjusted_cost(
             accumulation.total, fallback_output_shape, output_symmetry
@@ -4874,8 +4940,13 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     fallback_contracted = None
     fallback_output_shape = None
-    fallback_a_axis = None
-    fallback_b_axis = None
+    # ``np.dot`` always contracts a's last axis with b's last-but-one (b's
+    # only axis when b is 1-D), so the pair is known on every branch, not just
+    # the two that need it for the fallback's symmetry composition. Supplying
+    # it everywhere is what gets the contraction validated before it is priced
+    # on BOTH sides of the letter budget -- see `_validate_contracted_extents`.
+    a_axis = a.ndim - 1 if a.ndim else None
+    b_axis = (0 if b.ndim == 1 else b.ndim - 2) if b.ndim else None
     if a.ndim == 2 and b.ndim == 2:
         subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
@@ -4884,12 +4955,10 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         subs = _contraction_subscripts(a.ndim, 1, (a.ndim - 1,), (0,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1]
-        fallback_a_axis, fallback_b_axis = a.ndim - 1, 0
     else:
         subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 2,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1] + b.shape[:-2] + b.shape[-1:]
-        fallback_a_axis, fallback_b_axis = a.ndim - 1, b.ndim - 2
     return _einsum_routed_binary(  # type: ignore[return-value]
         "dot",
         _np.dot,
@@ -4900,8 +4969,8 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         nan_check=True,
         fallback_contracted=fallback_contracted,
         fallback_output_shape=fallback_output_shape,
-        fallback_a_contract_axis=fallback_a_axis,
-        fallback_b_contract_axis=fallback_b_axis,
+        a_contract_axis=a_axis,
+        b_contract_axis=b_axis,
     )
 
 
@@ -4954,8 +5023,12 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         b = _np.asarray(b)
     fallback_contracted = None
     fallback_output_shape = None
-    fallback_a_axis = None
-    fallback_b_axis = None
+    # ``np.inner`` always contracts the last axis of both operands, so the
+    # pair is known on every branch. Passing it everywhere -- not only where
+    # the fallback needs it for symmetry -- is what gets the contraction
+    # validated before it is priced on both sides of the letter budget.
+    a_axis = a.ndim - 1 if a.ndim else None
+    b_axis = b.ndim - 1 if b.ndim else None
     if a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
     elif a.ndim == 2 and b.ndim == 2:
@@ -4964,7 +5037,6 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         subs = _contraction_subscripts(a.ndim, b.ndim, (a.ndim - 1,), (b.ndim - 1,))
         fallback_contracted = a.shape[-1]
         fallback_output_shape = a.shape[:-1] + b.shape[:-1]
-        fallback_a_axis, fallback_b_axis = a.ndim - 1, b.ndim - 1
     return _einsum_routed_binary(  # type: ignore[return-value]
         "inner",
         _np.inner,
@@ -4975,8 +5047,8 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         nan_check=False,
         fallback_contracted=fallback_contracted,
         fallback_output_shape=fallback_output_shape,
-        fallback_a_contract_axis=fallback_a_axis,
-        fallback_b_contract_axis=fallback_b_axis,
+        a_contract_axis=a_axis,
+        b_contract_axis=b_axis,
     )
 
 
@@ -5236,6 +5308,11 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     arithmetically instead of through a subscript string. The charge is
     then never lower than what the einsum path would compute for the same
     operands, and can be higher.
+
+    A contraction whose paired axes do not line up -- unequal counts, or a
+    pair whose extents differ -- raises :class:`ValueError` before any cost
+    is computed and before any budget is charged, matching what
+    ``np.tensordot`` raises for the same call.
     """
     budget = require_budget()
     if not isinstance(a, _np.ndarray):
@@ -5243,6 +5320,14 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
     a_contract_axes, b_contract_axes = _tensordot_parse_axes(a.ndim, b.ndim, axes)
+    # Ahead of the normalisation below, because that is numpy's own order:
+    # `np.tensordot` compares `len(axes_a)` to `len(axes_b)` before it indexes
+    # either shape, so a call that is both mis-paired and out of range gets
+    # the ValueError, not the IndexError.
+    if len(a_contract_axes) != len(b_contract_axes):
+        _validate_contracted_extents(
+            "tensordot", a.shape, b.shape, a_contract_axes, b_contract_axes
+        )
     # Normalise before anything below reads these: `contracted`,
     # `a_surviving`/`b_surviving`, `output_shape`, and the `is_full_inner`
     # check all assume non-negative axes. Raises IndexError (matching what
@@ -5250,6 +5335,13 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
     # budget is charged.
     a_contract_axes, b_contract_axes = _tensordot_normalize_axes(
         a.ndim, b.ndim, a_contract_axes, b_contract_axes
+    )
+    # Above all three pricing arms -- full-inner, oversized-symmetry and the
+    # ordinary partial contraction -- and above every `budget.deduct` in this
+    # function, so a contraction numpy is going to refuse costs nothing on
+    # either side of the 52-letter budget.
+    _validate_contracted_extents(
+        "tensordot", a.shape, b.shape, a_contract_axes, b_contract_axes
     )
     # Fast path: a full inner contraction over all axes maps cleanly to
     # einsum and benefits from joint-operand savings when a is b.

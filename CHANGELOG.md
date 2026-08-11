@@ -119,6 +119,29 @@
   costs, before the op weight and dtype rate that scale them into a bill.
   An axis still out-of-range after normalisation now raises `IndexError`
   before `budget.deduct` runs, rather than being silently skipped.
+- **cost-model**: `dot`, `inner` and `tensordot` now refuse a contraction
+  whose paired axes do not line up — unequal numbers of paired axes, or a
+  pair whose extents differ — with `ValueError` before any cost is computed
+  and before `budget.deduct` runs. `deduct` charges on entry and does not
+  roll back when the wrapped NumPy call raises, so such a call previously
+  consumed budget for arithmetic that never happened, and could report
+  `BudgetExhaustedError` in place of NumPy's shape error. Neither pricing
+  path caught it on its own: above the 52-letter subscript budget the
+  arithmetic fallback prices from shapes alone and never inspects the
+  pairing, and below it the einsum route only appears to — `einsum`
+  broadcasts an extent of 1, so `ij,jk->ik` priced `j=1` against `j=7` in
+  full (measured: 390 FLOPs on a rank-2 pair) before NumPy rejected the
+  call. All three pricing arms of `tensordot` (full-inner, oversized-
+  symmetry, and the ordinary partial contraction) are covered, on both sides
+  of the letter budget. The check is exactly NumPy's own predicate: none of
+  the three operations broadcasts a size-1 contracted axis, every unequal
+  pair including `0` against `n` is a `ValueError`, and equal extents are
+  always accepted — `0` against `0` included, which stays a legal empty
+  contraction costing 0. Valid contractions are unaffected: a 900-case
+  differential sweep against plain NumPy found no accepted call whose price
+  or outcome changed. An axis spec that is both mis-paired and out of range
+  reports the pairing `ValueError`, matching NumPy's own ordering, rather
+  than the `IndexError` for the out-of-range index.
 
 ## v0.10.0 (2026-07-31)
 

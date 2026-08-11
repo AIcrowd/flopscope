@@ -1043,3 +1043,261 @@ def test_complex_above_budget_fails_closed_when_symmetry_scales_the_cost():
         with flops.BudgetContext(flop_budget=10**16, quiet=True):
             with pytest.raises(RuntimeError, match="computes its complex cost exactly"):
                 fnp.inner(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Mis-paired contracted axes: refuse before charging
+# ---------------------------------------------------------------------------
+#
+# `budget.deduct` charges on entry and never rolls back when the wrapped numpy
+# call raises, so a contraction numpy is going to reject must be refused BEFORE
+# its cost is computed. Neither pricing path did that on its own: above the
+# 52-letter budget the arithmetic fallback prices from shapes and never looks
+# at the pairing at all, and below it the einsum route only appears to
+# validate -- `_build_size_map` rejects two different label sizes, but einsum
+# BROADCASTS an extent of 1, so `ij,jk->ik` happily priced `j=1` against `j=7`
+# and left numpy to reject the call afterwards.
+#
+# Measured against numpy 2.2.6 (see the module note on the support matrix):
+# `np.dot`, `np.inner` and `np.tensordot` all require contracted extents to
+# match EXACTLY. None of the three broadcasts a size-1 contracted axis, and
+# every unequal pair -- 1 against n, 0 against n -- is a ValueError. Equal
+# extents are always accepted, INCLUDING 0 against 0, which yields a zero
+# fill. Assertions here are on exception TYPE and on `flops_used`, never on
+# message text, which differs per op and across the numpy support matrix.
+
+
+def _raises_billing(fn, exc=ValueError):
+    """Assert `fn` raises `exc`, and return what it billed before doing so."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as b:
+            with pytest.raises(exc):
+                fn()
+            return b.flops_used
+
+
+# The contracted pair has to survive the padding, so these build the padded
+# shape directly instead of reusing `_pad_end` (which would push the contracted
+# axis inward and leave a singleton pad axis contracted instead).
+#
+# `inner` and the `axes=([-1], [-1])` tensordot spec contract the last axis of
+# both operands; `dot` contracts a's last with b's last-but-one, so b's padding
+# goes in front. numpy caps dot/inner at 32 dimensions per operand, so `PAD=25`
+# splits rank across both to reach 27 + 27 = 54 > 52.
+PAD = 25
+MISPAIRED_OPS = [("dot", None), ("inner", None), ("tensordot", ([-1], [-1]))]
+
+
+def _operands(op_name, k, j, pad):
+    """(a, b) contracting extent `k` of a against extent `j` of b."""
+    a_shape = (2,) + (1,) * pad + (k,)
+    b_shape = (1,) * pad + (j, 2) if op_name == "dot" else (2,) + (1,) * pad + (j,)
+    return np.ones(a_shape), np.ones(b_shape)
+
+
+def _honest_cost(op_name, k, pad):
+    """The FMA=2 dense price `2*alpha - M` for `_operands(op_name, k, k, pad)`."""
+    a, b = _operands(op_name, k, k, pad)
+    if k == 0:
+        return 0  # empty arithmetic domain: no multiply or accumulation events
+    alpha = a.size * b.size // k
+    return 2 * alpha - (a.size // k) * (b.size // k)
+
+
+@pytest.mark.parametrize("op_name,axes", MISPAIRED_OPS)
+@pytest.mark.parametrize("pad", [0, PAD])
+def test_extent_mismatch_refuses_before_charging(op_name, axes, pad):
+    """A genuine extent mismatch must raise, and bill nothing, on both sides.
+
+    3 against 7 is unambiguous: no broadcasting rule in numpy makes this
+    contraction legal. Before the fix the above-budget spelling priced it and
+    entered `budget.deduct`, so an impossible call consumed budget (and could
+    raise `BudgetExhaustedError` in place of numpy's shape error).
+    """
+    fn = getattr(fnp, op_name)
+    kwargs = {"axes": axes} if axes is not None else {}
+    a, b = _operands(op_name, 3, 7, pad)
+    with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+        getattr(np, op_name)(a, b, **kwargs)
+    assert (a.ndim + b.ndim > 52) is (pad == PAD)
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    assert _raises_billing(lambda: fn(a, b, **kwargs)) == 0
+
+
+@pytest.mark.parametrize("op_name,axes", MISPAIRED_OPS)
+@pytest.mark.parametrize("pad", [0, PAD])
+def test_size_one_contracted_axis_refuses_before_charging(op_name, axes, pad):
+    """numpy does NOT broadcast a size-1 contracted axis, so neither may we.
+
+    This is the shape of the mismatch the einsum route used to price: einsum
+    broadcasts an extent of 1, so below the budget `fnp.inner` on (2,3) against
+    (2,1) billed the whole contraction and only then hit numpy's "not aligned".
+    """
+    fn = getattr(fnp, op_name)
+    kwargs = {"axes": axes} if axes is not None else {}
+    a, b = _operands(op_name, 3, 1, pad)
+    with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+        getattr(np, op_name)(a, b, **kwargs)
+
+    a, b = fnp.asarray(a), fnp.asarray(b)
+    assert _raises_billing(lambda: fn(a, b, **kwargs)) == 0
+
+
+@pytest.mark.parametrize("op_name,axes", MISPAIRED_OPS)
+def test_valid_contraction_bill_is_unchanged_either_side_of_the_budget(op_name, axes):
+    """The regression an over-rejecting validator would cause: pin the price.
+
+    Turning a working call into a hard failure is worse than the over-charge
+    being fixed, so this pins both that the valid contraction still runs and
+    the exact FLOP figure it costs -- 20, unchanged above and below the budget
+    and equal to the honest `2*alpha - M`.
+    """
+    fn = getattr(fnp, op_name)
+    kwargs = {"axes": axes} if axes is not None else {}
+
+    a, b = _operands(op_name, 3, 3, 0)
+    below = billed(lambda: fn(fnp.asarray(a), fnp.asarray(b), **kwargs))
+    a, b = _operands(op_name, 3, 3, PAD)
+    assert a.ndim + b.ndim > 52
+    above = billed(lambda: fn(fnp.asarray(a), fnp.asarray(b), **kwargs))
+
+    assert below == _honest_cost(op_name, 3, 0) == 20
+    assert above == below
+
+
+@pytest.mark.parametrize("op_name,axes", MISPAIRED_OPS)
+@pytest.mark.parametrize("pad", [0, PAD])
+def test_zero_length_contracted_axis_is_accepted_and_priced_the_same(
+    op_name, axes, pad
+):
+    """0 against 0 is legal in numpy, so the validator must let it through.
+
+    The empty contraction has no arithmetic domain, so it costs 0 -- the same
+    figure on both sides of the letter budget (`_dense_accumulation_cost`
+    already guards `2*alpha - M` from going negative here). This is the
+    over-rejection guard for the zero case specifically: a validator written
+    as "reject unless both extents are positive" would break it, and so would
+    one that treated 0 as a wildcard the way einsum treats 1.
+    """
+    fn = getattr(fnp, op_name)
+    kwargs = {"axes": axes} if axes is not None else {}
+    a, b = _operands(op_name, 0, 0, pad)
+    expected_shape = getattr(np, op_name)(a, b, **kwargs).shape  # numpy accepts it
+    assert (a.ndim + b.ndim > 52) is (pad == PAD)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            result = fn(fnp.asarray(a), fnp.asarray(b), **kwargs)
+            assert budget.flops_used == _honest_cost(op_name, 0, pad) == 0
+    assert np.asarray(result).shape == expected_shape
+
+
+def test_mispaired_refusal_precedes_the_complex_fail_closed_guard():
+    """The refusal must also beat the *other* thing `deduct` can raise.
+
+    `complex_factor_for`'s fail-closed "exact" guard fires from inside
+    `deduct`, so a check that slipped past the deduct boundary would report
+    that RuntimeError for a contraction whose real problem is its shapes.
+    The control here pins that these exact operands DO reach that guard when
+    their extents match (symmetry scales the cost, so no exact complex ratio
+    is claimable -- see
+    `test_complex_above_budget_fails_closed_when_symmetry_scales_the_cost`),
+    which is what makes the mis-paired assertion below meaningful rather
+    than vacuous.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    rng = np.random.default_rng(0)
+    v = rng.standard_normal((4, 4, 3)) + 1j * rng.standard_normal((4, 4, 3))
+    sym = v + v.transpose(1, 0, 2)  # genuinely symmetric in axes 0 and 1
+    a = wrap_with_symmetry(
+        sym.reshape((4, 4) + (1,) * 24 + (3,)), SymmetryGroup.symmetric(axes=(0, 1))
+    )
+
+    def _complex_b(k):
+        vals = rng.standard_normal((4,) + (1,) * 25 + (k,))
+        return vals + 1j * vals
+
+    assert a.ndim + _complex_b(3).ndim > 52
+    # Control: matching extents reach the pricing guard and fail closed there.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            with pytest.raises(RuntimeError, match="computes its complex cost exactly"):
+                fnp.inner(a, _complex_b(3))
+
+    assert _raises_billing(lambda: fnp.inner(a, _complex_b(7))) == 0
+
+
+def test_tensordot_axis_count_mismatch_refuses_before_charging():
+    """Pairing k axes of `a` with j != k of `b` is numpy's own ValueError.
+
+    `np.tensordot` compares `len(axes_a)` to `len(axes_b)` BEFORE it indexes
+    either shape, so the count check has to sit ahead of the out-of-range
+    normalisation to keep the same exception for a spec that is both
+    mis-paired and out of range.
+    """
+    a, b = fnp.asarray(np.ones((3, 4))), fnp.asarray(np.ones((4, 5)))
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([1], [0, 1]))) == 0
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([0, 1], [0]))) == 0
+    # Mis-paired AND out of range: numpy reports the count, not the index.
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([1], [0, 99]))) == 0
+    # Same count, out of range: still the IndexError this branch already had.
+    assert (
+        _raises_billing(lambda: fnp.tensordot(a, b, axes=([1], [99])), IndexError) == 0
+    )
+
+
+def test_tensordot_full_inner_extent_mismatch_refuses_before_charging():
+    """The full-inner arm prices `2*numel - 1` straight from `a.size`.
+
+    Above the letter budget it never builds a subscript string, so nothing
+    else would have caught operands of equal rank but different extents.
+    """
+    a = fnp.asarray(np.ones((3,) + (1,) * 26))
+    b = fnp.asarray(np.ones((7,) + (1,) * 26))
+    assert a.ndim + b.ndim > 52
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=a.ndim)) == 0
+
+
+def test_tensordot_oversized_symmetry_arm_extent_mismatch_refuses_before_charging():
+    """The third pricing arm: an operand whose group is too large to enumerate.
+
+    Mirrors `test_tensordot_oversized_symmetry_arm_bills_fma_not_multiplies_only`
+    (S_12, order 479_001_600, far past the default `dimino_budget` of 50_000,
+    padded past the 52-letter budget) but with the contracted extents made
+    unequal. That arm computes its own dense price and would otherwise charge
+    for a contraction numpy immediately refuses.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=tuple(range(12)))
+    a = wrap_with_symmetry(np.ones((2,) * 12 + (1,) * 44 + (5,)), group)
+    b = fnp.asarray(np.ones((7, 3)))
+    assert a.ndim + b.ndim > 52
+
+    assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([56], [0]))) == 0
+
+
+def test_dot_inner_scalar_operand_behaviour_is_untouched():
+    """A 0-d operand has no contracted axis, so the validator must skip it.
+
+    `np.dot`/`np.inner` treat a scalar operand as a plain multiply. flopscope
+    has a separate, pre-existing gap there (the subscript builder divides by
+    `a.ndim`), and this pins that the pairing check neither fixes nor
+    aggravates it -- it must not be the thing that raises.
+    """
+    scalar = fnp.asarray(np.array(2.0))
+    arr = fnp.asarray(np.ones((3, 4)))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            with pytest.raises(ZeroDivisionError):
+                fnp.inner(scalar, arr)
+            with pytest.raises(ZeroDivisionError):
+                fnp.dot(scalar, arr)
