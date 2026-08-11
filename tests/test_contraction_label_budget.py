@@ -1306,3 +1306,103 @@ def test_dot_inner_scalar_operand_behaviour_is_untouched():
                 fnp.inner(scalar, arr)
             with pytest.raises(ZeroDivisionError):
                 fnp.dot(scalar, arr)
+
+
+# ---------------------------------------------------------------------------
+# Zero-sized contraction under a surviving symmetry. `_dense_accumulation_cost`
+# returns 0 for a zero-length contracted axis, but `_symmetry_adjusted_cost`
+# used to floor its symmetry branch at 1 -- charging a call that performed no
+# arithmetic, and (for complex operands) desynchronising the charge from
+# `accumulation.total` so the exact complex factor was withheld and
+# `complex_factor_for`'s fail-closed guard raised.
+# ---------------------------------------------------------------------------
+
+
+def _symmetric_contraction(op_name, dtype, pad, k):
+    """A `dot`/`inner`/`tensordot` call with a surviving S_2 output symmetry.
+
+    `k` is the contracted extent (0 for the empty-domain cases). `pad` sets
+    how many leading singleton axes each operand carries: 0 keeps the
+    combined rank inside the 52-letter budget (einsum path), 24 puts both
+    operands at rank 27 -- past the budget when combined, so the label-free
+    fallback prices it, yet still inside numpy's own 32-dimension limit on
+    an *input* array, so the call really executes.
+
+    The S_2 group sits on the two extent-5 axes, which neither op contracts,
+    so it survives into the output and its unique/dense ratio is 45/75 < 1 --
+    i.e. `_symmetry_adjusted_cost` genuinely scales here rather than taking
+    one of its no-op early returns. That the ratio bites on exactly this
+    construction is pinned by
+    `test_symmetry_discount_survives_on_nonempty_contraction` below.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._symmetry_utils import wrap_with_symmetry
+
+    group = SymmetryGroup.symmetric(axes=(pad, pad + 1))
+    a = wrap_with_symmetry(np.ones((1,) * pad + (5, 5, k), dtype=dtype), group)
+    if op_name == "inner":
+        b = np.ones((1,) * (pad + 1) + (3, k), dtype=dtype)
+        return a, b, lambda: fnp.inner(a, b)
+    b = np.ones((1,) * (pad + 1) + (k, 3), dtype=dtype)
+    if op_name == "dot":
+        return a, b, lambda: fnp.dot(a, b)
+    return a, b, lambda: fnp.tensordot(a, b, axes=([a.ndim - 1], [b.ndim - 2]))
+
+
+@pytest.mark.parametrize("op_name", ["dot", "inner", "tensordot"])
+@pytest.mark.parametrize("pad", [0, 24])
+@pytest.mark.parametrize("dtype", [np.float64, np.complex128])
+def test_empty_contraction_with_surviving_symmetry_bills_zero(op_name, pad, dtype):
+    """K = 0 performs no arithmetic, so it costs 0 on either side of the budget.
+
+    Below the budget the einsum path already charged 0. Above it, the
+    fallback's `_dense_accumulation_cost` also returned 0, but the symmetry
+    scaler floored that to 1 -- so the same valid call cost 1 purely because
+    the operands were too high-rank for a subscript string. The complex case
+    is the sharper half: the floored charge no longer matched
+    `accumulation.total`, the call site withheld its exact
+    `complex_factor_override`, and a call that worked below the budget raised
+    `RuntimeError` above it.
+    """
+    a, b, call = _symmetric_contraction(op_name, dtype, pad, 0)
+    assert (a.ndim + b.ndim > 52) is (pad == 24)
+    assert billed(call) == 0
+
+
+@pytest.mark.parametrize("op_name", ["dot", "inner", "tensordot"])
+def test_symmetry_discount_survives_on_nonempty_contraction(op_name):
+    """The zero-preservation must not disturb a real symmetric contraction.
+
+    Same construction as the empty cases above, with the contracted extent
+    at 4 instead of 0, above the letter budget so the symmetry scaler is in
+    play. `alpha = 100 * 12 // 4 = 300` multiplies over `M = 5*5*3 = 75`
+    output cells gives a dense `2*alpha - M = 525`; the surviving S_2 leaves
+    `15 * 3 = 45` unique cells of those 75, so the charge is `525 * 45 // 75`.
+    A fix that dropped the ratio (or the floor with it) would show up here.
+    """
+    a, b, call = _symmetric_contraction(op_name, np.float64, 24, 4)
+    assert a.ndim + b.ndim > 52
+    dense = _dense_accumulation_cost(a.size, b.size, 4, (5, 5, 3)).total
+    assert dense == 525
+    got = billed(call)
+    assert got == dense * 45 // 75 == 315
+    assert got < dense  # the discount is real, not a rounding artefact
+
+
+def test_symmetry_adjusted_cost_preserves_zero_but_keeps_the_floor():
+    """The scaler's two boundary behaviours, pinned directly.
+
+    Zero in, zero out: no arithmetic happened, so no ratio can conjure a
+    charge. Non-zero in, at least 1 out: real work whose scaled charge would
+    round down to nothing still costs something. `(5, 5)` under S_2 has 15
+    unique cells of 25, so `1 * 15 // 25 == 0` before the floor applies.
+    """
+    from flopscope._perm_group import SymmetryGroup
+    from flopscope._pointwise import _symmetry_adjusted_cost
+
+    group = SymmetryGroup.symmetric(axes=(0, 1))
+    assert _symmetry_adjusted_cost(0, (5, 5), group) == 0
+    assert _symmetry_adjusted_cost(0, (5, 5), None) == 0
+    assert _symmetry_adjusted_cost(1, (5, 5), group) == 1
+    assert _symmetry_adjusted_cost(2, (5, 5), group) == 1  # 2*15//25 == 1
+    assert _symmetry_adjusted_cost(100, (5, 5), group) == 60

@@ -475,24 +475,38 @@ def _symmetry_adjusted_cost(dense_cost, output_shape, output_symmetry):
     SymmetricTensor inputs). For symmetric outputs, the ratio drops
     below 1 and captures redundant-element savings.
 
+    A dense cost of 0 stays 0. The floor of 1 below exists so *real* work
+    whose symmetry-scaled charge rounds down to nothing still costs
+    something; a zero-sized (empty) contraction performed no multiplies and
+    no accumulations, so there is nothing for the ratio to scale and nothing
+    to floor. Charging it 1 would also break the zero-domain invariant
+    ``_dense_accumulation_cost`` and ``aggregate_einsum`` both hold, and
+    would desynchronise ``cost`` from ``accumulation.total`` at the
+    contraction call sites — withholding the exact complex factor they
+    derive from that accumulation and tripping ``complex_factor_for``'s
+    fail-closed raise on an otherwise valid complex call.
+
     TODO: this is a placeholder. The real algorithmic cost depends on
     whether the underlying NumPy call (or the flopscope wrapper) actually
     skips redundant work — today, our wrappers compute the dense
     output and discard the duplicates. Replace with a per-op
     algorithmic-cost model when one is available.
     """
+    dense_cost = int(dense_cost)
+    if dense_cost == 0:
+        return 0
     if output_symmetry is None:
-        return int(dense_cost)
+        return dense_cost
     # Use the Python builtins to avoid the module-level ``max`` /
     # ``prod`` reduction wrappers that shadow them in this module.
     dense_output = _builtins.max(_math_prod(output_shape), 1)
     if dense_output <= 1:
-        return int(dense_cost)
+        return dense_cost
     unique = unique_elements_for_shape(output_symmetry, output_shape)
     if unique >= dense_output:
-        return int(dense_cost)
+        return dense_cost
     # Integer-division form avoids float drift on large arrays.
-    return _builtins.max(int(dense_cost) * int(unique) // dense_output, 1)
+    return _builtins.max(dense_cost * int(unique) // dense_output, 1)
 
 
 _ARRAY_UFUNC_MISSING = object()

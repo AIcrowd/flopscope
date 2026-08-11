@@ -142,6 +142,25 @@
   or outcome changed. An axis spec that is both mis-paired and out of range
   reports the pairing `ValueError`, matching NumPy's own ordering, rather
   than the `IndexError` for the out-of-range index.
+- **cost-model**: a legal empty contraction (a contracted axis of extent `0`)
+  now costs 0 even when a non-trivial symmetry survives on the output. The
+  symmetry scaler floored its adjusted charge at 1 — correct for real work
+  whose scaled price rounds down to nothing, wrong for a contraction that
+  performed no multiplies and no accumulations — so above the 52-letter
+  subscript budget, where the label-free fallback routes through that scaler,
+  `dot`, `inner` and `tensordot` charged 1 FLOP for arithmetic that never
+  happened, breaking the zero-domain rule the arithmetic fallback and the
+  einsum path both hold. The floored charge also no longer matched the
+  accumulation total it was derived from, so the call site withheld its exact
+  complex factor and the fail-closed guard raised `RuntimeError` on complex
+  operands: the same call billed 0 below the letter budget and failed above
+  it. Both are fixed by preserving a zero input cost through the scaler. The
+  floor itself is unchanged for non-zero costs, symmetry discounts on
+  non-empty contractions are unchanged (measured: a rank-27 pair with a
+  surviving `S_2` still bills 315 of a dense 525), and `ufunc.outer`, the
+  scaler's other caller, clamps its dense cost to at least 1 before calling
+  and so is unaffected. Those figures are FLOP costs, before the op weight
+  and dtype rate that scale them into a bill.
 
 ## v0.10.0 (2026-07-31)
 
