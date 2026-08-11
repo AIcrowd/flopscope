@@ -72,6 +72,95 @@
   the "fixed output dtype ⇒ not neutral" rule to the *distribution* samplers,
   which the Random section had already carved `choice`/`shuffle`/
   `permutation`/`permuted` out of. Reported in #176.
+- **cost-model**: contraction wrappers now share one einsum subscript
+  allocator and one out-of-letters price. Previously `tensordot`, `dot`/
+  `inner`, and `tensordot`'s full-inner fast path each allocated subscript
+  labels independently and disagreed about what to do when the 52-letter
+  alphabet ran out: `tensordot` fell back to a multiply-only formula that
+  charged `alpha` instead of the honest `2 * alpha - M`, `dot` and `inner`
+  let a bare `StopIteration` escape, and the full-inner path allocated only
+  26 letters and leaked a NumPy `ValueError` above 26 dimensions. All four
+  call sites now route through `_contraction_subscripts`; when it runs out
+  of letters they price the contraction from the same FMA=2 model without
+  an einsum subscript string, and the resulting charge is never lower than
+  what the einsum path would compute for the same operands, though it can
+  be higher. A `CostFallbackWarning` — deduplicated per operation name, and
+  suppressible with `flops.configure(symmetry_warnings=False)` — flags the
+  calls where symmetry or repeated-operand savings could be forfeited.
+  Where the fallback's charge is the accumulation total itself, complex
+  operands now bill at the exact `(8K - 2) / (2K - 1)` ratio instead of
+  raising; where a symmetry adjustment moves the charge off that total,
+  they still fail closed with the existing `RuntimeError`.
+- **cost-model**: `dot` and `inner` now keep a `SymmetricTensor` operand's
+  surviving symmetry when the 52-letter budget is exceeded, instead of
+  dropping it. `tensordot`'s partial-contraction, non-oversized fallback arm
+  already composed the post-contraction group onto the output axes and
+  priced the unique-element fraction there — its full-inner fallback and its
+  oversized-symmetry arm both discard the group instead (`out_sym = None`);
+  the shared `dot`/`inner` fallback discarded it on every arm, so the same
+  contraction cost more above the budget than below it purely because of
+  rank, and returned a plain array where the einsum path returns a
+  `SymmetricTensor` (measured: 64 versus 40 FLOPs on a 2-axis-symmetric
+  rank-27 operand). The direction was over-billing, never under-billing.
+  The composition bails to the dense price — unchanged from before — when a
+  group's order exceeds
+  `dimino_budget` or the enumeration exceeds it mid-composition, so neither
+  operation gains a failure mode above the budget. Repeated-operand
+  (`dot(x, x)`) savings are still forfeited there, and still warned about.
+- **cost-model**: `tensordot`'s label-budget fallback never normalised
+  negative axis indices, mispricing partial contractions above the
+  52-letter budget in both directions. A negative axis skipped by the
+  contracted-size divisor left it at 1, over-billing (a reproduced 256x
+  ratio at rank sum 54, `axes=([-26], [0])`: 33,488,896 instead of
+  130,816); a negative axis that leaked into the output shape inflated `M`
+  until `2*alpha - M` collapsed to the old multiply-only price,
+  under-billing (`axes=([1], [-27])`: 65,536 instead of 130,816). Both now
+  cost 130,816, matching the positive-axis spelling. Those figures are FLOP
+  costs, before the op weight and dtype rate that scale them into a bill.
+  An axis still out-of-range after normalisation now raises `IndexError`
+  before `budget.deduct` runs, rather than being silently skipped.
+- **cost-model**: `dot`, `inner` and `tensordot` now refuse a contraction
+  whose paired axes do not line up — unequal numbers of paired axes, or a
+  pair whose extents differ — with `ValueError` before any cost is computed
+  and before `budget.deduct` runs. `deduct` charges on entry and does not
+  roll back when the wrapped NumPy call raises, so such a call previously
+  consumed budget for arithmetic that never happened, and could report
+  `BudgetExhaustedError` in place of NumPy's shape error. Neither pricing
+  path caught it on its own: above the 52-letter subscript budget the
+  arithmetic fallback prices from shapes alone and never inspects the
+  pairing, and below it the einsum route only appears to — `einsum`
+  broadcasts an extent of 1, so `ij,jk->ik` priced `j=1` against `j=7` in
+  full (measured: 390 FLOPs on a rank-2 pair) before NumPy rejected the
+  call. All three pricing arms of `tensordot` (full-inner, oversized-
+  symmetry, and the ordinary partial contraction) are covered, on both sides
+  of the letter budget. The check is exactly NumPy's own predicate: none of
+  the three operations broadcasts a size-1 contracted axis, every unequal
+  pair including `0` against `n` is a `ValueError`, and equal extents are
+  always accepted — `0` against `0` included, which stays a legal empty
+  contraction costing 0. Valid contractions are unaffected: a 900-case
+  differential sweep against plain NumPy found no accepted call whose price
+  or outcome changed. An axis spec that is both mis-paired and out of range
+  reports the pairing `ValueError`, matching NumPy's own ordering, rather
+  than the `IndexError` for the out-of-range index.
+- **cost-model**: a legal empty contraction (a contracted axis of extent `0`)
+  now costs 0 even when a non-trivial symmetry survives on the output. The
+  symmetry scaler floored its adjusted charge at 1 — correct for real work
+  whose scaled price rounds down to nothing, wrong for a contraction that
+  performed no multiplies and no accumulations — so above the 52-letter
+  subscript budget, where the label-free fallback routes through that scaler,
+  `dot`, `inner` and `tensordot` charged 1 FLOP for arithmetic that never
+  happened, breaking the zero-domain rule the arithmetic fallback and the
+  einsum path both hold. The floored charge also no longer matched the
+  accumulation total it was derived from, so the call site withheld its exact
+  complex factor and the fail-closed guard raised `RuntimeError` on complex
+  operands: the same call billed 0 below the letter budget and failed above
+  it. Both are fixed by preserving a zero input cost through the scaler. The
+  floor itself is unchanged for non-zero costs, symmetry discounts on
+  non-empty contractions are unchanged (measured: a rank-27 pair with a
+  surviving `S_2` still bills 315 of a dense 525), and `ufunc.outer`, the
+  scaler's other caller, clamps its dense cost to at least 1 before calling
+  and so is unaffected. Those figures are FLOP costs, before the op weight
+  and dtype rate that scale them into a bill.
 
 ## v0.10.0 (2026-07-31)
 
