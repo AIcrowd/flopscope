@@ -294,9 +294,17 @@ def test_tensordot_negative_axis_out_of_range_raises_before_charging():
     indexing fail) -- callers see no behavioural change beyond the timing.
     Refuse-before-charge: no budget may be spent on a call that was always
     going to fail.
+
+    ``IndexError`` is safe to pin here: the axes are well formed and unique,
+    and every out-of-range spelling is refused by the shape indexing on every
+    numpy in the support range. The ``np.tensordot`` calls are the ground
+    truth that keeps that claim honest on whichever numpy is installed.
     """
     a = np.zeros((3, 4))
     b = np.zeros((4, 5))
+    for axes in (([1], [5]), ([5], [0])):
+        with pytest.raises(IndexError):  # ground truth: plain numpy refuses it
+            np.tensordot(a, b, axes=axes)
     with flops.BudgetContext(flop_budget=10**16, quiet=True) as ctx:
         with pytest.raises(IndexError):
             fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=([1], [5]))
@@ -317,6 +325,8 @@ def test_tensordot_zero_dim_default_axes_raises_index_error_not_zero_division():
     """
     a = np.array(5.0)
     b = np.array(6.0)
+    with pytest.raises(IndexError):  # ground truth: plain numpy refuses it
+        np.tensordot(a, b, axes=2)
     with flops.BudgetContext(flop_budget=10**16, quiet=True) as ctx:
         with pytest.raises(IndexError):
             fnp.tensordot(fnp.asarray(a), fnp.asarray(b), axes=2)
@@ -1243,11 +1253,22 @@ def test_tensordot_axis_count_mismatch_refuses_before_charging():
     """Pairing k axes of `a` with j != k of `b` is numpy's own ValueError.
 
     `np.tensordot` compares `len(axes_a)` to `len(axes_b)` BEFORE it indexes
-    either shape, so the count check has to sit ahead of the out-of-range
-    normalisation to keep the same exception for a spec that is both
-    mis-paired and out of range.
+    either shape, so the count check sits ahead of the range check here too --
+    which keeps `ValueError`, not `IndexError`, for a spec that is both
+    mis-paired and out of range. Both types are stable across the numpy
+    support range (a count mismatch has been the same `ValueError` since 2.0,
+    and an out-of-range axis on otherwise well-formed axes the same
+    `IndexError`), and the `np.tensordot` calls below hold that to account on
+    whichever numpy is installed.
     """
-    a, b = fnp.asarray(np.ones((3, 4))), fnp.asarray(np.ones((4, 5)))
+    raw_a, raw_b = np.ones((3, 4)), np.ones((4, 5))
+    for axes in (([1], [0, 1]), ([0, 1], [0]), ([1], [0, 99])):
+        with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+            np.tensordot(raw_a, raw_b, axes=axes)
+    with pytest.raises(IndexError):
+        np.tensordot(raw_a, raw_b, axes=([1], [99]))
+
+    a, b = fnp.asarray(raw_a), fnp.asarray(raw_b)
     assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([1], [0, 1]))) == 0
     assert _raises_billing(lambda: fnp.tensordot(a, b, axes=([0, 1], [0]))) == 0
     # Mis-paired AND out of range: numpy reports the count, not the index.
@@ -1411,11 +1432,19 @@ def test_symmetry_adjusted_cost_preserves_zero_but_keeps_the_floor():
 
 # --- `axes` spellings: what numpy takes, what it refuses, what each costs ----
 #
-# Ground truth measured against plain numpy 2.2.6 for every spelling below,
-# and each test re-checks its own case against `np.tensordot` before asserting
-# anything about `fnp.tensordot`, so the pin cannot drift away from numpy.
-# Assertions are on exception TYPE and on `flops_used`, never on message text:
-# CI spans numpy 2.0 through 2.4 and the wording differs across it.
+# Each test re-checks its own case against live `np.tensordot` before asserting
+# anything about `fnp.tensordot`, so a pin cannot drift away from the numpy it
+# is running on. Assertions are on `flops_used` and on the accept/reject
+# decision, never on message text: CI spans numpy 2.0 through 2.4 and the
+# wording differs across it.
+#
+# A few tests below still assert an exception TYPE. Those are the cases where
+# the type is the same on every numpy in the support range -- a plain extent
+# mismatch, an axis-count mismatch, an out-of-range axis on well-formed axes --
+# and each is guarded by the matching `pytest.raises` against plain numpy in
+# the same test, so a numpy that changed its mind would fail the ground-truth
+# assertion first. The differential sweep at the bottom of this file does NOT
+# assert exception types; see the comment there for why.
 #
 # The measured gaps these cover, all of them charges for work that never ran:
 #   * a duplicated contracted axis (`axes=([0, 0], [0, 0])`) was priced as if
@@ -1725,6 +1754,60 @@ def test_negative_and_zero_axes_spellings_are_unchanged(pad):
 
 
 @pytest.mark.parametrize("pad", [0, AXES_PAD])
+def test_zero_d_array_axis_runs_on_every_supported_numpy(pad):
+    """The one spelling where numpy's own accept/reject decision moved.
+
+    A 0-d `ndarray` is a perfectly good index -- it has `__index__` -- and
+    `np.tensordot` contracts with it happily on numpy 2.0 through 2.3. numpy
+    2.4 refuses it: the duplicate check it added puts the axis objects in a
+    `set`, and a 0-d `ndarray` is unhashable, so the call dies with
+    `TypeError: unhashable type: 'numpy.ndarray'` before any shape is looked
+    at.
+
+    flopscope cannot match both, so it canonicalises each axis to a plain
+    `int` and runs the call on every supported numpy. That is the permissive
+    direction, chosen deliberately: the alternative is refusing, on numpy
+    2.0-2.3, a contraction those numpys compute -- breaking working code to
+    mirror a newer release's incidental behaviour. Nothing about billing is
+    at stake either way, and the charge-then-fail defect is: forwarding the
+    raw 0-d array (what this branch used to do) meant numpy 2.4 raised
+    `TypeError` *after* `budget.deduct` had already charged the contraction.
+
+    This spelling is therefore excluded from the differential sweep below,
+    which asserts decision parity with the installed numpy.
+    """
+    a, b = _axes_operands(pad, "pair")
+    # Every supported numpy accepts the equivalent plain-int spelling, which
+    # is what flopscope canonicalises this one to.
+    expected = np.tensordot(a, b, axes=([1], [0]))
+    fa, fb = fnp.asarray(a), fnp.asarray(b)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fnp.tensordot(fa, fb, axes=(np.array(1), np.array(0)))
+            assert budget.flops_used == AXES_HONEST_COST
+    assert np.array_equal(np.asarray(got), expected)
+
+    # Same for the nested spelling, and for the duplicate that numpy 2.4
+    # reports as unhashable rather than as the repeat it is: flopscope
+    # compares the canonicalised indices, so it is refused -- free -- on
+    # every numpy.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            got = fnp.tensordot(fa, fb, axes=([np.array(1)], [np.array(0)]))
+            assert budget.flops_used == AXES_HONEST_COST
+    assert np.array_equal(np.asarray(got), expected)
+
+    square_a, square_b = _square_axes_operands(pad)
+    fsa, fsb = fnp.asarray(square_a), fnp.asarray(square_b)
+    dup = ([np.array(0), np.array(0)], [0, 1])
+    with pytest.raises(Exception):  # noqa: B017 -- type is numpy's to change
+        np.tensordot(square_a, square_b, axes=dup)
+    assert _raises_billing(lambda: fnp.tensordot(fsa, fsb, axes=dup)) == 0
+
+
+@pytest.mark.parametrize("pad", [0, AXES_PAD])
 def test_unsigned_scalar_axes_follows_numpy_rather_than_looking_plausible(pad):
     """The reason the integer arm uses numpy's `range(-axes, 0)` verbatim.
 
@@ -1753,28 +1836,41 @@ def test_unsigned_scalar_axes_follows_numpy_rather_than_looking_plausible(pad):
     assert billed(lambda: fnp.tensordot(fa, fb, axes=np.uint8(0))) == AXES_OUTER_COST
 
 
-# --- the differential sweep: same call, same outcome, nothing charged --------
+# --- the differential sweep: same call, same decision, nothing charged -------
 #
 # The case-by-case pins above each cover one spelling. This drives a grid of
-# them against plain `np.tensordot` on the same operands and asserts three
-# things per case: identical outcome (both run, or both raise the SAME
-# exception TYPE), `flops_used == 0` whenever either side raises, and identical
-# shape and values whenever both run.
+# them against plain `np.tensordot` on the same operands and asserts, per case:
 #
-# It exists because the order of `tensordot`'s own checks is load-bearing and
-# is not something a hand-picked case list keeps honest. numpy pairs the axis
-# counts, then indexes each shape with the RAW (still signed, possibly `bool`)
-# index, then compares the extents, and only then normalises a negative axis;
-# its two internal transposes run last, after all of that. Validating in any
-# other order still refuses the same calls -- and still charges nothing, which
-# is what the fix was for -- but hands the caller the wrong exception type: an
-# `IndexError` where numpy stops earlier at a `ValueError` extent mismatch, or
-# a `TypeError` for a boolean numpy indexes happily and rejects two steps
-# later. Measured against numpy 2.2.6, that ordering alone accounted for 341
-# type mismatches across this grid.
+#   * the same accept/reject DECISION -- flopscope raises exactly when the
+#     installed numpy raises;
+#   * `flops_used == 0` whenever flopscope refuses, which is the defect this
+#     whole branch exists to fix (an impossible `axes` spec used to be priced
+#     and charged, and only then handed to numpy to reject);
+#   * identical result shape and values whenever both accept.
 #
-# TYPE only, never message text: CI spans numpy 2.0 through 2.4 and the wording
-# differs across it.
+# It deliberately does NOT assert that the exception TYPE matches numpy's, and
+# an assertion to that effect must not be restored. numpy reorders these checks
+# between its own releases, so no fixed order in flopscope can agree with the
+# whole 2.0-2.4 support matrix. Concretely, numpy 2.4 added an explicit
+# duplicate-axis check ahead of the shape indexing that earlier releases reach
+# first, so for `a` of rank 3 and `b` of rank 1:
+#
+#     axes=([0, 0], [0, 1])   numpy 2.2  IndexError: tuple index out of range
+#                             numpy 2.4  ValueError: duplicate axes are not
+#                                        allowed in tensordot
+#     axes=([0, 0], [0, 0])   numpy 2.2  ValueError: axes don't match array
+#                             numpy 2.4  ValueError: duplicate axes are not
+#                                        allowed
+#
+# Pinning either shape of that grid makes the other matrix cell fail. Verified
+# by running this grid against numpy 2.0.2, 2.1.3, 2.2.6, 2.3.5 and 2.4.6: the
+# decision and the result agree on all five, and only the type moves.
+#
+# Never message text either, for the same reason: the wording differs across
+# the matrix even where the type does not.
+#
+# One spelling is excluded because numpy's own DECISION moved, not just its
+# exception type -- see `test_zero_d_array_axis_runs_on_every_supported_numpy`.
 
 PARITY_SHAPES = [(2, 3), (3, 2, 3), (3,), (2, 3, 4), (4,), (3, 3), (2, 2, 2, 2)]
 
@@ -1807,7 +1903,9 @@ PARITY_AXES_SPECS = {
     "ndarray-pair": lambda: (np.array([1]), np.array([0])),
     "numpy-int-pair": lambda: (np.int64(1), np.int64(0)),
     "numpy-int-in-list": lambda: ([np.int32(1)], [np.int32(0)]),
-    "zero-d-array-in-pair": lambda: (np.array(1), np.array(0)),
+    # `(np.array(1), np.array(0))` belongs here by shape but not by outcome:
+    # numpy accepts it up to 2.3 and refuses it from 2.4, so no fixed
+    # flopscope behaviour can match the whole matrix. It has its own test.
     "empty-pair": lambda: ([], []),
     # Negatives, which numpy normalises only AFTER the extent comparison.
     "negative-a": lambda: ([-1], [0]),
@@ -1858,11 +1956,12 @@ PARITY_AXES_SPECS = {
 
 
 class _Outcome(NamedTuple):
-    """What one `tensordot` call did: raised this type, or returned this array.
+    """What one `tensordot` call did: raised, or returned this array.
 
-    `raised` is the exception TYPE, never an instance and never a message --
-    the type is the whole assertion. `billed` is 0 for plain numpy, which has
-    no meter.
+    `raised` carries the exception TYPE purely so a failure message can name
+    it. Only whether it is `None` is asserted on -- see the comment above for
+    why the type itself is not comparable across the numpy support matrix.
+    `billed` is 0 for plain numpy, which has no meter.
     """
 
     raised: type[BaseException] | None
@@ -1877,7 +1976,7 @@ def _numpy_outcome(a, b, axes) -> _Outcome:
         warnings.simplefilter("ignore")
         try:
             return _Outcome(None, np.asarray(np.tensordot(a, b, axes=axes)), 0)
-        except Exception as exc:  # noqa: BLE001 -- the type IS the assertion
+        except Exception as exc:  # noqa: BLE001 -- raising at all IS the assertion
             return _Outcome(type(exc), None, 0)
 
 
@@ -1897,9 +1996,9 @@ def _flopscope_outcome(a, b, axes) -> _Outcome:
 def test_tensordot_axes_outcome_matches_numpy_on_every_shape_pair(spec_id):
     """One `axes` spelling against the whole shape grid, both directions.
 
-    Every mismatch in the grid is collected rather than raised on sight, so a
-    regression reports the whole family it broke instead of one arbitrary
-    member of it.
+    Decision, billing and values -- not exception types. Every mismatch in the
+    grid is collected rather than raised on sight, so a regression reports the
+    whole family it broke instead of one arbitrary member of it.
     """
     make_axes = PARITY_AXES_SPECS[spec_id]
     rng = np.random.default_rng(0)
@@ -1911,22 +2010,19 @@ def test_tensordot_axes_outcome_matches_numpy_on_every_shape_pair(spec_id):
             expected = _numpy_outcome(a, b, make_axes())
             got = _flopscope_outcome(a, b, make_axes())
             where = f"a={a_shape} b={b_shape} axes={spec_id}"
+            # Refuse before charging: a call flopscope was never going to run
+            # must leave the budget untouched, whatever it raised.
+            if got.raised is not None and got.billed != 0:
+                mismatches.append(f"{where}: refused but billed {got.billed}")
             if (expected.raised is None) != (got.raised is None):
                 mismatches.append(
                     f"{where}: numpy {expected.raised}, flopscope {got.raised}"
                 )
                 continue
             if expected.raised is not None:
-                assert got.raised is not None  # the branch above settled this
-                if expected.raised is not got.raised:
-                    mismatches.append(
-                        f"{where}: numpy {expected.raised.__name__}, "
-                        f"flopscope {got.raised.__name__}"
-                    )
-                # Refuse before charging: a call numpy was always going to
-                # refuse must leave the budget untouched.
-                if got.billed != 0:
-                    mismatches.append(f"{where}: refused but billed {got.billed}")
+                # Both refused. Which of ValueError / IndexError / TypeError
+                # each one picked is NOT compared -- numpy moves it between
+                # releases; see the comment above this grid.
                 continue
             assert expected.result is not None and got.result is not None
             if expected.result.shape != got.result.shape:
@@ -1942,9 +2038,14 @@ def test_tensordot_axes_parity_sweep_covers_both_outcomes():
     """The guard on the sweep above: it must exercise more than one branch.
 
     A grid that only ever raised -- or only ever ran -- would pass the parity
-    assertions while pinning nothing. This counts the outcomes to prove the
-    grid straddles the boundary, and that all three exception types the
-    ordering decides between actually occur in it.
+    assertions while pinning nothing. This counts flopscope's own outcomes to
+    prove the grid straddles the boundary, and that all three exception types
+    the validator can produce actually occur in it.
+
+    flopscope's types are counted rather than numpy's precisely because
+    flopscope's are the stable ones: it validates in a single fixed order on
+    every supported numpy, whereas numpy's own split between the three moves
+    from release to release.
     """
     rng = np.random.default_rng(0)
     operands = {shape: rng.standard_normal(shape) for shape in PARITY_SHAPES}
@@ -1953,7 +2054,7 @@ def test_tensordot_axes_parity_sweep_covers_both_outcomes():
     for make_axes in PARITY_AXES_SPECS.values():
         for a_shape in PARITY_SHAPES:
             for b_shape in PARITY_SHAPES:
-                outcome = _numpy_outcome(
+                outcome = _flopscope_outcome(
                     operands[a_shape], operands[b_shape], make_axes()
                 )
                 if outcome.raised is None:
