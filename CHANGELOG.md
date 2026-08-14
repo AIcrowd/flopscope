@@ -111,6 +111,26 @@
   per dtype — rather than a kind table, so it keeps holding on NumPy releases
   that do not exist yet. `heavier_billing_dtype` shares the one predicate, so
   the two cannot drift apart.
+- **cost-model**: `matmul` and its broadcasting siblings now refuse a
+  mis-paired contraction BEFORE `budget.deduct`, like `dot`/`inner`/
+  `tensordot` already did. `deduct` charges on entry and does not roll back
+  when the wrapped numpy call raises, and these four route through
+  `_einsum_routed_binary` with a `...`-broadcasting subscript that makes the
+  contracted pairing implicit rather than checked — einsum BROADCASTS an
+  extent of 1 where numpy's gufunc core rejects it. So
+  `fnp.matmul(fnp.ones((3,1)), fnp.ones((7,5)))` charged 390 FLOPs for
+  arithmetic that never ran and only then raised numpy's `ValueError`, which
+  on a tight budget surfaced as `BudgetExhaustedError` instead;
+  `fnp.vecdot`, `fnp.matvec` and `fnp.vecmat` charged the same way, as did the
+  `@` operator, which routes through `fnp.matmul`. All four now supply their
+  contracted axis pair to the existing `_validate_contracted_extents`, so an
+  impossible contraction leaves `flops_used` at 0. Every contraction numpy
+  accepts still runs and bills exactly what it billed before, including the
+  two a careless predicate breaks: a size-1 axis contracted against another
+  size-1 axis (legal, and not a broadcast) and 0 against 0 (legal, and free).
+  Validation is skipped, not misapplied, where the default pair is not the
+  pair numpy contracts — a 0-d operand, or an `axis=`/`axes=` that relocates
+  the gufunc's core dimension.
 - **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
   it, and refuses what numpy refuses before any budget is charged. Three
   measured gaps, all of them a charge for work that never ran or a rejection

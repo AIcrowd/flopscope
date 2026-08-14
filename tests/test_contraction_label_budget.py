@@ -1330,6 +1330,131 @@ def test_dot_inner_scalar_operand_behaviour_is_untouched():
                 fnp.dot(scalar, arr)
 
 
+# --- the broadcasting siblings: matmul, vecdot, matvec, vecmat -------------
+#
+# These four route through `_einsum_routed_binary` with a `...`-broadcasting
+# subscript, so they never reach the letter budget and were left out of the
+# pairing check with `a_contract_axis=None`. Their contracted pairing is no
+# less real for being implicit in the subscript, and the einsum route
+# BROADCASTS an extent of 1 where numpy's gufunc core does not -- so
+# `fnp.matmul(ones((3,1)), ones((7,5)))` priced and charged the whole
+# contraction (390 FLOPs) and only then raised numpy's ValueError.
+#
+# Measured against numpy 2.x, all four require the contracted extents to match
+# exactly: none broadcasts a size-1 contracted axis, and equal extents are
+# always accepted, 0 against 0 included. Every case below asserts that against
+# live numpy first, so the list cannot drift into claiming numpy refuses
+# something it accepts.
+
+requires_vecdot = pytest.mark.skipif(
+    not hasattr(np, "vecdot"), reason="requires numpy >= 2.1"
+)
+requires_vecmat = pytest.mark.skipif(
+    not hasattr(np, "vecmat"), reason="requires numpy >= 2.2"
+)
+
+GUFUNC_MISPAIRED = [
+    ("matmul", (3, 4), (7, 5)),  # plain mismatch
+    ("matmul", (3, 1), (7, 5)),  # size-1 a-side: einsum broadcasts, numpy does not
+    ("matmul", (3, 5), (7, 1)),  # size-1 b-side
+    ("matmul", (1,), (7, 5)),  # 1-D first operand
+    ("matmul", (3, 1), (7,)),  # 1-D second operand
+    ("matmul", (2, 3, 1), (2, 7, 5)),  # batched
+    pytest.param("vecdot", (1,), (7,), marks=requires_vecdot),
+    pytest.param("vecdot", (3, 1), (3, 7), marks=requires_vecdot),
+    pytest.param("matvec", (3, 1), (7,), marks=requires_vecmat),
+    pytest.param("vecmat", (1,), (7, 3), marks=requires_vecmat),
+]
+
+
+@pytest.mark.parametrize("op_name,a_shape,b_shape", GUFUNC_MISPAIRED)
+def test_gufunc_contraction_mismatch_refuses_before_charging(op_name, a_shape, b_shape):
+    a, b = np.ones(a_shape), np.ones(b_shape)
+    with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+        getattr(np, op_name)(a, b)
+
+    fn = getattr(fnp, op_name)
+    assert _raises_billing(lambda: fn(fnp.asarray(a), fnp.asarray(b))) == 0
+
+
+def test_matmul_operator_spelling_refuses_before_charging():
+    """`@` routes through `FlopscopeArray.__matmul__` -> `fnp.matmul`, so it
+    must inherit the refusal rather than keep the old charge-then-fail."""
+    a, b = fnp.asarray(np.ones((3, 1))), fnp.asarray(np.ones((7, 5)))
+    assert _raises_billing(lambda: a @ b) == 0
+    assert _raises_billing(lambda: b.__rmatmul__(a)) == 0
+
+
+GUFUNC_VALID = [
+    ("matmul", (3, 4), (4, 5), 105),  # 2*3*4*5 - 3*5
+    ("matmul", (3, 1), (1, 5), 15),  # a genuine size-1 CONTRACTION: 2*15 - 15
+    ("matmul", (3, 0), (0, 5), 0),  # empty contraction: no arithmetic at all
+    ("matmul", (3,), (3,), 5),  # 1-D . 1-D: 2*3 - 1
+    ("matmul", (2, 3, 4), (2, 4, 5), 210),  # batched
+    ("matmul", (4,), (4, 5), 35),  # 1-D first operand
+    ("matmul", (3, 4), (4,), 21),  # 1-D second operand
+    pytest.param("vecdot", (4,), (4,), 7, marks=requires_vecdot),
+    pytest.param("vecdot", (0,), (0,), 0, marks=requires_vecdot),
+    pytest.param("matvec", (3, 4), (4,), 21, marks=requires_vecmat),
+    pytest.param("matvec", (3, 0), (0,), 0, marks=requires_vecmat),
+    pytest.param("vecmat", (4,), (4, 3), 21, marks=requires_vecmat),
+    pytest.param("vecmat", (0,), (0, 3), 0, marks=requires_vecmat),
+]
+
+
+@pytest.mark.parametrize("op_name,a_shape,b_shape,expected", GUFUNC_VALID)
+def test_gufunc_valid_contraction_bill_is_unchanged(
+    op_name, a_shape, b_shape, expected
+):
+    """The regression an over-rejecting validator would cause: pin the price.
+
+    Includes the two cases a careless predicate breaks -- a size-1 axis
+    contracted against another size-1 axis (legal, and NOT a broadcast), and
+    0 against 0 (legal, and free)."""
+    a, b = np.ones(a_shape), np.ones(b_shape)
+    expected_shape = getattr(np, op_name)(a, b).shape  # numpy accepts it
+
+    fn = getattr(fnp, op_name)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True) as budget:
+            result = fn(fnp.asarray(a), fnp.asarray(b))
+            assert budget.flops_used == expected
+    assert np.asarray(result).shape == expected_shape
+
+
+def test_matmul_scalar_operand_behaviour_is_untouched():
+    """A 0-d operand has no contracted axis, so the validator must skip it and
+    leave numpy to report the missing core dimension -- which it already did
+    without charging."""
+    scalar = fnp.asarray(np.array(2.0))
+    arr = fnp.asarray(np.ones((3, 4)))
+    with pytest.raises(ValueError):  # ground truth: plain numpy refuses it
+        np.matmul(np.array(2.0), np.ones((3, 4)))
+    assert _raises_billing(lambda: fnp.matmul(scalar, arr)) == 0
+    assert _raises_billing(lambda: fnp.matmul(arr, scalar)) == 0
+
+
+@requires_vecmat
+def test_gufunc_relocated_core_axis_is_left_to_numpy():
+    """`axis=`/`axes=` move the gufunc's core dimension off the position the
+    subscript assumes, so the pair this check would validate is no longer the
+    pair numpy contracts. The validation is skipped for those spellings rather
+    than applied to the wrong axes -- refusing a call numpy runs is a worse
+    failure than the charge-then-fail this fixes. (Those spellings also carry
+    a separate, pre-existing pricing gap: the cost is still read off the
+    default layout. Out of scope here; pinned only so it is not mistaken for
+    a regression.)"""
+    a, b = np.ones((3, 4)), np.ones((3, 4))
+    # numpy's stubs omit the gufunc `axis=` keyword its own docstring
+    # advertises; the runtime takes it, which is the whole point here.
+    assert np.vecdot(a, b, axis=0).shape == (4,)  # type: ignore[reportCallIssue]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with flops.BudgetContext(flop_budget=10**16, quiet=True):
+            fnp.vecdot(fnp.asarray(a), fnp.asarray(b), axis=0)  # must not raise
+
+
 # ---------------------------------------------------------------------------
 # Zero-sized contraction under a surviving symmetry. `_dense_accumulation_cost`
 # returns 0 for a zero-length contracted axis, but `_symmetry_adjusted_cost`
