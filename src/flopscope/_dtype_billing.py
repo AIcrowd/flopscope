@@ -30,6 +30,8 @@ bare call; widening past it still widens the rate.
 
 from __future__ import annotations
 
+from functools import cache
+
 import numpy as _np
 
 from flopscope._weights import _UFUNC_METHOD_SUFFIXES, get_dtype_rate
@@ -267,6 +269,57 @@ def resolve_billing_dtype(dtypes: tuple) -> _np.dtype | None:
 _NUMERIC_KINDS = frozenset("biufc")
 
 
+#: ``np.empty`` captured at import, before anything can replace it on the
+#: numpy module object. ``_materialised_itemsize`` runs from INSIDE the ban,
+#: which the numpy-compat harness reaches with ``numpy.empty`` monkey-patched
+#: to route back through flopscope: going through the live attribute would
+#: re-enter a counted wrapper, whose own operand scan calls the ban again --
+#: unbounded recursion, not a slow path. Same doctrine as
+#: ``_budget._NDARRAY_DTYPE_DESCRIPTOR``: bind the real implementation once
+#: rather than resolve it through something a caller can shadow.
+_EMPTY = _np.empty
+
+
+@cache
+def _materialised_itemsize(resolved: _np.dtype) -> int:
+    """Bytes per element numpy actually allocates for *resolved*.
+
+    Not always ``resolved.itemsize``. An unsized or zero-length string dtype
+    (``'U0'``/``'S0'``, and their bare ``'U'``/``'S'``/``np.str_``/
+    ``np.bytes_`` spellings) reports ``itemsize == 0``, but numpy PROMOTES it
+    to a one-character dtype the moment it materialises an array:
+    ``np.zeros(1000, dtype='U0')`` is a real 4000-byte ``<U1`` array, not a
+    data-free one. Void is the kind that genuinely keeps zero bytes per
+    element through construction -- ``np.dtype([])`` and ``'V0'`` both stay
+    at 0 -- which is the case the carve-out in ``refuse_non_numeric_dtype``
+    exists for.
+
+    Asked of numpy rather than encoded as a kind table, so it keeps holding
+    on numpy releases that do not exist yet. ``np.empty(0, ...)`` allocates
+    no elements, and the answer for a given dtype is fixed for the life of
+    the process, so it is cached.
+    """
+    try:
+        return _EMPTY(0, dtype=resolved).dtype.itemsize
+    except (TypeError, ValueError):
+        # numpy will not build an array in it, so there is no per-element
+        # cost to vouch for. Report a non-zero size: the carve-out is an
+        # exemption, and an unexaminable dtype does not get one.
+        return 1
+
+
+def _is_data_free_dtype(resolved: _np.dtype) -> bool:
+    """Whether *resolved* carries no bytes per element once materialised.
+
+    The single predicate behind the non-numeric ban's one carve-out. Both
+    halves are required: the requested itemsize keeps the numpy round-trip
+    off the path for every ordinary dtype, and the materialised one is what
+    the carve-out's "data-free by construction" justification actually
+    depends on.
+    """
+    return resolved.itemsize == 0 and _materialised_itemsize(resolved) == 0
+
+
 def rate_for(resolved: _np.dtype) -> float:
     if resolved.kind not in _NUMERIC_KINDS:
         return 1.0
@@ -298,16 +351,23 @@ def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
     way as any other structured dtype -- there is no separate object check
     to bypass.
 
-    One exception: a zero-itemsize dtype (an empty structured spec such as
-    ``np.dtype([])``, or a zero-length ``'U0'``/``'S0'``) is let through
-    regardless of kind. Zero bytes per element cannot embed an object field
-    or any itemsize-dependent cost -- it is data-free by construction, the
-    same safety property that makes a numeric dtype billable in the first
-    place. This is not a hypothetical: NumPy's own ``broadcast_shapes``
-    allocates ``np.empty(shape, dtype=np.dtype([]))`` internally as a
-    zero-byte shape-computation placeholder, so this exception keeps a
-    dtype numpy invents for its own bookkeeping from being refused as if a
-    caller had asked to compute something in it.
+    One exception: a dtype that is still zero-itemsize once numpy
+    MATERIALISES it (an empty structured spec such as ``np.dtype([])``, or
+    ``'V0'``) is let through regardless of kind. Zero bytes per element
+    cannot embed an object field or any itemsize-dependent cost -- it is
+    data-free by construction, the same safety property that makes a numeric
+    dtype billable in the first place. This is not a hypothetical: NumPy's
+    own ``broadcast_shapes`` allocates ``np.empty(shape,
+    dtype=np.dtype([]))`` internally as a zero-byte shape-computation
+    placeholder, so this exception keeps a dtype numpy invents for its own
+    bookkeeping from being refused as if a caller had asked to compute
+    something in it.
+
+    "Materialised" is load-bearing: ``np.dtype('U0').itemsize`` is 0, but
+    numpy promotes ``'U0'``/``'S0'`` to ``'U1'``/``'S1'`` when it allocates,
+    so reading the REQUESTED itemsize handed back a real 4000-byte ``<U1``
+    array for ``fnp.zeros(1000, dtype='U0')`` under a carve-out justified
+    entirely by the storage being empty. See ``_materialised_itemsize``.
 
     Deliberately independent of the dtype-rate table: ``get_dtype_rate``
     returns 1.0 for every name in unit mode, and the test suite resets weights
@@ -323,7 +383,7 @@ def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
             resolved = _np.dtype(candidate)
         except (TypeError, ValueError):
             continue  # a weak Python scalar, not a dtype
-        if resolved.kind not in _NUMERIC_KINDS and resolved.itemsize != 0:
+        if resolved.kind not in _NUMERIC_KINDS and not _is_data_free_dtype(resolved):
             raise UnsupportedDtypeError(
                 f"{op_name}: dtype {resolved!r} is not billable -- flopscope "
                 "meters only numeric dtypes (bool, integer, float, complex). "
@@ -342,13 +402,15 @@ def refuse_non_numeric_dtype(op_name: str, *dtypes) -> None:
 def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     """Return the operand dtype with the highest billing rate (ties -> first).
 
-    A forbidden non-numeric, nonzero-itemsize dtype is propagated before the
-    rate comparison so the eventual ``deduct`` call can refuse it with the
-    operation's name. Otherwise a higher-rate numeric participant could erase
-    it while collapsing a complete ufunc signature -- for example, the
+    A forbidden non-numeric dtype is propagated before the rate comparison so
+    the eventual ``deduct`` call can refuse it with the operation's name.
+    Otherwise a higher-rate numeric participant could erase it while
+    collapsing a complete ufunc signature -- for example, the
     ``timedelta64, float64 -> timedelta64`` loop would collapse to float64 and
-    bypass the numeric-only policy. Zero-itemsize dtypes retain the central
-    policy's explicit exception and continue through the normal comparison.
+    bypass the numeric-only policy. Data-free dtypes retain the central
+    policy's explicit exception -- the same ``_is_data_free_dtype`` predicate,
+    so the two cannot drift apart -- and continue through the normal
+    comparison.
 
     Unlike ``np.result_type``, this never promotes to a *third* dtype. Use it
     where the billed cost is the MAX of the operand rates rather than the
@@ -360,7 +422,7 @@ def heavier_billing_dtype(*dtypes: _np.dtype) -> _np.dtype:
     """
     dts = [_np.dtype(d) for d in dtypes]
     for dtype in dts:
-        if dtype.kind not in _NUMERIC_KINDS and dtype.itemsize != 0:
+        if dtype.kind not in _NUMERIC_KINDS and not _is_data_free_dtype(dtype):
             return dtype
     return max(dts, key=rate_for)
 

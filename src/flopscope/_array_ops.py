@@ -26,6 +26,7 @@ from flopscope._budget import (
     _call_numpy,
     _call_user_code,
     _counted_wrapper,
+    refuse_non_numeric_sequence_leaf,
 )
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
@@ -3397,11 +3398,21 @@ def _refuse_non_numeric_dtype_tree(
     walked (and, for a list of arrays, checked) more than once, and
     ``_active`` turns a genuine self-reference into a prompt ``ValueError``
     instead of NumPy re-deriving the same conclusion at exponential cost.
+
+    A leaf inside a list/tuple that carries no ``dtype`` at all is classified
+    by ``refuse_non_numeric_sequence_leaf``, on the same reasoning and with
+    the same depth-0 exemption as the operand scan: without it a raw Python
+    sequence of strings walked to the bottom and matched nothing, so
+    ``fnp.permute_dims(['a', 'b'], (0,))`` relocated a ``<U1`` array for free.
     """
     dtype = getattr(value, "dtype", None)
     if dtype is not None:
         refuse_non_numeric_dtype(op_name, dtype)
-    elif isinstance(value, (list, tuple)) and _depth < _DTYPE_SCAN_MAX_DEPTH:
+    elif isinstance(value, (list, tuple)):
+        # Past the cap, stop looking rather than fall through to the leaf
+        # branch below -- a container is not a bare payload.
+        if _depth >= _DTYPE_SCAN_MAX_DEPTH:
+            return
         if _scanned is None:
             _scanned = set()
         if _active is None:
@@ -3422,6 +3433,8 @@ def _refuse_non_numeric_dtype_tree(
                 )
         finally:
             _active.discard(marker)
+    elif _depth:
+        refuse_non_numeric_sequence_leaf(op_name, value)
 
 
 def permute_dims(*args, **kwargs):
