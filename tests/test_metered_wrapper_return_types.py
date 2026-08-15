@@ -88,6 +88,7 @@ import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._ndarray import FlopscopeArray
 from flopscope._registry import REGISTRY
+from flopscope._symmetric import SymmetricTensor
 from flopscope.errors import UnsupportedFunctionError
 
 _SERVER_SRC = str(Path(__file__).parent.parent / "flopscope-server" / "src")
@@ -127,7 +128,6 @@ KNOWN_RAW_RETURN_OPS = frozenset(
         "isnan",
         "matmul",
         "matvec",
-        "outer",
         "vecdot",
         "vecmat",
     }
@@ -478,6 +478,68 @@ def test_cross_results_were_already_array_handles(label, a, b):
         "before the #193 wrap, so this is a grader repricing in the other "
         "direction"
     )
+
+
+# ---------------------------------------------------------------------------
+# outer: the plain-result early exit is the only line that may be wrapped
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["outer", "linalg.outer"])
+def test_outer_returns_a_flopscope_type(name):
+    """The unaliased, no-``out=`` shape -- the one that took the raw early exit."""
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(_V3, _W3)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.{name} returned {type(result).__module__}.{type(result).__name__}"
+    )
+    assert np.allclose(np.asarray(result), np.outer(_V3, _W3))
+
+
+@pytest.mark.parametrize("name", ["outer", "linalg.outer"])
+def test_outer_aliased_operands_still_yield_a_symmetric_tensor(name):
+    """``outer(v, v)`` must not be routed through the plain wrap.
+
+    The early exit that is now wrapped is guarded by ``output_sym is None``, so
+    the aliased call still leaves through ``_wrap_result`` with its S2 group. A
+    module-wide or decorator-style wrap would view-cast the SymmetricTensor's
+    result and drop the symmetry -- which is also a pricing change, since the
+    group is what halves an outer's cost.
+    """
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(_V3, _V3)
+    assert isinstance(result, SymmetricTensor), (
+        f"fnp.{name}(v, v) returned {type(result).__module__}."
+        f"{type(result).__name__}; operand-aliasing detection was lost"
+    )
+    assert result.symmetry == flops.SymmetryGroup.symmetric(axes=(0, 1))
+
+
+@pytest.mark.parametrize("dest_kind", ["plain", "flopscope"])
+def test_outer_out_hands_back_the_callers_buffer(dest_kind):
+    """``out=`` returns the caller's own object; only the line below it wraps.
+
+    ``if out is not None: return out`` sits directly above the wrapped early
+    exit. Wrapping that line instead -- or wrapping the function as a whole --
+    hands back a fresh view and breaks numpy's ``out=`` identity contract.
+    """
+    dest = np.zeros((3, 3))
+    if dest_kind == "flopscope":
+        dest = dest.view(FlopscopeArray)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.outer(_V3, _W3, out=dest)  # pyright: ignore[reportArgumentType]
+    assert result is dest, (
+        f"fnp.outer(out=<{dest_kind} ndarray>) returned "
+        f"{type(result).__module__}.{type(result).__name__} instead of the "
+        "caller's own buffer"
+    )
+    assert np.allclose(np.asarray(dest), np.outer(_V3, _W3))
 
 
 # ---------------------------------------------------------------------------

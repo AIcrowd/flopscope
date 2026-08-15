@@ -5177,8 +5177,10 @@ def outer(
         )
     if output_sym is None and not isinstance(out, SymmetricTensor):
         if out is not None:
+            # numpy's out= contract is identity: hand back the caller's own
+            # object, unwrapped. Only the allocated result below may be wrapped.
             return out
-        return result  # type: ignore[return-value]
+        return _wrap_metered_result(result)  # type: ignore[return-value]
     # A SymmetricTensor destination reaches _wrap_result even when the result
     # carries no symmetry. It used to take the branch above and return itself
     # UNWRITTEN: numpy had been handed out=None, nothing ever copied the answer
