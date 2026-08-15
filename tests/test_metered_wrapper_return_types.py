@@ -694,7 +694,9 @@ def test_fft_free_ops_have_no_scalar_shape_to_trap_on(name, args, kwargs):
 
 @pytest.mark.parametrize("name", ["fft.fftshift", "fft.ifftshift"])
 @pytest.mark.parametrize(
-    "operand", [np.array(3.0), np.float64(3.0), 3.0], ids=["0d-array", "np-scalar", "py-float"]
+    "operand",
+    [np.array(3.0), np.float64(3.0), 3.0],
+    ids=["0d-array", "np-scalar", "py-float"],
 )
 def test_fft_shift_refuses_zero_d_input_before_flopscope_returns(name, operand):
     """The 0-d shape -- where a wrap would reprice -- is unreachable.
