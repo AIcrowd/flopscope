@@ -6153,6 +6153,22 @@ attach_docstring(
 )
 
 
+def _reject_zero_d_y(y_arr, op_name: str) -> None:
+    """Refuse a 0-d ``y`` the way numpy does, before any shape indexing.
+
+    The feature-count reads below are guarded only by ``ndim == 1``, so a 0-d
+    ``y`` fell through to ``y_arr.shape[0]`` and raised flopscope's own
+    IndexError where numpy raises ValueError. numpy refuses these calls too, so
+    nothing is billed before or after: this runs inside the cost helper, which
+    completes before ``budget.deduct``.
+    """
+    if y_arr.ndim == 0:
+        raise ValueError(
+            f"{op_name}: y must be at least 1-dimensional, got a 0-d operand "
+            f"(shape {y_arr.shape}, dtype {y_arr.dtype})"
+        )
+
+
 def _cov_cost(x, y=None, rowvar=True):
     """Cost for cov: 2 * f^2 * s + 2 * f * s FLOPs.
 
@@ -6183,6 +6199,7 @@ def _cov_cost(x, y=None, rowvar=True):
         f, s = x.shape[1], x.shape[0]
     if y is not None:
         y_arr = _np.asarray(y)
+        _reject_zero_d_y(y_arr, "cov")
         if y_arr.ndim == 1:
             f2 = 1
         elif rowvar:
@@ -6216,6 +6233,7 @@ def _corrcoef_cost(x, y=None, rowvar=True):
         f = x.shape[1]
     if y is not None:
         y_arr = _np.asarray(y)
+        _reject_zero_d_y(y_arr, "corrcoef")
         if y_arr.ndim == 1:
             f2 = 1
         elif rowvar:

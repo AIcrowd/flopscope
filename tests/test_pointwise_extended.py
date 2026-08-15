@@ -223,6 +223,29 @@ def test_cov_with_y():
     assert result.shape == (2, 2)
 
 
+@pytest.mark.parametrize("fn_name", ["cov", "corrcoef"])
+@pytest.mark.parametrize("rowvar", [True, False])
+@pytest.mark.parametrize("zero_d", [numpy.float64(2.0), numpy.array(2.0)])
+def test_zero_d_y_raises_value_error_like_numpy(fn_name, rowvar, zero_d):
+    """A 0-d ``y`` must be refused with numpy's exception class, not ours.
+
+    The cost helpers read ``y.shape[0]``/``shape[1]`` behind an ``ndim == 1``
+    guard, so a 0-d y crashed with flopscope's own IndexError. numpy's own
+    outcome is pinned in the same test rather than a remembered exception
+    class -- the #209/#210 lesson. Nothing is billed either way: the cost
+    helper runs before ``budget.deduct``.
+    """
+    x = numpy.ones((3, 4))
+
+    with pytest.raises(ValueError):
+        getattr(numpy, fn_name)(x, zero_d, rowvar=rowvar)
+
+    with BudgetContext(flop_budget=10**12, quiet=True) as budget:
+        with pytest.raises(ValueError):
+            getattr(ops, fn_name)(x, zero_d, rowvar=rowvar)
+        assert budget.flops_used == 0, "a refused call must not be billed"
+
+
 def test_trapezoid():
     y = numpy.array([0.0, 1.0, 2.0, 3.0])
     with BudgetContext(flop_budget=10**6) as budget:
