@@ -1174,3 +1174,25 @@ def test_cost_is_weight_only():
         a = fnp.array([1.0] * 1000)
         fnp.add(a, a)
     assert b.flops_used >= 1000  # no 0-scaling possible
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_flop_budget_is_rejected(bad):
+    """A non-finite budget must be refused at construction.
+
+    NaN compares False against every bound, so it slipped past the ``<= 0``
+    check, propagated through ``flops_remaining`` and made the exhaustion
+    comparison always False -- a budget that silently stopped enforcing.
+    """
+    with pytest.raises(ValueError, match="finite"):
+        BudgetContext(flop_budget=bad)
+
+
+def test_exhaustion_still_raises_after_finite_guard():
+    """The finite guard must not disturb ordinary exhaustion."""
+    import flopscope.numpy as fnp
+
+    with pytest.raises(BudgetExhaustedError):
+        with BudgetContext(flop_budget=1, quiet=True):
+            a = fnp.ones((100, 100))
+            _ = a + a

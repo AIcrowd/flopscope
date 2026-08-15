@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import math
 import sys as _sys
 import threading
 import time
@@ -1406,6 +1407,12 @@ class BudgetContext:
         # eventual wall_time_s span, billed to flopscope_overhead_time_s. See
         # issue #82.
         self._creation_time = time.perf_counter()
+        # The finite check runs first: NaN compares False against every bound,
+        # so it slipped past ``<= 0``, propagated through ``flops_remaining``
+        # and made the exhaustion comparison always False -- BudgetExhaustedError
+        # became unreachable and the budget silently stopped enforcing.
+        if not math.isfinite(flop_budget):
+            raise ValueError(f"flop_budget must be finite, got {flop_budget}")
         if flop_budget <= 0:
             raise ValueError(f"flop_budget must be > 0, got {flop_budget}")
         self._flop_budget = flop_budget
