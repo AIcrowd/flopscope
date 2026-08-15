@@ -62,6 +62,22 @@
   FLOPs on both the old and the new code — byte-identical. The local estimate
   moves toward the amount the grader was already charging; no re-evaluation
   follows from it.
+- **No billed amount changes for the linalg return-type fix below either.**
+  Same shape, measured the same way. A decomposition-heavy workload built from
+  PLAIN numpy operands (the only case that moves — every linalg op already
+  wrapped its result when an operand was a `FlopscopeArray`): local
+  `flops_used` 8,283,360 → 8,352,480 (+69,120, +0.83%). The same workload built
+  from `FlopscopeArray` operands reads 8,352,480 on both old and new code, so
+  what the change does is make the plain-operand path agree with the one the
+  grader already charged. On the grader side, 64 measurements — 31 linalg ops
+  plus `multi_dot(out=)`, each on both operand kinds — driven through the
+  server's real `RequestHandler.handle` → `_pack_result` produce a
+  byte-identical wire form, op-call cost and downstream-multiply cost on both
+  trees, and a real client/server round trip over the same 28 ops bills 10,112
+  grader FLOPs either way with every `RemoteArray`/`RemoteScalar` split
+  unchanged. The reason is structural: `Session.store_array` already view-casts
+  every stored ndarray to `FlopscopeArray`, so the server never saw the
+  difference.
 
 ### Fix
 
@@ -91,10 +107,34 @@
   silently. That sweep also found 36 further ops with the same defect,
   concentrated in `linalg` and `fft` and including structured returns
   (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
-  `linalg.lstsq`) and a `numpy.matrix` (`bmat`); those are recorded, not
-  changed here, because closing them raises local estimates across the whole
-  linear-algebra surface and needs its own measurement. #193 is therefore
-  referenced, not closed.
+  `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
+  closed by the next item; the remaining 17 are recorded, not changed. #193 is
+  therefore referenced, not closed.
+- **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
+  a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
+  returns the sweep above found. These ops already wrapped their result when
+  an operand was a `FlopscopeArray`, so the gap was the plain-numpy case: a
+  participant holding `numpy` arrays got a raw ndarray back from `cholesky`,
+  `eig`, `inv`, `qr`, `solve`, `svd`, `lstsq` and the rest, and the arithmetic
+  that followed billed 0 in-process while the grader billed it. The module
+  gained the same `wrap_module_returns` call nine other modules already carry,
+  which wraps ndarray returns only: `det`, `norm`, `cond`, `matrix_rank`,
+  `slogdet`'s `sign`/`logabsdet` and `lstsq`'s `rank` stay numpy scalars, so
+  they still reach the participant as a `RemoteScalar` packed by value and
+  their downstream arithmetic stays free. `EigResult`, `EighResult`,
+  `QRResult`, `SVDResult` and `SlogdetResult` keep their named type — the wrap
+  rebuilds them rather than flattening them to tuples, so `.eigenvalues`,
+  `.U` and `.sign` still resolve. `linalg.multi_dot` is deliberately excluded:
+  it is the one op here that takes `out=` and returns that buffer by identity,
+  and wrapping the return turned `multi_dot([m, n], out=dest) is dest` from
+  True to False for a plain-ndarray destination. `linalg.tensorsolve`, which
+  no sweep probe form fits, is fixed by the same call and carries its own
+  assertion. Retracts a documented promise: `solve` and `lstsq` claimed
+  numpy's subclass-return policy (a plain `b` yields a plain-ndarray solution
+  even when `a` is a `FlopscopeArray`). That no longer holds and the
+  docstrings saying so are deleted. `linalg` was the only module honouring it
+  — `sort`, `cumsum`, `tensordot` and `fft.fft` on plain numpy input all
+  already return `FlopscopeArray`.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even
