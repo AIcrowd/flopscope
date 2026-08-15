@@ -197,6 +197,65 @@
   and so is unaffected. Those figures are FLOP costs, before the op weight
   and dtype rate that scale them into a bill.
 
+### Test
+
+- **weights**: the weight-tier policy guard no longer accepts `8.0`. No shipped
+  op carries that tier — it is retired — so admitting it meant 408 of 472 ops
+  could regress onto it with CI green. It is now named as retired rather than
+  merely dropped, so a regression reports as "retired tier" instead of as an
+  unknown value. No weight changes; the shipped table already satisfies the
+  tightened guard. (#175)
+- **conformance**: the compute-dtype sweep exempts 16 index-output ops
+  (`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`,
+  `searchsorted`, `count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple
+  forms, and kin) from the result-dtype floor, which is correct — they return
+  `int64` indices at any operand width — but nothing replaced it, leaving
+  `billed_rate >= 1.0`. Since no resolvable dtype rates below 1.0 and every
+  probe input was int32, that assertion could not fail: the oracle was switched
+  off, not relaxed. Those ops are now held to an operand-dtype floor probed at
+  `float64`, plus a guard-on-the-guard that fails if the probe dtype is ever
+  narrowed back to the minimum rate. A second pass narrows the probes to
+  `float32` and requires the billed rate to follow down, which separates billing
+  the operand from billing the `int64` index result — both rate 2.0, so a floor
+  alone cannot tell them apart. All 16 pass against the shipped table, so no
+  undercount was hiding behind the disabled assertion and no billed amount
+  changes. (#191)
+- **cost-model docs**: added a cross-check that every op named in
+  `cost-model.md`'s weight-0 lists actually resolves in `ops.json` at weight
+  0.0. The pre-existing guard only scans `attach_docstring()` calls in source,
+  so names appearing only in doc prose were invisible to it. The new guard
+  parses the lists out of the document's structure rather than copying their
+  members, so it catches the next stale name too. A documented name with no
+  `ops.json` row (an array method such as `view`) is exercised and must bill 0
+  rather than merely resolve, since inherited `ndarray` methods resolve whether
+  or not they are free. (#190)
+
+### Docs
+
+- **cost-model**: removed `asfortranarray` and `ascontiguousarray` from both
+  weight-0 free-tier lists. Neither op exists — both raise `AttributeError` and
+  appear nowhere in `ops.json`. They were deliberately **not** implemented at
+  weight 0: `fnp.asarray(a, order='F')` bills `numel` today, so a free
+  `asfortranarray` would move the same elements for nothing, which the doc's
+  own layout-coincidence rule forbids. Also corrected the false "manually
+  handled in flopscope" comment covering both names in `scripts/numpy_audit.py`.
+  (#190)
+- **cost-model**: corrected the weight-tier invariant row, which claimed
+  arithmetic ops may weigh "0, 1, or 4" while the guard has always enforced
+  0 or 1. The prose was wrong, not the guard. (#175)
+- **cost-model**: documented why `gcd`/`lcm` sit at weight 16 — an iterative
+  Euclidean per-element kernel rather than a single instruction — and added the
+  missing `ix_` row to the index-generators table with its shipped formula,
+  `sum(numel(outputs)) + sum(numel(Boolean inputs))` at weight 1.0, including
+  the Boolean-mask scan term. Both document already-shipped behavior. (#177)
+- **cost-model**: the "Guaranteed coverage" paragraph now discloses the
+  index-output carve-out in the compute-dtype sweep and the operand-dtype floor
+  that replaces it. (#191)
+
+**No billed amounts change in any of the above.** Every entry in these two
+sections is documentation or test-strength only; no weight, rate, complex
+factor, or cost formula was touched, and no re-evaluation is needed.
+
 ## v0.10.0 (2026-07-31)
 
 ### BREAKING CHANGE

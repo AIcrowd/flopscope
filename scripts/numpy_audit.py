@@ -33,6 +33,12 @@ SKIP_NAMES: frozenset[str] = frozenset(
         "array",
         "asarray",
         "asanyarray",
+        # --- decided gaps: NOT handled, and skipped so the audit does not
+        # --- re-report them. flopscope does not implement these at all (they
+        # --- raise AttributeError) and they are deliberately absent from the
+        # --- weight-0 free tier: billing a layout change at 0 would be a free
+        # --- data-movement path. Implementing them is a repricing decision, so
+        # --- the suppression stays until that decision is made.
         "ascontiguousarray",
         "asfortranarray",
         # --- dtype / type-system ---

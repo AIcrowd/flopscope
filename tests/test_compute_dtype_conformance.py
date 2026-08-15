@@ -1191,6 +1191,179 @@ def test_billed_rate_covers_compute_dtype(op: str):
     )
 
 
+# ---------------------------------------------------------------------------
+# The floor that replaces the result-dtype floor for INDEX_OUTPUT_OPS.
+#
+# Exempting those 16 ops from the RESULT-dtype floor is correct: they return
+# int64 index arrays whatever the operand's width, so the result dtype says
+# nothing about the arithmetic. But the sweep above replaces the exemption with
+# nothing -- `floor` stays 1.0, and no dtype rates below 1.0, so for those ops
+# `billed_rate >= floor` is not a relaxed oracle, it is a switched-off one.
+#
+# The replacement is an OPERAND-dtype floor, probed at a dtype whose rate is
+# above the minimum so the assertion can actually fail.
+# ---------------------------------------------------------------------------
+IDX_WIDE = np.arange(1, 9, dtype=np.float64)  # rate 2.0, unlike the int32 sweep
+IDX_WIDE_CENTERED = IDX_WIDE - 4.0  # spans zero, for the nonzero family
+
+# Narrow dtypes spanning the bottom of the rate table. Their minimum is the
+# lowest rate any resolvable dtype can carry; a floor at that value is
+# unfalsifiable by construction, which is what went wrong here the first time.
+# Read under load_weights() -- the autouse conftest fixture resets to unit
+# weights, where every rate is 1.0.
+NARROW_DTYPES = ("bool", "int8", "int16", "int32", "uint8", "float16", "float32")
+
+# op -> (operand probed, call taking that operand). The operand travels with
+# the probe so the floor and the failure message both read the dtype actually
+# exercised. A free-floating "the operand dtype is float64" constant can drift
+# away from the probes: narrowing one probe would then be reported against the
+# constant's dtype, naming an operand the run never used.
+INDEX_OUTPUT_PROBES: dict[str, tuple[Any, Callable[[Any], Any]]] = {
+    "argmax": (IDX_WIDE, lambda a: fnp.argmax(a)),
+    "argmin": (IDX_WIDE, lambda a: fnp.argmin(a)),
+    "nanargmax": (IDX_WIDE, lambda a: fnp.nanargmax(a)),
+    "nanargmin": (IDX_WIDE, lambda a: fnp.nanargmin(a)),
+    "argsort": (IDX_WIDE, lambda a: fnp.argsort(a)),
+    "argpartition": (IDX_WIDE, lambda a: fnp.argpartition(a, 2)),
+    "nonzero": (IDX_WIDE_CENTERED, lambda a: fnp.nonzero(a)),
+    "flatnonzero": (IDX_WIDE_CENTERED, lambda a: fnp.flatnonzero(a)),
+    "argwhere": (IDX_WIDE_CENTERED, lambda a: fnp.argwhere(a)),
+    "searchsorted": (IDX_WIDE, lambda a: fnp.searchsorted(a, 4.0)),
+    "count_nonzero": (IDX_WIDE, lambda a: fnp.count_nonzero(a)),
+    "digitize": (IDX_WIDE, lambda a: fnp.digitize(a, [2.0, 4.0, 6.0])),
+    "lexsort": (IDX_WIDE, lambda a: fnp.lexsort((a, a))),
+    "unique_all": (IDX_WIDE, lambda a: fnp.unique_all(a)),
+    "unique_counts": (IDX_WIDE, lambda a: fnp.unique_counts(a)),
+    "unique_inverse": (IDX_WIDE, lambda a: fnp.unique_inverse(a)),
+}
+
+
+def _probe_operand_dtype(op: str) -> np.dtype[Any]:
+    """The dtype of the array the probe for ``op`` actually feeds in."""
+    return np.dtype(INDEX_OUTPUT_PROBES[op][0].dtype)
+
+
+def test_index_output_probe_accounting():
+    """Every result-dtype-exempt op needs an operand-dtype probe, and no more."""
+    assert set(INDEX_OUTPUT_PROBES) == INDEX_OUTPUT_OPS, (
+        "ops exempted from the result-dtype floor without an operand-dtype "
+        f"probe: {sorted(INDEX_OUTPUT_OPS - set(INDEX_OUTPUT_PROBES))}; "
+        f"stale probes: {sorted(set(INDEX_OUTPUT_PROBES) - INDEX_OUTPUT_OPS)}"
+    )
+
+
+def test_index_output_floor_is_falsifiable():
+    """Every probe's operand must rate above the lowest rate any dtype resolves to.
+
+    This is the guard on the guard. A floor equal to the minimum rate cannot be
+    violated by any billed dtype, so the per-op assertion below would pass
+    unconditionally -- exactly the defect that left the result-dtype exemption
+    asserting nothing. Narrowing any float64 probe to int32 would silently
+    reintroduce it for that op; this fails instead. It reads each probe's own
+    operand, so it covers all sixteen rather than one shared constant.
+    """
+    load_weights()
+    min_rate = min(rate_for(np.dtype(name)) for name in NARROW_DTYPES)
+    weak = sorted(
+        (op, str(_probe_operand_dtype(op)), rate_for(_probe_operand_dtype(op)))
+        for op in INDEX_OUTPUT_PROBES
+        if rate_for(_probe_operand_dtype(op)) <= min_rate
+    )
+    assert not weak, (
+        "these probe operands rate at or below the minimum rate any dtype can "
+        f"resolve to ({min_rate}), so the index-output floor below cannot fail "
+        f"for them and is asserting nothing: {weak}"
+    )
+
+
+def _billed_dtype_for_probe(op: str, operand: Any) -> np.dtype[Any]:
+    """Run ``op``'s probe on ``operand`` and return the dtype it billed at."""
+    _, probe = INDEX_OUTPUT_PROBES[op]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+            try:
+                probe(operand)
+            except UnsupportedFunctionError as e:
+                # Version-gated op absent from the RUNNING numpy, matching the
+                # int32 sweep's handling above.
+                pytest.skip(f"probe op unavailable on this numpy: {e}")
+            records = [r for r in b.op_log if r.op_name == op]
+    assert records, f"probe for {op!r} did not log an op record under that name"
+    rec = records[-1]
+    assert rec.resolved_dtype is not None, (
+        f"{op!r} bills dtype-neutrally; if that is by design move it out of "
+        f"INDEX_OUTPUT_OPS and into SKIPPED with the width-independence reason"
+    )
+    return np.dtype(rec.resolved_dtype)
+
+
+@pytest.mark.parametrize("op", sorted(INDEX_OUTPUT_OPS))
+def test_index_output_ops_bill_operand_dtype(op: str):
+    """Index-output ops are exempt from the RESULT-dtype floor (they return
+    int64 indices at any input width) but must still bill at least the
+    OPERAND's rate. Probed at float64 (rate 2.0) so this can actually fail --
+    an int32 probe makes the floor 1.0, which no resolvable dtype is below.
+    """
+    load_weights()
+    operand, _ = INDEX_OUTPUT_PROBES[op]
+    billed = _billed_dtype_for_probe(op, operand)
+    billed_rate = rate_for(billed)
+    operand_dtype = _probe_operand_dtype(op)
+    floor = rate_for(operand_dtype)
+    assert billed_rate >= floor, (
+        f"{op!r} billed dtype {billed} (rate {billed_rate}) on a "
+        f"{operand_dtype} operand (needs rate >= {floor}): the index output "
+        f"is int64 either way, but the comparison work is done at the operand's "
+        f"width and must be billed there"
+    )
+
+
+# The floor alone cannot separate "bills the operand" from "bills the int64
+# index result": float64 and int64 both rate 2.0 on the shipped table, so an op
+# that priced its indices instead of its comparisons would satisfy it. Narrowing
+# the operand splits them -- operand billing follows down to rate 1.0, index
+# billing stays at 2.0.
+IDX_NARROW_DTYPE = np.dtype("float32")
+
+# searchsorted's needle and digitize's bin edges are float64 in their probes, so
+# NEP-50 promotes the call even when the array narrows. They bill above the
+# operand, which over-bills rather than under-bills -- the safe direction -- so
+# they are exempt from tracking down and pinned to over-resolving instead, which
+# keeps the exemption from rotting into a blanket skip.
+NARROWING_EXEMPT = frozenset({"searchsorted", "digitize"})
+
+
+@pytest.mark.parametrize("op", sorted(INDEX_OUTPUT_OPS))
+def test_index_output_ops_track_operand_width_down(op: str):
+    """Billing must follow the operand down, not sit on the index result's width."""
+    load_weights()
+    operand, _ = INDEX_OUTPUT_PROBES[op]
+    wide_rate = rate_for(_probe_operand_dtype(op))
+    narrow_rate = rate_for(IDX_NARROW_DTYPE)
+    assert narrow_rate < wide_rate, (
+        f"{IDX_NARROW_DTYPE} rates {narrow_rate} and the probe operand rates "
+        f"{wide_rate}, so narrowing separates nothing and this test asserts "
+        "nothing -- pick a narrower probe dtype"
+    )
+
+    billed = _billed_dtype_for_probe(op, operand.astype(IDX_NARROW_DTYPE))
+    billed_rate = rate_for(billed)
+    if op in NARROWING_EXEMPT:
+        assert billed_rate > narrow_rate, (
+            f"{op!r} now tracks its operand down to {billed} -- it no longer "
+            "over-resolves, so drop it from NARROWING_EXEMPT and let it be "
+            "held to the same rule as the rest"
+        )
+        return
+    assert billed_rate <= narrow_rate, (
+        f"{op!r} billed dtype {billed} (rate {billed_rate}) on a narrowed "
+        f"{IDX_NARROW_DTYPE} operand (needs rate <= {narrow_rate}): billing "
+        "that does not follow the operand down is pricing the int64 index "
+        "output rather than the comparison work"
+    )
+
+
 def test_fixed_composites_do_not_overbill_f32():
     """Composites fixed in this task that numpy computes f32-in-f32-out must
     still bill float32, not fold unconditionally to float64.
