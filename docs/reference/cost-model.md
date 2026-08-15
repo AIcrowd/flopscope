@@ -705,7 +705,12 @@ from the **result**-dtype half of the assertion, because they return `int64` ind
 whatever the operand's width — their result dtype says nothing about the arithmetic they
 did. They are held to an **operand**-dtype floor instead, probed at `float64` so the
 assertion can actually be violated: the comparison work is done at the operand's width
-and must be billed there. `tests/test_binary_ufunc_spelling_billing.py` pins
+and must be billed there. A second pass narrows the same probes to `float32` and requires
+the billed rate to follow the operand down, which is what separates billing the operand
+from billing the `int64` index result — those rate the same, so a floor alone cannot tell
+them apart. `searchsorted` and `digitize` are held to over-resolving instead: their bin
+edges and needle promote the call, so they bill above the operand, which over-bills
+rather than under-bills. `tests/test_binary_ufunc_spelling_billing.py` pins
 complete-signature billing, narrow binary loops, the promoted-input floor,
 direct/`outer` parity, explicit `dtype=`/`signature=` constraints plus wider-`out=`
 composition, descriptor-safe operand metadata, and store-only complex billing for the

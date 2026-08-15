@@ -214,8 +214,11 @@
   probe input was int32, that assertion could not fail: the oracle was switched
   off, not relaxed. Those ops are now held to an operand-dtype floor probed at
   `float64`, plus a guard-on-the-guard that fails if the probe dtype is ever
-  narrowed back to the minimum rate. All 16 pass against the shipped table, so
-  no undercount was hiding behind the disabled assertion and no billed amount
+  narrowed back to the minimum rate. A second pass narrows the probes to
+  `float32` and requires the billed rate to follow down, which separates billing
+  the operand from billing the `int64` index result — both rate 2.0, so a floor
+  alone cannot tell them apart. All 16 pass against the shipped table, so no
+  undercount was hiding behind the disabled assertion and no billed amount
   changes. (#191)
 - **cost-model docs**: added a cross-check that every op named in
   `cost-model.md`'s weight-0 lists actually resolves in `ops.json` at weight
