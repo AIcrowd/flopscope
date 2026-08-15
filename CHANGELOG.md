@@ -222,7 +222,10 @@
   0.0. The pre-existing guard only scans `attach_docstring()` calls in source,
   so names appearing only in doc prose were invisible to it. The new guard
   parses the lists out of the document's structure rather than copying their
-  members, so it catches the next stale name too. (#190)
+  members, so it catches the next stale name too. A documented name with no
+  `ops.json` row (an array method such as `view`) is exercised and must bill 0
+  rather than merely resolve, since inherited `ndarray` methods resolve whether
+  or not they are free. (#190)
 
 ### Docs
 
