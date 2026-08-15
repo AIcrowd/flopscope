@@ -698,7 +698,14 @@ fails the build instead of shipping an undercount. The sweep covers charged *reg
 ops; the dynamic ufunc-method surface (`.outer`, `.reduceat`, `.at`, `.reduce`,
 `.accumulate`, which bill under per-call op names like `hypot.outer` rather than registry
 keys) is out of its reach and is locked by targeted tests in `tests/test_dtype_cost.py`
-instead. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
+instead. There is a second, narrower carve-out inside the sweep: the index-output ops
+(`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`, `searchsorted`,
+`count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple forms, and kin) are exempt
+from the **result**-dtype half of the assertion, because they return `int64` index arrays
+whatever the operand's width — their result dtype says nothing about the arithmetic they
+did. They are held to an **operand**-dtype floor instead, probed at `float64` so the
+assertion can actually be violated: the comparison work is done at the operand's width
+and must be billed there. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
 narrow binary loops, the promoted-input floor, direct/`outer` parity, explicit
 `dtype=`/`signature=` constraints plus wider-`out=` composition, descriptor-safe operand
 metadata, and store-only complex billing for the single-output binary paths.
