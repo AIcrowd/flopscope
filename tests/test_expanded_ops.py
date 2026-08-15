@@ -139,8 +139,13 @@ class TestCustomOps:
     def test_diff(self):
         x = numpy.array([1.0, 3.0, 6.0, 10.0])
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
-            assert numpy.allclose(fnp.diff(x), numpy.diff(x))
+            result = fnp.diff(x)
+            # Snapshot before comparing: diff now returns a flopscope type
+            # (#193), so the numpy.allclose below auto-routes to fnp.allclose
+            # and is itself billed. That billing is correct -- the grader
+            # charges it too -- but it is not diff's cost.
             assert budget.flops_used == 3
+            assert numpy.allclose(result, numpy.diff(x))
 
     def test_vdot(self):
         a, b = numpy.array([1.0, 2.0, 3.0]), numpy.array([4.0, 5.0, 6.0])
