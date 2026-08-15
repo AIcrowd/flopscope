@@ -196,9 +196,9 @@ but nothing is written into it:
 1. **Views / metadata** — operations that return a view of existing memory or inspect
    metadata without touching element values: `transpose`, `swapaxes`,
    `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
-   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`,
-   `view`, `real`/`imag` (component extraction), `split`,
-   `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal` (the 2-D view path — see
+   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `view`,
+   `real`/`imag` (component extraction), `split`, `hsplit`, `vsplit`,
+   `array_split`, `unstack`, `diagonal` (the 2-D view path — see
    [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
    1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
    `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
@@ -705,10 +705,11 @@ from the **result**-dtype half of the assertion, because they return `int64` ind
 whatever the operand's width — their result dtype says nothing about the arithmetic they
 did. They are held to an **operand**-dtype floor instead, probed at `float64` so the
 assertion can actually be violated: the comparison work is done at the operand's width
-and must be billed there. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
-narrow binary loops, the promoted-input floor, direct/`outer` parity, explicit
-`dtype=`/`signature=` constraints plus wider-`out=` composition, descriptor-safe operand
-metadata, and store-only complex billing for the single-output binary paths.
+and must be billed there. `tests/test_binary_ufunc_spelling_billing.py` pins
+complete-signature billing, narrow binary loops, the promoted-input floor,
+direct/`outer` parity, explicit `dtype=`/`signature=` constraints plus wider-`out=`
+composition, descriptor-safe operand metadata, and store-only complex billing for the
+single-output binary paths.
 
 Reproduce any of these yourself: run the call inside a `BudgetContext` and read
 `op_log[-1].resolved_dtype` alongside `flops_used`.
