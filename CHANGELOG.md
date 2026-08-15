@@ -54,9 +54,79 @@
   `FlopscopeArray` inputs, but now rejects foreign NumPy `ndarray` subclasses,
   including `MaskedArray` and `memmap`, because their hooks cannot be safely
   billed.
+- **No billed amount changes for the metered-wrapper return-type fix below.**
+  It raises the LOCAL, in-process estimate only. Measured on a
+  contraction-heavy workload doing arithmetic downstream of the affected ops:
+  local `flops_used` 2,230,766 → 2,326,380 (+95,614, +4.29%), while the same
+  workload driven over a real client/server round trip bills 2,327,658 grader
+  FLOPs on both the old and the new code — byte-identical. The local estimate
+  moves toward the amount the grader was already charging; no re-evaluation
+  follows from it.
 
 ### Fix
 
+- **billing**: `tensordot`, `kron`, `diff`, `gradient`, `ediff1d`, `convolve`,
+  `correlate`, `cov`, `sort_complex`, and the array-returning shapes of
+  `corrcoef`, `interp`, `trapezoid`, and `trapz` now return flopscope types
+  instead of the raw `numpy.ndarray` their inner numpy call produced.
+  Arithmetic performed on one of those results billed **0** FLOPs in-process
+  while the grader billed it: the server stores an ndarray result as a handle,
+  so the participant gets a `RemoteArray` whose arithmetic is dispatched and
+  charged. Local estimates therefore read low against what was actually
+  charged, and they now rise to meet it (figures under *Billing impact*
+  above). `gradient`'s multi-axis tuple return is preserved.
+  **A numpy SCALAR result is deliberately left unwrapped** — `vdot`, and
+  `trapezoid`/`trapz`/`interp`/`corrcoef` on the argument shapes where numpy
+  returns a scalar. The server packs a numpy scalar by value, so the
+  participant gets a `RemoteScalar` whose arithmetic runs locally and costs
+  nothing; the in-process path already agreed at 0. A 0-d `FlopscopeArray` is
+  an `ndarray`, so wrapping those results would have flipped them to handles
+  and started charging downstream arithmetic that is free today — a change to
+  grader billing, which this release deliberately does not make.
+  The 14 sites carried a `# wrapped at fnp.<name> import time` comment
+  describing a wrapping mechanism that does not exist; the comments are
+  removed. A registry-driven sweep now probes every metered op, in every
+  argument form it accepts, and pins the set that still returns a raw
+  `numpy.ndarray` as a shrink-only inventory, so a new wrapper cannot regress
+  silently. That sweep also found 36 further ops with the same defect,
+  concentrated in `linalg` and `fft` and including structured returns
+  (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
+  `linalg.lstsq`) and a `numpy.matrix` (`bmat`); those are recorded, not
+  changed here, because closing them raises local estimates across the whole
+  linear-algebra surface and needs its own measurement. #193 is therefore
+  referenced, not closed.
+- **symmetry**: `expand_dims` no longer dies on high-rank input. The
+  symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
+  elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even
+  when the array carried no symmetry group, so calls failed somewhere around
+  rank 14 while numpy itself handles rank 41. The remap is now pure shape
+  arithmetic that allocates nothing, with axis normalization delegated to
+  numpy's own `normalize_axis_tuple` so negative, tuple, repeated, and
+  out-of-range axis forms raise exactly what `numpy.expand_dims` raises across
+  the supported numpy range. Symmetry groups for calls that already worked are
+  unchanged, and `expand_dims` still bills 0 FLOPs.
+- **budget**: a non-finite `flop_budget` is now refused at construction.
+  Validation only tested `flop_budget <= 0`, and NaN compares False against
+  every bound, so a NaN budget was accepted, propagated through
+  `flops_remaining`, and made the exhaustion comparison always False —
+  `BudgetExhaustedError` became unreachable and the budget silently stopped
+  enforcing. No billed amount changes.
+- **budget**: `wall_time_s` and `residual_wall_time_s` now report live values
+  while the context is open instead of `None`, matching what
+  `budget_summary_dict()` already reported for the same two quantities. Both
+  route through the helper the summary path uses. Values read after the
+  context exits — what Whestbench bills from — are unchanged. The client is
+  changed the same way for the same two reads (see the client entry below), so
+  an in-process live read and a client live read both answer a float.
+- **cost-model**: `cov` and `corrcoef` given a 0-d `y` now raise `ValueError`
+  with a message naming the operand, instead of an `IndexError` from
+  flopscope's own shape arithmetic. The guard runs before `budget.deduct`, so
+  nothing is billed before or after — the refusal set is unchanged, only the
+  exception class and message. numpy refuses the same calls whenever `x`
+  carries more than one observation; it accepts a 0-d `y` in the single
+  observation case (`np.cov([1.0], np.float64(2.0))`), which flopscope refused
+  before this change and still refuses. Un-refusing it would change
+  accept/refuse on a billable call, so it is left for the repricing wave.
 - **client**: `fnp.array` and `fnp.asarray` now accept a `numpy.ndarray` (and
   any other buffer-protocol object) at any rank. Both documented conversions
   used to fail: `asarray` was an auto-generated proxy with no encoding for an

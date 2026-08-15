@@ -1174,3 +1174,78 @@ def test_cost_is_weight_only():
         a = fnp.array([1.0] * 1000)
         fnp.add(a, a)
     assert b.flops_used >= 1000  # no 0-scaling possible
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_flop_budget_is_rejected(bad):
+    """A non-finite budget must be refused at construction.
+
+    NaN compares False against every bound, so it slipped past the ``<= 0``
+    check, propagated through ``flops_remaining`` and made the exhaustion
+    comparison always False -- a budget that silently stopped enforcing.
+    """
+    with pytest.raises(ValueError, match="finite"):
+        BudgetContext(flop_budget=bad)
+
+
+def test_exhaustion_still_raises_after_finite_guard():
+    """The finite guard must not disturb ordinary exhaustion."""
+    import flopscope.numpy as fnp
+
+    with pytest.raises(BudgetExhaustedError):
+        with BudgetContext(flop_budget=1, quiet=True):
+            a = fnp.ones((100, 100))
+            _ = a + a
+
+
+def test_timing_properties_are_live_inside_the_context():
+    """wall_time_s / residual_wall_time_s must agree with the summary path.
+
+    ``budget_summary_dict()`` already reported live values for both
+    quantities while the context was open; the properties returned None.
+    """
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fnp.ones((64, 64))
+        _ = a + a
+        live = ctx.residual_wall_time_s
+        assert live is not None, "residual_wall_time_s must be live inside the context"
+        assert live >= 0.0
+        assert ctx.wall_time_s is not None
+        assert ctx.wall_time_s >= 0.0
+        summary = flops.budget_summary_dict()
+        assert summary["residual_wall_time_s"] is not None
+        assert summary["wall_time_s"] is not None
+
+
+def test_closed_context_timing_properties_match_the_summary():
+    """The post-exit read path -- what Whestbench bills from -- is unchanged."""
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fnp.ones((64, 64))
+        _ = a + a
+
+    wall = ctx.wall_time_s
+    residual = ctx.residual_wall_time_s
+    assert wall is not None and wall > 0.0
+    assert residual is not None and residual >= 0.0
+    summary = ctx.summary_dict()
+    assert summary["wall_time_s"] == wall
+    assert summary["residual_wall_time_s"] == residual
+
+
+def test_huge_int_flop_budget_is_still_accepted():
+    """An int budget past float range must not trip the finite guard.
+
+    A Python int is finite at any magnitude, but ``math.isfinite`` on one above
+    roughly 1.8e308 raises ``OverflowError: int too large to convert to
+    float``. origin/main accepted such a budget, and a validator whose job is a
+    clean ``ValueError`` must not introduce a new error class of its own.
+    """
+    huge = 10**400
+    ctx = BudgetContext(flop_budget=huge, quiet=True)
+    assert ctx.flop_budget == huge

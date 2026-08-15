@@ -102,4 +102,42 @@ CASES: tuple[Case, ...] = (
         source="fnp.ndim(A)",
         tags=frozenset({"family:12", _FAST}),
     ),
+    # Family 12 - metered-wrapper return kind, and what downstream arithmetic
+    # on it costs. #193: an ndarray result reaches the client as a RemoteArray
+    # whose arithmetic is dispatched and billed, a numpy scalar reaches it as a
+    # RemoteScalar whose arithmetic is local and free. Both kinds are covered
+    # here with a downstream operation attached, so the two backends must agree
+    # on the FLOP delta and not only on the value.
+    #
+    # The scalar cases coerce with float() on purpose. Without it they also
+    # trip a SEPARATE, pre-existing divergence that has nothing to do with
+    # billing: arithmetic on a numpy scalar stays a numpy scalar in-process
+    # (pytype "float32") while RemoteScalar arithmetic re-wraps as a
+    # RemoteScalar. Verified present on origin/main, so it is not this batch's
+    # to fix; folding it in here would only bury it inside a billing case.
+    Case(
+        id="idiom/vdot-scalar-downstream",
+        source="float(fnp.vdot(V, V) * 2.0)",
+        tags=frozenset({"family:12", _FAST}),
+    ),
+    Case(
+        id="idiom/trapezoid-scalar-downstream",
+        source="float(fnp.trapezoid(V) + fnp.trapezoid(V))",
+        tags=frozenset({"family:12", _FAST}),
+    ),
+    Case(
+        id="idiom/interp-scalar-downstream",
+        source="float(fnp.interp(2.5, V, V) * 2.0)",
+        tags=frozenset({"family:12"}),
+    ),
+    Case(
+        id="idiom/tensordot-array-downstream",
+        source="fnp.tensordot(A, B, axes=1) + fnp.tensordot(A, B, axes=1)",
+        tags=frozenset({"family:12", _FAST}),
+    ),
+    Case(
+        id="idiom/diff-array-downstream",
+        source="fnp.diff(V) * 2.0",
+        tags=frozenset({"family:12", _FAST}),
+    ),
 )

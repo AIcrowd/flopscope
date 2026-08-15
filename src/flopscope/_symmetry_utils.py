@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_tuple as _np_normalize_axis_tuple
 
 from flopscope._config import get_setting as _get_setting
 from flopscope._perm_group import SymmetryGroup, _DiminoBudgetExceeded
@@ -377,22 +378,41 @@ def remap_group_for_expand_dims(
     ndim: int,
     axis,
 ) -> SymmetryGroup | None:
-    """Remap tensor-axis support after ``numpy.expand_dims`` axis insertion."""
+    """Remap tensor-axis support after ``numpy.expand_dims`` axis insertion.
+
+    Pure shape arithmetic: no array is allocated. This used to build
+    ``probe_shape = tuple(range(2, 2 + ndim))`` and allocate
+    ``np.empty(probe_shape)`` -- ``(ndim + 1)!`` float64 elements, 152 TiB at
+    rank 15 -- solely to read one ``.shape``, and did it unconditionally, even
+    when ``group is None``. ``expand_dims`` therefore died around rank 14 where
+    numpy itself handles 41 (#173).
+
+    The probe's distinct sizes served a second purpose: ``axis_map`` was built
+    by ``expanded_shape.index(size)``, which needed every original axis to have
+    a unique length. The arithmetic below reproduces that mapping exactly --
+    original axes fill the output positions the inserted axes did not take, in
+    order -- without needing distinct sizes.
+
+    Axis normalization is delegated to numpy's own ``normalize_axis_tuple``
+    rather than reimplemented, so negative, tuple, repeated and out-of-range
+    axis forms raise exactly what ``numpy.expand_dims`` raises on every numpy
+    in the supported range.
+    """
     if group is not None:
         validate_symmetry_group(group, ndim=ndim)
-    probe_shape = tuple(range(2, 2 + ndim))
-    probe = np.empty(probe_shape)
-    expanded_shape = np.expand_dims(probe, axis=axis).shape
+    # Mirrors numpy.expand_dims: a non-tuple/list axis is wrapped, the output
+    # rank is ndim + len(axis), and normalization is relative to that rank.
+    axes = axis if type(axis) in (tuple, list) else (axis,)
+    out_ndim = len(axes) + ndim
+    inserted_axes = tuple(sorted(_np_normalize_axis_tuple(axes, out_ndim)))
     remapped = None
     if group is not None:
-        axis_map = {
-            old_axis: expanded_shape.index(size)
-            for old_axis, size in enumerate(probe_shape)
-        }
+        inserted_set = set(inserted_axes)
+        original_positions = [
+            position for position in range(out_ndim) if position not in inserted_set
+        ]
+        axis_map = dict(enumerate(original_positions))
         remapped = remap_group_axes(group, axis_map)
-    inserted_axes = tuple(
-        axis_idx for axis_idx, size in enumerate(expanded_shape) if size == 1
-    )
     inserted = inserted_axes_symmetry(inserted_axes)
     return direct_product_groups(remapped, inserted)
 
