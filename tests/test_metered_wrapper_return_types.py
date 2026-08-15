@@ -40,15 +40,28 @@ Guards:
   gated off on the running numpy (``matvec``/``vecmat`` below 2.2, ``vecdot``
   below 2.1) does not make the ratchet version-dependent.
 
-``KNOWN_RAW_RETURN_OPS`` is deliberately not empty. The sweep shows the defect
+``KNOWN_RAW_RETURN_OPS`` is deliberately not empty. The sweep showed the defect
 reaches well past the ops #193 filed: 36 more, concentrated in ``linalg`` and
-``fft``, still return raw ndarrays, several of them structured returns
-(``EigResult``, ``QRResult``, ``SVDResult``), plain tuples (``histogramdd``,
-``linalg.lstsq``) or a ``numpy.matrix`` (``bmat``) that wrapping would have to
-handle case by case. Closing those raises local FLOP estimates across the whole
-linear-algebra surface, which needs its own measurement and its own release
-note; it is not this change. The inventory records them so the gap is visible
-and cannot grow.
+``fft``, returned raw ndarrays. The 19 ``linalg.*`` entries are now closed by
+the module-wide ``wrap_module_returns`` call at the foot of
+``flopscope/numpy/linalg/__init__.py``, leaving 17. Those 17 include structured
+returns, plain tuples (``histogramdd``) and a ``numpy.matrix`` (``bmat``) that
+wrapping would have to handle case by case. Closing them raises local FLOP
+estimates further, which needs its own measurement and its own release note; it
+is not this change. The inventory records them so the gap is visible and cannot
+grow.
+
+Two things the sweep structurally cannot judge, and which therefore carry their
+own guards below:
+
+* an op that returns its ``out=`` buffer by identity -- ``_probe_op`` discards
+  any result identical to an argument, so the ratchet is blind to exactly the
+  breakage ``skip_names={"multi_dot"}`` prevents
+  (:func:`test_multi_dot_out_hands_back_the_callers_buffer`).
+* the *type* of a structured return. The sweep inspects the elements inside a
+  tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
+  clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
+  (:func:`test_linalg_structured_returns_keep_their_named_type`).
 """
 
 from __future__ import annotations
@@ -101,25 +114,6 @@ KNOWN_RAW_RETURN_OPS = frozenset(
         "isfinite",
         "isinf",
         "isnan",
-        "linalg.cholesky",
-        "linalg.cross",
-        "linalg.eig",
-        "linalg.eigh",
-        "linalg.eigvals",
-        "linalg.eigvalsh",
-        "linalg.inv",
-        "linalg.lstsq",
-        "linalg.matmul",
-        "linalg.matrix_power",
-        "linalg.matrix_rank",
-        "linalg.outer",
-        "linalg.pinv",
-        "linalg.qr",
-        "linalg.solve",
-        "linalg.svd",
-        "linalg.svdvals",
-        "linalg.tensorinv",
-        "linalg.vecdot",
         "matmul",
         "matvec",
         "outer",
@@ -502,6 +496,101 @@ def test_tensordot_result_arithmetic_is_billed():
         assert budget.flops_used > before, (
             "arithmetic on a tensordot result was not billed"
         )
+
+
+@pytest.mark.parametrize("dest_kind", ["plain", "flopscope"])
+def test_multi_dot_out_hands_back_the_callers_buffer(dest_kind):
+    """``out=`` returns the caller's own object -- the case the sweep cannot see.
+
+    ``_probe_op`` discards any result identical to an argument, so an
+    ``out=``-returning op is invisible to the ratchet. ``linalg.multi_dot`` is
+    the one op in ``flopscope.numpy.linalg`` that takes ``out=``, so a blanket
+    module-wide wrap would view-cast its return and hand back a new
+    ``FlopscopeArray`` instead of the buffer the caller passed in, breaking
+    ``out is result`` for a plain-ndarray destination. That is why the wrap
+    carries ``skip_names={"multi_dot"}``, and this is the assertion that keeps
+    it there.
+    """
+    dest = np.zeros((3, 3))
+    if dest_kind == "flopscope":
+        dest = dest.view(FlopscopeArray)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.linalg.multi_dot([_M.copy(), _N.copy()], out=dest)
+    assert result is dest, (
+        f"linalg.multi_dot(out=<{dest_kind} ndarray>) returned "
+        f"{type(result).__module__}.{type(result).__name__} instead of the "
+        "caller's own buffer. numpy's out= contract is identity; wrapping the "
+        "return breaks it."
+    )
+    assert np.allclose(np.asarray(dest), _M @ _N)
+
+
+@pytest.mark.parametrize(
+    "name, args, fields",
+    [
+        ("eig", (_M,), ("eigenvalues", "eigenvectors")),
+        ("eigh", (_M,), ("eigenvalues", "eigenvectors")),
+        ("qr", (_M,), ("Q", "R")),
+        ("svd", (_M,), ("U", "S", "Vh")),
+        ("slogdet", (_M,), ("sign", "logabsdet")),
+    ],
+)
+def test_linalg_structured_returns_keep_their_named_type(name, args, fields):
+    """Wrapping must rebuild the namedtuple, not flatten it to a bare tuple.
+
+    ``numpy.linalg`` hands these back as ``EigResult``/``QRResult``/
+    ``SVDResult``/``SlogdetResult``, and participant code reaches for
+    ``.eigenvalues``/``.U``/``.sign``. ``wrap_module_returns`` rebuilds the
+    type via ``type(result)(*wrapped_elems)``; a tuple-flattening wrapper would
+    pass the ratchet sweep (which only inspects element types) while silently
+    destroying attribute access.
+    """
+    expected = getattr(np.linalg, name)(*args)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = getattr(fnp.linalg, name)(*args)
+    assert type(result) is type(expected), (
+        f"fnp.linalg.{name} returned {type(result).__name__} where numpy "
+        f"returns {type(expected).__name__}"
+    )
+    for field in fields:
+        got = getattr(result, field)
+        want = getattr(expected, field)
+        assert type(got) is type(want) or isinstance(got, FlopscopeArray), (
+            f"fnp.linalg.{name}.{field} is {type(got).__module__}.{type(got).__name__}"
+        )
+        assert np.allclose(np.abs(np.asarray(got)), np.abs(np.asarray(want)))
+
+
+def test_linalg_lstsq_keeps_its_scalar_rank():
+    """lstsq's rank element is a numpy integer and must stay one.
+
+    The array elements are wrapped; ``result[2]`` is not an ndarray, so it must
+    come back exactly as numpy produced it -- a wrapped 0-d rank would reach the
+    grader as an array handle instead of a by-value scalar.
+    """
+    expected = np.linalg.lstsq(_M, _V[:3], rcond=None)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.linalg.lstsq(_M, _V[:3], rcond=None)
+    assert isinstance(result[2], np.integer) and not isinstance(
+        result[2], np.ndarray
+    ), (
+        f"lstsq rank came back as {type(result[2]).__module__}."
+        f"{type(result[2]).__name__}"
+    )
+    assert result[2].dtype == expected[2].dtype
+    assert _flopscope_typed(result)
+
+
+def test_linalg_tensorsolve_returns_a_flopscope_type():
+    """No probe form in the sweep fits tensorsolve, so it needs its own guard."""
+    a = np.eye(6).reshape(3, 2, 3, 2)
+    b = np.ones((3, 2))
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.linalg.tensorsolve(a, b)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.linalg.tensorsolve returned {type(result).__module__}."
+        f"{type(result).__name__}"
+    )
 
 
 @pytest.mark.parametrize(

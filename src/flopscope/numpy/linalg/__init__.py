@@ -103,3 +103,19 @@ __all__ = [
 __getattr__ = _make_module_getattr(
     module_prefix="linalg.", module_label="flopscope.numpy.linalg"
 )
+
+import sys as _sys  # noqa: E402
+
+from flopscope._ndarray import wrap_module_returns as _wrap_module_returns  # noqa: E402
+
+# ``check_module=False`` because every name above is re-exported from a
+# submodule, so the default ``__module__`` filter would skip all of them.
+#
+# ``multi_dot`` is skipped because it is the one op here that takes ``out=``
+# and returns that buffer by identity. Wrapping the return view-casts a plain
+# ndarray destination, so ``multi_dot([m, n], out=dest) is dest`` goes True ->
+# False -- measured, not assumed. See
+# ``test_multi_dot_out_hands_back_the_callers_buffer``.
+_wrap_module_returns(
+    _sys.modules[__name__], check_module=False, skip_names={"multi_dot"}
+)
