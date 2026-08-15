@@ -115,10 +115,9 @@
   while the context is open instead of `None`, matching what
   `budget_summary_dict()` already reported for the same two quantities. Both
   route through the helper the summary path uses. Values read after the
-  context exits — what Whestbench bills from — are unchanged. Note the client
-  is being changed the other way for the same reads (it cannot compute the
-  backend/overhead split locally and will raise instead of returning `None`),
-  so an in-process live read returns a float where a client live read raises.
+  context exits — what Whestbench bills from — are unchanged. The client is
+  changed the same way for the same two reads (see the client entry below), so
+  an in-process live read and a client live read both answer a float.
 - **cost-model**: `cov` and `corrcoef` given a 0-d `y` now raise `ValueError`
   with a message naming the operand, instead of an `IndexError` from
   flopscope's own shape arithmetic. The guard runs before `budget.deduct`, so
@@ -128,6 +127,43 @@
   observation case (`np.cov([1.0], np.float64(2.0))`), which flopscope refused
   before this change and still refuses. Un-refusing it would change
   accept/refuse on a billable call, so it is left for the repricing wave.
+- **client**: `fnp.array` and `fnp.asarray` now accept a `numpy.ndarray` (and
+  any other buffer-protocol object) at any rank. Both documented conversions
+  used to fail: `asarray` was an auto-generated proxy with no encoding for an
+  ndarray argument and raised `RemoteSerializationError`, while `array`'s
+  buffer path was gated on `mv.ndim <= 1` and raised `TypeError` for anything
+  above 1-D, even though the `create_from_data` wire call has always carried an
+  arbitrary shape. Fortran-order and strided inputs keep their logical values
+  (`memoryview.tobytes()` is C-order for both), and a 0-d buffer now has rank 0
+  instead of the rank 1 the old `nbytes // itemsize` length produced. Buffers
+  with no wire dtype — byte-swapped, structured, string — still raise. The
+  client remains numpy-free: everything goes through `memoryview`. **No billed
+  amount changes.** `asarray` materializes locally only for values the wire
+  refuses today and then dispatches exactly as before, so every call that
+  already worked keeps its dispatch and its charge; what changes is that calls
+  that used to error now run and bill at the existing `array`/`asarray` rates.
+  One asymmetry is now reachable above rank 1 and is pinned rather than
+  changed: a buffer carrying `dtype=` is ingested free and then cast
+  server-side, where a nested list packs directly in the target dtype and bills
+  nothing — the buffer route is the more expensive of the two, at the same
+  per-element rate it has always charged at rank 1. This is participant-visible
+  and needs a starter-kit pin bump at release (#194).
+- **client**: `BudgetContext.wall_time_s` and
+  `BudgetContext.residual_wall_time_s` are now live while the context is open,
+  instead of returning `None` until it closed while `summary_dict()` reported
+  live values for the same two quantities — one quantity with two different
+  answers. Both are measured locally from the process clock and the local
+  dispatch accumulator, so a read costs no round trip; only the
+  backend/overhead split of that dispatch time needs the server's kernel
+  measurement, and `flopscope_backend_time_s` / `flopscope_overhead_time_s` are
+  therefore still `0.0` until close. The property and the summary path now
+  share one measurement helper and cannot drift apart. Reads after the context
+  exits — the path scoring bills from — are unchanged, as are reads on a
+  context that was never entered, which still answer `None`. Reading is
+  deliberately not counted as flopscope dispatch: the read is the caller's own
+  Python and stays in the billed residual, so polling the property cannot shave
+  it. Participant-visible (a live read answers a float where it answered
+  `None`); needs a starter-kit pin bump at release (#211, client half).
 - **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
   it, and refuses what numpy refuses before any budget is charged. Three
   measured gaps, all of them a charge for work that never ran or a rejection
@@ -267,6 +303,65 @@
   scaler's other caller, clamps its dense cost to at least 1 before calling
   and so is unaffected. Those figures are FLOP costs, before the op weight
   and dtype rate that scale them into a bill.
+
+### Test
+
+- **weights**: the weight-tier policy guard no longer accepts `8.0`. No shipped
+  op carries that tier — it is retired — so admitting it meant 408 of 472 ops
+  could regress onto it with CI green. It is now named as retired rather than
+  merely dropped, so a regression reports as "retired tier" instead of as an
+  unknown value. No weight changes; the shipped table already satisfies the
+  tightened guard. (#175)
+- **conformance**: the compute-dtype sweep exempts 16 index-output ops
+  (`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`,
+  `searchsorted`, `count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple
+  forms, and kin) from the result-dtype floor, which is correct — they return
+  `int64` indices at any operand width — but nothing replaced it, leaving
+  `billed_rate >= 1.0`. Since no resolvable dtype rates below 1.0 and every
+  probe input was int32, that assertion could not fail: the oracle was switched
+  off, not relaxed. Those ops are now held to an operand-dtype floor probed at
+  `float64`, plus a guard-on-the-guard that fails if the probe dtype is ever
+  narrowed back to the minimum rate. A second pass narrows the probes to
+  `float32` and requires the billed rate to follow down, which separates billing
+  the operand from billing the `int64` index result — both rate 2.0, so a floor
+  alone cannot tell them apart. All 16 pass against the shipped table, so no
+  undercount was hiding behind the disabled assertion and no billed amount
+  changes. (#191)
+- **cost-model docs**: added a cross-check that every op named in
+  `cost-model.md`'s weight-0 lists actually resolves in `ops.json` at weight
+  0.0. The pre-existing guard only scans `attach_docstring()` calls in source,
+  so names appearing only in doc prose were invisible to it. The new guard
+  parses the lists out of the document's structure rather than copying their
+  members, so it catches the next stale name too. A documented name with no
+  `ops.json` row (an array method such as `view`) is exercised and must bill 0
+  rather than merely resolve, since inherited `ndarray` methods resolve whether
+  or not they are free. (#190)
+
+### Docs
+
+- **cost-model**: removed `asfortranarray` and `ascontiguousarray` from both
+  weight-0 free-tier lists. Neither op exists — both raise `AttributeError` and
+  appear nowhere in `ops.json`. They were deliberately **not** implemented at
+  weight 0: `fnp.asarray(a, order='F')` bills `numel` today, so a free
+  `asfortranarray` would move the same elements for nothing, which the doc's
+  own layout-coincidence rule forbids. Also corrected the false "manually
+  handled in flopscope" comment covering both names in `scripts/numpy_audit.py`.
+  (#190)
+- **cost-model**: corrected the weight-tier invariant row, which claimed
+  arithmetic ops may weigh "0, 1, or 4" while the guard has always enforced
+  0 or 1. The prose was wrong, not the guard. (#175)
+- **cost-model**: documented why `gcd`/`lcm` sit at weight 16 — an iterative
+  Euclidean per-element kernel rather than a single instruction — and added the
+  missing `ix_` row to the index-generators table with its shipped formula,
+  `sum(numel(outputs)) + sum(numel(Boolean inputs))` at weight 1.0, including
+  the Boolean-mask scan term. Both document already-shipped behavior. (#177)
+- **cost-model**: the "Guaranteed coverage" paragraph now discloses the
+  index-output carve-out in the compute-dtype sweep and the operand-dtype floor
+  that replaces it. (#191)
+
+**No billed amounts change in any of the above.** Every entry in these two
+sections is documentation or test-strength only; no weight, rate, complex
+factor, or cost formula was touched, and no re-evaluation is needed.
 
 ## v0.10.0 (2026-07-31)
 

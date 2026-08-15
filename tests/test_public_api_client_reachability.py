@@ -155,7 +155,7 @@ def _build_client_reachability() -> dict[str, bool]:
     # ---- 2. Top-level client surface ----
     # Special-cased ops defined explicitly in __init__.py (not auto-generated).
     _SPECIAL_CASED = frozenset(
-        {"array", "einsum", "load", "save", "savez", "savez_compressed"}
+        {"array", "asarray", "einsum", "load", "save", "savez", "savez_compressed"}
     )
     # Auto-proxy loop: for every non-blacklisted, non-dotted op in the registry
     # that is not special-cased, the client __init__.py creates a proxy function
