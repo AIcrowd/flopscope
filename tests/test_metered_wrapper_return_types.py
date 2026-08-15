@@ -267,6 +267,50 @@ def _probe_op(fn) -> list:
     return results
 
 
+def _skip_if_numpy_lacks(name: str) -> None:
+    """Skip when the RUNNING numpy carries no such function.
+
+    The tests below pin flopscope's return kind against numpy's own for the
+    identical call, so they cannot run where numpy does not have the op at all
+    -- numpy removed ``trapz`` in 2.4. Probing flopscope's surface does not
+    detect this: flopscope keeps a version-gated stub, so ``fnp.trapz`` exists
+    on every cell and raises ``UnsupportedFunctionError`` when called. Numpy's
+    surface is the one that has to be checked.
+    """
+    if getattr(np, name, None) is None:
+        pytest.skip(f"numpy {np.__version__} does not provide {name}")
+
+
+def _gated_off_ops() -> set[str]:
+    """Metered ops flopscope refuses outright on the RUNNING numpy.
+
+    Their version guard raises ``UnsupportedFunctionError`` before it looks at
+    arguments, so a bare call identifies them without needing a probe form that
+    fits. A live op raises ``TypeError`` on the same call and is not collected.
+
+    These are unsweepable by construction, not a coverage gap: ``trapz`` is
+    absent from numpy 2.4+, ``matvec``/``vecmat`` below 2.2, ``vecdot`` below
+    2.1. ``_sweep_raw_return_ops`` folds them into ``unexercised`` alongside ops
+    that merely lack a fitting probe; separating them here lets the fixed-op
+    guard stay strict about the second case while tolerating the first.
+    """
+    gated: set[str] = set()
+    for name, meta in REGISTRY.items():
+        if meta["category"] not in _METERED_CATEGORIES:
+            continue
+        fn = _resolve(name)
+        if fn is None or not callable(fn):
+            continue
+        try:
+            with flops.BudgetContext(flop_budget=10**14, quiet=True):
+                fn()
+        except UnsupportedFunctionError:
+            gated.add(name)
+        except Exception:  # noqa: BLE001 -- any other outcome means it is live
+            continue
+    return gated
+
+
 def _sweep_raw_return_ops() -> tuple[set[str], set[str], int]:
     """Return ``(raw, unexercised, exercised_count)`` over every metered op."""
     metered = sorted(
@@ -344,7 +388,12 @@ def test_fixed_ops_return_flopscope_types_in_the_live_sweep():
         "op(s) fixed for #193 return a raw numpy.ndarray again: " + ", ".join(still_raw)
     )
 
-    missed = sorted(FIXED_OPS & unexercised)
+    # An op the running numpy does not carry is unsweepable, not unguarded --
+    # fnp.trapz raises UnsupportedFunctionError on numpy 2.4+, where numpy
+    # removed trapz. Subtracting them keeps this guard meaningful on every
+    # matrix cell while still failing for an op that IS live and simply has no
+    # probe form that fits.
+    missed = sorted(FIXED_OPS & unexercised - _gated_off_ops())
     assert not missed, (
         "the sweep never exercised these fixed op(s), so it cannot vouch for "
         "them; widen the probe cascade: " + ", ".join(missed)
@@ -380,6 +429,7 @@ def test_named_offenders_return_flopscope_types(name, args):
     fn = getattr(fnp, name, None)
     if fn is None:
         pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    _skip_if_numpy_lacks(name)
     expected = getattr(np, name)(*args)
     assert isinstance(expected, np.ndarray | tuple), (
         f"probe for {name} no longer yields an array from numpy itself; pick a "
@@ -437,6 +487,7 @@ def test_scalar_results_stay_numpy_scalars(name, args):
     Pinned against numpy's own return kind for the identical call, so this
     tracks numpy rather than a remembered list.
     """
+    _skip_if_numpy_lacks(name)
     expected = getattr(np, name)(*args)
     assert isinstance(expected, np.generic), (
         f"probe for {name} no longer yields a numpy scalar from numpy itself; "
