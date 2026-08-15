@@ -862,6 +862,17 @@ logaddexp2, floor_divide, mod/remainder, fmod, float_power. NumPy's selected
 narrower than `DD->D`, so float32 operands bill as float64 and complex64 operands bill
 as complex128. This comes from NumPy's loop table, not a hand-maintained family mapping.
 
+**Iterative integer tier (weight 16.0)**: `gcd`, `lcm`. These sit at the weight-16 tier
+without being transcendental functions, and the reason is the same one the tier exists
+for: the per-element kernel is a bounded multi-step loop, not a single instruction.
+NumPy computes `gcd` by the Euclidean algorithm — a remainder loop whose trip count
+grows with the operand magnitude — and `lcm` runs that same loop and then a multiply and
+a divide. Pricing them at the arithmetic tier would sell a genuinely iterative
+per-element computation at the price of an `add`. Both are integer-only
+(`complex_factor: illegal` — NumPy raises `TypeError` on complex input), so the complex
+table below never applies to them; an `int64` operand pair bills
+`numel × 16 × 2` (weight 16.0 at the int64 rate 2.0).
+
 **Basis**: DECLARED per-element FMA=2 convention and empirical calibration.
 
 **Complex dtypes**: each op bills its per-op `complex_factor` from the class table in
@@ -1516,8 +1527,16 @@ does not depend on how wide the position values happen to be stored:
 | `tri` | `numel(output)` — **not** dtype-neutral; bills the actual output dtype like a value array (see [Generator](#generator-linspace-arange-and-kin)) | DECLARED |
 | `broadcast_shapes` | sum of `len(shape)` across the input shapes (floor 1) | DECLARED |
 | `indices` | `numel(output)` at the actual output dtype (dense: `len(dims)·prod(dims)`; sparse: `sum(dims)`) | DECLARED |
+| `ix_` | `sum(numel(outputs)) + sum(numel(Boolean inputs))` — **not** dtype-neutral: billed at the returned index arrays' actual dtype (`intp`), like `tri` above | DECLARED |
 
 All weight 1.0. Source: `src/flopscope/_array_ops.py`.
+
+`ix_`'s second term is the load-bearing one. Every Boolean argument pays
+`numel(arg)`, the full mask, because NumPy runs an internal `nonzero` scan over all of
+it; the charge therefore does not fall with the mask's popcount. Without that term a
+one-`True` mask over a large array would produce a one-element output and bill almost
+nothing, making an arbitrarily large scan free. `ix_` bills weight 1.0 — it was
+previously in the free tier and is not any more.
 
 ---
 
