@@ -1276,15 +1276,9 @@ def test_index_output_floor_is_falsifiable():
     )
 
 
-@pytest.mark.parametrize("op", sorted(INDEX_OUTPUT_OPS))
-def test_index_output_ops_bill_operand_dtype(op: str):
-    """Index-output ops are exempt from the RESULT-dtype floor (they return
-    int64 indices at any input width) but must still bill at least the
-    OPERAND's rate. Probed at float64 (rate 2.0) so this can actually fail --
-    an int32 probe makes the floor 1.0, which no resolvable dtype is below.
-    """
-    load_weights()
-    operand, probe = INDEX_OUTPUT_PROBES[op]
+def _billed_dtype_for_probe(op: str, operand: Any) -> np.dtype[Any]:
+    """Run ``op``'s probe on ``operand`` and return the dtype it billed at."""
+    _, probe = INDEX_OUTPUT_PROBES[op]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
@@ -1301,14 +1295,72 @@ def test_index_output_ops_bill_operand_dtype(op: str):
         f"{op!r} bills dtype-neutrally; if that is by design move it out of "
         f"INDEX_OUTPUT_OPS and into SKIPPED with the width-independence reason"
     )
-    billed_rate = rate_for(np.dtype(rec.resolved_dtype))
+    return np.dtype(rec.resolved_dtype)
+
+
+@pytest.mark.parametrize("op", sorted(INDEX_OUTPUT_OPS))
+def test_index_output_ops_bill_operand_dtype(op: str):
+    """Index-output ops are exempt from the RESULT-dtype floor (they return
+    int64 indices at any input width) but must still bill at least the
+    OPERAND's rate. Probed at float64 (rate 2.0) so this can actually fail --
+    an int32 probe makes the floor 1.0, which no resolvable dtype is below.
+    """
+    load_weights()
+    operand, _ = INDEX_OUTPUT_PROBES[op]
+    billed = _billed_dtype_for_probe(op, operand)
+    billed_rate = rate_for(billed)
     operand_dtype = _probe_operand_dtype(op)
     floor = rate_for(operand_dtype)
     assert billed_rate >= floor, (
-        f"{op!r} billed dtype {rec.resolved_dtype} (rate {billed_rate}) on a "
+        f"{op!r} billed dtype {billed} (rate {billed_rate}) on a "
         f"{operand_dtype} operand (needs rate >= {floor}): the index output "
         f"is int64 either way, but the comparison work is done at the operand's "
         f"width and must be billed there"
+    )
+
+
+# The floor alone cannot separate "bills the operand" from "bills the int64
+# index result": float64 and int64 both rate 2.0 on the shipped table, so an op
+# that priced its indices instead of its comparisons would satisfy it. Narrowing
+# the operand splits them -- operand billing follows down to rate 1.0, index
+# billing stays at 2.0.
+IDX_NARROW_DTYPE = np.dtype("float32")
+
+# searchsorted's needle and digitize's bin edges are float64 in their probes, so
+# NEP-50 promotes the call even when the array narrows. They bill above the
+# operand, which over-bills rather than under-bills -- the safe direction -- so
+# they are exempt from tracking down and pinned to over-resolving instead, which
+# keeps the exemption from rotting into a blanket skip.
+NARROWING_EXEMPT = frozenset({"searchsorted", "digitize"})
+
+
+@pytest.mark.parametrize("op", sorted(INDEX_OUTPUT_OPS))
+def test_index_output_ops_track_operand_width_down(op: str):
+    """Billing must follow the operand down, not sit on the index result's width."""
+    load_weights()
+    operand, _ = INDEX_OUTPUT_PROBES[op]
+    wide_rate = rate_for(_probe_operand_dtype(op))
+    narrow_rate = rate_for(IDX_NARROW_DTYPE)
+    assert narrow_rate < wide_rate, (
+        f"{IDX_NARROW_DTYPE} rates {narrow_rate} and the probe operand rates "
+        f"{wide_rate}, so narrowing separates nothing and this test asserts "
+        "nothing -- pick a narrower probe dtype"
+    )
+
+    billed = _billed_dtype_for_probe(op, operand.astype(IDX_NARROW_DTYPE))
+    billed_rate = rate_for(billed)
+    if op in NARROWING_EXEMPT:
+        assert billed_rate > narrow_rate, (
+            f"{op!r} now tracks its operand down to {billed} -- it no longer "
+            "over-resolves, so drop it from NARROWING_EXEMPT and let it be "
+            "held to the same rule as the rest"
+        )
+        return
+    assert billed_rate <= narrow_rate, (
+        f"{op!r} billed dtype {billed} (rate {billed_rate}) on a narrowed "
+        f"{IDX_NARROW_DTYPE} operand (needs rate <= {narrow_rate}): billing "
+        "that does not follow the operand down is pricing the int64 index "
+        "output rather than the comparison work"
     )
 
 
