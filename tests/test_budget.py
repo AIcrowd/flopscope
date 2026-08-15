@@ -1236,3 +1236,16 @@ def test_closed_context_timing_properties_match_the_summary():
     summary = ctx.summary_dict()
     assert summary["wall_time_s"] == wall
     assert summary["residual_wall_time_s"] == residual
+
+
+def test_huge_int_flop_budget_is_still_accepted():
+    """An int budget past float range must not trip the finite guard.
+
+    A Python int is finite at any magnitude, but ``math.isfinite`` on one above
+    roughly 1.8e308 raises ``OverflowError: int too large to convert to
+    float``. origin/main accepted such a budget, and a validator whose job is a
+    clean ``ValueError`` must not introduce a new error class of its own.
+    """
+    huge = 10**400
+    ctx = BudgetContext(flop_budget=huge, quiet=True)
+    assert ctx.flop_budget == huge

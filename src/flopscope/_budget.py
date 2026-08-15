@@ -1411,7 +1411,13 @@ class BudgetContext:
         # so it slipped past ``<= 0``, propagated through ``flops_remaining``
         # and made the exhaustion comparison always False -- BudgetExhaustedError
         # became unreachable and the budget silently stopped enforcing.
-        if not math.isfinite(flop_budget):
+        #
+        # A Python int is finite whatever its magnitude, and math.isfinite on
+        # one above ~1.8e308 raises OverflowError converting it to float. An
+        # arbitrarily large int budget was accepted before this guard and must
+        # keep being accepted -- the validator's job is a clean ValueError, not
+        # a new error class of its own.
+        if not isinstance(flop_budget, int) and not math.isfinite(flop_budget):
             raise ValueError(f"flop_budget must be finite, got {flop_budget}")
         if flop_budget <= 0:
             raise ValueError(f"flop_budget must be > 0, got {flop_budget}")
