@@ -116,20 +116,14 @@ _METERED_CATEGORIES = {
 KNOWN_RAW_RETURN_OPS = frozenset(
     {
         "bmat",
-        "dot",
         "fft.fftfreq",
         "fft.fftshift",
         "fft.ifftshift",
         "fft.rfftfreq",
         "histogramdd",
-        "inner",
         "isfinite",
         "isinf",
         "isnan",
-        "matmul",
-        "matvec",
-        "vecdot",
-        "vecmat",
     }
 )
 
@@ -581,6 +575,37 @@ _SCALAR_RETURNING_PROBES: list[tuple[str, tuple]] = [
     ("linalg.trace", (_M,)),
     ("linalg.vector_norm", (_V,)),
     ("linalg.matrix_norm", (_M,)),
+    # The 1-D x 1-D shape of every op routed through _einsum_routed_binary.
+    # These operands are plain numpy, i.e. BY-VALUE on the wire, which is the
+    # form the site's scalar branch must preserve: with plain operands the
+    # contraction hands back numpy's own scalar and the server packs it by
+    # value. An unconditional wrap at that return -- the obvious way to write
+    # the #193 fix -- turns each of these into a 0-d FlopscopeArray, which is
+    # an ndarray, which _pack_result stores as a handle: VAL:float64 becomes
+    # H:(), and downstream grader arithmetic goes 0 -> billed. That is the
+    # repricing these six entries exist to catch.
+    ("dot", (_V, _W)),
+    ("inner", (_V, _W)),
+    ("matmul", (_V, _W)),
+    ("vecdot", (_V, _W)),
+    ("linalg.matmul", (_V, _W)),
+    ("linalg.vecdot", (_V, _W)),
+]
+
+# The same ops at the same shape, with FlopscopeArray operands. This is the
+# OTHER half of the contraction site's contract and it points the other way:
+# with a flopscope operand the site has always run its result through
+# _asflopscope, so even the scalar-valued 1-D x 1-D shape reaches the grader as
+# a 0-d array handle. Replacing that with the scalar-preserving
+# _wrap_metered_result would REMOVE a wrap that ships today and drop downstream
+# grader billing from 2 FLOPs to 0.
+_WHEST_OPERAND_CONTRACTIONS = [
+    "dot",
+    "inner",
+    "matmul",
+    "vecdot",
+    "linalg.matmul",
+    "linalg.vecdot",
 ]
 
 
@@ -645,6 +670,53 @@ def test_scalar_results_still_pack_by_value(name, args):
         f"by-value scalar. The client turns a handle into a RemoteArray whose "
         f"arithmetic is billed on the grader; it turns a value into a "
         f"RemoteScalar whose arithmetic is free. This is a grader repricing."
+    )
+
+
+@pytest.mark.parametrize("name", _WHEST_OPERAND_CONTRACTIONS)
+def test_contractions_on_flopscope_operands_keep_their_array_handle(name):
+    """A flopscope operand's contraction result must stay an ARRAY on the wire.
+
+    The mirror image of :func:`test_scalar_results_still_pack_by_value`, and
+    the reason ``_einsum_routed_binary`` cannot simply
+    ``return _wrap_metered_result(result)``. Its whest-operand branch has always
+    called ``_asflopscope``, which converts numpy's scalar to a 0-d
+    ``FlopscopeArray``; the grader therefore stores a handle and bills the 2
+    FLOPs of ``z + z``. Swapping in the scalar-preserving wrap would hand the
+    scalar straight back, the server would pack it by value, and that billing
+    would drop to 0 -- a downward repricing of every 1-D x 1-D dot / inner /
+    matmul / vecdot in a submission that keeps its arrays in flopscope types.
+    """
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    a = _V.copy().view(FlopscopeArray)
+    b = _W.copy().view(FlopscopeArray)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        try:
+            result = fn(a, b)
+        except UnsupportedFunctionError:
+            pytest.skip(f"fnp.{name} is gated off on numpy {np.__version__}")
+
+    assert isinstance(result, np.ndarray), (
+        f"fnp.{name} on FlopscopeArray operands returned "
+        f"{type(result).__module__}.{type(result).__name__}; it returned a 0-d "
+        "array before, and a scalar packs by value -- see the docstring"
+    )
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        f"fnp.{name} on FlopscopeArray operands now packs by value. The client "
+        "turns a value into a RemoteScalar whose arithmetic is free and a "
+        "handle into a RemoteArray whose arithmetic is billed, so this drops "
+        "what the grader charges. It is a repricing, not a fix."
     )
 
 

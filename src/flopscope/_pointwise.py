@@ -4976,7 +4976,27 @@ def _einsum_routed_binary(
             return SymmetricTensor(_np.asarray(result), symmetry=output_symmetry)
     if out is not None:
         return out
-    return _asflopscope(result) if inputs_were_whest else result
+    # Two branches, not one, and the asymmetry is deliberate.
+    #
+    # A flopscope operand has always left here through ``_asflopscope``, which
+    # converts even numpy's SCALAR (the 1-D x 1-D shape of dot/inner/matmul/
+    # vecdot) into a 0-d FlopscopeArray. The server packs that as an array
+    # handle, the participant gets a RemoteArray, and downstream arithmetic is
+    # billed. Collapsing this branch into ``_wrap_metered_result`` -- which
+    # passes scalars through untouched -- would hand the scalar back, the
+    # server would pack it by value, and the grader's charge for that
+    # arithmetic would drop from billed to 0. That is a repricing of shipped
+    # behaviour, so the branch stays exactly as it was.
+    #
+    # A plain-numpy operand took ``return result``, handing back the raw
+    # ndarray numpy allocated: arithmetic on it billed 0 in-process while the
+    # grader billed it through the client's RemoteArray (#193). Only the
+    # ndarray half of that is wrong -- a numpy scalar reaches the grader by
+    # value and is free on both sides -- which is exactly the line
+    # ``_wrap_metered_result`` draws.
+    if inputs_were_whest:
+        return _asflopscope(result)
+    return _wrap_metered_result(result)
 
 
 @_counted_wrapper
