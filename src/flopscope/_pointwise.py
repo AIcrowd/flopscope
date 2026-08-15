@@ -5803,7 +5803,11 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         _op.set_cost(
             _builtins.max(3 * (result.size if hasattr(result, "size") else 1), 1)
         )
-    return result  # type: ignore[return-value]
+    # Safe at every vector width, including the 2-vector form that contracts the
+    # vector axis away: numpy.cross returns a 0-d ndarray there, not a numpy
+    # scalar, so the server already stored a handle and the wrap cannot flip the
+    # wire form. See test_cross_results_were_already_array_handles.
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(

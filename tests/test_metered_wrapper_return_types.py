@@ -115,7 +115,6 @@ _METERED_CATEGORIES = {
 KNOWN_RAW_RETURN_OPS = frozenset(
     {
         "bmat",
-        "cross",
         "dot",
         "fft.fftfreq",
         "fft.fftshift",
@@ -405,6 +404,79 @@ def test_named_offenders_return_flopscope_types(name, args):
         result = fn(*args)
     assert _flopscope_typed(result), (
         f"fnp.{name} returned {type(result).__module__}.{type(result).__name__}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# cross: an ndarray at every vector width, so wrapping cannot move the wire
+# ---------------------------------------------------------------------------
+
+_V3 = np.array([1.0, 2.0, 3.0])
+_W3 = np.array([3.0, 2.0, 1.0])
+_V2 = np.array([1.0, 2.0])
+_W2 = np.array([3.0, 2.0])
+
+# Every vector width numpy.cross accepts. The 2-vector forms are the ones worth
+# spelling out: they contract the vector axis away entirely, so the result is
+# 0-d -- the shape at which a wrap would flip a scalar's wire form if the value
+# were a numpy scalar. It is not; see the second test.
+_CROSS_PROBES = [
+    ("3v x 3v", _V3, _W3),
+    ("2v x 2v", _V2, _W2),
+    ("2v x 3v", _V2, _W3),
+    ("3v x 2v", _V3, _W2),
+    ("batched 3v", np.stack([_V3, _W3]), np.stack([_W3, _V3])),
+    ("batched 2v", np.stack([_V2, _W2]), np.stack([_W2, _V2])),
+]
+
+
+@pytest.mark.parametrize("label, a, b", _CROSS_PROBES)
+def test_cross_returns_a_flopscope_type_at_every_vector_width(label, a, b):
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.cross(a, b)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.cross({label}) returned {type(result).__module__}."
+        f"{type(result).__name__}; downstream arithmetic on a raw ndarray bills "
+        "0 in-process while the grader bills it through the client's "
+        "RemoteArray (#193)"
+    )
+    assert np.allclose(np.asarray(result), np.cross(a, b))
+
+
+@pytest.mark.parametrize("label, a, b", _CROSS_PROBES)
+def test_cross_results_were_already_array_handles(label, a, b):
+    """Why wrapping ``cross`` costs the grader nothing, pinned at the wire.
+
+    The 2-vector forms contract the vector axis away and return a 0-d result,
+    which is the shape where a wrap normally repricing-flips a by-value
+    ``RemoteScalar`` into an array handle. ``numpy.cross`` returns a 0-d
+    *ndarray* rather than a numpy scalar there, so ``_pack_result`` already
+    stored a handle before this change and stores one after. Asserted against
+    numpy's own return kind, so it tracks numpy rather than a remembered fact.
+    """
+    expected = np.cross(a, b)
+    assert isinstance(expected, np.ndarray) and not isinstance(expected, np.generic), (
+        f"numpy.cross({label}) now returns "
+        f"{type(expected).__module__}.{type(expected).__name__}. If numpy has "
+        "started returning a scalar here, wrapping cross is no longer "
+        "grader-neutral at this width -- re-measure before keeping the wrap."
+    )
+
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.cross(a, b)
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        f"fnp.cross({label}) now packs by value; it packed as an array handle "
+        "before the #193 wrap, so this is a grader repricing in the other "
+        "direction"
     )
 
 
