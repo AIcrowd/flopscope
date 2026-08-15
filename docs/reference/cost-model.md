@@ -196,8 +196,8 @@ but nothing is written into it:
 1. **Views / metadata** — operations that return a view of existing memory or inspect
    metadata without touching element values: `transpose`, `swapaxes`,
    `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
-   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `asfortranarray`,
-   `ascontiguousarray`, `view`, `real`/`imag` (component extraction), `split`,
+   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`,
+   `view`, `real`/`imag` (component extraction), `split`,
    `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal` (the 2-D view path — see
    [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
    1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
@@ -1676,7 +1676,7 @@ Weight 0 now covers two sub-families:
 - **Views / metadata** — no new buffer, or a read-only reinterpretation of an
   existing one: `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
   `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`, `atleast_1d`/`atleast_2d`/
-  `atleast_3d`, `broadcast_to`, `asfortranarray`, `ascontiguousarray`,
+  `atleast_3d`, `broadcast_to`,
   `view`, `real`/`imag` (component extraction — a strided view or constant-fill, no
   arithmetic), `split`, `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal`
   (2-D view path only — the 1-D *construct* path writes, see [Copy and

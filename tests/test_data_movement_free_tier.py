@@ -416,3 +416,134 @@ def test_ops_json_weight_equals_billed_weight():
                 )
     finally:
         reset_weights()
+
+
+# ---------------------------------------------------------------------------
+# The doc's own weight-0 lists must name ops that exist and really are free
+# ---------------------------------------------------------------------------
+import json
+
+from flopscope._ndarray import FlopscopeArray
+
+_COST_MODEL_MD = (
+    pathlib.Path(__file__).resolve().parents[1] / "docs" / "reference" / "cost-model.md"
+)
+_OPS_JSON = (
+    pathlib.Path(__file__).resolve().parents[1] / "website" / "public" / "ops.json"
+)
+
+# A free-tier section is any heading that declares itself "(weight 0.0)"; its
+# members are the bold-labelled list items underneath it. Matching on the
+# document's structure rather than on a copy of the member names is the point:
+# the guard has to catch the *next* stale name, not just the ones removed in
+# the commit that added it.
+_FREE_TIER_HEADING = re.compile(r"^#{2,6}[^\n]*\(weight 0\.0\)[^\n]*$", re.M)
+_MD_HEADING = re.compile(r"^#{1,6}\s", re.M)
+_FREE_TIER_ITEM = re.compile(r"^[ \t]*(?:\d+\.|[-*])[ \t]+(?=\*\*)", re.M)
+_BACKTICKED = re.compile(r"`([^`]+)`")
+
+
+def _positive_enumeration(item: str) -> str:
+    """Return the opening sentence of a list item with parentheticals dropped.
+
+    Each item names its members in its first sentence and then spends the rest
+    of the paragraph on counter-examples -- "``reshape``, ``ravel`` ... do
+    *not* belong here", "Any *other* constant fill (``ones``, ``full``) ... is
+    charged", the parenthesised shape/stride introspection tail. Only the
+    opening, unparenthesised span lists actual members, so the scan stops at
+    the first top-level sentence end and drops anything nested in parentheses.
+    Backtick spans are opaque, so ``linalg.diagonal``'s dot is not mistaken for
+    a sentence end.
+    """
+    out: list[str] = []
+    depth = 0
+    in_code = False
+    i = 0
+    while i < len(item):
+        ch = item[i]
+        if ch == "`":
+            in_code = not in_code
+            if depth == 0:
+                out.append(ch)
+            i += 1
+            continue
+        if not in_code:
+            if ch == "(":
+                depth += 1
+                i += 1
+                continue
+            if ch == ")":
+                depth = max(0, depth - 1)
+                i += 1
+                continue
+            if ch == "." and depth == 0:
+                following = item[i + 1] if i + 1 < len(item) else " "
+                if following.isspace():
+                    break
+        if depth == 0:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _doc_free_tier_names() -> dict[str, str]:
+    """Map every name in cost-model.md's weight-0 lists to its section heading."""
+    md = _COST_MODEL_MD.read_text()
+    headings = list(_FREE_TIER_HEADING.finditer(md))
+    assert headings, (
+        "cost-model.md has no '(weight 0.0)' section for this guard to read"
+    )
+    found: dict[str, str] = {}
+    for heading in headings:
+        following = _MD_HEADING.search(md, heading.end())
+        body = (
+            md[heading.end() : following.start()] if following else md[heading.end() :]
+        )
+        starts = [m.end() for m in _FREE_TIER_ITEM.finditer(body)]
+        assert starts, f"no member list found under {heading.group(0).strip()!r}"
+        for i, start in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else len(body)
+            span = _positive_enumeration(body[start:end])
+            for token in _BACKTICKED.findall(span):
+                for name in (part.strip() for part in token.split("/")):
+                    if name:
+                        found.setdefault(name, heading.group(0).strip())
+    return found
+
+
+def test_doc_free_tier_names_exist_in_ops_json():
+    """Every op named in cost-model.md's weight-0 lists must actually exist and
+    actually be free.
+
+    test_free_labels_match_actual_weight only scans attach_docstring() calls in
+    source, so it cannot see a name that appears only in doc prose -- which is
+    how two ops that raise AttributeError sat in the documented free tier.
+    """
+    names = _doc_free_tier_names()
+    # Without this, a parser that quietly stopped matching would turn the guard
+    # into an assertion over an empty set.
+    assert len(names) >= 25, (
+        f"free-tier scan read only {len(names)} names, so it is no longer "
+        f"reading the doc's lists: {sorted(names)}"
+    )
+
+    ops = {
+        o["name"]: o["weight"] for o in json.loads(_OPS_JSON.read_text())["operations"]
+    }
+    offenders = []
+    for name, heading in sorted(names.items()):
+        if name in ops:
+            if ops[name] != 0.0:
+                offenders.append(
+                    f"{name}: documented free under {heading!r} but ops.json "
+                    f"weight={ops[name]}"
+                )
+        elif not (hasattr(FlopscopeArray, name) or hasattr(SymmetricTensor, name)):
+            offenders.append(
+                f"{name}: documented free under {heading!r} but is absent from "
+                "ops.json and is not an array attribute either -- it does not exist"
+            )
+    assert not offenders, (
+        "cost-model.md's weight-0 lists name ops that are not free (or not "
+        "there at all):\n  " + "\n  ".join(offenders)
+    )

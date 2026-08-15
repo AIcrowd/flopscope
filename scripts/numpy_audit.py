@@ -33,6 +33,11 @@ SKIP_NAMES: frozenset[str] = frozenset(
         "array",
         "asarray",
         "asanyarray",
+        # ascontiguousarray/asfortranarray are NOT handled: flopscope does not
+        # implement them at all (they raise AttributeError) and they are
+        # deliberately absent from the weight-0 free tier -- billing a layout
+        # change at 0 would be a free data-movement path. Skipped here only so
+        # the audit does not re-report a known, decided gap.
         "ascontiguousarray",
         "asfortranarray",
         # --- dtype / type-system ---
