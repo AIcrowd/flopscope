@@ -422,8 +422,8 @@ def test_ops_json_weight_equals_billed_weight():
 # The doc's own weight-0 lists must name ops that exist and really are free
 # ---------------------------------------------------------------------------
 import json
-
-from flopscope._ndarray import FlopscopeArray
+from collections.abc import Callable
+from typing import Any
 
 _COST_MODEL_MD = (
     pathlib.Path(__file__).resolve().parents[1] / "docs" / "reference" / "cost-model.md"
@@ -441,6 +441,21 @@ _FREE_TIER_HEADING = re.compile(r"^#{2,6}[^\n]*\(weight 0\.0\)[^\n]*$", re.M)
 _MD_HEADING = re.compile(r"^#{1,6}\s", re.M)
 _FREE_TIER_ITEM = re.compile(r"^[ \t]*(?:\d+\.|[-*])[ \t]+(?=\*\*)", re.M)
 _BACKTICKED = re.compile(r"`([^`]+)`")
+
+# A ratchet, not a sanity check. The scan reads this many names today; a drop
+# means the parser stopped seeing part of the document, which would quietly
+# shrink what the guard covers. Deliberately removing a documented free op is
+# expected to lower this number in the same commit.
+_FREE_TIER_NAME_COUNT = 30
+
+# Documented free names with no ops.json row because they are array methods
+# rather than registry ops. Existence is not proof of freeness -- `flatten` is
+# an array method too and it bills -- so each is exercised and must actually
+# cost 0. A new name reaching this path has to be measured, not merely resolved.
+_FREE_ATTR_OPERAND = fnp.asarray(np.arange(8, dtype=np.float64))
+_FREE_ATTR_PROBES: dict[str, Callable[[Any], Any]] = {
+    "view": lambda a: a.view(),
+}
 
 
 def _positive_enumeration(item: str) -> str:
@@ -501,13 +516,22 @@ def _doc_free_tier_names() -> dict[str, str]:
         )
         starts = [m.end() for m in _FREE_TIER_ITEM.finditer(body)]
         assert starts, f"no member list found under {heading.group(0).strip()!r}"
+        read_here = 0
         for i, start in enumerate(starts):
             end = starts[i + 1] if i + 1 < len(starts) else len(body)
             span = _positive_enumeration(body[start:end])
             for token in _BACKTICKED.findall(span):
                 for name in (part.strip() for part in token.split("/")):
                     if name:
+                        read_here += 1
                         found.setdefault(name, heading.group(0).strip())
+        # Per-section, because most of a later section's names are already
+        # claimed by an earlier heading: a total-only check would not notice
+        # one section going dark.
+        assert read_here, (
+            f"no member names extracted under {heading.group(0).strip()!r} -- "
+            "the scan is no longer reading that section"
+        )
     return found
 
 
@@ -521,28 +545,46 @@ def test_doc_free_tier_names_exist_in_ops_json():
     """
     names = _doc_free_tier_names()
     # Without this, a parser that quietly stopped matching would turn the guard
-    # into an assertion over an empty set.
-    assert len(names) >= 25, (
-        f"free-tier scan read only {len(names)} names, so it is no longer "
-        f"reading the doc's lists: {sorted(names)}"
+    # into an assertion over a shrunken set.
+    assert len(names) >= _FREE_TIER_NAME_COUNT, (
+        f"free-tier scan read {len(names)} names, down from "
+        f"{_FREE_TIER_NAME_COUNT}, so it is no longer reading all of the doc's "
+        "lists (or a name was deliberately removed, in which case lower the "
+        f"count with it): {sorted(names)}"
     )
 
     ops = {
         o["name"]: o["weight"] for o in json.loads(_OPS_JSON.read_text())["operations"]
     }
     offenders = []
-    for name, heading in sorted(names.items()):
-        if name in ops:
-            if ops[name] != 0.0:
+    load_weights()
+    try:
+        for name, heading in sorted(names.items()):
+            if name in ops:
+                if ops[name] != 0.0:
+                    offenders.append(
+                        f"{name}: documented free under {heading!r} but ops.json "
+                        f"weight={ops[name]}"
+                    )
+                continue
+            probe = _FREE_ATTR_PROBES.get(name)
+            if probe is None:
                 offenders.append(
-                    f"{name}: documented free under {heading!r} but ops.json "
-                    f"weight={ops[name]}"
+                    f"{name}: documented free under {heading!r} but is absent "
+                    "from ops.json -- if it is a free array method give it a "
+                    "_FREE_ATTR_PROBES entry so its cost is measured, otherwise "
+                    "it does not exist"
                 )
-        elif not (hasattr(FlopscopeArray, name) or hasattr(SymmetricTensor, name)):
-            offenders.append(
-                f"{name}: documented free under {heading!r} but is absent from "
-                "ops.json and is not an array attribute either -- it does not exist"
-            )
+                continue
+            with flops.BudgetContext(flop_budget=10**9, quiet=True) as ctx:
+                probe(_FREE_ATTR_OPERAND)
+            if ctx.flops_used != 0:
+                offenders.append(
+                    f"{name}: documented free under {heading!r} but the array "
+                    f"method bills {ctx.flops_used} FLOPs"
+                )
+    finally:
+        reset_weights()
     assert not offenders, (
         "cost-model.md's weight-0 lists name ops that are not free (or not "
         "there at all):\n  " + "\n  ".join(offenders)
