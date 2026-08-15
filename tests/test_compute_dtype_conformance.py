@@ -1205,7 +1205,6 @@ def test_billed_rate_covers_compute_dtype(op: str):
 # ---------------------------------------------------------------------------
 IDX_WIDE = np.arange(1, 9, dtype=np.float64)  # rate 2.0, unlike the int32 sweep
 IDX_WIDE_CENTERED = IDX_WIDE - 4.0  # spans zero, for the nonzero family
-IDX_OPERAND_DTYPE = np.dtype("float64")
 
 # Narrow dtypes spanning the bottom of the rate table. Their minimum is the
 # lowest rate any resolvable dtype can carry; a floor at that value is
@@ -1214,24 +1213,34 @@ IDX_OPERAND_DTYPE = np.dtype("float64")
 # weights, where every rate is 1.0.
 NARROW_DTYPES = ("bool", "int8", "int16", "int32", "uint8", "float16", "float32")
 
-INDEX_OUTPUT_PROBES: dict[str, Callable[[], Any]] = {
-    "argmax": lambda: fnp.argmax(IDX_WIDE),
-    "argmin": lambda: fnp.argmin(IDX_WIDE),
-    "nanargmax": lambda: fnp.nanargmax(IDX_WIDE),
-    "nanargmin": lambda: fnp.nanargmin(IDX_WIDE),
-    "argsort": lambda: fnp.argsort(IDX_WIDE),
-    "argpartition": lambda: fnp.argpartition(IDX_WIDE, 2),
-    "nonzero": lambda: fnp.nonzero(IDX_WIDE_CENTERED),
-    "flatnonzero": lambda: fnp.flatnonzero(IDX_WIDE_CENTERED),
-    "argwhere": lambda: fnp.argwhere(IDX_WIDE_CENTERED),
-    "searchsorted": lambda: fnp.searchsorted(IDX_WIDE, 4.0),
-    "count_nonzero": lambda: fnp.count_nonzero(IDX_WIDE),
-    "digitize": lambda: fnp.digitize(IDX_WIDE, [2.0, 4.0, 6.0]),
-    "lexsort": lambda: fnp.lexsort((IDX_WIDE, IDX_WIDE)),
-    "unique_all": lambda: fnp.unique_all(IDX_WIDE),
-    "unique_counts": lambda: fnp.unique_counts(IDX_WIDE),
-    "unique_inverse": lambda: fnp.unique_inverse(IDX_WIDE),
+# op -> (operand probed, call taking that operand). The operand travels with
+# the probe so the floor and the failure message both read the dtype actually
+# exercised. A free-floating "the operand dtype is float64" constant can drift
+# away from the probes: narrowing one probe would then be reported against the
+# constant's dtype, naming an operand the run never used.
+INDEX_OUTPUT_PROBES: dict[str, tuple[Any, Callable[[Any], Any]]] = {
+    "argmax": (IDX_WIDE, lambda a: fnp.argmax(a)),
+    "argmin": (IDX_WIDE, lambda a: fnp.argmin(a)),
+    "nanargmax": (IDX_WIDE, lambda a: fnp.nanargmax(a)),
+    "nanargmin": (IDX_WIDE, lambda a: fnp.nanargmin(a)),
+    "argsort": (IDX_WIDE, lambda a: fnp.argsort(a)),
+    "argpartition": (IDX_WIDE, lambda a: fnp.argpartition(a, 2)),
+    "nonzero": (IDX_WIDE_CENTERED, lambda a: fnp.nonzero(a)),
+    "flatnonzero": (IDX_WIDE_CENTERED, lambda a: fnp.flatnonzero(a)),
+    "argwhere": (IDX_WIDE_CENTERED, lambda a: fnp.argwhere(a)),
+    "searchsorted": (IDX_WIDE, lambda a: fnp.searchsorted(a, 4.0)),
+    "count_nonzero": (IDX_WIDE, lambda a: fnp.count_nonzero(a)),
+    "digitize": (IDX_WIDE, lambda a: fnp.digitize(a, [2.0, 4.0, 6.0])),
+    "lexsort": (IDX_WIDE, lambda a: fnp.lexsort((a, a))),
+    "unique_all": (IDX_WIDE, lambda a: fnp.unique_all(a)),
+    "unique_counts": (IDX_WIDE, lambda a: fnp.unique_counts(a)),
+    "unique_inverse": (IDX_WIDE, lambda a: fnp.unique_inverse(a)),
 }
+
+
+def _probe_operand_dtype(op: str) -> np.dtype[Any]:
+    """The dtype of the array the probe for ``op`` actually feeds in."""
+    return np.dtype(INDEX_OUTPUT_PROBES[op][0].dtype)
 
 
 def test_index_output_probe_accounting():
@@ -1244,21 +1253,26 @@ def test_index_output_probe_accounting():
 
 
 def test_index_output_floor_is_falsifiable():
-    """The operand floor must sit above the lowest rate any dtype can resolve to.
+    """Every probe's operand must rate above the lowest rate any dtype resolves to.
 
     This is the guard on the guard. A floor equal to the minimum rate cannot be
-    violated by any billed dtype, so the per-op assertions below would pass
+    violated by any billed dtype, so the per-op assertion below would pass
     unconditionally -- exactly the defect that left the result-dtype exemption
-    asserting nothing. Swapping the float64 probes for int32 ones would silently
-    reintroduce it; this fails instead.
+    asserting nothing. Narrowing any float64 probe to int32 would silently
+    reintroduce it for that op; this fails instead. It reads each probe's own
+    operand, so it covers all sixteen rather than one shared constant.
     """
     load_weights()
     min_rate = min(rate_for(np.dtype(name)) for name in NARROW_DTYPES)
-    floor = rate_for(IDX_OPERAND_DTYPE)
-    assert floor > min_rate, (
-        f"operand probe dtype {IDX_OPERAND_DTYPE} rates {floor}, the minimum "
-        f"any dtype can resolve to ({min_rate}) -- the index-output floor "
-        "below cannot fail and is asserting nothing"
+    weak = sorted(
+        (op, str(_probe_operand_dtype(op)), rate_for(_probe_operand_dtype(op)))
+        for op in INDEX_OUTPUT_PROBES
+        if rate_for(_probe_operand_dtype(op)) <= min_rate
+    )
+    assert not weak, (
+        "these probe operands rate at or below the minimum rate any dtype can "
+        f"resolve to ({min_rate}), so the index-output floor below cannot fail "
+        f"for them and is asserting nothing: {weak}"
     )
 
 
@@ -1270,11 +1284,12 @@ def test_index_output_ops_bill_operand_dtype(op: str):
     an int32 probe makes the floor 1.0, which no resolvable dtype is below.
     """
     load_weights()
+    operand, probe = INDEX_OUTPUT_PROBES[op]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
             try:
-                INDEX_OUTPUT_PROBES[op]()
+                probe(operand)
             except UnsupportedFunctionError as e:
                 # Version-gated op absent from the RUNNING numpy, matching the
                 # int32 sweep's handling above.
@@ -1287,10 +1302,11 @@ def test_index_output_ops_bill_operand_dtype(op: str):
         f"INDEX_OUTPUT_OPS and into SKIPPED with the width-independence reason"
     )
     billed_rate = rate_for(np.dtype(rec.resolved_dtype))
-    floor = rate_for(IDX_OPERAND_DTYPE)
+    operand_dtype = _probe_operand_dtype(op)
+    floor = rate_for(operand_dtype)
     assert billed_rate >= floor, (
         f"{op!r} billed dtype {rec.resolved_dtype} (rate {billed_rate}) on a "
-        f"{IDX_OPERAND_DTYPE} operand (needs rate >= {floor}): the index output "
+        f"{operand_dtype} operand (needs rate >= {floor}): the index output "
         f"is int64 either way, but the comparison work is done at the operand's "
         f"width and must be billed there"
     )
