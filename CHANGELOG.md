@@ -57,6 +57,43 @@
 
 ### Fix
 
+- **client**: `fnp.array` and `fnp.asarray` now accept a `numpy.ndarray` (and
+  any other buffer-protocol object) at any rank. Both documented conversions
+  used to fail: `asarray` was an auto-generated proxy with no encoding for an
+  ndarray argument and raised `RemoteSerializationError`, while `array`'s
+  buffer path was gated on `mv.ndim <= 1` and raised `TypeError` for anything
+  above 1-D, even though the `create_from_data` wire call has always carried an
+  arbitrary shape. Fortran-order and strided inputs keep their logical values
+  (`memoryview.tobytes()` is C-order for both), and a 0-d buffer now has rank 0
+  instead of the rank 1 the old `nbytes // itemsize` length produced. Buffers
+  with no wire dtype — byte-swapped, structured, string — still raise. The
+  client remains numpy-free: everything goes through `memoryview`. **No billed
+  amount changes.** `asarray` materializes locally only for values the wire
+  refuses today and then dispatches exactly as before, so every call that
+  already worked keeps its dispatch and its charge; what changes is that calls
+  that used to error now run and bill at the existing `array`/`asarray` rates.
+  One asymmetry is now reachable above rank 1 and is pinned rather than
+  changed: a buffer carrying `dtype=` is ingested free and then cast
+  server-side, where a nested list packs directly in the target dtype and bills
+  nothing — the buffer route is the more expensive of the two, at the same
+  per-element rate it has always charged at rank 1. This is participant-visible
+  and needs a starter-kit pin bump at release (#194).
+- **client**: `BudgetContext.wall_time_s` and
+  `BudgetContext.residual_wall_time_s` are now live while the context is open,
+  instead of returning `None` until it closed while `summary_dict()` reported
+  live values for the same two quantities — one quantity with two different
+  answers. Both are measured locally from the process clock and the local
+  dispatch accumulator, so a read costs no round trip; only the
+  backend/overhead split of that dispatch time needs the server's kernel
+  measurement, and `flopscope_backend_time_s` / `flopscope_overhead_time_s` are
+  therefore still `0.0` until close. The property and the summary path now
+  share one measurement helper and cannot drift apart. Reads after the context
+  exits — the path scoring bills from — are unchanged, as are reads on a
+  context that was never entered, which still answer `None`. Reading is
+  deliberately not counted as flopscope dispatch: the read is the caller's own
+  Python and stays in the billed residual, so polling the property cannot shave
+  it. Participant-visible (a live read answers a float where it answered
+  `None`); needs a starter-kit pin bump at release (#211, client half).
 - **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
   it, and refuses what numpy refuses before any budget is charged. Three
   measured gaps, all of them a charge for work that never ran or a rejection

@@ -90,6 +90,34 @@ def test_timing_nonzero_and_identity():
     assert abs(ctx.wall_time_s - total) < 0.05
 
 
+def test_live_timing_properties_match_the_live_summary_end_to_end():
+    """The properties and summary_dict() answer the same live question (#211).
+
+    The unit test pins the arithmetic against a mock; this pins it against a
+    real server, where summary_dict() makes an actual round trip and the two
+    property reads make none.
+    """
+    import flopscope as fl
+
+    with fl.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fl.ones((32, 32))
+        _ = fl.dot(a, a)
+        time.sleep(0.05)
+
+        live_wall = ctx.wall_time_s
+        live_residual = ctx.residual_wall_time_s
+        summary = ctx.summary_dict()
+
+    assert live_wall is not None and live_wall > 0
+    assert live_residual is not None and live_residual >= 0.05
+    # summary_dict() measures after the property reads, so on a monotonic
+    # clock it can only be larger; the gap is one round trip, not a
+    # difference of definition.
+    assert summary["wall_time_s"] >= live_wall
+    assert summary["wall_time_s"] - live_wall < 0.05
+    assert abs(summary["residual_wall_time_s"] - live_residual) < 0.05
+
+
 def test_tolist_is_overhead_not_residual():
     """Heavy fetch+reconstruct with NO participant Python ⇒ residual ≈ 0."""
     import flopscope as fl
