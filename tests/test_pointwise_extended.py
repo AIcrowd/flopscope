@@ -226,24 +226,51 @@ def test_cov_with_y():
 @pytest.mark.parametrize("fn_name", ["cov", "corrcoef"])
 @pytest.mark.parametrize("rowvar", [True, False])
 @pytest.mark.parametrize("zero_d", [numpy.float64(2.0), numpy.array(2.0)])
-def test_zero_d_y_raises_value_error_like_numpy(fn_name, rowvar, zero_d):
-    """A 0-d ``y`` must be refused with numpy's exception class, not ours.
+@pytest.mark.parametrize("x", [numpy.ones((3, 4)), numpy.ones((2,)), numpy.ones((1,))])
+def test_zero_d_y_raises_value_error_not_index_error(fn_name, rowvar, zero_d, x):
+    """A 0-d ``y`` must be refused with ``ValueError``, not flopscope's own
+    ``IndexError``.
 
     The cost helpers read ``y.shape[0]``/``shape[1]`` behind an ``ndim == 1``
-    guard, so a 0-d y crashed with flopscope's own IndexError. numpy's own
-    outcome is pinned in the same test rather than a remembered exception
-    class -- the #209/#210 lesson. Nothing is billed either way: the cost
-    helper runs before ``budget.deduct``.
+    guard, so a 0-d y crashed with an IndexError out of flopscope's shape
+    arithmetic. Nothing is billed either way: the cost helper runs before
+    ``budget.deduct``, which is what the flops_used assertion pins.
+
+    numpy's own outcome for the identical call is recorded here rather than
+    asserted equal, because the two genuinely differ in one place and the
+    difference should be visible instead of hidden -- see
+    :func:`test_numpy_accepts_zero_d_y_for_a_single_observation`.
     """
-    x = numpy.ones((3, 4))
-
-    with pytest.raises(ValueError):
-        getattr(numpy, fn_name)(x, zero_d, rowvar=rowvar)
-
     with BudgetContext(flop_budget=10**12, quiet=True) as budget:
         with pytest.raises(ValueError):
             getattr(ops, fn_name)(x, zero_d, rowvar=rowvar)
         assert budget.flops_used == 0, "a refused call must not be billed"
+
+
+@pytest.mark.parametrize("fn_name", ["cov", "corrcoef"])
+def test_numpy_accepts_zero_d_y_for_a_single_observation(fn_name):
+    """A KNOWN, deliberate divergence from numpy, pinned so it cannot drift.
+
+    With a single observation numpy broadcasts a 0-d ``y`` to ``(1, 1)`` and
+    returns a 2x2 result; flopscope refuses it. Un-refusing it would change
+    accept/refuse on a *billable* call, which is a repricing decision and does
+    not belong in this batch -- so the divergence is recorded, not closed.
+    Before this change flopscope refused the same call with ``IndexError``, so
+    nothing here regressed; only the exception class moved.
+    """
+    x = numpy.ones((1,))
+    y = numpy.float64(2.0)
+
+    accepted = getattr(numpy, fn_name)(x, y)
+    assert accepted.shape == (2, 2), (
+        "numpy no longer accepts a 0-d y for a single observation; the "
+        "divergence this test records may be closable -- re-triage it"
+    )
+
+    with BudgetContext(flop_budget=10**12, quiet=True) as budget:
+        with pytest.raises(ValueError, match="0-d"):
+            getattr(ops, fn_name)(x, y)
+        assert budget.flops_used == 0
 
 
 def test_trapezoid():

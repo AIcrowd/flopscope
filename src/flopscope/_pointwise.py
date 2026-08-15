@@ -6154,13 +6154,22 @@ attach_docstring(
 
 
 def _reject_zero_d_y(y_arr, op_name: str) -> None:
-    """Refuse a 0-d ``y`` the way numpy does, before any shape indexing.
+    """Refuse a 0-d ``y`` with ``ValueError``, before any shape indexing.
 
     The feature-count reads below are guarded only by ``ndim == 1``, so a 0-d
     ``y`` fell through to ``y_arr.shape[0]`` and raised flopscope's own
-    IndexError where numpy raises ValueError. numpy refuses these calls too, so
-    nothing is billed before or after: this runs inside the cost helper, which
-    completes before ``budget.deduct``.
+    IndexError. This runs inside the cost helper, which completes before
+    ``budget.deduct``, so nothing is billed before or after and the set of
+    calls flopscope refuses is unchanged -- only the exception class and the
+    message move.
+
+    numpy refuses the same call whenever ``x`` carries more than one
+    observation. It *accepts* a 0-d ``y`` in the single-observation case,
+    broadcasting it to ``(1, 1)``: ``np.cov([1.0], np.float64(2.0))`` returns a
+    2x2 array. flopscope refused that before this guard (with the IndexError)
+    and still refuses it. Accepting it would change accept/refuse on a billable
+    call, which is a pricing decision, so the divergence is deliberate and
+    pinned by ``test_numpy_accepts_zero_d_y_for_a_single_observation``.
     """
     if y_arr.ndim == 0:
         raise ValueError(
