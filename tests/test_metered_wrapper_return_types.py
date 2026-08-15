@@ -51,23 +51,35 @@ estimates further, which needs its own measurement and its own release note; it
 is not this change. The inventory records them so the gap is visible and cannot
 grow.
 
-Two things the sweep structurally cannot judge, and which therefore carry their
-own guards below:
+Three things the sweep structurally cannot judge, and which therefore carry
+their own guards below:
 
 * an op that returns its ``out=`` buffer by identity -- ``_probe_op`` discards
   any result identical to an argument, so the ratchet is blind to exactly the
   breakage ``skip_names={"multi_dot"}`` prevents
-  (:func:`test_multi_dot_out_hands_back_the_callers_buffer`).
+  (:func:`test_multi_dot_out_hands_back_the_callers_buffer`). The same
+  exclusion leaves ``multi_dot``'s ordinary array-returning shape raw, and the
+  inventory cannot record that either, because the only probe form fitting
+  ``multi_dot`` yields a scalar and so classifies it clean
+  (:func:`test_multi_dot_without_out_is_a_recorded_residual_gap`). The honest
+  count is 19 closed, 17 inventoried, 1 closed-off-by-exclusion.
 * the *type* of a structured return. The sweep inspects the elements inside a
   tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
   clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
   (:func:`test_linalg_structured_returns_keep_their_named_type`).
+* whether a scalar-returning op is still returning a scalar.
+  ``_flopscope_typed`` answers True for a ``FlopscopeArray``, so a 0-d-wrapped
+  ``linalg.det`` would read clean in the sweep while flipping the grader's wire
+  form from a by-value ``RemoteScalar`` to an array handle. That is what
+  ``_SCALAR_RETURNING_PROBES`` and the two tests it feeds are for, and why the
+  linalg scalar surface is enumerated there.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -191,13 +203,23 @@ _PROBE_FORMS: list = [
 ]
 
 
-def _resolve(name: str):
-    obj = fnp
+def _resolve_in(root: object, name: str) -> Any:
+    """Walk a dotted op name from ``root``. Returns None if any part is absent.
+
+    Dotted because the scalar probes below name ``linalg.det`` and friends, and
+    a plain ``getattr(fnp, "linalg.det")`` silently yields None -- which would
+    skip the probe instead of running it.
+    """
+    obj = root
     for part in name.split("."):
         obj = getattr(obj, part, None)
         if obj is None:
             return None
     return obj
+
+
+def _resolve(name: str):
+    return _resolve_in(fnp, name)
 
 
 def _flopscope_typed(value) -> bool:
@@ -410,11 +432,26 @@ _SCALAR_RETURNING_PROBES: list[tuple[str, tuple]] = [
     ("trapz", (_V,)),
     ("interp", (2.5, _V, _W)),
     ("corrcoef", (_V,)),
+    # linalg's scalar surface. These are the ops the module-wide
+    # ``wrap_module_returns`` call at the foot of ``flopscope/numpy/linalg/
+    # __init__.py`` passes over, and the whole change is only grader-neutral
+    # because it does. The wrap tests ``isinstance(result, np.ndarray)`` and
+    # ``np.generic`` is not an ndarray subclass, so they are untouched today --
+    # but nothing asserted that until these entries existed, and the ratchet
+    # sweep cannot: ``_flopscope_typed`` returns True for a FlopscopeArray, so
+    # a 0-d-wrapped scalar reads clean there.
+    ("linalg.det", (_M,)),
+    ("linalg.norm", (_V,)),
+    ("linalg.cond", (_M,)),
+    ("linalg.matrix_rank", (_M,)),
+    ("linalg.trace", (_M,)),
+    ("linalg.vector_norm", (_V,)),
+    ("linalg.matrix_norm", (_M,)),
 ]
 
 
 def _scalar_probe_result(name: str, args: tuple):
-    fn = getattr(fnp, name, None)
+    fn = _resolve(name)
     if fn is None:
         pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
     with flops.BudgetContext(flop_budget=10**14, quiet=True):
@@ -431,7 +468,10 @@ def test_scalar_results_stay_numpy_scalars(name, args):
     Pinned against numpy's own return kind for the identical call, so this
     tracks numpy rather than a remembered list.
     """
-    expected = getattr(np, name)(*args)
+    npfn = _resolve_in(np, name)
+    if npfn is None:
+        pytest.skip(f"numpy {np.__version__} has no {name}")
+    expected = npfn(*args)
     assert isinstance(expected, np.generic), (
         f"probe for {name} no longer yields a numpy scalar from numpy itself; "
         "pick a different probe rather than weakening the assertion"
@@ -525,6 +565,41 @@ def test_multi_dot_out_hands_back_the_callers_buffer(dest_kind):
     assert np.allclose(np.asarray(dest), _M @ _N)
 
 
+def test_multi_dot_without_out_is_a_recorded_residual_gap():
+    """The price of ``skip_names={"multi_dot"}``, written down rather than left
+    implicit.
+
+    Excluding ``multi_dot`` from the module-wide wrap preserves its ``out=``
+    identity contract (the test above), but it also leaves its ordinary
+    array-returning shape handing back a raw ``numpy.ndarray`` on plain-numpy
+    operands -- the #193 defect, still open for this one op. It was raw before
+    this change too, so nothing regressed; what is new is that it can no longer
+    be tracked by :data:`KNOWN_RAW_RETURN_OPS`.
+
+    It cannot go in that inventory, because the inventory is exact in both
+    directions and the sweep classifies ``multi_dot`` as clean: the only probe
+    form that fits it is ``multi_dot([_V, _W])``, whose result is a numpy
+    scalar. So the sweep exercises the op, sees a scalar, and is blind to the
+    array-returning shape. Listing it would red the ratchet's ``stale`` check.
+
+    Hence this test. The honest count for the change is "19 closed, 17 still
+    inventoried, 1 closed-off-by-exclusion and recorded here". When a later
+    change closes it -- by making the wrap identity-aware, i.e. skipping the
+    wrap only when the result *is* one of the arguments or ``kwargs["out"]``,
+    which is the same test ``_probe_op`` already uses -- this test should be
+    deleted along with the exclusion.
+    """
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.linalg.multi_dot([_M.copy(), _N.copy()])
+    assert type(result) is np.ndarray, (
+        f"fnp.linalg.multi_dot now returns {type(result).__module__}."
+        f"{type(result).__name__} rather than a raw ndarray. If that was "
+        "deliberate, delete this test and the skip_names={'multi_dot'} "
+        "exclusion together -- but first confirm the out= identity test above "
+        "still passes, which is the reason the exclusion exists."
+    )
+
+
 @pytest.mark.parametrize(
     "name, args, fields",
     [
@@ -555,9 +630,23 @@ def test_linalg_structured_returns_keep_their_named_type(name, args, fields):
     for field in fields:
         got = getattr(result, field)
         want = getattr(expected, field)
-        assert type(got) is type(want) or isinstance(got, FlopscopeArray), (
-            f"fnp.linalg.{name}.{field} is {type(got).__module__}.{type(got).__name__}"
-        )
+        # Kind-aware, deliberately: an ``isinstance(got, FlopscopeArray)``
+        # escape clause would be satisfied by a 0-d-wrapped ``slogdet.sign``,
+        # so the test would stay green through exactly the scalar -> handle
+        # flip it exists to catch.
+        if isinstance(want, np.generic):
+            assert isinstance(got, np.generic) and not isinstance(got, np.ndarray), (
+                f"fnp.linalg.{name}.{field} is {type(got).__module__}."
+                f"{type(got).__name__} where numpy returns {type(want).__name__}. "
+                f"A wrapped scalar reaches the grader as an array handle instead "
+                f"of a by-value RemoteScalar, which bills downstream arithmetic "
+                f"that is free today. See test_scalar_results_still_pack_by_value."
+            )
+        else:
+            assert isinstance(got, FlopscopeArray), (
+                f"fnp.linalg.{name}.{field} is {type(got).__module__}."
+                f"{type(got).__name__} where numpy returns {type(want).__name__}"
+            )
         assert np.allclose(np.abs(np.asarray(got)), np.abs(np.asarray(want)))
 
 
