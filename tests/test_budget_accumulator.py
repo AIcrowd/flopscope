@@ -226,7 +226,11 @@ def test_reused_decorator_context_resets_live_timing_state_between_calls():
 
     assert first_closed_wall_time is not None
     assert first_closed_wall_time >= 0.03
-    assert seen_ctx_wall_times == [None, None]
+    # wall_time_s reads live inside an open context (#211). The reset contract
+    # this test exists for is that re-entry restarts the span: the second call's
+    # live reading must not carry the first call's 0.03s sleep.
+    assert all(seen is not None for seen in seen_ctx_wall_times)
+    assert seen_ctx_wall_times[1] < first_closed_wall_time / 2
     assert seen_context_live_wall_times[1] is not None
     assert seen_context_live_wall_times[1] < first_closed_wall_time / 2
     assert seen_global_live_wall_times[1] is not None

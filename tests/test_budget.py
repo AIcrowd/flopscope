@@ -1196,3 +1196,43 @@ def test_exhaustion_still_raises_after_finite_guard():
         with BudgetContext(flop_budget=1, quiet=True):
             a = fnp.ones((100, 100))
             _ = a + a
+
+
+def test_timing_properties_are_live_inside_the_context():
+    """wall_time_s / residual_wall_time_s must agree with the summary path.
+
+    ``budget_summary_dict()`` already reported live values for both
+    quantities while the context was open; the properties returned None.
+    """
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fnp.ones((64, 64))
+        _ = a + a
+        live = ctx.residual_wall_time_s
+        assert live is not None, "residual_wall_time_s must be live inside the context"
+        assert live >= 0.0
+        assert ctx.wall_time_s is not None
+        assert ctx.wall_time_s >= 0.0
+        summary = flops.budget_summary_dict()
+        assert summary["residual_wall_time_s"] is not None
+        assert summary["wall_time_s"] is not None
+
+
+def test_closed_context_timing_properties_match_the_summary():
+    """The post-exit read path -- what Whestbench bills from -- is unchanged."""
+    import flopscope as flops
+    import flopscope.numpy as fnp
+
+    with flops.BudgetContext(flop_budget=10**12, quiet=True) as ctx:
+        a = fnp.ones((64, 64))
+        _ = a + a
+
+    wall = ctx.wall_time_s
+    residual = ctx.residual_wall_time_s
+    assert wall is not None and wall > 0.0
+    assert residual is not None and residual >= 0.0
+    summary = ctx.summary_dict()
+    assert summary["wall_time_s"] == wall
+    assert summary["residual_wall_time_s"] == residual

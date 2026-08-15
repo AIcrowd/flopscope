@@ -1485,8 +1485,10 @@ class BudgetContext:
         """Total wall-clock seconds spanned by the context.
 
         Measured from ``__init__`` start to the end of ``__exit__`` (after the
-        accumulator-record and active-budget restoration work). ``None`` until
-        ``__exit__`` has run.
+        accumulator-record and active-budget restoration work). Inside an open
+        context it reports the elapsed span so far, the same live quantity
+        ``budget_summary_dict()`` reports; it is ``None`` only before
+        ``__enter__``.
 
         The decomposition ``wall_time_s == flopscope_backend_time_s
         + flopscope_overhead_time_s + residual_wall_time_s`` holds within numerical
@@ -1495,7 +1497,7 @@ class BudgetContext:
         active-budget restore) are both attributed to
         ``flopscope_overhead_time_s``.
         """
-        return self._wall_time_s
+        return self._accounting_wall_time_s()
 
     @property
     def elapsed_s(self) -> float:
@@ -1542,17 +1544,17 @@ class BudgetContext:
         time.sleep, GC pauses, and un-instrumented NumPy. User-callback ops
         (``apply_along_axis``, ``apply_over_axes``, ``piecewise``,
         ``fromfunction``, ``fromiter``) attribute their callback wall time here.
+
+        Live inside an open context, matching ``budget_summary_dict()``; it is
+        ``None`` only before ``__enter__``. Shares ``_timing_summary`` with the
+        summary path so the two cannot drift.
         """
-        if self._wall_time_s is None:
-            return None
-        residual = (
-            self._wall_time_s
-            - self._total_flopscope_backend_time
-            - self._total_flopscope_overhead_time
+        _, _, _, residual = _timing_summary(
+            self._accounting_wall_time_s(),
+            self._total_flopscope_backend_time,
+            self._total_flopscope_overhead_time,
         )
-        if residual < 0 and abs(residual) < 1e-12:
-            return 0.0
-        return max(residual, 0.0)
+        return residual
 
     def _advance_summary_generation(self, *, rollup_changed: bool = False) -> None:
         self._summary_generation += 1
