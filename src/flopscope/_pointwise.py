@@ -860,17 +860,26 @@ def _wrap_metered_result(result):
 
     * an ndarray is stored as a handle and reaches the participant as a
       ``RemoteArray``, whose arithmetic is dispatched to the server and billed;
-    * a numpy scalar is packed by value and reaches them as a ``RemoteScalar``,
-      whose arithmetic runs locally in Python and is billed nothing.
+    * a numpy scalar is *usually* packed by value and reaches them as a
+      ``RemoteScalar``, whose arithmetic runs locally in Python and is billed
+      nothing. "Usually", because ``_pack_result`` packs by value only when
+      ``.item()`` is msgpack-native: a ``complex128`` scalar is not, so it
+      falls back to ``store_array`` and reaches them as a handle after all.
+      See :func:`test_complex_scalar_results_are_a_recorded_residual_gap`.
 
     So for an ndarray result the in-process path was the one that was wrong --
     it handed back a raw ``numpy.ndarray`` and billed 0 for downstream
     arithmetic the grader was charging (#193) -- and wrapping it makes the two
-    agree. For a scalar result the two already agree at 0, and wrapping it
-    would *break* that agreement: a 0-d ``FlopscopeArray`` is an ``ndarray``,
-    so the server would store it as a handle and start charging downstream
-    arithmetic that costs nothing today. That is a repricing, not a fix, so
-    scalars are passed through untouched.
+    agree. For a by-value scalar result the two already agree at 0, and
+    wrapping it would *break* that agreement: a 0-d ``FlopscopeArray`` is an
+    ``ndarray``, so the server would store it as a handle and start charging
+    downstream arithmetic that costs nothing today. That is a repricing, not a
+    fix, so scalars are passed through untouched.
+
+    That leaves the handle-packed scalars above as a residual #193 gap rather
+    than a resolved case: locally free, billed on the grader. Closing it is not
+    just "wrap them too" -- it is wire-neutral only for the dtypes that already
+    fall back to a handle, so it needs its own dtype-by-dtype measurement.
 
     Tuple results are handled element by element, matching ``_pack_result``'s
     own per-element branch order for a tuple return.
@@ -4991,9 +5000,11 @@ def _einsum_routed_binary(
     # A plain-numpy operand took ``return result``, handing back the raw
     # ndarray numpy allocated: arithmetic on it billed 0 in-process while the
     # grader billed it through the client's RemoteArray (#193). Only the
-    # ndarray half of that is wrong -- a numpy scalar reaches the grader by
-    # value and is free on both sides -- which is exactly the line
-    # ``_wrap_metered_result`` draws.
+    # ndarray half of that is wrong -- a numpy scalar of an msgpack-native
+    # dtype reaches the grader by value and is free on both sides -- which is
+    # exactly the line ``_wrap_metered_result`` draws. A complex128 scalar is
+    # the documented exception: it packs as a handle, so it stays a residual
+    # #193 gap here rather than a case this change closes.
     if inputs_were_whest:
         return _asflopscope(result)
     return _wrap_metered_result(result)

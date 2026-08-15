@@ -87,9 +87,12 @@
   every stored ndarray to `FlopscopeArray`, so the server never saw the
   difference.
 - **No billed amount changes for the cross/outer/contraction return-type fix
-  below either.** Local only, measured the same way. A workload looping
-  `matmul`/`dot`/`outer`/`cross`/`matvec` at n=32 with elementwise arithmetic
-  on each result: local `flops_used` 10,570,880 → 11,231,760 on plain-numpy
+  below either.** Local only, measured the same way. The workload, stated
+  precisely enough to re-run: 40 iterations at n=32 of `matmul(a, b)`,
+  `dot(a, b)`, `outer(u, w)`, `cross(v3, w3)`, `matvec(a, u)` and a scalar
+  `inner(u, w)`, with one elementwise expression on each array result
+  (`m*0.5 + m`, `d - d*0.25`, `o + o`, `c*2.0`, `mv + mv`) and a `.sum()` over
+  each: local `flops_used` 10,570,880 → 11,231,760 on plain-numpy
   operands (+660,880, +6.25%) and 11,067,600 → 11,231,760 on `FlopscopeArray`
   operands (+164,160, +1.48%). The two operand kinds now read the SAME total,
   which is the point — `cross` and `outer` were raw on both kinds, the
@@ -193,6 +196,13 @@
   from a handle to by-value. Wrapping unconditionally instead moves 15 the
   other way. The form shipped here moves none of them, and both failure
   directions are now pinned by tests rather than by review attention.
+  One residual is recorded rather than closed: a **complex** scalar
+  contraction result is still a #193 divergence. Scalars are passed through on
+  the reasoning that they are free in-process and free on the grader, but
+  `_pack_result` only packs by value when `.item()` is msgpack-native, and a
+  `complex128` scalar is not — it falls back to a handle the grader bills while
+  in-process billing stays 0. It packs identically on the pre-fix tree, so
+  nothing regressed; it is now written down and pinned instead of implied.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even

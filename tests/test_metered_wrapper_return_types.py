@@ -811,12 +811,13 @@ def test_multi_dot_without_out_is_a_recorded_residual_gap():
     scalar. So the sweep exercises the op, sees a scalar, and is blind to the
     array-returning shape. Listing it would red the ratchet's ``stale`` check.
 
-    Hence this test. The honest count for the change is "19 closed, 17 still
-    inventoried, 1 closed-off-by-exclusion and recorded here". When a later
-    change closes it -- by making the wrap identity-aware, i.e. skipping the
-    wrap only when the result *is* one of the arguments or ``kwargs["out"]``,
-    which is the same test ``_probe_op`` already uses -- this test should be
-    deleted along with the exclusion.
+    Hence this test. The honest cumulative count is "27 closed, 9 still
+    inventoried, 1 closed-off-by-exclusion and recorded here" -- the same
+    figures the module docstring above reports. When a later change closes it
+    -- by making the wrap identity-aware, i.e. skipping the wrap only when the
+    result *is* one of the arguments or ``kwargs["out"]``, which is the same
+    test ``_probe_op`` already uses -- this test should be deleted along with
+    the exclusion.
     """
     with flops.BudgetContext(flop_budget=10**14, quiet=True):
         result = fnp.linalg.multi_dot([_M.copy(), _N.copy()])
@@ -826,6 +827,66 @@ def test_multi_dot_without_out_is_a_recorded_residual_gap():
         "deliberate, delete this test and the skip_names={'multi_dot'} "
         "exclusion together -- but first confirm the out= identity test above "
         "still passes, which is the reason the exclusion exists."
+    )
+
+
+def test_complex_scalar_results_are_a_recorded_residual_gap():
+    """The one place the "scalars are free on both sides" rule does not hold.
+
+    ``_wrap_metered_result`` leaves numpy scalars alone because a by-value
+    scalar is free in-process AND free on the grader, so wrapping it would
+    reprice. That reasoning rests on ``_pack_result`` packing scalars by
+    value -- and it only does so when ``.item()`` is msgpack-native. A
+    ``complex128`` scalar is not: it falls back to ``store_array`` and reaches
+    the client as a handle, whose arithmetic the grader bills, while the
+    in-process return stays a numpy scalar billing 0.
+
+    So complex scalar contraction results are still a #193 divergence. This is
+    NOT a regression and NOT something this change introduced -- it packs as a
+    handle identically on the pre-#193 tree -- and it is not in
+    :data:`KNOWN_RAW_RETURN_OPS`, because the ops involved are not returning a
+    raw ndarray; they are returning a scalar that happens to travel as a
+    handle. Hence a recorded gap, like ``multi_dot``'s above.
+
+    Closing it is deliberately left alone: wrapping complex scalars would be
+    wire-neutral (handle before, handle after) but the same edit applied to
+    scalars generally is the exact repricing this module exists to prevent, so
+    it needs its own dtype-by-dtype measurement rather than a blanket wrap.
+    """
+    complex_vec = np.array([1.0 + 1j, 2.0 - 1j, 3.0 + 0j])
+
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        result = fnp.dot(complex_vec, complex_vec.copy())
+        after_call = budget.flops_used
+        _ = result * 2.0
+        downstream = budget.flops_used - after_call
+
+    assert isinstance(result, np.generic), (
+        f"fnp.dot on complex operands now returns {type(result).__name__} "
+        "rather than a numpy scalar. If a later change wrapped it, re-measure "
+        "the wire form before assuming this test is obsolete."
+    )
+    assert downstream == 0, (
+        f"downstream arithmetic on a complex scalar result billed "
+        f"{downstream} in-process. If that is now non-zero the gap this test "
+        "records has been closed -- delete the test and say so in the "
+        "CHANGELOG."
+    )
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        "a complex128 scalar now packs BY VALUE. That would make the "
+        "'free on both sides' rule universal and close this gap -- good news, "
+        "but confirm it against _pack_result's msgpack-native check and "
+        "update _wrap_metered_result's docstring before deleting this test."
     )
 
 
