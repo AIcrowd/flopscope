@@ -131,15 +131,15 @@ from flopscope._ndarray import wrap_module_returns as _wrap_module_returns  # no
 # holds nothing but those four metered ops: the default ``check_module=True``
 # filter skips every other public name here (``attach_docstring``,
 # ``require_budget``, ``FlopscopeArray``, ``Sequence``), all of which are
-# imports. Pinned by ``test_fft_free_module_wrap_reaches_only_the_four_metered_ops``.
+# imports. Pinned by
+# ``test_fft_free_module_wrap_reaches_only_the_four_metered_ops``.
 #
 # Wire-neutral on the grader because none of the four can return a scalar --
 # the one shape where a wrap flips a by-value RemoteScalar into an array
 # handle, which is a repricing. ``fftfreq``/``rfftfreq`` always build a rank-1
-# grid, and
-# ``fftshift``/``ifftshift`` of a 0-d input is refused inside ``numpy.roll``
-# before the return line is reached. Both measured, not assumed -- see
-# ``test_fft_free_ops_have_no_scalar_shape_to_trap_on`` and
+# grid, and ``fftshift``/``ifftshift`` of a 0-d input is refused inside
+# ``numpy.roll`` before the return line is reached. Both measured, not assumed
+# -- see ``test_fft_free_ops_have_no_scalar_shape_to_trap_on`` and
 # ``test_fft_shift_refuses_zero_d_input_before_flopscope_returns``.
 #
 # No ``skip_names``: none of the four takes ``out=``, so there is no caller
