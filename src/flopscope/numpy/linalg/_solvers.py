@@ -58,11 +58,15 @@ def solve_cost(n: int, nrhs: int = 1, symmetric: bool = False) -> int:
 def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     """Solve linear system ``a @ x = b`` with FLOP counting.
 
-    The result is always a ``FlopscopeArray``, so arithmetic on it is billed
-    in-process the way the grader bills arithmetic on the ``RemoteArray`` the
-    same call produces. ``b_was_whest`` below is now only the difference
-    between wrapping here and wrapping in the module-wide
-    ``wrap_module_returns`` pass; both land on ``_asflopscope``.
+    Called as ``fnp.linalg.solve`` the result is always a ``FlopscopeArray``,
+    so arithmetic on it is billed in-process the way the grader bills
+    arithmetic on the ``RemoteArray`` the same call produces. The wrapping for
+    a plain-ndarray ``b`` is applied by the module-wide
+    ``wrap_module_returns`` pass at the foot of ``flopscope/numpy/linalg/
+    __init__.py``, not here, so this function object on its own still returns
+    a plain ndarray for a plain ``b``. ``b_was_whest`` below is therefore only
+    the difference between wrapping here and wrapping there; both land on
+    ``_asflopscope``.
     """
     budget = require_budget()
     b_was_whest = isinstance(b, FlopscopeArray)
@@ -224,11 +228,14 @@ def lstsq(
 ) -> tuple[FlopscopeArray, FlopscopeArray, int, FlopscopeArray]:
     """Least-squares solution with FLOP counting.
 
-    Returns a 4-tuple ``(solution, residuals, rank, singular_values)``. The
-    three array elements are always ``FlopscopeArray``, so arithmetic on them
-    is billed in-process the way the grader bills it. ``rank`` stays the numpy
-    integer numpy itself returns -- it is not an array, and the grader delivers
-    it by value.
+    Returns a 4-tuple ``(solution, residuals, rank, singular_values)``. Called
+    as ``fnp.linalg.lstsq`` the three array elements are always
+    ``FlopscopeArray``, so arithmetic on them is billed in-process the way the
+    grader bills it; for a plain-ndarray ``b`` that wrapping comes from the
+    module-wide ``wrap_module_returns`` pass at the foot of
+    ``flopscope/numpy/linalg/__init__.py``, so this function object on its own
+    still returns plain ndarrays. ``rank`` stays the numpy integer numpy itself
+    returns -- it is not an array, and the grader delivers it by value.
     """
     budget = require_budget()
     b_was_whest = isinstance(b, FlopscopeArray)

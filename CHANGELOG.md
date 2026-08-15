@@ -69,7 +69,15 @@
   `flops_used` 8,283,360 → 8,352,480 (+69,120, +0.83%). The same workload built
   from `FlopscopeArray` operands reads 8,352,480 on both old and new code, so
   what the change does is make the plain-operand path agree with the one the
-  grader already charged. On the grader side, 64 measurements — 31 linalg ops
+  grader already charged. **That percentage is workload-specific, not a
+  characteristic figure.** The newly-billed work is the downstream elementwise
+  arithmetic, which is O(n²), while the decompositions that dominate the total
+  are O(n³) — so the rise falls as matrices get bigger. The same
+  cholesky/inv/qr/eigh/solve loop measured across sizes moves +11.1% at n=4,
+  +5.3% at n=8, +2.6% at n=16, +1.3% at n=32 and +0.64% at n=64; a submission
+  doing heavier algebra per decomposition sits higher still. Read it as "single
+  digit percent on typical geometry, more on small matrices", not as 0.83%.
+  On the grader side, 64 measurements — 31 linalg ops
   plus `multi_dot(out=)`, each on both operand kinds — driven through the
   server's real `RequestHandler.handle` → `_pack_result` produce a
   byte-identical wire form, op-call cost and downstream-multiply cost on both
@@ -127,7 +135,14 @@
   `.U` and `.sign` still resolve. `linalg.multi_dot` is deliberately excluded:
   it is the one op here that takes `out=` and returns that buffer by identity,
   and wrapping the return turned `multi_dot([m, n], out=dest) is dest` from
-  True to False for a plain-ndarray destination. `linalg.tensorsolve`, which
+  True to False for a plain-ndarray destination. That exclusion has a price,
+  stated rather than glossed: `multi_dot`'s ordinary array-returning shape
+  still hands back a raw ndarray on plain-numpy operands, so the honest count
+  is 19 closed, 17 still inventoried, and 1 closed-off-by-exclusion. It cannot
+  go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
+  the sweep classifies `multi_dot` as clean, because the only probe form that
+  fits it returns a scalar — so it is pinned by a dedicated test instead.
+  `linalg.tensorsolve`, which
   no sweep probe form fits, is fixed by the same call and carries its own
   assertion. Retracts a documented promise: `solve` and `lstsq` claimed
   numpy's subclass-return policy (a plain `b` yields a plain-ndarray solution
