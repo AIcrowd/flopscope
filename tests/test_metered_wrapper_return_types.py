@@ -30,6 +30,19 @@ Guards:
   ever gets wrapped, and also if ``_pack_result`` reorders its branches.
 * :func:`test_tensordot_result_arithmetic_is_billed` -- the consequence,
   pinned directly: arithmetic on a tensordot result must move ``flops_used``.
+* :func:`test_contractions_on_flopscope_operands_keep_their_array_handle` --
+  the same wire pin pointing the OTHER way. ``_einsum_routed_binary`` has
+  always run its result through ``_asflopscope`` when an operand was a
+  flopscope type, which turns numpy's scalar into a 0-d array, so the 1-D x
+  1-D shape of ``dot``/``inner``/``matmul``/``vecdot`` reaches the grader as a
+  handle. Rewriting that branch to the scalar-preserving wrap would remove a
+  wrap that ships today and drop grader billing rather than add it. Both
+  directions are repricings; both are pinned.
+* :func:`test_cross_results_were_already_array_handles` and
+  :func:`test_outer_out_hands_back_the_callers_buffer` -- the two
+  preconditions that make the ``cross``/``outer`` wraps free. ``numpy.cross``
+  returns a 0-d *ndarray* rather than a scalar for 2-vector operands, and
+  ``outer``'s ``out=`` early exit sits directly above the wrapped line.
 * :func:`test_raw_numpy_returning_ops_only_ever_shrink` -- the registry-driven
   sweep. It probes every metered op in the registry, in every probe form the op
   accepts, and compares the set that still returns a raw ``numpy.ndarray``
@@ -42,14 +55,24 @@ Guards:
 
 ``KNOWN_RAW_RETURN_OPS`` is deliberately not empty. The sweep showed the defect
 reaches well past the ops #193 filed: 36 more, concentrated in ``linalg`` and
-``fft``, returned raw ndarrays. The 19 ``linalg.*`` entries are now closed by
-the module-wide ``wrap_module_returns`` call at the foot of
-``flopscope/numpy/linalg/__init__.py``, leaving 17. Those 17 include structured
-returns, plain tuples (``histogramdd``) and a ``numpy.matrix`` (``bmat``) that
-wrapping would have to handle case by case. Closing them raises local FLOP
-estimates further, which needs its own measurement and its own release note; it
-is not this change. The inventory records them so the gap is visible and cannot
-grow.
+``fft``, returned raw ndarrays. The 19 ``linalg.*`` entries were closed by the
+module-wide ``wrap_module_returns`` call at the foot of
+``flopscope/numpy/linalg/__init__.py``, leaving 17; the eight contraction and
+product ops (``cross``, ``outer``, ``dot``, ``inner``, ``matmul``, ``matvec``,
+``vecdot``, ``vecmat``) were then closed one return statement at a time, leaving
+9. Those nine are ``bmat`` (a ``numpy.matrix``), ``histogramdd`` (a plain
+tuple), the four ``fft`` index/frequency helpers and the three ``is*``
+predicates, and wrapping them has to be handled case by case. Closing them
+raises local FLOP estimates further, which needs its own measurement and its own
+release note; it is not this change. The inventory records them so the gap is
+visible and cannot grow.
+
+The contraction ops were deliberately not closed with a module-wide wrap. Their
+single shared return site, ``_einsum_routed_binary``, also serves ``out=``
+callers and symmetric results, and it already wraps on one of its two operand
+branches -- so a blanket wrap there would break ``out=`` identity, and the
+narrow one-line form would reprice the branch that already wraps. See
+:func:`test_contractions_on_flopscope_operands_keep_their_array_handle`.
 
 Three things the sweep structurally cannot judge, and which therefore carry
 their own guards below:
@@ -62,7 +85,7 @@ their own guards below:
   inventory cannot record that either, because the only probe form fitting
   ``multi_dot`` yields a scalar and so classifies it clean
   (:func:`test_multi_dot_without_out_is_a_recorded_residual_gap`). The honest
-  count is 19 closed, 17 inventoried, 1 closed-off-by-exclusion.
+  count is 27 closed, 9 inventoried, 1 closed-off-by-exclusion.
 * the *type* of a structured return. The sweep inspects the elements inside a
   tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
   clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
