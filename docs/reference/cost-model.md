@@ -196,9 +196,9 @@ but nothing is written into it:
 1. **Views / metadata** — operations that return a view of existing memory or inspect
    metadata without touching element values: `transpose`, `swapaxes`,
    `moveaxis`, `squeeze`, `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`,
-   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `asfortranarray`,
-   `ascontiguousarray`, `view`, `real`/`imag` (component extraction), `split`,
-   `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal` (the 2-D view path — see
+   `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `view`,
+   `real`/`imag` (component extraction), `split`, `hsplit`, `vsplit`,
+   `array_split`, `unstack`, `diagonal` (the 2-D view path — see
    [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
    1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
    `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
@@ -698,10 +698,23 @@ fails the build instead of shipping an undercount. The sweep covers charged *reg
 ops; the dynamic ufunc-method surface (`.outer`, `.reduceat`, `.at`, `.reduce`,
 `.accumulate`, which bill under per-call op names like `hypot.outer` rather than registry
 keys) is out of its reach and is locked by targeted tests in `tests/test_dtype_cost.py`
-instead. `tests/test_binary_ufunc_spelling_billing.py` pins complete-signature billing,
-narrow binary loops, the promoted-input floor, direct/`outer` parity, explicit
-`dtype=`/`signature=` constraints plus wider-`out=` composition, descriptor-safe operand
-metadata, and store-only complex billing for the single-output binary paths.
+instead. There is a second, narrower carve-out inside the sweep: the index-output ops
+(`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`, `searchsorted`,
+`count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple forms, and kin) are exempt
+from the **result**-dtype half of the assertion, because they return `int64` index arrays
+whatever the operand's width — their result dtype says nothing about the arithmetic they
+did. They are held to an **operand**-dtype floor instead, probed at `float64` so the
+assertion can actually be violated: the comparison work is done at the operand's width
+and must be billed there. A second pass narrows the same probes to `float32` and requires
+the billed rate to follow the operand down, which is what separates billing the operand
+from billing the `int64` index result — those rate the same, so a floor alone cannot tell
+them apart. `searchsorted` and `digitize` are held to over-resolving instead: their bin
+edges and needle promote the call, so they bill above the operand, which over-bills
+rather than under-bills. `tests/test_binary_ufunc_spelling_billing.py` pins
+complete-signature billing, narrow binary loops, the promoted-input floor,
+direct/`outer` parity, explicit `dtype=`/`signature=` constraints plus wider-`out=`
+composition, descriptor-safe operand metadata, and store-only complex billing for the
+single-output binary paths.
 
 Reproduce any of these yourself: run the call inside a `BudgetContext` and read
 `op_log[-1].resolved_dtype` alongside `flops_used`.
@@ -768,7 +781,7 @@ each backed by a CI-enforced test you can open and read:
 | Invariant | What it guarantees | Enforced by |
 |---|---|---|
 | **Faithful cost** | each `flop_cost` is the real standard-algorithm op count, with every shape/algorithm constant inside `flop_cost` | per-op evidence in [§Cost by family](#cost-by-family); `test_cost_constant_unification.py`, `test_cost_formula_vs_code.py` |
-| **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0, 1, or 4; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
+| **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0 or 1; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a zero-itemsize dtype is the one exception, since it carries no data either way | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
@@ -861,6 +874,17 @@ logaddexp2, floor_divide, mod/remainder, fmod, float_power. NumPy's selected
 `float_power` loop has no real signature narrower than `dd->d` and no complex signature
 narrower than `DD->D`, so float32 operands bill as float64 and complex64 operands bill
 as complex128. This comes from NumPy's loop table, not a hand-maintained family mapping.
+
+**Iterative integer tier (weight 16.0)**: `gcd`, `lcm`. These sit at the weight-16 tier
+without being transcendental functions, and the reason is the same one the tier exists
+for: the per-element kernel is a bounded multi-step loop, not a single instruction.
+NumPy computes `gcd` by the Euclidean algorithm — a remainder loop whose trip count
+grows with the operand magnitude — and `lcm` runs that same loop and then a multiply and
+a divide. Pricing them at the arithmetic tier would sell a genuinely iterative
+per-element computation at the price of an `add`. Both are integer-only
+(`complex_factor: illegal` — NumPy raises `TypeError` on complex input), so the complex
+table below never applies to them; an `int64` operand pair bills
+`numel × 16 × 2` (weight 16.0 at the int64 rate 2.0).
 
 **Basis**: DECLARED per-element FMA=2 convention and empirical calibration.
 
@@ -1516,8 +1540,16 @@ does not depend on how wide the position values happen to be stored:
 | `tri` | `numel(output)` — **not** dtype-neutral; bills the actual output dtype like a value array (see [Generator](#generator-linspace-arange-and-kin)) | DECLARED |
 | `broadcast_shapes` | sum of `len(shape)` across the input shapes (floor 1) | DECLARED |
 | `indices` | `numel(output)` at the actual output dtype (dense: `len(dims)·prod(dims)`; sparse: `sum(dims)`) | DECLARED |
+| `ix_` | `sum(numel(outputs)) + sum(numel(Boolean inputs))` — **not** dtype-neutral: billed at the returned index arrays' actual dtype (`intp`), like `tri` above | DECLARED |
 
 All weight 1.0. Source: `src/flopscope/_array_ops.py`.
+
+`ix_`'s second term is the load-bearing one. Every Boolean argument pays
+`numel(arg)`, the full mask, because NumPy runs an internal `nonzero` scan over all of
+it; the charge therefore does not fall with the mask's popcount. Without that term a
+one-`True` mask over a large array would produce a one-element output and bill almost
+nothing, making an arbitrarily large scan free. `ix_` bills weight 1.0 — it was
+previously in the free tier and is not any more.
 
 ---
 
@@ -1676,7 +1708,7 @@ Weight 0 now covers two sub-families:
 - **Views / metadata** — no new buffer, or a read-only reinterpretation of an
   existing one: `transpose`, `swapaxes`, `moveaxis`, `squeeze`,
   `expand_dims`, `flip`/`fliplr`/`flipud`, `rot90`, `atleast_1d`/`atleast_2d`/
-  `atleast_3d`, `broadcast_to`, `asfortranarray`, `ascontiguousarray`,
+  `atleast_3d`, `broadcast_to`,
   `view`, `real`/`imag` (component extraction — a strided view or constant-fill, no
   arithmetic), `split`, `hsplit`, `vsplit`, `array_split`, `unstack`, `diagonal`
   (2-D view path only — the 1-D *construct* path writes, see [Copy and
