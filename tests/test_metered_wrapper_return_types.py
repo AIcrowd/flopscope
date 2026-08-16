@@ -69,12 +69,22 @@ product ops (``cross``, ``outer``, ``dot``, ``inner``, ``matmul``, ``matvec``,
 9; the four ``fft`` index/frequency helpers (``fftfreq``, ``rfftfreq``,
 ``fftshift``, ``ifftshift``) were closed by a second module-wide
 ``wrap_module_returns`` call, this one at the foot of
-``flopscope/numpy/fft/_free.py``, leaving 5. Those five are ``bmat`` (a
-``numpy.matrix``), ``histogramdd`` (a plain tuple) and the three ``is*``
-predicates, and wrapping them has to be handled case by case. Closing them
-raises local FLOP estimates further, which needs its own measurement and its own
-release note; it is not this change. The inventory records them so the gap is
-visible and cannot grow.
+``flopscope/numpy/fft/_free.py``, leaving 5; ``bmat``, which returned a
+``numpy.matrix``, was then view-cast at its own return site, leaving 4. Those
+four are ``histogramdd`` (a plain tuple) and the three ``is*`` predicates, and
+wrapping them has to be handled case by case. Closing them raises local FLOP
+estimates further, which needs its own measurement and its own release note; it
+is not this change. The inventory records them so the gap is visible and cannot
+grow.
+
+``bmat`` was closed ahead of the other four because its divergence was not only
+a FLOP gap. ``numpy.matrix`` overloads ``*`` as matrix multiplication, so the
+in-process answer for ``m * m`` differed from the answer a participant got from
+the remote backend, which had always view-cast the matrix away on receipt in
+``Session.store_array``. Leaving it alone was therefore not the neutral option
+it is for the other four. The wire form is unchanged by the cast -- see
+:func:`test_bmat_wire_form_is_unchanged_by_the_view_cast` -- and the local
+costs are stated in the CHANGELOG and pinned in the ``bmat`` section below.
 
 The contraction ops were deliberately not closed with a module-wide wrap. Their
 single shared return site, ``_einsum_routed_binary``, also serves ``out=``
@@ -102,7 +112,7 @@ their own guards below:
   inventory cannot record that either, because the only probe form fitting
   ``multi_dot`` yields a scalar and so classifies it clean
   (:func:`test_multi_dot_without_out_is_a_recorded_residual_gap`). The honest
-  count is 31 closed, 5 inventoried, 1 closed-off-by-exclusion.
+  count is 32 closed, 4 inventoried, 1 closed-off-by-exclusion.
 * the *type* of a structured return. The sweep inspects the elements inside a
   tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
   clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
@@ -129,6 +139,7 @@ import flopscope.numpy as fnp
 from flopscope._ndarray import FlopscopeArray
 from flopscope._registry import REGISTRY
 from flopscope._symmetric import SymmetricTensor
+from flopscope._weights import load_weights, reset_weights
 from flopscope.errors import UnsupportedFunctionError
 
 _SERVER_SRC = str(Path(__file__).parent.parent / "flopscope-server" / "src")
@@ -155,7 +166,6 @@ _METERED_CATEGORIES = {
 # the in-process path hands back a raw ndarray and bills 0.
 KNOWN_RAW_RETURN_OPS = frozenset(
     {
-        "bmat",
         "histogramdd",
         "isfinite",
         "isinf",
@@ -1094,7 +1104,7 @@ def test_multi_dot_without_out_is_a_recorded_residual_gap():
     scalar. So the sweep exercises the op, sees a scalar, and is blind to the
     array-returning shape. Listing it would red the ratchet's ``stale`` check.
 
-    Hence this test. The honest cumulative count is "27 closed, 9 still
+    Hence this test. The honest cumulative count is "32 closed, 4 still
     inventoried, 1 closed-off-by-exclusion and recorded here" -- the same
     figures the module docstring above reports. When a later change closes it
     -- by making the wrap identity-aware, i.e. skipping the wrap only when the
@@ -1273,3 +1283,237 @@ def test_arithmetic_downstream_of_fixed_ops_is_billed(name, args):
         assert budget.flops_used > before, (
             f"arithmetic on an fnp.{name} result was not billed"
         )
+
+
+# ---------------------------------------------------------------------------
+# bmat: the in-process answer is aligned to the grader's, not the reverse
+# ---------------------------------------------------------------------------
+#
+# ``bmat`` was the one inventoried op whose divergence was not merely a FLOP
+# gap. It returned a ``numpy.matrix``, on which ``*`` is matrix multiplication,
+# ``.I``/``.A``/``.H``/``.A1`` exist and a row index keeps its row dimension.
+# The grader never saw any of that: ``Session.store_array`` view-casts every
+# stored ndarray that is not already a ``FlopscopeArray``, so the matrix
+# subclass was dropped on receipt and the client got an ordinary
+# ``RemoteArray``. Measured on ``[[1, 2], [3, 4]]``, ``m * m`` was
+# ``[[7, 10], [15, 22]]`` in-process and ``[[1, 4], [9, 16]]`` on the grader --
+# a silent wrong answer, not a billing difference.
+#
+# The in-process path is the one that moved: ``bmat`` now view-casts to
+# ``FlopscopeArray`` at its return site, which is exactly what the server was
+# already doing to the value it received. The tests below pin each behaviour
+# the local caller loses, so the change is documented behaviour rather than a
+# surprise, and pin the wire form as unchanged so it stays a local alignment
+# rather than a grader repricing.
+
+_BMAT_BLOCK = np.array([[1.0, 2.0], [3.0, 4.0]])
+_BMAT_ROW = np.array([1.0, 2.0, 3.0])
+
+
+def _bmat(blocks):
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        return fnp.bmat(blocks)
+
+
+def test_bmat_returns_a_plain_flopscope_array():
+    """Not a ``numpy.matrix``, and not a ``FlopscopeArray`` subclass of one.
+
+    ``_asflopscope`` is a deliberate no-op on non-flopscope ndarray subclasses
+    (it preserves ``SymmetricTensor`` metadata), so the ordinary wrap does
+    nothing here and ``bmat`` needs the subclass-dropping ``_asplainflopscope``
+    form instead.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    assert type(result) is FlopscopeArray, (
+        f"fnp.bmat returned {type(result).__module__}.{type(result).__name__}; "
+        "the local path must hand back the same plain array kind the grader "
+        "stores, or the two disagree on what '*' means"
+    )
+    assert not isinstance(result, np.matrix)
+    assert np.array_equal(np.asarray(result), _BMAT_BLOCK)
+
+
+def test_bmat_star_is_elementwise_and_matches_the_grader():
+    """The alignment itself: ``m * m`` is elementwise, as the grader always had it.
+
+    Locally this used to be matrix multiplication -- ``[[7, 10], [15, 22]]``
+    for this operand. The grader returned ``[[1, 4], [9, 16]]`` for the same
+    code. This is the participant-visible half of the change and the reason it
+    needs a starter-kit pin bump.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        product = np.asarray(result * result)
+    assert product.tolist() == [[1.0, 4.0], [9.0, 16.0]], (
+        f"fnp.bmat(...) * itself gave {product.tolist()}. The grader gives "
+        "[[1.0, 4.0], [9.0, 16.0]] for this operand (measured through a real "
+        "client/server round trip); matmul here means local and grader "
+        "disagree on the answer, which is the divergence this change closed."
+    )
+
+
+def test_bmat_result_arithmetic_is_billed_in_process():
+    """The FLOP half of the same alignment: downstream arithmetic used to be free.
+
+    A raw ``numpy.matrix`` bills 0 for ``m * m`` in-process while the grader
+    charges it through the client's ``RemoteArray``.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        before = budget.flops_used
+        _ = result * result
+        billed = budget.flops_used - before
+    assert billed > 0, (
+        "arithmetic on an fnp.bmat result billed 0 in-process; the grader "
+        "bills it, so this is the #193 gap reopening"
+    )
+
+
+@pytest.mark.parametrize("attr", ["I", "A", "H", "A1"])
+def test_bmat_result_no_longer_exposes_numpy_matrix_attributes(attr):
+    """A cost of the alignment, pinned so it is documented, not discovered.
+
+    ``.I`` (inverse), ``.A`` (asarray), ``.H`` (conjugate transpose) and
+    ``.A1`` (flattened) are ``numpy.matrix`` attributes. Local code that used
+    them must move to ``fnp.linalg.inv`` / ``np.asarray`` / ``.conj().T`` /
+    ``.ravel()``. They never worked on the grader, where the result has always
+    arrived as a ``RemoteArray``.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    assert not hasattr(result, attr), (
+        f"fnp.bmat result still exposes .{attr}, so it is still carrying "
+        "numpy.matrix semantics the grader does not have"
+    )
+
+
+def test_bmat_row_indexing_drops_the_row_dimension():
+    """The third cost: ``bm[0]`` is 1-D now, as it always was on the grader.
+
+    ``numpy.matrix`` is permanently 2-D, so indexing a row of a 1x3 bmat used
+    to give shape ``(1, 3)``. The grader gives ``(3,)`` -- measured through a
+    real round trip -- and the local path now agrees.
+    """
+    result = _bmat([[_BMAT_ROW]])
+    assert result.shape == (1, 3)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        row = result[0]
+    assert np.asarray(row).shape == (3,), (
+        f"fnp.bmat(...)[0] has shape {np.asarray(row).shape}; the grader gives "
+        "(3,) for the same index, and (1, 3) here means the matrix subclass "
+        "survived the return"
+    )
+
+
+def test_bmat_wire_form_is_unchanged_by_the_view_cast():
+    """The no-repricing proof: the grader receives exactly what it received before.
+
+    Packed through the real ``RequestHandler``, both the pre-change return
+    value (numpy's own ``numpy.matrix``, which is byte-for-byte what the
+    wrapper used to hand back) and the post-change return value produce the
+    same response: an array handle, same shape, same dtype, stored as the same
+    ``FlopscopeArray`` type. ``_pack_result`` tests ``isinstance(result,
+    np.ndarray)`` first and a ``numpy.matrix`` already satisfied it, so the
+    view-cast moves nothing on the wire -- it only spares
+    ``Session.store_array`` the cast it was doing itself.
+    """
+    pre_change = np.bmat([[_BMAT_BLOCK]])  # what the wrapper used to return
+    assert isinstance(pre_change, np.matrix), "numpy.bmat stopped returning a matrix"
+    post_change = _bmat([[_BMAT_BLOCK]])
+
+    packed = {}
+    stored_types = {}
+    for label, value in (("pre", pre_change), ("post", post_change)):
+        session = Session(flop_budget=10_000_000)
+        handler = RequestHandler(session)
+        try:
+            response = handler._pack_result(value)
+            assert response["status"] == "ok", response
+            meta = dict(response["result"])
+            stored = session.get_array(meta["id"])
+            stored_types[label] = type(stored)
+            meta.pop("id")
+            packed[label] = meta
+        finally:
+            if session.is_open:
+                session.close()
+
+    assert "value" not in packed["post"], (
+        "fnp.bmat now packs BY VALUE. A by-value result reaches the client as "
+        "a RemoteScalar whose arithmetic is free, so this would be a grader "
+        "repricing, not an alignment."
+    )
+    assert packed["post"] == packed["pre"], (
+        f"bmat's wire form changed: {packed['pre']} before the view-cast, "
+        f"{packed['post']} after. The grader must receive exactly what it "
+        "received before -- this change is local-side only."
+    )
+    assert stored_types["post"] is stored_types["pre"] is FlopscopeArray, (
+        f"server-side stored type changed: {stored_types}. store_array "
+        "view-cast the matrix to FlopscopeArray before this change and must "
+        "still hold a FlopscopeArray after it."
+    )
+
+
+def test_bmat_bills_its_own_call_exactly_as_before():
+    """The op's own price is untouched: numel(output), same as ``block``.
+
+    Two pins, because the view-cast must not reach the cost under either
+    weight table. Under the packaged table the 2x2 float64 probe bills 8 --
+    the figure measured on the pre-change tree, in-process and through a real
+    client/server round trip alike -- and under the test default (dtype rate
+    1.0, set by the autouse ``reset_weights`` fixture) it bills 4. ``block``
+    is the untouched sibling billing the identical formula, so it is the
+    control: the view-cast happens after ``deduct_after`` has read
+    ``result.size`` and ``result.dtype``, and cannot move either number.
+    """
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        before = budget.flops_used
+        fnp.bmat([[_BMAT_BLOCK]])
+        default_weights_cost = budget.flops_used - before
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        before = budget.flops_used
+        fnp.block([[_BMAT_BLOCK]])
+        block_cost = budget.flops_used - before
+
+    load_weights()
+    try:
+        with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+            before = budget.flops_used
+            fnp.bmat([[_BMAT_BLOCK]])
+            packaged_weights_cost = budget.flops_used - before
+    finally:
+        reset_weights()
+
+    assert (default_weights_cost, packaged_weights_cost) == (4, 8), (
+        f"fnp.bmat([[<2x2 float64>]]) billed {default_weights_cost} under the "
+        f"test-default weights and {packaged_weights_cost} under the packaged "
+        "table, not the (4, 8) it billed before the view-cast. Aligning the "
+        "return type must not reprice the op."
+    )
+    assert default_weights_cost == block_cost, (
+        f"bmat billed {default_weights_cost} where its untouched sibling block "
+        f"billed {block_cost} for the same blocks; they share one formula"
+    )
+
+
+def test_the_numpy_matrix_surface_is_one_op_wide():
+    """``bmat`` is the only way to reach a ``numpy.matrix`` through flopscope.
+
+    So aligning it aligns the whole matrix surface. ``asmatrix`` is
+    blacklisted (the module ``__getattr__`` refuses it by name), and neither
+    ``matrix`` nor ``mat`` is exposed at all -- meaning there is no second op
+    that could hand a local caller ``*``-as-matmul after this change.
+    """
+    assert REGISTRY["asmatrix"]["category"] == "blacklisted", (
+        "asmatrix is no longer blacklisted; if it is now metered it returns a "
+        "numpy.matrix and needs the same alignment bmat just got"
+    )
+    with pytest.raises(AttributeError, match="blacklisted"):
+        fnp.asmatrix  # noqa: B018 -- attribute access is the refusal under test
+
+    for name in ("matrix", "mat"):
+        assert not hasattr(fnp, name), (
+            f"fnp.{name} now exists. A matrix constructor reintroduces the "
+            "local/grader semantic split bmat's view-cast just closed."
+        )
+        assert name not in REGISTRY, f"{name} was added to the registry"
