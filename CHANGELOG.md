@@ -310,6 +310,31 @@
   nothing — the buffer route is the more expensive of the two, at the same
   per-element rate it has always charged at rank 1. This is participant-visible
   and needs a starter-kit pin bump at release (#194).
+- **client**: structured results keep their type over the wire, so
+  `fnp.linalg.svd(a).U` — and `.S`, `.Vh`, `.Q`, `.R`, `.eigenvalues`,
+  `.eigenvectors`, `.sign`, `.logabsdet`, and the `unique_all`/`unique_counts`/
+  `unique_inverse` fields — resolve against a server as they always have
+  in-process. They previously raised `AttributeError`: the wire's multi-result
+  form (`{"multi": [...]}`) had no slot for the container type, having been
+  designed for ops returning a homogeneous list of arrays (`nonzero` returns
+  one per dimension), and a namedtuple **is** a tuple, so every structured
+  result flowed down that path and arrived stripped. The server now describes
+  the container generically from `type(result).__name__` and
+  `type(result)._fields` — no numpy-specific table, so a numpy release that
+  adds a structured result needs no change — and the client rebuilds it with
+  `collections.namedtuple`, which adds no dependency (pyzmq and msgpack
+  remain the client's only ones). Results are still tuples, so indexing and
+  unpacking (`q, r = fnp.linalg.qr(x)`) are unaffected, and plain-tuple
+  returns (`nonzero`, `modf`, `frexp`) stay plain tuples. Additive and
+  compatible both ways: an older client ignores the new key and still sees a
+  plain tuple, and a newer client against an older server sees exactly what it
+  sees today. **No billed amount changes** — in-process or on the grader. What
+  changes is the label on a container the caller already received; the item
+  payloads are byte-for-byte identical, so no handle is minted or withheld and
+  nothing downstream is repriced. Measured on a linalg-heavy workload over a
+  real client/server round trip, all four version pairings bill an identical
+  3,997,936 grader FLOPs. Participant-visible; needs a starter-kit pin bump at
+  release (#193).
 - **client**: `BudgetContext.wall_time_s` and
   `BudgetContext.residual_wall_time_s` are now live while the context is open,
   instead of returning `None` until it closed while `summary_dict()` reported
