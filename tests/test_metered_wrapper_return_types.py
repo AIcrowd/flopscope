@@ -43,6 +43,12 @@ Guards:
   preconditions that make the ``cross``/``outer`` wraps free. ``numpy.cross``
   returns a 0-d *ndarray* rather than a scalar for 2-vector operands, and
   ``outer``'s ``out=`` early exit sits directly above the wrapped line.
+* :func:`test_fft_free_ops_have_no_scalar_shape_to_trap_on` and
+  :func:`test_fft_free_results_were_already_array_handles` -- the same pair of
+  preconditions for the four ``fft`` helpers. There is no argument at which any
+  of them returns a scalar: the two ``*freq`` builders always produce a rank-1
+  grid, and ``fftshift``/``ifftshift`` of a 0-d input is refused by
+  ``numpy.roll`` before flopscope ever reaches its return line.
 * :func:`test_raw_numpy_returning_ops_only_ever_shrink` -- the registry-driven
   sweep. It probes every metered op in the registry, in every probe form the op
   accepts, and compares the set that still returns a raw ``numpy.ndarray``
@@ -60,8 +66,11 @@ module-wide ``wrap_module_returns`` call at the foot of
 ``flopscope/numpy/linalg/__init__.py``, leaving 17; the eight contraction and
 product ops (``cross``, ``outer``, ``dot``, ``inner``, ``matmul``, ``matvec``,
 ``vecdot``, ``vecmat``) were then closed one return statement at a time, leaving
-9. Those nine are ``bmat`` (a ``numpy.matrix``), ``histogramdd`` (a plain
-tuple), the four ``fft`` index/frequency helpers and the three ``is*``
+9; the four ``fft`` index/frequency helpers (``fftfreq``, ``rfftfreq``,
+``fftshift``, ``ifftshift``) were closed by a second module-wide
+``wrap_module_returns`` call, this one at the foot of
+``flopscope/numpy/fft/_free.py``, leaving 5. Those five are ``bmat`` (a
+``numpy.matrix``), ``histogramdd`` (a plain tuple) and the three ``is*``
 predicates, and wrapping them has to be handled case by case. Closing them
 raises local FLOP estimates further, which needs its own measurement and its own
 release note; it is not this change. The inventory records them so the gap is
@@ -74,6 +83,14 @@ branches -- so a blanket wrap there would break ``out=`` identity, and the
 narrow one-line form would reprice the branch that already wraps. See
 :func:`test_contractions_on_flopscope_operands_keep_their_array_handle`.
 
+The ``fft`` helpers took the opposite decision for the opposite reason: the
+module-wide form is safe there. ``flopscope/numpy/fft/_free.py`` holds nothing
+but those four metered wrappers -- the only other public names in its namespace
+are imported symbols, which the default ``check_module=True`` filter excludes --
+so the pass reaches exactly the four intended return sites and nothing else.
+None of the four takes ``out=``, so there is no identity contract to break. See
+:func:`test_fft_free_module_wrap_reaches_only_the_four_metered_ops`.
+
 Three things the sweep structurally cannot judge, and which therefore carry
 their own guards below:
 
@@ -85,7 +102,7 @@ their own guards below:
   inventory cannot record that either, because the only probe form fitting
   ``multi_dot`` yields a scalar and so classifies it clean
   (:func:`test_multi_dot_without_out_is_a_recorded_residual_gap`). The honest
-  count is 27 closed, 9 inventoried, 1 closed-off-by-exclusion.
+  count is 31 closed, 5 inventoried, 1 closed-off-by-exclusion.
 * the *type* of a structured return. The sweep inspects the elements inside a
   tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
   clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
@@ -139,10 +156,6 @@ _METERED_CATEGORIES = {
 KNOWN_RAW_RETURN_OPS = frozenset(
     {
         "bmat",
-        "fft.fftfreq",
-        "fft.fftshift",
-        "fft.ifftshift",
-        "fft.rfftfreq",
         "histogramdd",
         "isfinite",
         "isinf",
@@ -612,6 +625,221 @@ def test_outer_out_hands_back_the_callers_buffer(dest_kind):
         "caller's own buffer"
     )
     assert np.allclose(np.asarray(dest), np.outer(_V3, _W3))
+
+
+# ---------------------------------------------------------------------------
+# fft free ops: no scalar shape exists, so the module-wide wrap is wire-neutral
+# ---------------------------------------------------------------------------
+
+# Every shape the four helpers produce. The ranks matter more than the values:
+# a wrap is only grader-neutral where the pre-wrap result was already an
+# ndarray, so the probes deliberately include the narrowest results each op can
+# return -- a length-1 frequency grid and a single-element shift -- which are
+# the closest any of them comes to a scalar.
+_FFT_FREE_PROBES = [
+    ("fft.fftfreq", (8,), {}),
+    ("fft.fftfreq", (9,), {"d": 0.5}),
+    ("fft.fftfreq", (1,), {}),
+    ("fft.fftfreq", (2,), {}),
+    ("fft.rfftfreq", (8,), {}),
+    ("fft.rfftfreq", (9,), {"d": 0.5}),
+    ("fft.rfftfreq", (1,), {}),
+    ("fft.rfftfreq", (2,), {}),
+    ("fft.fftshift", (_V,), {}),
+    ("fft.fftshift", (_M,), {}),
+    ("fft.fftshift", (_M,), {"axes": 0}),
+    ("fft.fftshift", (_M,), {"axes": (0, 1)}),
+    ("fft.fftshift", (np.array([3.0]),), {}),
+    ("fft.fftshift", (_IV,), {}),
+    ("fft.ifftshift", (_V,), {}),
+    ("fft.ifftshift", (_M,), {}),
+    ("fft.ifftshift", (_M,), {"axes": 0}),
+    ("fft.ifftshift", (_M,), {"axes": (0, 1)}),
+    ("fft.ifftshift", (np.array([3.0]),), {}),
+    ("fft.ifftshift", (_IV,), {}),
+]
+
+_NUMPY_FFT_FREE = {
+    "fft.fftfreq": np.fft.fftfreq,
+    "fft.rfftfreq": np.fft.rfftfreq,
+    "fft.fftshift": np.fft.fftshift,
+    "fft.ifftshift": np.fft.ifftshift,
+}
+
+
+def test_fft_free_module_wrap_reaches_only_the_four_metered_ops():
+    """``wrap_module_returns`` on ``_free`` must patch the four ops and no more.
+
+    The module-wide form is only defensible if the module holds nothing else.
+    ``_free.py`` also carries imported public names -- ``attach_docstring``,
+    ``require_budget``, ``FlopscopeArray``, ``Sequence`` -- and patching any of
+    them would replace, in this module's namespace, an object the rest of the
+    package holds by identity. The default ``check_module=True`` filter is what
+    excludes them, so this pins the filter's outcome twice over: the set of
+    names it is allowed to reach, and the identity of the imports it must leave
+    alone. Dropping to ``check_module=False`` reddens the second half.
+
+    That the four are actually patched is proved behaviourally by
+    :func:`test_fft_free_ops_return_flopscope_types`, not here --
+    ``_counted_wrapper`` already sets ``__wrapped__``, so an attribute probe
+    would read clean either way.
+    """
+    from flopscope._docstrings import attach_docstring
+    from flopscope._ndarray import FlopscopeArray as _FlopscopeArray
+    from flopscope._validation import require_budget
+    from flopscope.numpy.fft import _free
+
+    eligible = {
+        name
+        for name, obj in vars(_free).items()
+        if not name.startswith("_")
+        and callable(obj)
+        and getattr(obj, "__module__", None) == _free.__name__
+    }
+    assert eligible == {"fftfreq", "rfftfreq", "fftshift", "ifftshift"}, (
+        "wrap_module_returns(_free) would reach a name other than the four "
+        f"metered ops: {sorted(eligible)}. Wrap the four return sites by hand "
+        "instead of module-wide."
+    )
+
+    for name, original in (
+        ("attach_docstring", attach_docstring),
+        ("require_budget", require_budget),
+        ("FlopscopeArray", _FlopscopeArray),
+    ):
+        assert getattr(_free, name) is original, (
+            f"the module wrap replaced the imported {name} in _free's "
+            "namespace; it must only reach the four metered ops"
+        )
+
+
+@pytest.mark.parametrize("name, args, kwargs", _FFT_FREE_PROBES)
+def test_fft_free_ops_return_flopscope_types(name, args, kwargs):
+    fn = _resolve(name)
+    assert fn is not None, f"fnp.{name} is missing"
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(*args, **kwargs)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.{name}{args} returned {type(result).__module__}."
+        f"{type(result).__name__}; downstream arithmetic on a raw ndarray bills "
+        "0 in-process while the grader bills it through the client's "
+        "RemoteArray (#193)"
+    )
+    assert np.allclose(np.asarray(result), _NUMPY_FFT_FREE[name](*args, **kwargs))
+
+
+@pytest.mark.parametrize("name, args, kwargs", _FFT_FREE_PROBES)
+def test_fft_free_ops_have_no_scalar_shape_to_trap_on(name, args, kwargs):
+    """numpy never hands these four a scalar, at any argument.
+
+    This is the precondition that makes the module-wide wrap grader-neutral.
+    Wrapping a numpy SCALAR return would flip its wire form from a by-value
+    ``RemoteScalar`` to an array handle and start billing downstream arithmetic
+    that is free today. Asserted against numpy's own return kind so it tracks
+    numpy rather than a remembered fact.
+    """
+    expected = _NUMPY_FFT_FREE[name](*args, **kwargs)
+    assert isinstance(expected, np.ndarray) and not isinstance(expected, np.generic), (
+        f"numpy.{name}{args} now returns {type(expected).__module__}."
+        f"{type(expected).__name__}. If numpy has started returning a scalar "
+        "here, the module-wide wrap is no longer grader-neutral at this shape "
+        "-- re-measure before keeping it."
+    )
+
+
+@pytest.mark.parametrize("name", ["fft.fftshift", "fft.ifftshift"])
+@pytest.mark.parametrize(
+    "operand",
+    [np.array(3.0), np.float64(3.0), 3.0],
+    ids=["0d-array", "np-scalar", "py-float"],
+)
+def test_fft_shift_refuses_zero_d_input_before_flopscope_returns(name, operand):
+    """The 0-d shape -- where a wrap would reprice -- is unreachable.
+
+    ``numpy.fft.fftshift`` is ``numpy.roll``, and ``roll`` of a 0-d input dies
+    unpacking an empty index list. The refusal happens inside numpy, so
+    flopscope's return line is never reached and the wrap has nothing to act
+    on. numpy's own outcome is pinned in the same test rather than asserting a
+    remembered exception class.
+    """
+    numpy_fn = _NUMPY_FFT_FREE[name]
+    with pytest.raises(ValueError):
+        numpy_fn(operand)
+
+    fn = _resolve(name)
+    assert fn is not None, f"fnp.{name} is missing"
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        with pytest.raises(ValueError):
+            fn(operand)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 8, 9, 64])
+def test_fft_freq_builders_always_return_a_rank_1_grid(n):
+    """The other half of the no-scalar-shape claim, for the two ``*freq`` ops.
+
+    They take an int rather than an array, so there is no operand rank to
+    collapse: numpy builds an ``arange`` and scales it, which is rank 1 for
+    every accepted ``n`` including 1.
+    """
+    for numpy_fn in (np.fft.fftfreq, np.fft.rfftfreq):
+        expected = numpy_fn(n)
+        assert isinstance(expected, np.ndarray) and expected.ndim == 1, (
+            f"numpy.fft.{numpy_fn.__name__}({n}) returned "
+            f"{type(expected).__name__} of ndim "
+            f"{getattr(expected, 'ndim', None)}; a rank-0 result would make the "
+            "wrap a repricing at this n"
+        )
+
+
+@pytest.mark.parametrize("name, args, kwargs", _FFT_FREE_PROBES)
+def test_fft_free_results_were_already_array_handles(name, args, kwargs):
+    """Why wrapping the four costs the grader nothing, pinned at the wire.
+
+    ``_pack_result`` stored a handle for these results before this change --
+    they were already ndarrays, just raw ones -- and stores one after.
+    """
+    fn = _resolve(name)
+    assert fn is not None, f"fnp.{name} is missing"
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(*args, **kwargs)
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        f"fnp.{name}{args} now packs by value; it packed as an array handle "
+        "before the #193 wrap, so this is a grader repricing in the other "
+        "direction"
+    )
+
+
+@pytest.mark.parametrize(
+    "name, args",
+    [
+        ("fft.fftfreq", (8,)),
+        ("fft.rfftfreq", (8,)),
+        ("fft.fftshift", (_V,)),
+        ("fft.ifftshift", (_V,)),
+    ],
+)
+def test_arithmetic_downstream_of_fft_free_ops_is_billed(name, args):
+    """The consequence, pinned directly: the local path now bills what the
+    grader bills."""
+    fn = _resolve(name)
+    assert fn is not None, f"fnp.{name} is missing"
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        result = fn(*args)
+        before = budget.flops_used
+        _ = result + result
+        assert budget.flops_used > before, (
+            f"arithmetic on an fnp.{name} result was not billed in-process; "
+            "the grader bills it through the client's RemoteArray"
+        )
 
 
 # ---------------------------------------------------------------------------

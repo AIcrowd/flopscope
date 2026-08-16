@@ -106,6 +106,31 @@
   server's real `RequestHandler._pack_result` give a byte-identical wire form
   (handle vs by-value, shape, dtype), a byte-identical op-call cost, and
   unchanged `out=`/operand identity on both trees: 0 differences in all three.
+- **No billed amount changes for the fft free-op return-type fix below
+  either.** Local only, same shape, measured the same way. A realistic spectral
+  workload — 20 iterations of `fft2` → `fftshift` → an `abs()²` power spectrum
+  weighted by an `fftfreq` grid → `ifftshift` → `ifft2` — moves local
+  `flops_used` by +2.86% at n=16 (1,075,840 → 1,106,560), +1.60% at n=32
+  (5,121,280 → 5,203,200), +1.03% at n=64 (23,759,360 → 24,005,120) and +0.76%
+  at n=128 (108,139,520 → 108,958,720). The rise shrinks with n for the usual
+  reason: the newly-billed work is O(n²) elementwise arithmetic while the
+  transforms that dominate are O(n² log n). A workload made of nothing but the
+  four helpers and arithmetic on their results is the other end of the range
+  and roughly doubles — 990,720 → 1,661,600, +67.7% — so read the figure as
+  "low single-digit percent on spectral code, much more if the helpers are the
+  whole workload". Both operand kinds read identically before and after, since
+  these four returned raw on plain numpy and `FlopscopeArray` input alike. On
+  the grader side, 134 measurements — 67 call shapes covering all four ops at
+  ranks 0–3, int/bool/float32/complex operands, every `axes` form, list and
+  Python-float inputs, the eight fft transforms and the ops the earlier stages
+  touched, each on both operand kinds — driven through the server's real
+  `RequestHandler._pack_result` give a byte-identical wire form, op-call cost
+  and argument identity on both trees: 0 differences in all three. A real
+  client/server round trip over the same probes is byte-identical too, for a
+  second reason worth stating plainly: **the client exposes no `fft` proxy at
+  all** — `flopscope/fft/__init__.py` is a stub and every registered `fft.*`
+  name raises `AttributeError` — so none of these ops can reach the grader
+  today in the first place.
 
 ### Fix
 
@@ -136,9 +161,10 @@
   concentrated in `linalg` and `fft` and including structured returns
   (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
   `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
-  closed by the next item and 8 contraction/product ops by the one after it;
-  the remaining 9 are recorded, not changed. #193 is therefore referenced, not
-  closed.
+  closed by the next item, 8 contraction/product ops by the one after it, and
+  the 4 `fft` index/frequency helpers by the one after that; the remaining 5
+  (`bmat`, `histogramdd`, `isfinite`, `isinf`, `isnan`) are recorded, not
+  changed. #193 is therefore referenced, not closed.
 - **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
   a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
   returns the sweep above found. These ops already wrapped their result when
@@ -159,7 +185,8 @@
   True to False for a plain-ndarray destination. That exclusion has a price,
   stated rather than glossed: `multi_dot`'s ordinary array-returning shape
   still hands back a raw ndarray on plain-numpy operands, so the honest count
-  is 27 closed, 9 still inventoried, and 1 closed-off-by-exclusion. It cannot
+  across this release is 31 closed, 5 still inventoried, and 1
+  closed-off-by-exclusion. It cannot
   go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
   the sweep classifies `multi_dot` as clean, because the only probe form that
   fits it returns a scalar — so it is pinned by a dedicated test instead.
@@ -203,6 +230,33 @@
   `complex128` scalar is not — it falls back to a handle the grader bills while
   in-process billing stays 0. It packs identically on the pre-fix tree, so
   nothing regressed; it is now written down and pinned instead of implied.
+- **billing**: `fft.fftfreq`, `fft.rfftfreq`, `fft.fftshift` and
+  `fft.ifftshift` now return flopscope types, closing 4 more of the 36 raw
+  returns and leaving 5. Same defect as the three items above: all four ended
+  in a bare `return result` with no wrapping of any kind, so arithmetic on a
+  frequency grid or a shifted array billed 0 in-process while the grader would
+  bill it. Closed module-wide — the same `wrap_module_returns` call `linalg`
+  and nine other modules already carry — rather than one `return` at a time,
+  because `flopscope/numpy/fft/_free.py` contains nothing but those four
+  metered wrappers: its only other public names are imports, which the default
+  `check_module=True` filter excludes. That was enumerated before the form was
+  chosen, and a test now pins both halves of it — the set of names the pass may
+  reach, and the identity of the imported helpers it must leave alone.
+  None of the four takes `out=`, so there is no caller-buffer identity to
+  break, and no `skip_names` is needed.
+  **There is no scalar shape to trap on here**, which is what makes the
+  module-wide form safe: wrapping a numpy scalar would flip a by-value
+  `RemoteScalar` into an array handle and start charging arithmetic that is
+  free today. `fftfreq`/`rfftfreq` take an int and always build a rank-1 grid,
+  including at `n=1`; `fftshift`/`ifftshift` of a 0-d input never reaches
+  flopscope's return line at all, because `numpy.roll` raises `ValueError`
+  first. Both are asserted against numpy's own behaviour rather than
+  remembered, so they track numpy rather than this changelog.
+  `tests/test_fft_free.py` keeps its billed numbers (8, 5, 8, 8) and moves its
+  `numpy.allclose` check outside the budgeted region: the comparison is a
+  metered op now that the result is a flopscope type, so the old form measured
+  the op plus the check and read 63 where it means 8. Restructured, not
+  relaxed, with the premise pinned by its own test.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even
