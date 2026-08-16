@@ -205,6 +205,39 @@ def _is_msgpack_native(obj) -> bool:
     return False
 
 
+def _describe_namedtuple(result) -> dict[str, Any] | None:
+    """Describe *result*'s namedtuple container, or ``None`` if it is not one.
+
+    Generic on purpose: every structured numpy result (``SVDResult``,
+    ``EigResult``, ``QRResult``, ``SlogdetResult``, ``UniqueAllResult``, ...)
+    is an ordinary namedtuple, so reading ``__name__``/``_fields`` off the
+    type covers all of them — and covers any new one a future numpy adds —
+    without a lookup table anyone has to remember to update.
+
+    A result is only described when it is genuinely rebuildable on the other
+    side: the field names must be valid, distinct Python identifiers and there
+    must be exactly one per item. Anything else (a plain tuple, a list, a tuple
+    subclass carrying an unrelated ``_fields`` attribute) is left undescribed
+    and travels as the plain multi form it has always travelled as.
+    """
+    fields = getattr(type(result), "_fields", None)
+    if not isinstance(fields, tuple):
+        return None
+    if len(fields) != len(result):
+        return None
+    if not all(
+        isinstance(name, str) and name.isidentifier() and not name.startswith("_")
+        for name in fields
+    ):
+        return None
+    if len(set(fields)) != len(fields):
+        return None
+    name = type(result).__name__
+    if not name.isidentifier():
+        return None
+    return {"name": name, "fields": list(fields)}
+
+
 #: Maximum allowed array size in bytes (configurable via environment variable).
 MAX_ARRAY_BYTES = int(os.environ.get("FLOPSCOPE_MAX_ARRAY_BYTES", 100 * 1024 * 1024))
 
@@ -872,7 +905,18 @@ class RequestHandler:
                     items.append({"value": _make_serializable(r), "dtype": "object"})
                 else:
                     items.append({"value": r})
-            return {"status": "ok", "result": {"multi": items}, "budget": budget}
+            payload: dict[str, Any] = {"multi": items}
+            # A namedtuple result (linalg.svd -> SVDResult, linalg.qr ->
+            # QRResult, unique_all -> UniqueAllResult, ...) is a tuple, so it
+            # arrives here and would otherwise reach the client as a bare
+            # tuple with its field names dropped. Describe the container
+            # alongside the items so the client can rebuild it. Additive: a
+            # client that predates the key ignores it and still sees a plain
+            # tuple.
+            multi_type = _describe_namedtuple(result)
+            if multi_type is not None:
+                payload["multi_type"] = multi_type
+            return {"status": "ok", "result": payload, "budget": budget}
 
         # Scalar or other value
         if isinstance(result, np.generic):
