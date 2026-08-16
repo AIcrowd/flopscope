@@ -368,26 +368,81 @@ class BudgetContext:
         """Optional namespace label for this context."""
         return self._namespace
 
+    def _live_wall_and_residual_s(self) -> tuple[float, float] | None:
+        """Measure (wall, residual) seconds now, or ``None`` before ``__enter__``.
+
+        Both quantities are purely local. Wall is this process's clock since
+        ``__enter__``; residual is that wall minus the dispatch time this
+        process accumulated inside flopscope calls. Only splitting the dispatch
+        bucket into backend and overhead needs ``kernel_ns`` from the server,
+        which is why those two properties stay server-fed while these two do
+        not — no round trip is involved here.
+
+        Deliberately NOT wrapped in ``dispatch_span()``: the time a read costs
+        is the caller's own Python and belongs in residual. Charging it to
+        overhead instead would let a caller shrink the billed residual
+        (``C_m = F_m + lambda * residual``) by polling this property in a loop.
+        """
+        wall_dispatch = self._live_timing_ns()
+        if wall_dispatch is None:
+            return None
+        # kernel_ns only splits dispatch into backend/overhead; neither wall nor
+        # residual reads it, so 0 is exact here rather than a stand-in.
+        wall_s, _backend_s, _overhead_s, residual_s = _decompose_timing(
+            wall_dispatch[0], wall_dispatch[1], 0
+        )
+        return wall_s, residual_s
+
     @property
     def wall_time_s(self) -> float | None:
-        """Total wall-clock seconds spanned by the context (None until closed)."""
+        """Total wall-clock seconds spanned by the context.
+
+        Live while the context is open — measured locally, no round trip — and
+        the closed total once it exits. ``None`` only before ``__enter__``.
+        Matches ``summary_dict()["wall_time_s"]``, which is measured the same
+        way from the same helper.
+        """
+        if self._is_open:
+            live = self._live_wall_and_residual_s()
+            if live is not None:
+                return live[0]
         return self._wall_time_s
 
     @property
     def flopscope_backend_time_s(self) -> float:
-        """Seconds of real op compute on the server (0.0 until closed)."""
+        """Seconds of real op compute on the server (0.0 until closed).
+
+        Unlike wall and residual this one is not locally computable: the kernel
+        time it reports is measured on the server and arrives with the close
+        response. Call :func:`budget_summary_dict` for a live value.
+        """
         return self._flopscope_backend_time
 
     @property
     def flopscope_overhead_time_s(self) -> float:
         """Seconds of flopscope transport overhead — serialization + network +
-        server-side comms (0.0 until closed). Not billed."""
+        server-side comms (0.0 until closed). Not billed.
+
+        Server-fed for the same reason as
+        :attr:`flopscope_backend_time_s`: the client knows the combined
+        dispatch time but not how much of it was server-side kernel.
+        """
         return self._flopscope_overhead_time
 
     @property
     def residual_wall_time_s(self) -> float | None:
-        """Seconds of participant Python outside flopscope calls (None until
-        closed). The billed bucket: C_m = F_m + lambda * residual."""
+        """Seconds of participant Python outside flopscope calls. The billed
+        bucket: C_m = F_m + lambda * residual.
+
+        Live while the context is open — measured locally, no round trip — and
+        the closed total once it exits. ``None`` only before ``__enter__``.
+        Matches ``summary_dict()["residual_wall_time_s"]``, which is measured
+        the same way from the same helper.
+        """
+        if self._is_open:
+            live = self._live_wall_and_residual_s()
+            if live is not None:
+                return live[1]
         return self._residual_wall_time
 
     # ------------------------------------------------------------------
@@ -443,16 +498,30 @@ class BudgetContext:
         self._flopscope_overhead_time = summary["flopscope_overhead_time_s"]
         self._residual_wall_time = summary["residual_wall_time_s"]
 
+    def _live_timing_ns(self) -> tuple[int, int] | None:
+        """Local ``(wall_ns, dispatch_ns)`` since ``__enter__``, or ``None``.
+
+        The single place these two clocks are read, so the timing properties
+        and the summary path cannot answer the same question differently —
+        which is the defect #211 reported.
+        """
+        if self._wall_start_ns is None:
+            return None
+        wall_ns = max(time.perf_counter_ns() - self._wall_start_ns, 0)
+        dispatch_ns = max(total_dispatch_ns() - self._dispatch_baseline_ns, 0)
+        return wall_ns, dispatch_ns
+
     def _normalize_context_timing(self, summary: dict, *, kernel_ns: int) -> dict:
         """Return one client-context timing view without changing server state."""
         with dispatch_span():
             result = deepcopy(summary)
-        if self._wall_start_ns is None:
+        # Measured after the copy above, so the copy's cost lands in dispatch
+        # (overhead) rather than in the caller's residual.
+        wall_dispatch = self._live_timing_ns()
+        if wall_dispatch is None:
             return result
-        wall_ns = max(time.perf_counter_ns() - self._wall_start_ns, 0)
-        dispatch_ns = max(total_dispatch_ns() - self._dispatch_baseline_ns, 0)
         wall, backend, overhead, residual = _decompose_timing(
-            wall_ns, dispatch_ns, kernel_ns
+            wall_dispatch[0], wall_dispatch[1], kernel_ns
         )
         result.update(
             wall_time_s=wall,

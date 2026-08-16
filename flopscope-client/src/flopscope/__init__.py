@@ -308,15 +308,38 @@ def _infer_dtype(values):
     return "float64"  # mixed or float values
 
 
+# Buffer-protocol formats with a direct wire dtype. Anything else (big-endian
+# '>d', structured 'T{...}', complex 'Zd', unicode '1w') has no wire dtype and
+# falls through to the TypeError at the end of array().
+_BUFFER_FORMAT_TO_WIRE = {
+    "f": "float32",
+    "d": "float64",
+    "e": "float16",
+    "b": "int8",
+    "B": "uint8",
+    "h": "int16",
+    "H": "uint16",
+    "i": "int32",
+    "I": "uint32",
+    "l": "int64",
+    "L": "uint64",
+    "q": "int64",
+    "Q": "uint64",
+    "?": "bool",
+}
+
+
 @timed_dispatch
 def array(object, dtype=None, **kwargs):  # noqa: F811
-    """Create a remote array from a Python list, tuple, or existing RemoteArray.
+    """Create a remote array from a Python list, tuple, buffer, or RemoteArray.
 
     Parameters
     ----------
     object:
         Data to create the array from.  May be a nested list/tuple of
-        numbers or an existing :class:`RemoteArray`.
+        numbers, an object exposing the buffer protocol (``array.array``,
+        ``memoryview``, ``numpy.ndarray``) at any rank, or an existing
+        :class:`RemoteArray`.
     dtype:
         Optional dtype string (e.g. ``"float64"``).  Inferred from data
         if not given.
@@ -391,26 +414,10 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
         resp = conn.send_recv(encode_create_from_data(data, [], dtype_str))
         return _result_from_response(resp)
 
-    # Buffer-protocol inputs (stdlib array.array, memoryview, bytes-backed
-    # buffers). Native numpy-backed flopscope accepts these; mirror it. Send the
-    # raw bytes directly (C-speed) rather than materializing a Python list, so
-    # the timed array() dispatch is not inflated.
-    _BUFFER_FORMAT_TO_WIRE = {
-        "f": "float32",
-        "d": "float64",
-        "e": "float16",
-        "b": "int8",
-        "B": "uint8",
-        "h": "int16",
-        "H": "uint16",
-        "i": "int32",
-        "I": "uint32",
-        "l": "int64",
-        "L": "uint64",
-        "q": "int64",
-        "Q": "uint64",
-        "?": "bool",
-    }
+    # Buffer-protocol inputs (stdlib array.array, memoryview, numpy.ndarray,
+    # bytes-backed buffers). Native numpy-backed flopscope accepts these; mirror
+    # it. Send the raw bytes directly (C-speed) rather than materializing a
+    # Python list, so the timed array() dispatch is not inflated.
     # bytes/bytearray/str expose a buffer but numpy treats them as string/bytes
     # dtypes (e.g. np.array(b"abc") -> |S3 scalar), which flopscope has no dtype
     # for. Reject cleanly rather than mis-reading them as a uint8 buffer.
@@ -424,13 +431,20 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
         mv = memoryview(object)
     except TypeError:
         mv = None
-    if mv is not None and mv.ndim <= 1:
+    if mv is not None:
         native_wire = _BUFFER_FORMAT_TO_WIRE.get(mv.format)
         if native_wire is not None:
+            # tobytes() is C-order for F-order and strided buffers alike, and
+            # mv.shape is the logical shape at any rank -- including () for a
+            # 0-d buffer, which create_from_data already accepts (the scalar
+            # branch above sends exactly that). The old path derived the length
+            # from nbytes//itemsize and always sent [n], which is why anything
+            # above rank 1 was refused and a 0-d buffer came back as rank 1.
             data = mv.tobytes()
-            n = mv.nbytes // mv.itemsize
             conn = get_connection()
-            resp = conn.send_recv(encode_create_from_data(data, [n], native_wire))
+            resp = conn.send_recv(
+                encode_create_from_data(data, list(mv.shape), native_wire)
+            )
             arr = _result_from_response(resp)
             if dtype is not None:
                 want = _normalize_dtype(dtype)
@@ -443,6 +457,58 @@ def array(object, dtype=None, **kwargs):  # noqa: F811
         f"Expected list, tuple, int, float, RemoteArray, or a numeric buffer "
         f"(array.array / memoryview of a numeric type)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Special-case: asarray()
+# ---------------------------------------------------------------------------
+
+
+def _needs_local_buffer_upload(value) -> bool:
+    """Whether *value* is a numeric buffer the wire cannot carry as it stands.
+
+    Deliberately narrow: it answers True only for values the backend refuses
+    today. Everything the wire already represents -- a ``RemoteArray`` handle,
+    a nested list, a number, a numpy scalar ``_encode_arg`` unwraps to a plain
+    one -- is excluded, so every call that works today keeps its exact
+    dispatch, and therefore its exact billing. The only behaviour that changes
+    is a refusal turning into a working call.
+    """
+    # bytes-like values ARE carried by the wire (as binary), and array()
+    # rejects them on purpose since numpy reads them as an S-dtype scalar.
+    if isinstance(value, (bytes, bytearray, str)):
+        return False
+    try:
+        mv = memoryview(value)
+    except (TypeError, ValueError):
+        # Not a buffer at all, or a dtype memoryview itself refuses (e.g.
+        # datetime64): keep today's outcome rather than inventing a new one.
+        # This is also the cheap early exit for lists, numbers and handles.
+        return False
+    if _BUFFER_FORMAT_TO_WIRE.get(mv.format) is None:
+        return False
+    # A buffer _encode_arg rewrites (a numpy scalar it unwraps to a Python
+    # float, say) already has a wire form that works; only the ones it hands
+    # back untouched would be msgpack'd as opaque binary and misread.
+    return _encode_arg(value) is value
+
+
+_asarray_remote = _make_proxy("asarray")
+
+
+@timed_dispatch
+def asarray(a, *args, **kwargs):
+    """Convert *a* to a remote array, without copying when it already is one.
+
+    Accepts everything the server accepts plus, unlike the auto-generated
+    proxy this replaces, objects exposing the buffer protocol at any rank
+    (``numpy.ndarray``, ``array.array``, ``memoryview``). Those are uploaded
+    with :func:`array` first, because a raw buffer has no wire representation;
+    every other input is dispatched to the server unchanged.
+    """
+    if _needs_local_buffer_upload(a):
+        a = array(a)
+    return _asarray_remote(a, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +557,7 @@ from flopscope._module import Module  # noqa: E402
 
 # Functions that are special-cased above and should not be overwritten.
 _SPECIAL_CASED = frozenset(
-    {"array", "einsum", "load", "save", "savez", "savez_compressed"}
+    {"array", "asarray", "einsum", "load", "save", "savez", "savez_compressed"}
 )
 
 # Functions that belong to submodules (contain a dot) are handled by the
