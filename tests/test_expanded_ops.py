@@ -133,8 +133,14 @@ class TestCustomOps:
     def test_outer(self):
         a, b = numpy.array([1.0, 2.0]), numpy.array([3.0, 4.0, 5.0])
         with BudgetContext(flop_budget=10**6, quiet=True) as budget:
-            assert numpy.allclose(fnp.outer(a, b), numpy.outer(a, b))
+            result = fnp.outer(a, b)
+            # Snapshot before comparing: outer now returns a flopscope type
+            # (#193), so the numpy.allclose below auto-routes to fnp.allclose
+            # and is itself billed. That billing is correct -- the grader
+            # charges it too -- but it is not outer's cost, and 6 is outer's
+            # cost. Same restructuring as test_diff below.
             assert budget.flops_used == 6
+            assert numpy.allclose(result, numpy.outer(a, b))
 
     def test_diff(self):
         x = numpy.array([1.0, 3.0, 6.0, 10.0])

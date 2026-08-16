@@ -86,6 +86,26 @@
   unchanged. The reason is structural: `Session.store_array` already view-casts
   every stored ndarray to `FlopscopeArray`, so the server never saw the
   difference.
+- **No billed amount changes for the cross/outer/contraction return-type fix
+  below either.** Local only, measured the same way. The workload, stated
+  precisely enough to re-run: 40 iterations at n=32 of `matmul(a, b)`,
+  `dot(a, b)`, `outer(u, w)`, `cross(v3, w3)`, `matvec(a, u)` and a scalar
+  `inner(u, w)`, with one elementwise expression on each array result
+  (`m*0.5 + m`, `d - d*0.25`, `o + o`, `c*2.0`, `mv + mv`) and a `.sum()` over
+  each: local `flops_used` 10,570,880 → 11,231,760 on plain-numpy
+  operands (+660,880, +6.25%) and 11,067,600 → 11,231,760 on `FlopscopeArray`
+  operands (+164,160, +1.48%). The two operand kinds now read the SAME total,
+  which is the point — `cross` and `outer` were raw on both kinds, the
+  contraction helper only on plain numpy, and the remaining spread was the
+  local estimate disagreeing with itself. **Those percentages are
+  workload-specific, not characteristic figures:** the newly-billed work is
+  O(n²) elementwise arithmetic while the contractions that dominate are O(n³),
+  so the rise shrinks as arrays grow. On the grader side, 146 measurements —
+  73 call shapes across `cross`, `outer`, every contraction op and their
+  unaffected neighbours, each on both operand kinds — driven through the
+  server's real `RequestHandler._pack_result` give a byte-identical wire form
+  (handle vs by-value, shape, dtype), a byte-identical op-call cost, and
+  unchanged `out=`/operand identity on both trees: 0 differences in all three.
 
 ### Fix
 
@@ -116,8 +136,9 @@
   concentrated in `linalg` and `fft` and including structured returns
   (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
   `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
-  closed by the next item; the remaining 17 are recorded, not changed. #193 is
-  therefore referenced, not closed.
+  closed by the next item and 8 contraction/product ops by the one after it;
+  the remaining 9 are recorded, not changed. #193 is therefore referenced, not
+  closed.
 - **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
   a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
   returns the sweep above found. These ops already wrapped their result when
@@ -138,7 +159,7 @@
   True to False for a plain-ndarray destination. That exclusion has a price,
   stated rather than glossed: `multi_dot`'s ordinary array-returning shape
   still hands back a raw ndarray on plain-numpy operands, so the honest count
-  is 19 closed, 17 still inventoried, and 1 closed-off-by-exclusion. It cannot
+  is 27 closed, 9 still inventoried, and 1 closed-off-by-exclusion. It cannot
   go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
   the sweep classifies `multi_dot` as clean, because the only probe form that
   fits it returns a scalar — so it is pinned by a dedicated test instead.
@@ -150,6 +171,38 @@
   docstrings saying so are deleted. `linalg` was the only module honouring it
   — `sort`, `cumsum`, `tensordot` and `fft.fft` on plain numpy input all
   already return `FlopscopeArray`.
+- **billing**: `cross`, `outer`, `linalg.outer`, and the array-returning shapes
+  of `dot`, `inner`, `matmul`, `vecdot`, `matvec`, `vecmat`, `linalg.matmul`
+  and `linalg.vecdot` now return flopscope types, closing 8 more of the 36 raw
+  returns and leaving 9. Same defect as the two items above — arithmetic on the
+  result billed 0 in-process while the grader billed it through the client's
+  `RemoteArray` — and the same shape of fix, but deliberately applied one
+  `return` statement at a time rather than module-wide, because all three sites
+  share their return path with cases that must not be wrapped. `outer`'s
+  destination early exit still hands back the caller's own buffer (`out is
+  result` stays True for a plain and a `FlopscopeArray` destination alike), and
+  `outer(v, v)` still returns a `SymmetricTensor` carrying its S2 group, which
+  is what halves a symmetric outer's price.
+  **The contraction site is asymmetric on purpose.** `dot`, `inner`, `matmul`,
+  `vecdot`, `matvec`, `vecmat`, `linalg.matmul` and `linalg.vecdot` all return
+  through one helper, and that helper already wrapped its result whenever an
+  operand was a `FlopscopeArray` — through `_asflopscope`, which converts even
+  numpy's SCALAR (the 1-D × 1-D shape) into a 0-d array. Those calls therefore
+  reach the grader as an array handle today and their downstream arithmetic is
+  charged. Only the plain-numpy branch changes. Rewriting the whole return to
+  the scalar-preserving wrap — the obvious one-liner — would have REMOVED that
+  existing wrap and cut grader billing on 1-D × 1-D contractions from billed to
+  0; measured through the server's own `_pack_result`, it moves 7 wire forms
+  from a handle to by-value. Wrapping unconditionally instead moves 15 the
+  other way. The form shipped here moves none of them, and both failure
+  directions are now pinned by tests rather than by review attention.
+  One residual is recorded rather than closed: a **complex** scalar
+  contraction result is still a #193 divergence. Scalars are passed through on
+  the reasoning that they are free in-process and free on the grader, but
+  `_pack_result` only packs by value when `.item()` is msgpack-native, and a
+  `complex128` scalar is not — it falls back to a handle the grader bills while
+  in-process billing stays 0. It packs identically on the pre-fix tree, so
+  nothing regressed; it is now written down and pinned instead of implied.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even

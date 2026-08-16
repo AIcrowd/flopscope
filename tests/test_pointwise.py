@@ -129,12 +129,17 @@ def test_dot_result():
     b = numpy.ones((4, 5))
     with BudgetContext(flop_budget=10**6) as budget:
         result = dot(a, b)
-        assert numpy.allclose(result, numpy.dot(a, b))
         # direct-event model with off-by-one correction:
         # total = (k-1)*prod(M) + prod(alpha) - prod(num_output_orbits)
         # = 60 + 60 - 15 = 105 (textbook 2n^3 - n^2 form).
         # First cell of each output orbit is a free copy.
         assert budget.flops_used == 105
+        # Compared after the snapshot: dot now returns a flopscope type (#193),
+        # so this numpy.allclose auto-routes to fnp.allclose and is itself
+        # billed (+104). That billing is right -- the grader charges the same
+        # comparison through the client's RemoteArray -- but it is not dot's
+        # cost, and 105 is dot's cost.
+        assert numpy.allclose(result, numpy.dot(a, b))
 
 
 def test_matmul_result():

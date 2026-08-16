@@ -860,17 +860,26 @@ def _wrap_metered_result(result):
 
     * an ndarray is stored as a handle and reaches the participant as a
       ``RemoteArray``, whose arithmetic is dispatched to the server and billed;
-    * a numpy scalar is packed by value and reaches them as a ``RemoteScalar``,
-      whose arithmetic runs locally in Python and is billed nothing.
+    * a numpy scalar is *usually* packed by value and reaches them as a
+      ``RemoteScalar``, whose arithmetic runs locally in Python and is billed
+      nothing. "Usually", because ``_pack_result`` packs by value only when
+      ``.item()`` is msgpack-native: a ``complex128`` scalar is not, so it
+      falls back to ``store_array`` and reaches them as a handle after all.
+      See :func:`test_complex_scalar_results_are_a_recorded_residual_gap`.
 
     So for an ndarray result the in-process path was the one that was wrong --
     it handed back a raw ``numpy.ndarray`` and billed 0 for downstream
     arithmetic the grader was charging (#193) -- and wrapping it makes the two
-    agree. For a scalar result the two already agree at 0, and wrapping it
-    would *break* that agreement: a 0-d ``FlopscopeArray`` is an ``ndarray``,
-    so the server would store it as a handle and start charging downstream
-    arithmetic that costs nothing today. That is a repricing, not a fix, so
-    scalars are passed through untouched.
+    agree. For a by-value scalar result the two already agree at 0, and
+    wrapping it would *break* that agreement: a 0-d ``FlopscopeArray`` is an
+    ``ndarray``, so the server would store it as a handle and start charging
+    downstream arithmetic that costs nothing today. That is a repricing, not a
+    fix, so scalars are passed through untouched.
+
+    That leaves the handle-packed scalars above as a residual #193 gap rather
+    than a resolved case: locally free, billed on the grader. Closing it is not
+    just "wrap them too" -- it is wire-neutral only for the dtypes that already
+    fall back to a handle, so it needs its own dtype-by-dtype measurement.
 
     Tuple results are handled element by element, matching ``_pack_result``'s
     own per-element branch order for a tuple return.
@@ -4976,7 +4985,29 @@ def _einsum_routed_binary(
             return SymmetricTensor(_np.asarray(result), symmetry=output_symmetry)
     if out is not None:
         return out
-    return _asflopscope(result) if inputs_were_whest else result
+    # Two branches, not one, and the asymmetry is deliberate.
+    #
+    # A flopscope operand has always left here through ``_asflopscope``, which
+    # converts even numpy's SCALAR (the 1-D x 1-D shape of dot/inner/matmul/
+    # vecdot) into a 0-d FlopscopeArray. The server packs that as an array
+    # handle, the participant gets a RemoteArray, and downstream arithmetic is
+    # billed. Collapsing this branch into ``_wrap_metered_result`` -- which
+    # passes scalars through untouched -- would hand the scalar back, the
+    # server would pack it by value, and the grader's charge for that
+    # arithmetic would drop from billed to 0. That is a repricing of shipped
+    # behaviour, so the branch stays exactly as it was.
+    #
+    # A plain-numpy operand took ``return result``, handing back the raw
+    # ndarray numpy allocated: arithmetic on it billed 0 in-process while the
+    # grader billed it through the client's RemoteArray (#193). Only the
+    # ndarray half of that is wrong -- a numpy scalar of an msgpack-native
+    # dtype reaches the grader by value and is free on both sides -- which is
+    # exactly the line ``_wrap_metered_result`` draws. A complex128 scalar is
+    # the documented exception: it packs as a handle, so it stays a residual
+    # #193 gap here rather than a case this change closes.
+    if inputs_were_whest:
+        return _asflopscope(result)
+    return _wrap_metered_result(result)
 
 
 @_counted_wrapper
@@ -5177,8 +5208,10 @@ def outer(
         )
     if output_sym is None and not isinstance(out, SymmetricTensor):
         if out is not None:
+            # numpy's out= contract is identity: hand back the caller's own
+            # object, unwrapped. Only the allocated result below may be wrapped.
             return out
-        return result  # type: ignore[return-value]
+        return _wrap_metered_result(result)  # type: ignore[return-value]
     # A SymmetricTensor destination reaches _wrap_result even when the result
     # carries no symmetry. It used to take the branch above and return itself
     # UNWRITTEN: numpy had been handed out=None, nothing ever copied the answer
@@ -5803,7 +5836,11 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         _op.set_cost(
             _builtins.max(3 * (result.size if hasattr(result, "size") else 1), 1)
         )
-    return result  # type: ignore[return-value]
+    # Safe at every vector width, including the 2-vector form that contracts the
+    # vector axis away: numpy.cross returns a 0-d ndarray there, not a numpy
+    # scalar, so the server already stored a handle and the wrap cannot flip the
+    # wire form. See test_cross_results_were_already_array_handles.
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(

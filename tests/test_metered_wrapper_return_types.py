@@ -30,6 +30,19 @@ Guards:
   ever gets wrapped, and also if ``_pack_result`` reorders its branches.
 * :func:`test_tensordot_result_arithmetic_is_billed` -- the consequence,
   pinned directly: arithmetic on a tensordot result must move ``flops_used``.
+* :func:`test_contractions_on_flopscope_operands_keep_their_array_handle` --
+  the same wire pin pointing the OTHER way. ``_einsum_routed_binary`` has
+  always run its result through ``_asflopscope`` when an operand was a
+  flopscope type, which turns numpy's scalar into a 0-d array, so the 1-D x
+  1-D shape of ``dot``/``inner``/``matmul``/``vecdot`` reaches the grader as a
+  handle. Rewriting that branch to the scalar-preserving wrap would remove a
+  wrap that ships today and drop grader billing rather than add it. Both
+  directions are repricings; both are pinned.
+* :func:`test_cross_results_were_already_array_handles` and
+  :func:`test_outer_out_hands_back_the_callers_buffer` -- the two
+  preconditions that make the ``cross``/``outer`` wraps free. ``numpy.cross``
+  returns a 0-d *ndarray* rather than a scalar for 2-vector operands, and
+  ``outer``'s ``out=`` early exit sits directly above the wrapped line.
 * :func:`test_raw_numpy_returning_ops_only_ever_shrink` -- the registry-driven
   sweep. It probes every metered op in the registry, in every probe form the op
   accepts, and compares the set that still returns a raw ``numpy.ndarray``
@@ -42,14 +55,24 @@ Guards:
 
 ``KNOWN_RAW_RETURN_OPS`` is deliberately not empty. The sweep showed the defect
 reaches well past the ops #193 filed: 36 more, concentrated in ``linalg`` and
-``fft``, returned raw ndarrays. The 19 ``linalg.*`` entries are now closed by
-the module-wide ``wrap_module_returns`` call at the foot of
-``flopscope/numpy/linalg/__init__.py``, leaving 17. Those 17 include structured
-returns, plain tuples (``histogramdd``) and a ``numpy.matrix`` (``bmat``) that
-wrapping would have to handle case by case. Closing them raises local FLOP
-estimates further, which needs its own measurement and its own release note; it
-is not this change. The inventory records them so the gap is visible and cannot
-grow.
+``fft``, returned raw ndarrays. The 19 ``linalg.*`` entries were closed by the
+module-wide ``wrap_module_returns`` call at the foot of
+``flopscope/numpy/linalg/__init__.py``, leaving 17; the eight contraction and
+product ops (``cross``, ``outer``, ``dot``, ``inner``, ``matmul``, ``matvec``,
+``vecdot``, ``vecmat``) were then closed one return statement at a time, leaving
+9. Those nine are ``bmat`` (a ``numpy.matrix``), ``histogramdd`` (a plain
+tuple), the four ``fft`` index/frequency helpers and the three ``is*``
+predicates, and wrapping them has to be handled case by case. Closing them
+raises local FLOP estimates further, which needs its own measurement and its own
+release note; it is not this change. The inventory records them so the gap is
+visible and cannot grow.
+
+The contraction ops were deliberately not closed with a module-wide wrap. Their
+single shared return site, ``_einsum_routed_binary``, also serves ``out=``
+callers and symmetric results, and it already wraps on one of its two operand
+branches -- so a blanket wrap there would break ``out=`` identity, and the
+narrow one-line form would reprice the branch that already wraps. See
+:func:`test_contractions_on_flopscope_operands_keep_their_array_handle`.
 
 Three things the sweep structurally cannot judge, and which therefore carry
 their own guards below:
@@ -62,7 +85,7 @@ their own guards below:
   inventory cannot record that either, because the only probe form fitting
   ``multi_dot`` yields a scalar and so classifies it clean
   (:func:`test_multi_dot_without_out_is_a_recorded_residual_gap`). The honest
-  count is 19 closed, 17 inventoried, 1 closed-off-by-exclusion.
+  count is 27 closed, 9 inventoried, 1 closed-off-by-exclusion.
 * the *type* of a structured return. The sweep inspects the elements inside a
   tuple, so a wrapper that flattened ``EigResult`` to a bare tuple would sweep
   clean while destroying ``.eigenvalues``/``.U``/``.sign`` attribute access
@@ -88,6 +111,7 @@ import flopscope as flops
 import flopscope.numpy as fnp
 from flopscope._ndarray import FlopscopeArray
 from flopscope._registry import REGISTRY
+from flopscope._symmetric import SymmetricTensor
 from flopscope.errors import UnsupportedFunctionError
 
 _SERVER_SRC = str(Path(__file__).parent.parent / "flopscope-server" / "src")
@@ -115,22 +139,14 @@ _METERED_CATEGORIES = {
 KNOWN_RAW_RETURN_OPS = frozenset(
     {
         "bmat",
-        "cross",
-        "dot",
         "fft.fftfreq",
         "fft.fftshift",
         "fft.ifftshift",
         "fft.rfftfreq",
         "histogramdd",
-        "inner",
         "isfinite",
         "isinf",
         "isnan",
-        "matmul",
-        "matvec",
-        "outer",
-        "vecdot",
-        "vecmat",
     }
 )
 
@@ -464,6 +480,141 @@ def test_named_offenders_return_flopscope_types(name, args):
 
 
 # ---------------------------------------------------------------------------
+# cross: an ndarray at every vector width, so wrapping cannot move the wire
+# ---------------------------------------------------------------------------
+
+_V3 = np.array([1.0, 2.0, 3.0])
+_W3 = np.array([3.0, 2.0, 1.0])
+_V2 = np.array([1.0, 2.0])
+_W2 = np.array([3.0, 2.0])
+
+# Every vector width numpy.cross accepts. The 2-vector forms are the ones worth
+# spelling out: they contract the vector axis away entirely, so the result is
+# 0-d -- the shape at which a wrap would flip a scalar's wire form if the value
+# were a numpy scalar. It is not; see the second test.
+_CROSS_PROBES = [
+    ("3v x 3v", _V3, _W3),
+    ("2v x 2v", _V2, _W2),
+    ("2v x 3v", _V2, _W3),
+    ("3v x 2v", _V3, _W2),
+    ("batched 3v", np.stack([_V3, _W3]), np.stack([_W3, _V3])),
+    ("batched 2v", np.stack([_V2, _W2]), np.stack([_W2, _V2])),
+]
+
+
+@pytest.mark.parametrize("label, a, b", _CROSS_PROBES)
+def test_cross_returns_a_flopscope_type_at_every_vector_width(label, a, b):
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.cross(a, b)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.cross({label}) returned {type(result).__module__}."
+        f"{type(result).__name__}; downstream arithmetic on a raw ndarray bills "
+        "0 in-process while the grader bills it through the client's "
+        "RemoteArray (#193)"
+    )
+    assert np.allclose(np.asarray(result), np.cross(a, b))
+
+
+@pytest.mark.parametrize("label, a, b", _CROSS_PROBES)
+def test_cross_results_were_already_array_handles(label, a, b):
+    """Why wrapping ``cross`` costs the grader nothing, pinned at the wire.
+
+    The 2-vector forms contract the vector axis away and return a 0-d result,
+    which is the shape where a wrap normally repricing-flips a by-value
+    ``RemoteScalar`` into an array handle. ``numpy.cross`` returns a 0-d
+    *ndarray* rather than a numpy scalar there, so ``_pack_result`` already
+    stored a handle before this change and stores one after. Asserted against
+    numpy's own return kind, so it tracks numpy rather than a remembered fact.
+    """
+    expected = np.cross(a, b)
+    assert isinstance(expected, np.ndarray) and not isinstance(expected, np.generic), (
+        f"numpy.cross({label}) now returns "
+        f"{type(expected).__module__}.{type(expected).__name__}. If numpy has "
+        "started returning a scalar here, wrapping cross is no longer "
+        "grader-neutral at this width -- re-measure before keeping the wrap."
+    )
+
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.cross(a, b)
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        f"fnp.cross({label}) now packs by value; it packed as an array handle "
+        "before the #193 wrap, so this is a grader repricing in the other "
+        "direction"
+    )
+
+
+# ---------------------------------------------------------------------------
+# outer: the plain-result early exit is the only line that may be wrapped
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["outer", "linalg.outer"])
+def test_outer_returns_a_flopscope_type(name):
+    """The unaliased, no-``out=`` shape -- the one that took the raw early exit."""
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(_V3, _W3)
+    assert isinstance(result, FlopscopeArray), (
+        f"fnp.{name} returned {type(result).__module__}.{type(result).__name__}"
+    )
+    assert np.allclose(np.asarray(result), np.outer(_V3, _W3))
+
+
+@pytest.mark.parametrize("name", ["outer", "linalg.outer"])
+def test_outer_aliased_operands_still_yield_a_symmetric_tensor(name):
+    """``outer(v, v)`` must not be routed through the plain wrap.
+
+    The early exit that is now wrapped is guarded by ``output_sym is None``, so
+    the aliased call still leaves through ``_wrap_result`` with its S2 group. A
+    module-wide or decorator-style wrap would view-cast the SymmetricTensor's
+    result and drop the symmetry -- which is also a pricing change, since the
+    group is what halves an outer's cost.
+    """
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fn(_V3, _V3)
+    assert isinstance(result, SymmetricTensor), (
+        f"fnp.{name}(v, v) returned {type(result).__module__}."
+        f"{type(result).__name__}; operand-aliasing detection was lost"
+    )
+    assert result.symmetry == flops.SymmetryGroup.symmetric(axes=(0, 1))
+
+
+@pytest.mark.parametrize("dest_kind", ["plain", "flopscope"])
+def test_outer_out_hands_back_the_callers_buffer(dest_kind):
+    """``out=`` returns the caller's own object; only the line below it wraps.
+
+    ``if out is not None: return out`` sits directly above the wrapped early
+    exit. Wrapping that line instead -- or wrapping the function as a whole --
+    hands back a fresh view and breaks numpy's ``out=`` identity contract.
+    """
+    dest = np.zeros((3, 3))
+    if dest_kind == "flopscope":
+        dest = dest.view(FlopscopeArray)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        result = fnp.outer(_V3, _W3, out=dest)  # pyright: ignore[reportArgumentType]
+    assert result is dest, (
+        f"fnp.outer(out=<{dest_kind} ndarray>) returned "
+        f"{type(result).__module__}.{type(result).__name__} instead of the "
+        "caller's own buffer"
+    )
+    assert np.allclose(np.asarray(dest), np.outer(_V3, _W3))
+
+
+# ---------------------------------------------------------------------------
 # The grader contract: a numpy scalar result must STAY a numpy scalar
 # ---------------------------------------------------------------------------
 #
@@ -502,6 +653,37 @@ _SCALAR_RETURNING_PROBES: list[tuple[str, tuple]] = [
     ("linalg.trace", (_M,)),
     ("linalg.vector_norm", (_V,)),
     ("linalg.matrix_norm", (_M,)),
+    # The 1-D x 1-D shape of every op routed through _einsum_routed_binary.
+    # These operands are plain numpy, i.e. BY-VALUE on the wire, which is the
+    # form the site's scalar branch must preserve: with plain operands the
+    # contraction hands back numpy's own scalar and the server packs it by
+    # value. An unconditional wrap at that return -- the obvious way to write
+    # the #193 fix -- turns each of these into a 0-d FlopscopeArray, which is
+    # an ndarray, which _pack_result stores as a handle: VAL:float64 becomes
+    # H:(), and downstream grader arithmetic goes 0 -> billed. That is the
+    # repricing these six entries exist to catch.
+    ("dot", (_V, _W)),
+    ("inner", (_V, _W)),
+    ("matmul", (_V, _W)),
+    ("vecdot", (_V, _W)),
+    ("linalg.matmul", (_V, _W)),
+    ("linalg.vecdot", (_V, _W)),
+]
+
+# The same ops at the same shape, with FlopscopeArray operands. This is the
+# OTHER half of the contraction site's contract and it points the other way:
+# with a flopscope operand the site has always run its result through
+# _asflopscope, so even the scalar-valued 1-D x 1-D shape reaches the grader as
+# a 0-d array handle. Replacing that with the scalar-preserving
+# _wrap_metered_result would REMOVE a wrap that ships today and drop downstream
+# grader billing from 2 FLOPs to 0.
+_WHEST_OPERAND_CONTRACTIONS = [
+    "dot",
+    "inner",
+    "matmul",
+    "vecdot",
+    "linalg.matmul",
+    "linalg.vecdot",
 ]
 
 
@@ -566,6 +748,53 @@ def test_scalar_results_still_pack_by_value(name, args):
         f"by-value scalar. The client turns a handle into a RemoteArray whose "
         f"arithmetic is billed on the grader; it turns a value into a "
         f"RemoteScalar whose arithmetic is free. This is a grader repricing."
+    )
+
+
+@pytest.mark.parametrize("name", _WHEST_OPERAND_CONTRACTIONS)
+def test_contractions_on_flopscope_operands_keep_their_array_handle(name):
+    """A flopscope operand's contraction result must stay an ARRAY on the wire.
+
+    The mirror image of :func:`test_scalar_results_still_pack_by_value`, and
+    the reason ``_einsum_routed_binary`` cannot simply
+    ``return _wrap_metered_result(result)``. Its whest-operand branch has always
+    called ``_asflopscope``, which converts numpy's scalar to a 0-d
+    ``FlopscopeArray``; the grader therefore stores a handle and bills the 2
+    FLOPs of ``z + z``. Swapping in the scalar-preserving wrap would hand the
+    scalar straight back, the server would pack it by value, and that billing
+    would drop to 0 -- a downward repricing of every 1-D x 1-D dot / inner /
+    matmul / vecdot in a submission that keeps its arrays in flopscope types.
+    """
+    fn = _resolve(name)
+    if fn is None:
+        pytest.skip(f"fnp.{name} is not available on numpy {np.__version__}")
+    a = _V.copy().view(FlopscopeArray)
+    b = _W.copy().view(FlopscopeArray)
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        try:
+            result = fn(a, b)
+        except UnsupportedFunctionError:
+            pytest.skip(f"fnp.{name} is gated off on numpy {np.__version__}")
+
+    assert isinstance(result, np.ndarray), (
+        f"fnp.{name} on FlopscopeArray operands returned "
+        f"{type(result).__module__}.{type(result).__name__}; it returned a 0-d "
+        "array before, and a scalar packs by value -- see the docstring"
+    )
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        f"fnp.{name} on FlopscopeArray operands now packs by value. The client "
+        "turns a value into a RemoteScalar whose arithmetic is free and a "
+        "handle into a RemoteArray whose arithmetic is billed, so this drops "
+        "what the grader charges. It is a repricing, not a fix."
     )
 
 
@@ -637,12 +866,13 @@ def test_multi_dot_without_out_is_a_recorded_residual_gap():
     scalar. So the sweep exercises the op, sees a scalar, and is blind to the
     array-returning shape. Listing it would red the ratchet's ``stale`` check.
 
-    Hence this test. The honest count for the change is "19 closed, 17 still
-    inventoried, 1 closed-off-by-exclusion and recorded here". When a later
-    change closes it -- by making the wrap identity-aware, i.e. skipping the
-    wrap only when the result *is* one of the arguments or ``kwargs["out"]``,
-    which is the same test ``_probe_op`` already uses -- this test should be
-    deleted along with the exclusion.
+    Hence this test. The honest cumulative count is "27 closed, 9 still
+    inventoried, 1 closed-off-by-exclusion and recorded here" -- the same
+    figures the module docstring above reports. When a later change closes it
+    -- by making the wrap identity-aware, i.e. skipping the wrap only when the
+    result *is* one of the arguments or ``kwargs["out"]``, which is the same
+    test ``_probe_op`` already uses -- this test should be deleted along with
+    the exclusion.
     """
     with flops.BudgetContext(flop_budget=10**14, quiet=True):
         result = fnp.linalg.multi_dot([_M.copy(), _N.copy()])
@@ -652,6 +882,66 @@ def test_multi_dot_without_out_is_a_recorded_residual_gap():
         "deliberate, delete this test and the skip_names={'multi_dot'} "
         "exclusion together -- but first confirm the out= identity test above "
         "still passes, which is the reason the exclusion exists."
+    )
+
+
+def test_complex_scalar_results_are_a_recorded_residual_gap():
+    """The one place the "scalars are free on both sides" rule does not hold.
+
+    ``_wrap_metered_result`` leaves numpy scalars alone because a by-value
+    scalar is free in-process AND free on the grader, so wrapping it would
+    reprice. That reasoning rests on ``_pack_result`` packing scalars by
+    value -- and it only does so when ``.item()`` is msgpack-native. A
+    ``complex128`` scalar is not: it falls back to ``store_array`` and reaches
+    the client as a handle, whose arithmetic the grader bills, while the
+    in-process return stays a numpy scalar billing 0.
+
+    So complex scalar contraction results are still a #193 divergence. This is
+    NOT a regression and NOT something this change introduced -- it packs as a
+    handle identically on the pre-#193 tree -- and it is not in
+    :data:`KNOWN_RAW_RETURN_OPS`, because the ops involved are not returning a
+    raw ndarray; they are returning a scalar that happens to travel as a
+    handle. Hence a recorded gap, like ``multi_dot``'s above.
+
+    Closing it is deliberately left alone: wrapping complex scalars would be
+    wire-neutral (handle before, handle after) but the same edit applied to
+    scalars generally is the exact repricing this module exists to prevent, so
+    it needs its own dtype-by-dtype measurement rather than a blanket wrap.
+    """
+    complex_vec = np.array([1.0 + 1j, 2.0 - 1j, 3.0 + 0j])
+
+    with flops.BudgetContext(flop_budget=10**14, quiet=True) as budget:
+        result = fnp.dot(complex_vec, complex_vec.copy())
+        after_call = budget.flops_used
+        _ = result * 2.0
+        downstream = budget.flops_used - after_call
+
+    assert isinstance(result, np.generic), (
+        f"fnp.dot on complex operands now returns {type(result).__name__} "
+        "rather than a numpy scalar. If a later change wrapped it, re-measure "
+        "the wire form before assuming this test is obsolete."
+    )
+    assert downstream == 0, (
+        f"downstream arithmetic on a complex scalar result billed "
+        f"{downstream} in-process. If that is now non-zero the gap this test "
+        "records has been closed -- delete the test and say so in the "
+        "CHANGELOG."
+    )
+
+    session = Session(flop_budget=10_000_000)
+    handler = RequestHandler(session)
+    try:
+        packed = handler._pack_result(result)
+    finally:
+        if session.is_open:
+            session.close()
+
+    assert packed["status"] == "ok", packed
+    assert "value" not in packed["result"], (
+        "a complex128 scalar now packs BY VALUE. That would make the "
+        "'free on both sides' rule universal and close this gap -- good news, "
+        "but confirm it against _pack_result's msgpack-native check and "
+        "update _wrap_metered_result's docstring before deleting this test."
     )
 
 
