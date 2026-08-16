@@ -2193,7 +2193,27 @@ def bmat(*args, **kwargs):
     return _asplainflopscope(result)
 
 
-attach_docstring(bmat, _np.bmat, "counted_custom", "numel(output) FLOPs")
+attach_docstring(
+    bmat,
+    _np.bmat,
+    "counted_custom",
+    "numel(output) FLOPs",
+    # NumPy's own Returns section says "out : matrix", which is the one
+    # statement in its docstring this wrapper makes false. Overridden rather
+    # than inherited so the published reference does not promise a type the
+    # op does not return -- and so it names the semantic difference, which is
+    # what actually bites a caller porting local code. Written without a
+    # ``numpy.`` prefix on purpose: the docs generator rewrites that prefix to
+    # ``flops.``, which would point the text at names flopscope does not have.
+    returns=(
+        "FlopscopeArray",
+        "A plain 2-D flopscope array. Upstream returns a ``matrix``; this "
+        "wrapper does not, because the remote backend never did. So ``*`` "
+        "and ``**`` are elementwise rather than matrix multiply and matrix "
+        "power, ``.I``/``.A``/``.H``/``.A1`` are absent, and the result is "
+        "not re-inflated to 2-D by indexing, reduction or flattening.",
+    ),
+)
 
 
 @_counted_wrapper

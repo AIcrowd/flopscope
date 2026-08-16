@@ -317,6 +317,19 @@
   stays that way — `asmatrix` is blacklisted, and `matrix`/`mat` are not
   exposed — which is asserted rather than assumed. `bmat`'s cost, refusals and
   wire form are unchanged (figures under *Billing impact* above).
+- **docs**: `bmat`'s published reference no longer states the wrong return
+  type. Wrappers inherit NumPy's docstring wholesale, which is right almost
+  everywhere — a `FlopscopeArray` *is* an `ndarray`, so an inherited
+  "out : ndarray" stays true — but NumPy's `bmat` documents "out : matrix",
+  and the alignment above made that the one false sentence on the page. Both
+  surfaces that publish it are corrected: `attach_docstring` takes an optional
+  `returns=` override for `help(fnp.bmat)`, and because
+  `scripts/generate_api_docs.py` builds the website from NumPy's docstring
+  directly rather than from the wrapper's, the override is also recorded on
+  the wrapper as `__flopscope_returns__` and applied there. Opt-in and used by
+  exactly one op, with the no-override path pinned so the other 256 call sites
+  are provably untouched. Documentation only — no weight, rate or formula is
+  involved, and the grader round trip is byte-identical either side.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even

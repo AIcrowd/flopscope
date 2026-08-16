@@ -1589,6 +1589,27 @@ def test_bmat_bills_its_own_call_exactly_as_before():
     )
 
 
+def test_bmat_published_docstring_does_not_promise_a_numpy_matrix():
+    """The reference a participant reads must not contradict what ships.
+
+    ``attach_docstring`` replaces the wrapper's ``__doc__`` wholesale with
+    NumPy's, so ``fnp.bmat.__doc__`` inherited NumPy's "out : matrix" Returns
+    section. That sentence was true before the view-cast and false after it,
+    which makes the published API reference -- generated from these docstrings
+    -- actively wrong about the return type of the op this change touched.
+    """
+    doc = fnp.bmat.__doc__ or ""
+    assert "Returns a matrix object" not in doc, (
+        "fnp.bmat's docstring still carries NumPy's 'Returns a matrix object, "
+        "which is a specialized 2-D array.' The wrapper returns a plain "
+        "FlopscopeArray, so the published reference states the wrong return "
+        "type for the op this change moved."
+    )
+    assert "FlopscopeArray" in doc, (
+        "fnp.bmat's docstring does not name the type it actually returns"
+    )
+
+
 def test_the_numpy_matrix_surface_is_one_op_wide():
     """``bmat`` is the only way to reach a ``numpy.matrix`` through flopscope.
 
