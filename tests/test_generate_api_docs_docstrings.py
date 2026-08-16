@@ -63,3 +63,33 @@ def test_stale_aliases_are_rejected_in_public_doc_examples():
         sections={"Parameters": ["x"], "Returns": ["value"], "Examples": lines},
     )
     assert any("stale alias" in problem for problem in problems)
+
+
+def test_bmat_page_documents_the_flopscope_return_type_not_numpys():
+    """The generator reads NumPy's docstring, so overrides must be applied here.
+
+    ``build_structured_doc`` prefers the upstream docstring for numpy ops, so
+    replacing the ``Returns`` section in the flopscope wrapper's own
+    ``__doc__`` is invisible to the website. ``bmat`` returns a
+    ``FlopscopeArray`` where ``numpy.bmat`` returns a ``numpy.matrix``, and
+    without this the published page states NumPy's type -- the one thing on
+    that page that is false.
+    """
+    _name, parsed, _example, _sig, _html = generate_api_docs.build_structured_doc(
+        "bmat", "numpy"
+    )
+    assert [field.type for field in parsed.returns] == ["FlopscopeArray"]
+    body = " ".join(line for field in parsed.returns for line in field.body)
+    assert "Returns a matrix object" not in body, (
+        "the bmat page still carries NumPy's Returns body, which promises a "
+        "numpy.matrix the wrapper does not return"
+    )
+
+
+def test_ops_without_an_override_keep_numpys_returns_section():
+    """The override is opt-in; every other page must be unaffected."""
+    _name, parsed, _example, _sig, _html = generate_api_docs.build_structured_doc(
+        "block", "numpy"
+    )
+    assert parsed.returns, "block lost its upstream Returns section"
+    assert all(field.type != "FlopscopeArray" for field in parsed.returns)

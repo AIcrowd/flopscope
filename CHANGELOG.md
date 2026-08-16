@@ -131,6 +131,23 @@
   all** — `flopscope/fft/__init__.py` is a stub and every registered `fft.*`
   name raises `AttributeError` — so none of these ops can reach the grader
   today in the first place.
+- **No billed amount changes for the `bmat` alignment below either**, and here
+  the local estimate does not merely move toward the grader's — it lands on it
+  exactly. A workload that is nothing but `bmat` and arithmetic on its result
+  (20 iterations of a 2×2 nest of an n×n block, then `m*m`, `+`, `.sum()`)
+  reads local `flops_used` 2,560 → 10,200 at n=4, 10,240 → 40,920 at n=8,
+  40,960 → 163,800 at n=16 and 163,840 → 655,320 at n=32. Every one of those
+  new totals is the number the same workload bills over a real client/server
+  round trip, on the old tree and the new tree alike — the grader column is
+  10,200 / 40,920 / 163,800 / 655,320 either way. **That ~4× is the extreme
+  end of the range, not a characteristic figure:** it is what happens when
+  every operation after the `bmat` was billing 0 locally and nothing else is
+  in the workload. `bmat`'s own call cost is untouched (8 FLOPs for a 2×2
+  float64 probe under the packaged table, before and after, in-process and
+  remote), and the packed wire form is unchanged — same array handle, same
+  shape, same dtype, stored as the same `FlopscopeArray` — because
+  `Session.store_array` was already view-casting the `numpy.matrix` away on
+  receipt.
 
 ### Fix
 
@@ -162,9 +179,9 @@
   (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
   `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
   closed by the next item, 8 contraction/product ops by the one after it, and
-  the 4 `fft` index/frequency helpers by the one after that; the remaining 5
-  (`bmat`, `histogramdd`, `isfinite`, `isinf`, `isnan`) are recorded, not
-  changed. #193 is therefore referenced, not closed.
+  the 4 `fft` index/frequency helpers by the one after that, and `bmat` by the
+  last of them; the remaining 4 (`histogramdd`, `isfinite`, `isinf`, `isnan`)
+  are recorded, not changed. #193 is therefore referenced, not closed.
 - **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
   a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
   returns the sweep above found. These ops already wrapped their result when
@@ -185,7 +202,7 @@
   True to False for a plain-ndarray destination. That exclusion has a price,
   stated rather than glossed: `multi_dot`'s ordinary array-returning shape
   still hands back a raw ndarray on plain-numpy operands, so the honest count
-  across this release is 31 closed, 5 still inventoried, and 1
+  across this release is 32 closed, 4 still inventoried, and 1
   closed-off-by-exclusion. It cannot
   go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
   the sweep classifies `multi_dot` as clean, because the only probe form that
@@ -257,6 +274,62 @@
   metered op now that the result is a flopscope type, so the old form measured
   the op plus the check and read 63 where it means 8. Restructured, not
   relaxed, with the premise pinned by its own test.
+- **billing**: `bmat` now returns a plain `FlopscopeArray` instead of the
+  `numpy.matrix` numpy hands back, closing the 5th of the 36 raw returns and
+  leaving 4. **This one is participant-visible in-process and needs a
+  starter-kit pin bump at release (#193).** Unlike the four items above, the
+  divergence here was not only a FLOP gap: the two backends disagreed on the
+  ARITHMETIC ANSWER. `numpy.matrix` overloads `*` as matrix multiplication, so
+  on `[[1, 2], [3, 4]]` an in-process `m * m` gave `[[7, 10], [15, 22]]` while
+  the same code on the grader gave `[[1, 4], [9, 16]]` — the server's
+  `Session.store_array` view-casts every stored ndarray that is not already a
+  `FlopscopeArray`, so the matrix subclass was dropped on receipt and never
+  reached a participant at all. "Change nothing" was therefore not the neutral
+  option it is for `histogramdd` and the three `is*` predicates; it left a
+  silent wrong answer in place. The in-process path is the one that moved, to
+  reproduce what the remote already did. **What local callers lose, each item
+  pinned by a test:**
+  - **`*` and `**` are elementwise, not matrix multiply and matrix power.**
+    `m * m` and `m ** 2` both gave `[[7, 10], [15, 22]]` on the operand above
+    and both now give `[[1, 4], [9, 16]]`. These are the two silent ones — the
+    answer changes with no exception and no warning.
+  - **The result is no longer permanently 2-D.** `numpy.matrix` re-inflated
+    every dimension-reducing result back to a row; a `FlopscopeArray` does not.
+    So `bm[0]` on a 1×3 gives `(3,)` where it gave `(1, 3)`, and on a 2×2
+    `.sum(axis=0)`, `.mean(axis=0)` and `.max(axis=0)` give `(2,)` where they
+    gave `(1, 2)`, while `.ravel()`, `.flatten()`, `.reshape(4)` and iterating
+    the rows give `(4,)`/`(2,)` where they gave `(1, 4)`/`(1, 2)`. Downstream
+    broadcasting changes silently with them.
+  - **`.I`, `.A`, `.H` and `.A1` no longer exist** — use `fnp.linalg.inv`,
+    `numpy.asarray`, `.conj().T` and `.ravel()`. This one fails loudly, with
+    `AttributeError`.
+  - **In-place `m *= x` and `m **= x` now raise `TypeError`** rather than
+    mutating with matrix semantics, because flopscope arrays are immutable.
+    Also loud; the message names the functional replacement.
+
+  None of these ever worked against the grader, so code written for the remote
+  backend is unaffected; code written and only ever run in-process may need
+  those edits. The two silent items are the reason this needs a starter-kit
+  pin bump rather than just a release note. The cast is
+  `_asplainflopscope` rather than the usual `_asflopscope`, which returns
+  non-flopscope ndarray subclasses unchanged so `SymmetricTensor` metadata
+  survives and is a no-op on a matrix. The matrix surface is one op wide and
+  stays that way — `asmatrix` is blacklisted, and `matrix`/`mat` are not
+  exposed — which is asserted rather than assumed. `bmat`'s cost, refusals and
+  wire form are unchanged (figures under *Billing impact* above).
+- **docs**: `bmat`'s published reference no longer states the wrong return
+  type. Wrappers inherit NumPy's docstring wholesale, which is right almost
+  everywhere — a `FlopscopeArray` *is* an `ndarray`, so an inherited
+  "out : ndarray" stays true — but NumPy's `bmat` documents "out : matrix",
+  and the alignment above made that the one false sentence on the page. Both
+  surfaces that publish it are corrected: `attach_docstring` takes an optional
+  `returns=` override for `help(fnp.bmat)`, and because
+  `scripts/generate_api_docs.py` builds the website from NumPy's docstring
+  directly rather than from the wrapper's, the override is also recorded on
+  the wrapper as `__flopscope_returns__` and applied there. Opt-in and used by
+  exactly one op, with the no-override path pinned so the other 256 call sites
+  are provably untouched. Documentation only — no weight, rate or formula is
+  involved, and the grader round trip is byte-identical either side.
 - **symmetry**: `expand_dims` no longer dies on high-rank input. The
   symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
   elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even

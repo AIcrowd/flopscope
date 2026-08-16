@@ -2822,6 +2822,25 @@ def _rewrite_doc_link(link: DocLink) -> DocLink:
     )
 
 
+def _apply_returns_override(parsed: ParsedDoc, flopscope_obj: object) -> None:
+    """Apply a wrapper's declared Returns section over the upstream one.
+
+    ``build_structured_doc`` prefers the UPSTREAM docstring for numpy ops, so
+    a ``Returns`` section flopscope replaced in its own wrapper docstring is
+    invisible here and the page would state numpy's return type instead. Ops
+    that deliberately return a different type from numpy record the correction
+    on the wrapper via ``flopscope._docstrings.attach_docstring(...,
+    returns=...)``; applying it keeps ``help()`` and the website agreeing.
+    ``bmat`` is the only such op today -- it returns a ``FlopscopeArray`` where
+    ``numpy.bmat`` returns a ``numpy.matrix``.
+    """
+    override = getattr(flopscope_obj, "__flopscope_returns__", None)
+    if override is None:
+        return
+    type_name, description = override
+    parsed.returns = [DocField(name="out", type=type_name, body=[description])]
+
+
 def _rewrite_parsed_doc(
     parsed: ParsedDoc,
     *,
@@ -2954,8 +2973,10 @@ def build_structured_doc(
         # ``NoneType`` docstring ("The type of the None singleton."), which is
         # truthy and would otherwise shadow the real docstring (see issue #50).
         raw_doc = _docstring_of(upstream_obj) or _docstring_of(flopscope_obj) or ""
+    parsed_doc = parse_numpy_docstring(raw_doc)
+    _apply_returns_override(parsed_doc, flopscope_obj)
     parsed = _rewrite_parsed_doc(
-        parse_numpy_docstring(raw_doc),
+        parsed_doc,
         alias_map=alias_map,
         supported_ops=supported_ops,
         internal_refs=internal_refs,
