@@ -78,13 +78,17 @@ is not this change. The inventory records them so the gap is visible and cannot
 grow.
 
 ``bmat`` was closed ahead of the other four because its divergence was not only
-a FLOP gap. ``numpy.matrix`` overloads ``*`` as matrix multiplication, so the
-in-process answer for ``m * m`` differed from the answer a participant got from
-the remote backend, which had always view-cast the matrix away on receipt in
-``Session.store_array``. Leaving it alone was therefore not the neutral option
-it is for the other four. The wire form is unchanged by the cast -- see
-:func:`test_bmat_wire_form_is_unchanged_by_the_view_cast` -- and the local
-costs are stated in the CHANGELOG and pinned in the ``bmat`` section below.
+a FLOP gap. ``numpy.matrix`` overloads ``*`` as matrix multiplication and ``**``
+as matrix power, and is permanently 2-D, so the in-process ANSWER differed from
+the answer a participant got from the remote backend, which had always view-cast
+the matrix away on receipt in ``Session.store_array``. Leaving it alone was
+therefore not the neutral option it is for the other four. The wire form is
+unchanged by the cast -- see
+:func:`test_bmat_wire_form_is_unchanged_by_the_view_cast` -- and every local
+behaviour the cast moves is stated in the CHANGELOG and pinned in the ``bmat``
+section below: ``*`` and ``**`` become elementwise, the ``numpy.matrix``-only
+attributes disappear, and results stop being re-inflated to 2-D by indexing,
+reduction, flattening, reshaping and iteration.
 
 The contraction ops were deliberately not closed with a module-wide wrap. Their
 single shared return site, ``_einsum_routed_binary``, also serves ``out=``
@@ -1349,6 +1353,71 @@ def test_bmat_star_is_elementwise_and_matches_the_grader():
         "[[1.0, 4.0], [9.0, 16.0]] for this operand (measured through a real "
         "client/server round trip); matmul here means local and grader "
         "disagree on the answer, which is the divergence this change closed."
+    )
+
+
+def test_bmat_double_star_is_elementwise_and_matches_the_grader():
+    """``**`` moves with ``*``, and silently: ``numpy.matrix.__pow__`` is matrix power.
+
+    Same failure mode as ``*`` and just as easy to miss, so it gets its own
+    pin rather than riding on the ``*`` one. On ``[[1, 2], [3, 4]]`` an
+    in-process ``m ** 2`` gave ``[[7, 10], [15, 22]]`` before this change; the
+    grader gives ``[[1, 4], [9, 16]]`` for the same code, measured through a
+    real client/server round trip on the old and new trees alike.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        squared = np.asarray(result**2)
+    assert squared.tolist() == [[1.0, 4.0], [9.0, 16.0]], (
+        f"fnp.bmat(...) ** 2 gave {squared.tolist()}. The grader gives "
+        "[[1.0, 4.0], [9.0, 16.0]]; matrix power here means local and grader "
+        "disagree on the answer with no exception raised, which is exactly "
+        "the divergence this change closed for '*'."
+    )
+
+
+# ``numpy.matrix`` is permanently 2-D: every dimension-reducing operation on
+# one re-inflates its result back to a row. The alignment drops that, so the
+# shape change is a family, not just the ``bm[0]`` case pinned above. Each pair
+# below is (operation, shape the grader gives), the grader shapes measured
+# through a real round trip -- identical on the old and new server trees,
+# because the matrix subclass never survived ``Session.store_array``. The
+# pre-change in-process shape is the 2-D re-inflation of each: ``(1, 2)`` for
+# the reductions and the iteration, ``(1, 4)`` for the flattening pair and the
+# reshape.
+_BMAT_TWO_D_LOSSES = [
+    ("sum(axis=0)", lambda m: m.sum(axis=0), (2,)),
+    ("mean(axis=0)", lambda m: m.mean(axis=0), (2,)),
+    ("max(axis=0)", lambda m: m.max(axis=0), (2,)),
+    ("ravel()", lambda m: m.ravel(), (4,)),
+    ("flatten()", lambda m: m.flatten(), (4,)),
+    ("reshape(4)", lambda m: m.reshape(4), (4,)),
+    ("next(iter(m))", lambda m: next(iter(m)), (2,)),
+]
+
+
+@pytest.mark.parametrize(
+    ("label", "operation", "expected"),
+    _BMAT_TWO_D_LOSSES,
+    ids=[label for label, _, _ in _BMAT_TWO_D_LOSSES],
+)
+def test_bmat_result_is_no_longer_permanently_two_dimensional(
+    label, operation, expected
+):
+    """The general form of the ``bm[0]`` cost, pinned so the list is complete.
+
+    Local code that relied on a reduction staying 2-D -- for broadcasting
+    against another row, typically -- gets a 1-D array now. None of these ever
+    worked that way against the grader, so only in-process code is affected.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    with flops.BudgetContext(flop_budget=10**14, quiet=True):
+        reduced = np.asarray(operation(result))
+    assert reduced.shape == expected, (
+        f"fnp.bmat(...).{label} has shape {reduced.shape}; the grader gives "
+        f"{expected} for the same call. A 2-D shape here means the "
+        "numpy.matrix subclass survived the return and local code silently "
+        "broadcasts differently from the grader."
     )
 
 
