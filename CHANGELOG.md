@@ -287,13 +287,30 @@
   reached a participant at all. "Change nothing" was therefore not the neutral
   option it is for `histogramdd` and the three `is*` predicates; it left a
   silent wrong answer in place. The in-process path is the one that moved, to
-  reproduce what the remote already did. **Three things local callers lose,
-  each pinned by a test:** `m * m` is elementwise, not matmul; `.I`, `.A`,
-  `.H` and `.A1` no longer exist (use `fnp.linalg.inv`, `numpy.asarray`,
-  `.conj().T`, `.ravel()`); and indexing a row of a 1×3 result gives shape
-  `(3,)` where it gave `(1, 3)`. None of the three ever worked against the
-  grader, so code written for the remote backend is unaffected; code written
-  and only ever run in-process may need those three edits. The cast is
+  reproduce what the remote already did. **What local callers lose, each item
+  pinned by a test:**
+  - **`*` and `**` are elementwise, not matrix multiply and matrix power.**
+    `m * m` and `m ** 2` both gave `[[7, 10], [15, 22]]` on the operand above
+    and both now give `[[1, 4], [9, 16]]`. These are the two silent ones — the
+    answer changes with no exception and no warning.
+  - **The result is no longer permanently 2-D.** `numpy.matrix` re-inflated
+    every dimension-reducing result back to a row; a `FlopscopeArray` does not.
+    So `bm[0]` on a 1×3 gives `(3,)` where it gave `(1, 3)`, and on a 2×2
+    `.sum(axis=0)`, `.mean(axis=0)` and `.max(axis=0)` give `(2,)` where they
+    gave `(1, 2)`, while `.ravel()`, `.flatten()`, `.reshape(4)` and iterating
+    the rows give `(4,)`/`(2,)` where they gave `(1, 4)`/`(1, 2)`. Downstream
+    broadcasting changes silently with them.
+  - **`.I`, `.A`, `.H` and `.A1` no longer exist** — use `fnp.linalg.inv`,
+    `numpy.asarray`, `.conj().T` and `.ravel()`. This one fails loudly, with
+    `AttributeError`.
+  - **In-place `m *= x` and `m **= x` now raise `TypeError`** rather than
+    mutating with matrix semantics, because flopscope arrays are immutable.
+    Also loud; the message names the functional replacement.
+
+  None of these ever worked against the grader, so code written for the remote
+  backend is unaffected; code written and only ever run in-process may need
+  those edits. The two silent items are the reason this needs a starter-kit
+  pin bump rather than just a release note. The cast is
   `_asplainflopscope` rather than the usual `_asflopscope`, which returns
   non-flopscope ndarray subclasses unchanged so `SymmetricTensor` metadata
   survives and is a no-op on a matrix. The matrix surface is one op wide and

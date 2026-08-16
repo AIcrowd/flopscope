@@ -1421,6 +1421,30 @@ def test_bmat_result_is_no_longer_permanently_two_dimensional(
     )
 
 
+@pytest.mark.parametrize(
+    ("label", "operation"),
+    [
+        ("*=", lambda m: m.__imul__(m)),
+        ("**=", lambda m: m.__ipow__(2)),
+    ],
+)
+def test_bmat_result_refuses_in_place_arithmetic(label, operation):
+    """The loud counterpart to ``*``/``**``: in-place forms now raise.
+
+    On a ``numpy.matrix`` these mutated the buffer in place with matrix
+    semantics. ``FlopscopeArray`` is immutable, so they raise ``TypeError``
+    naming the functional replacement instead. Listed with the silent changes
+    in the CHANGELOG because it is still a local behaviour change -- but it
+    cannot produce a wrong answer, only a stack trace.
+    """
+    result = _bmat([[_BMAT_BLOCK]])
+    with (
+        flops.BudgetContext(flop_budget=10**14, quiet=True),
+        pytest.raises(TypeError, match="immutable"),
+    ):
+        operation(result)
+
+
 def test_bmat_result_arithmetic_is_billed_in_process():
     """The FLOP half of the same alignment: downstream arithmetic used to be free.
 
