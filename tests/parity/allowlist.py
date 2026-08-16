@@ -3419,17 +3419,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-6",
     ),
     Entry(
-        case_id="grid/bmat::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`bmat` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
         case_id="grid/unique_all::*",
         dimension="container",
         category=Category.KNOWN_BUG,
