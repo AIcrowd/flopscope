@@ -1054,9 +1054,14 @@ def refuse_non_numeric_sequence_leaf(op_name: str, value: Any) -> None:
     Numeric leaves -- ``bool``/``int``/``float``/``complex`` and a NumPy
     scalar whose own dtype is numeric -- pass. Refused are the leaf types
     that are unambiguously DATA and unambiguously non-numeric: ``str``,
-    ``bytes``/``bytearray``, a NumPy scalar whose own dtype is not numeric
-    (``np.str_``, ``np.bytes_``, ``np.datetime64``, ``np.timedelta64``,
-    ``np.void``), and a stdlib date/time/timedelta.
+    ``bytes``, a NumPy scalar whose own dtype is not numeric (``np.str_``,
+    ``np.bytes_``, ``np.datetime64``, ``np.timedelta64``, ``np.void``), and a
+    stdlib date/time/timedelta.
+
+    ``bytearray`` is NOT in that list even though ``bytes`` is. NumPy realizes
+    a ``bytearray`` leaf through the buffer protocol as **uint8**, not as an
+    "S" array -- the same numeric dtype it gives a ``memoryview`` leaf -- so
+    refusing it would reject a numeric payload rather than close a leak.
 
     Everything ELSE -- ``None``, a callable, a set, a range, an arbitrary
     object -- is deliberately left alone even though numpy would store it as
@@ -1092,7 +1097,14 @@ def refuse_non_numeric_sequence_leaf(op_name: str, value: Any) -> None:
         refuse_non_numeric_dtype(op_name, _NP_GENERIC_DTYPE_DESCRIPTOR.__get__(value))
     elif isinstance(value, str):
         refuse_non_numeric_dtype(op_name, _STR_LEAF_DTYPE)
-    elif isinstance(value, (bytes, bytearray)):
+    # `bytes` only -- NOT `bytearray`. They look alike but NumPy realizes them
+    # differently: a `bytes` leaf becomes an "S" array, while a `bytearray`
+    # leaf goes through the buffer protocol and becomes **uint8**, which is
+    # numeric and inside the allowlist (`np.array([bytearray(b"ab")]).dtype`
+    # is uint8, the same as for a `memoryview` leaf). Refusing it would reject
+    # a numeric payload -- including a mixed call like
+    # `concatenate([np.ones(4, np.uint8), bytearray(b"abcd")])`.
+    elif isinstance(value, bytes):
         refuse_non_numeric_dtype(op_name, _BYTES_LEAF_DTYPE)
     elif isinstance(value, _TEMPORAL_LEAF_TYPES):
         refuse_non_numeric_dtype(op_name, _OBJECT_LEAF_DTYPE)

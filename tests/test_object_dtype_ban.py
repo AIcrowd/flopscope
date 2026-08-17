@@ -1142,7 +1142,6 @@ def test_python_sequence_of_strings_is_refused_and_bills_nothing(label, call):
     [
         "a",
         b"a",
-        bytearray(b"a"),
         np.str_("a"),
         np.bytes_(b"a"),
         np.datetime64("2020-01-01"),
@@ -1156,7 +1155,6 @@ def test_python_sequence_of_strings_is_refused_and_bills_nothing(label, call):
     ids=[
         "str",
         "bytes",
-        "bytearray",
         "np.str_",
         "np.bytes_",
         "datetime64",
@@ -1269,6 +1267,35 @@ def test_numeric_sequence_billing_is_unchanged():
     with BudgetContext(BUDGET, quiet=True) as bc:
         fnp.array([1.0, 2.0])
         assert bc.flops_used == 2
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [bytearray(b"abcd"), memoryview(b"abcd")],
+    ids=["bytearray", "memoryview"],
+)
+def test_buffer_leaves_are_numeric_and_still_bill(leaf):
+    """A buffer leaf realizes as uint8, so it is INSIDE the allowlist.
+
+    ``bytearray`` looks like ``bytes`` and is not: NumPy reads it through the
+    buffer protocol, so ``np.array([bytearray(b"ab")]).dtype`` is uint8 where
+    ``np.array([b"ab"]).dtype`` is "S". Refusing it would reject a numeric
+    payload, and unlike the ``str`` case the ndarray spelling never refused it
+    either -- so refusing the sequence spelling would MANUFACTURE an asymmetry
+    rather than close one. Pinned against numpy's own realization so this
+    tracks numpy rather than a remembered list.
+    """
+    assert np.array([leaf]).dtype == np.uint8
+
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        result = fnp.sum([leaf])
+    assert bc.flops_used > 0, f"a {type(leaf).__name__} leaf must still bill"
+    assert np.asarray(result).dtype.kind in "biufc"
+
+    # The mixed spelling is unambiguously a numeric call.
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        fnp.concatenate([np.ones(4, np.uint8), leaf])
+    assert bc.flops_used > 0
 
 
 def test_top_level_string_arguments_are_not_treated_as_operands():

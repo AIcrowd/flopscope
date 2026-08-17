@@ -71,9 +71,13 @@
   handed back a real `<U1` array, `fnp.random.permutation`/`fnp.random.shuffle`
   billed 16, and `fnp.transpose`/`fnp.flip`/`fnp.permute_dims` relocated one
   for 0. A leaf inside a list/tuple is now classified by its TYPE — `str`,
-  `bytes`/`bytearray`, a NumPy scalar whose own dtype is non-numeric
-  (`np.str_`, `np.bytes_`, `np.datetime64`, `np.timedelta64`, `np.void`), and
-  a stdlib `date`/`time`/`timedelta` are refused. Classification never reads
+  `bytes`, a NumPy scalar whose own dtype is non-numeric (`np.str_`,
+  `np.bytes_`, `np.datetime64`, `np.timedelta64`, `np.void`), and a stdlib
+  `date`/`time`/`timedelta` are refused. `bytearray` is deliberately NOT
+  refused despite resembling `bytes`: NumPy realises it through the buffer
+  protocol as **uint8**, the same numeric dtype it gives a `memoryview`, so
+  every `bytearray` call bills exactly what it billed before. Classification
+  never reads
   an attribute of the leaf and never realises the sequence, so it runs no
   participant code, the same invariant the ndarray branch already held. The
   rule stops there deliberately: `None`, a callable, a set and a range all
