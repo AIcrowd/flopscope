@@ -3263,107 +3263,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-5",
     ),
     Entry(
-        case_id="grid/convolve::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`convolve` returns a real array/tuple in-process for this pattern, but"
-            " its specific type identity (an ndarray subclass, a namedtuple, or a list)"
-            " is not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/cov::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`cov` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/diff::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`diff` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/ediff1d::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`ediff1d` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/gradient::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`gradient` returns a real array/tuple in-process for this pattern, but"
-            " its specific type identity (an ndarray subclass, a namedtuple, or a list)"
-            " is not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/kron::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`kron` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/linalg.outer::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`linalg.outer` returns a real array/tuple in-process for this pattern,"
-            " but its specific type identity (an ndarray subclass, a namedtuple, or a"
-            " list) is not preserved once it crosses to the client, so pytype"
-            " disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/outer::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`outer` returns a real array/tuple in-process for this pattern, but its"
-            " specific type identity (an ndarray subclass, a namedtuple, or a list) is"
-            " not preserved once it crosses to the client, so pytype disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
-        case_id="grid/sort_complex::*",
-        dimension="pytype",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "`sort_complex` returns a real array/tuple in-process for this pattern,"
-            " but its specific type identity (an ndarray subclass, a namedtuple, or a"
-            " list) is not preserved once it crosses to the client, so pytype"
-            " disagrees."
-        ),
-        issue="INTERNAL-P2-family-6",
-    ),
-    Entry(
         case_id="grid/diag::*",
         dimension="pytype",
         category=Category.KNOWN_BUG,
@@ -5389,17 +5288,6 @@ ENTRIES: tuple[Entry, ...] = (
             "server indexing raises IndexError surfaced as FlopscopeServerError."
         ),
         issue="INTERNAL-P2-family-4",
-    ),
-    Entry(
-        case_id="types/memoryview::constructor",
-        dimension="outcome",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "For memoryview at constructor, in-process asarray returned a uint8 array "
-            "while client numeric-only validation sees the wire bytes dtype and raises "
-            "UnsupportedDtypeError."
-        ),
-        issue="INTERNAL-PARITY-NUMERIC-DTYPE-EXCEPTIONS",
     ),
     Entry(
         case_id="types/bytearray::positional",

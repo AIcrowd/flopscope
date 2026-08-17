@@ -245,8 +245,16 @@ def test_buffer_allowlist_entries_are_literal_current_observations():
         )
         expected.update(
             (f"{prefix}::{position}", "outcome")
-            for position in ("list-element", "index-key", "constructor")
+            for position in ("list-element", "index-key")
         )
+
+    # The constructor position is per-family, not shared. bytearray still
+    # diverges there; memoryview stopped when the client learned to ingest a
+    # buffer at any rank, so fnp.asarray(memoryview) now succeeds on both
+    # backends and the full sweep reports that entry stale. This set is frozen
+    # rather than re-observed, so it has to be updated by hand whenever a
+    # divergence is genuinely fixed.
+    expected.add(("types/bytearray::constructor", "outcome"))
 
     entries = tuple(
         entry
@@ -286,9 +294,11 @@ def test_buffer_allowlist_entries_are_literal_current_observations():
         index_outcome = entries_by_key[(f"{prefix}::index-key", "outcome")].reason
         assert "returned" in index_outcome
         assert "IndexError" in index_outcome
-        constructor = entries_by_key[(f"{prefix}::constructor", "outcome")].reason
-        assert "uint8" in constructor
-        assert "UnsupportedDtypeError" in constructor
+    # Per-family, for the same reason as the expected-set entry above: only
+    # bytearray still diverges at the constructor.
+    constructor = entries_by_key[("types/bytearray::constructor", "outcome")].reason
+    assert "uint8" in constructor
+    assert "UnsupportedDtypeError" in constructor
 
 
 def test_broad_exception_entries_describe_their_current_paths():
