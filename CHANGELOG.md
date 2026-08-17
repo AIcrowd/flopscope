@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.11.0 (2026-08-17)
 
 ### BREAKING CHANGE
 
@@ -40,6 +40,17 @@
   and every other non-numeric one, are now refused outright.
 
 ### Billing impact
+
+- A contraction whose combined operand rank exceeds the 52-letter subscript
+  budget previously fell back to a price that counted multiplies only, not the
+  honest FMA count. Padding both operands with singleton axes until the combined
+  rank crossed that budget therefore bought the same arithmetic at roughly half
+  price. Padded and unpadded forms now bill identically, so an estimator built
+  around the padded form bills close to twice what it did before: measured on
+  real estimators at production geometry (width 256, depth 32), one MLP each,
+  totals moved by 1.89x to 1.94x. This is the only change in this release that
+  moves what the grader charges for calls that already ran, and the only one
+  that requires re-evaluation.
 
 - A counted op on a non-numeric-dtype array or destination previously billed
   at a flat rate that did not track the real per-element cost — unbounded
@@ -152,554 +163,84 @@
   `Session.store_array` was already view-casting the `numpy.matrix` away on
   receipt.
 
+### Feat
+
+- **cost-model**: warn when a label-budget fallback loses precision
+- **cost-model**: add label-free contraction cost helper
+
 ### Fix
 
-- **billing**: the non-numeric ban now reaches a raw Python SEQUENCE of
-  non-numeric values, not only an `np.ndarray` of them. The operand scan
-  walked a list/tuple hunting for an `np.ndarray` to read a dtype off; a
-  sequence like `['a', 'b', 'c', 'd']` holds no array anywhere, so the walk
-  matched nothing and the op ran — while the ndarray spelling of the very
-  same call raised. The ops that leaked are the ones with no source check of
-  their own, all of which declare `dtypes=()` and so never reach `deduct`'s
-  refusal either: `fnp.random.choice(['a','b','c','d'], 2)` billed 8 FLOPs and
-  handed back a real `<U1` array, `fnp.random.permutation`/`fnp.random.shuffle`
-  billed 16, and `fnp.transpose`/`fnp.flip`/`fnp.permute_dims` relocated one
-  for 0. A leaf inside a list/tuple is now classified by its TYPE — `str`,
-  `bytes`, a NumPy scalar whose own dtype is non-numeric (`np.str_`,
-  `np.bytes_`, `np.datetime64`, `np.timedelta64`, `np.void`), and a stdlib
-  `date`/`time`/`timedelta` are refused. `bytearray` is deliberately NOT
-  refused despite resembling `bytes`: NumPy realises it through the buffer
-  protocol as **uint8**, the same numeric dtype it gives a `memoryview`, so
-  every `bytearray` call bills exactly what it billed before. Classification
-  never reads
-  an attribute of the leaf and never realises the sequence, so it runs no
-  participant code, the same invariant the ndarray branch already held. The
-  rule stops there deliberately: `None`, a callable, a set and a range all
-  realise as object dtype, but they are also how NumPy spells `fftn`'s
-  per-axis `s=(None, 8)` sentinel, `piecewise`'s funclist, `tensordot`'s
-  `axes=({1}, {0})`, and a tuple `out=`, and this scan sees every argument of
-  every counted op with no way to tell those from a payload — failing closed
-  there would refuse calls NumPy runs. For the same reason the rule is off at
-  depth 0 (a bare `str` argument is `ord='fro'`, an einsum subscript, a
-  `casting=` mode) and off for the string-specifier parameters
-  (`requirements=`, `order=`, a ufunc `signature`/`sig`, `einsum`'s explicit
-  `optimize=['einsum_path', ...]`), in the positional spelling as well as the
-  keyword one. No billed amount changes for any call
-  that was already valid. Measured per-call cost of the added check, against
-  the operand scan alone (CPU time, floor of many rounds, both versions
-  round-robin in one process): +50 to +78 ns (+4-5%) for a call whose operands
-  are already `ndarray`s — that path executes one extra argument push and
-  nothing else — and +190 to +290 ns (+10-17%) for a Python list operand with
-  eight numeric leaves, which is one `isinstance` per leaf the scan already
-  visited.
-- **billing**: the ban's zero-itemsize carve-out now reads the dtype NumPy
-  MATERIALISES rather than the one that was requested. `np.dtype('U0')`
-  reports `itemsize == 0` and so passed a guard whose entire justification was
-  "zero bytes per element cannot carry an itemsize-dependent cost" — but NumPy
-  promotes `'U0'`/`'S0'` to `'U1'`/`'S1'` the moment it allocates, so
-  `fnp.zeros(1000, dtype='U0')` billed 0 FLOPs and returned a real 4000-byte
-  `<U1` array (`'S0'`: 1000 bytes). Both are now refused, as are the
-  equivalent bare `'U'`/`'S'`/`np.str_`/`np.bytes_` spellings — which is also
-  what makes the sequence-leaf refusal above and `refuse_non_numeric_source`'s
-  representative string dtype fire. `'V0'` and an empty structured spec keep
-  working unchanged: void genuinely stays at zero bytes per element through
-  construction, which is the case the carve-out exists for (NumPy's own
-  `broadcast_shapes` allocates `np.empty(shape, dtype=np.dtype([]))`). The
-  test is behavioural — NumPy is asked, via a zero-element allocation cached
-  per dtype — rather than a kind table, so it keeps holding on NumPy releases
-  that do not exist yet. `heavier_billing_dtype` shares the one predicate, so
-  the two cannot drift apart.
-- **cost-model**: `matmul` and its broadcasting siblings now refuse a
-  mis-paired contraction BEFORE `budget.deduct`, like `dot`/`inner`/
-  `tensordot` already did. `deduct` charges on entry and does not roll back
-  when the wrapped numpy call raises, and these four route through
-  `_einsum_routed_binary` with a `...`-broadcasting subscript that makes the
-  contracted pairing implicit rather than checked — einsum BROADCASTS an
-  extent of 1 where numpy's gufunc core rejects it. So
-  `fnp.matmul(fnp.ones((3,1)), fnp.ones((7,5)))` charged 390 FLOPs for
-  arithmetic that never ran and only then raised numpy's `ValueError`, which
-  on a tight budget surfaced as `BudgetExhaustedError` instead;
-  `fnp.vecdot`, `fnp.matvec` and `fnp.vecmat` charged the same way, as did the
-  `@` operator, which routes through `fnp.matmul`. All four now supply their
-  contracted axis pair to the existing `_validate_contracted_extents`, so an
-  impossible contraction leaves `flops_used` at 0. Every contraction numpy
-  accepts still runs and bills exactly what it billed before, including the
-  two a careless predicate breaks: a size-1 axis contracted against another
-  size-1 axis (legal, and not a broadcast) and 0 against 0 (legal, and free).
-  Validation is skipped, not misapplied, where the default pair is not the
-  pair numpy contracts — a 0-d operand, or an `axis=`/`axes=` that relocates
-  the gufunc's core dimension.
-- **billing**: `tensordot`, `kron`, `diff`, `gradient`, `ediff1d`, `convolve`,
-  `correlate`, `cov`, `sort_complex`, and the array-returning shapes of
-  `corrcoef`, `interp`, `trapezoid`, and `trapz` now return flopscope types
-  instead of the raw `numpy.ndarray` their inner numpy call produced.
-  Arithmetic performed on one of those results billed **0** FLOPs in-process
-  while the grader billed it: the server stores an ndarray result as a handle,
-  so the participant gets a `RemoteArray` whose arithmetic is dispatched and
-  charged. Local estimates therefore read low against what was actually
-  charged, and they now rise to meet it (figures under *Billing impact*
-  above). `gradient`'s multi-axis tuple return is preserved.
-  **A numpy SCALAR result is deliberately left unwrapped** — `vdot`, and
-  `trapezoid`/`trapz`/`interp`/`corrcoef` on the argument shapes where numpy
-  returns a scalar. The server packs a numpy scalar by value, so the
-  participant gets a `RemoteScalar` whose arithmetic runs locally and costs
-  nothing; the in-process path already agreed at 0. A 0-d `FlopscopeArray` is
-  an `ndarray`, so wrapping those results would have flipped them to handles
-  and started charging downstream arithmetic that is free today — a change to
-  grader billing, which this release deliberately does not make.
-  The 14 sites carried a `# wrapped at fnp.<name> import time` comment
-  describing a wrapping mechanism that does not exist; the comments are
-  removed. A registry-driven sweep now probes every metered op, in every
-  argument form it accepts, and pins the set that still returns a raw
-  `numpy.ndarray` as a shrink-only inventory, so a new wrapper cannot regress
-  silently. That sweep also found 36 further ops with the same defect,
-  concentrated in `linalg` and `fft` and including structured returns
-  (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
-  `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
-  closed by the next item, 8 contraction/product ops by the one after it, and
-  the 4 `fft` index/frequency helpers by the one after that, and `bmat` by the
-  last of them; the remaining 4 (`histogramdd`, `isfinite`, `isinf`, `isnan`)
-  are recorded, not changed. #193 is therefore referenced, not closed.
-- **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
-  a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
-  returns the sweep above found. These ops already wrapped their result when
-  an operand was a `FlopscopeArray`, so the gap was the plain-numpy case: a
-  participant holding `numpy` arrays got a raw ndarray back from `cholesky`,
-  `eig`, `inv`, `qr`, `solve`, `svd`, `lstsq` and the rest, and the arithmetic
-  that followed billed 0 in-process while the grader billed it. The module
-  gained the same `wrap_module_returns` call nine other modules already carry,
-  which wraps ndarray returns only: `det`, `norm`, `cond`, `matrix_rank`,
-  `slogdet`'s `sign`/`logabsdet` and `lstsq`'s `rank` stay numpy scalars, so
-  they still reach the participant as a `RemoteScalar` packed by value and
-  their downstream arithmetic stays free. `EigResult`, `EighResult`,
-  `QRResult`, `SVDResult` and `SlogdetResult` keep their named type — the wrap
-  rebuilds them rather than flattening them to tuples, so `.eigenvalues`,
-  `.U` and `.sign` still resolve. `linalg.multi_dot` is deliberately excluded:
-  it is the one op here that takes `out=` and returns that buffer by identity,
-  and wrapping the return turned `multi_dot([m, n], out=dest) is dest` from
-  True to False for a plain-ndarray destination. That exclusion has a price,
-  stated rather than glossed: `multi_dot`'s ordinary array-returning shape
-  still hands back a raw ndarray on plain-numpy operands, so the honest count
-  across this release is 32 closed, 4 still inventoried, and 1
-  closed-off-by-exclusion. It cannot
-  go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
-  the sweep classifies `multi_dot` as clean, because the only probe form that
-  fits it returns a scalar — so it is pinned by a dedicated test instead.
-  `linalg.tensorsolve`, which
-  no sweep probe form fits, is fixed by the same call and carries its own
-  assertion. Retracts a documented promise: `solve` and `lstsq` claimed
-  numpy's subclass-return policy (a plain `b` yields a plain-ndarray solution
-  even when `a` is a `FlopscopeArray`). That no longer holds and the
-  docstrings saying so are deleted. `linalg` was the only module honouring it
-  — `sort`, `cumsum`, `tensordot` and `fft.fft` on plain numpy input all
-  already return `FlopscopeArray`.
-- **billing**: `cross`, `outer`, `linalg.outer`, and the array-returning shapes
-  of `dot`, `inner`, `matmul`, `vecdot`, `matvec`, `vecmat`, `linalg.matmul`
-  and `linalg.vecdot` now return flopscope types, closing 8 more of the 36 raw
-  returns and leaving 9. Same defect as the two items above — arithmetic on the
-  result billed 0 in-process while the grader billed it through the client's
-  `RemoteArray` — and the same shape of fix, but deliberately applied one
-  `return` statement at a time rather than module-wide, because all three sites
-  share their return path with cases that must not be wrapped. `outer`'s
-  destination early exit still hands back the caller's own buffer (`out is
-  result` stays True for a plain and a `FlopscopeArray` destination alike), and
-  `outer(v, v)` still returns a `SymmetricTensor` carrying its S2 group, which
-  is what halves a symmetric outer's price.
-  **The contraction site is asymmetric on purpose.** `dot`, `inner`, `matmul`,
-  `vecdot`, `matvec`, `vecmat`, `linalg.matmul` and `linalg.vecdot` all return
-  through one helper, and that helper already wrapped its result whenever an
-  operand was a `FlopscopeArray` — through `_asflopscope`, which converts even
-  numpy's SCALAR (the 1-D × 1-D shape) into a 0-d array. Those calls therefore
-  reach the grader as an array handle today and their downstream arithmetic is
-  charged. Only the plain-numpy branch changes. Rewriting the whole return to
-  the scalar-preserving wrap — the obvious one-liner — would have REMOVED that
-  existing wrap and cut grader billing on 1-D × 1-D contractions from billed to
-  0; measured through the server's own `_pack_result`, it moves 7 wire forms
-  from a handle to by-value. Wrapping unconditionally instead moves 15 the
-  other way. The form shipped here moves none of them, and both failure
-  directions are now pinned by tests rather than by review attention.
-  One residual is recorded rather than closed: a **complex** scalar
-  contraction result is still a #193 divergence. Scalars are passed through on
-  the reasoning that they are free in-process and free on the grader, but
-  `_pack_result` only packs by value when `.item()` is msgpack-native, and a
-  `complex128` scalar is not — it falls back to a handle the grader bills while
-  in-process billing stays 0. It packs identically on the pre-fix tree, so
-  nothing regressed; it is now written down and pinned instead of implied.
-- **billing**: `fft.fftfreq`, `fft.rfftfreq`, `fft.fftshift` and
-  `fft.ifftshift` now return flopscope types, closing 4 more of the 36 raw
-  returns and leaving 5. Same defect as the three items above: all four ended
-  in a bare `return result` with no wrapping of any kind, so arithmetic on a
-  frequency grid or a shifted array billed 0 in-process while the grader would
-  bill it. Closed module-wide — the same `wrap_module_returns` call `linalg`
-  and nine other modules already carry — rather than one `return` at a time,
-  because `flopscope/numpy/fft/_free.py` contains nothing but those four
-  metered wrappers: its only other public names are imports, which the default
-  `check_module=True` filter excludes. That was enumerated before the form was
-  chosen, and a test now pins both halves of it — the set of names the pass may
-  reach, and the identity of the imported helpers it must leave alone.
-  None of the four takes `out=`, so there is no caller-buffer identity to
-  break, and no `skip_names` is needed.
-  **There is no scalar shape to trap on here**, which is what makes the
-  module-wide form safe: wrapping a numpy scalar would flip a by-value
-  `RemoteScalar` into an array handle and start charging arithmetic that is
-  free today. `fftfreq`/`rfftfreq` take an int and always build a rank-1 grid,
-  including at `n=1`; `fftshift`/`ifftshift` of a 0-d input never reaches
-  flopscope's return line at all, because `numpy.roll` raises `ValueError`
-  first. Both are asserted against numpy's own behaviour rather than
-  remembered, so they track numpy rather than this changelog.
-  `tests/test_fft_free.py` keeps its billed numbers (8, 5, 8, 8) and moves its
-  `numpy.allclose` check outside the budgeted region: the comparison is a
-  metered op now that the result is a flopscope type, so the old form measured
-  the op plus the check and read 63 where it means 8. Restructured, not
-  relaxed, with the premise pinned by its own test.
-- **billing**: `bmat` now returns a plain `FlopscopeArray` instead of the
-  `numpy.matrix` numpy hands back, closing the 5th of the 36 raw returns and
-  leaving 4. **This one is participant-visible in-process and needs a
-  starter-kit pin bump at release (#193).** Unlike the four items above, the
-  divergence here was not only a FLOP gap: the two backends disagreed on the
-  ARITHMETIC ANSWER. `numpy.matrix` overloads `*` as matrix multiplication, so
-  on `[[1, 2], [3, 4]]` an in-process `m * m` gave `[[7, 10], [15, 22]]` while
-  the same code on the grader gave `[[1, 4], [9, 16]]` — the server's
-  `Session.store_array` view-casts every stored ndarray that is not already a
-  `FlopscopeArray`, so the matrix subclass was dropped on receipt and never
-  reached a participant at all. "Change nothing" was therefore not the neutral
-  option it is for `histogramdd` and the three `is*` predicates; it left a
-  silent wrong answer in place. The in-process path is the one that moved, to
-  reproduce what the remote already did. **What local callers lose, each item
-  pinned by a test:**
-  - **`*` and `**` are elementwise, not matrix multiply and matrix power.**
-    `m * m` and `m ** 2` both gave `[[7, 10], [15, 22]]` on the operand above
-    and both now give `[[1, 4], [9, 16]]`. These are the two silent ones — the
-    answer changes with no exception and no warning.
-  - **The result is no longer permanently 2-D.** `numpy.matrix` re-inflated
-    every dimension-reducing result back to a row; a `FlopscopeArray` does not.
-    So `bm[0]` on a 1×3 gives `(3,)` where it gave `(1, 3)`, and on a 2×2
-    `.sum(axis=0)`, `.mean(axis=0)` and `.max(axis=0)` give `(2,)` where they
-    gave `(1, 2)`, while `.ravel()`, `.flatten()`, `.reshape(4)` and iterating
-    the rows give `(4,)`/`(2,)` where they gave `(1, 4)`/`(1, 2)`. Downstream
-    broadcasting changes silently with them.
-  - **`.I`, `.A`, `.H` and `.A1` no longer exist** — use `fnp.linalg.inv`,
-    `numpy.asarray`, `.conj().T` and `.ravel()`. This one fails loudly, with
-    `AttributeError`.
-  - **In-place `m *= x` and `m **= x` now raise `TypeError`** rather than
-    mutating with matrix semantics, because flopscope arrays are immutable.
-    Also loud; the message names the functional replacement.
+- **client**: rebuild namedtuple results from the wire's container type
+- **server**: carry the namedtuple container type on multi results
+- **docs**: stop bmat's reference promising the numpy.matrix it no longer returns
+- **bmat**: align the in-process answer with the remote backend's
+- **client**: accept n-D buffers and ndarray input in array and asarray
+- **client**: compute wall and residual timing live inside the context
+- **billing**: wrap the four fft free-op returns so downstream arithmetic is billed
+- **billing**: wrap contraction results only on the branch that ships raw
+- **billing**: wrap outer's plain result, leaving out= identity untouched
+- **billing**: wrap cross's array return so downstream arithmetic is billed
+- **billing**: wrap linalg's array returns so downstream arithmetic is billed
+- **budget**: keep accepting int budgets past float range in the finite guard
+- **billing**: wrap metered ARRAY results, keep scalar results by value
+- **cost-model**: pin the 0-d y guard to numpy's actual refusal set
+- **symmetry**: compute expand_dims axis remap by arithmetic, not a probe array
+- **cost-model**: raise ValueError, not IndexError, for 0-d y in cov/corrcoef
+- **budget**: compute wall and residual timing live inside the context
+- **budget**: reject non-finite flop_budget instead of failing open
+- **billing**: classify a bytearray leaf as the numeric buffer it realises as
+- **cost-model**: refuse mis-paired matmul contractions before charging
+- **billing**: refuse non-numeric Python sequences and zero-length string dtypes
+- **cost-model**: pin tensordot axes refusals, not numpy's version-dependent types
+- **cost-model**: mirror numpy's tensordot axes check ORDER, not just its refusals
+- **cost-model**: parse tensordot axes as numpy does, and refuse before pricing
+- **cost-model**: keep an empty contraction free when output symmetry survives
+- **cost-model**: refuse mis-paired contractions before dot/inner/tensordot price
+- **cost-model**: keep operand symmetry on the dot/inner label-budget fallback
+- **cost-model**: stop enumerating branches in label-budget warning text
+- **cost-model**: give dot and inner an honest out-of-letters branch
+- **cost-model**: route tensordot full-inner path through shared allocator
+- **cost-model**: normalise negative tensordot axes before fallback pricing
+- **cost-model**: bill tensordot fallback at FMA=2, not multiplies only
+- include close bookkeeping in timing
+- **billing**: charge ix boolean mask scans
+- exclude backend registration from timing
+- avoid nested backend timing overlap
+- bound backend timing to reset epochs
+- rebase live timers at budget reset
+- **ci**: align local coverage threshold
+- align remote budget summary formatting
+- align remote budget context summaries
+- query authoritative global budget summaries
+- attribute remote summary overhead authoritatively
+- harden budget summary reset authorization
+- add trusted budget summary epoch reset
+- ignore stale closed summary sessions
+- serve authoritative budget summaries
+- harden server handshake validation
+- negotiate authoritative budget summaries
+- attribute budget inspection overhead
+- **protocol**: restore single-output tuple identity
+- **protocol**: preserve nonforeign output semantics
+- **protocol**: preserve aliased callback outputs
+- **protocol**: preserve callback output layout
+- **protocol**: preserve symmetric callback outputs
+- **stats**: warn on narrow-float promotion (#201)
+- **timing**: attribute numeric protocol callbacks to residual (#199)
+- **billing**: meter numeric dtypes only, refuse the rest (#196)
+- **billing**: floor reduceat by produced cells
 
-  None of these ever worked against the grader, so code written for the remote
-  backend is unaffected; code written and only ever run in-process may need
-  those edits. The two silent items are the reason this needs a starter-kit
-  pin bump rather than just a release note. The cast is
-  `_asplainflopscope` rather than the usual `_asflopscope`, which returns
-  non-flopscope ndarray subclasses unchanged so `SymmetricTensor` metadata
-  survives and is a no-op on a matrix. The matrix surface is one op wide and
-  stays that way — `asmatrix` is blacklisted, and `matrix`/`mat` are not
-  exposed — which is asserted rather than assumed. `bmat`'s cost, refusals and
-  wire form are unchanged (figures under *Billing impact* above).
-- **docs**: `bmat`'s published reference no longer states the wrong return
-  type. Wrappers inherit NumPy's docstring wholesale, which is right almost
-  everywhere — a `FlopscopeArray` *is* an `ndarray`, so an inherited
-  "out : ndarray" stays true — but NumPy's `bmat` documents "out : matrix",
-  and the alignment above made that the one false sentence on the page. Both
-  surfaces that publish it are corrected: `attach_docstring` takes an optional
-  `returns=` override for `help(fnp.bmat)`, and because
-  `scripts/generate_api_docs.py` builds the website from NumPy's docstring
-  directly rather than from the wrapper's, the override is also recorded on
-  the wrapper as `__flopscope_returns__` and applied there. Opt-in and used by
-  exactly one op, with the no-override path pinned so the other 256 call sites
-  are provably untouched. Documentation only — no weight, rate or formula is
-  involved, and the grader round trip is byte-identical either side.
-- **symmetry**: `expand_dims` no longer dies on high-rank input. The
-  symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
-  elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even
-  when the array carried no symmetry group, so calls failed somewhere around
-  rank 14 while numpy itself handles rank 41. The remap is now pure shape
-  arithmetic that allocates nothing, with axis normalization delegated to
-  numpy's own `normalize_axis_tuple` so negative, tuple, repeated, and
-  out-of-range axis forms raise exactly what `numpy.expand_dims` raises across
-  the supported numpy range. Symmetry groups for calls that already worked are
-  unchanged, and `expand_dims` still bills 0 FLOPs.
-- **budget**: a non-finite `flop_budget` is now refused at construction.
-  Validation only tested `flop_budget <= 0`, and NaN compares False against
-  every bound, so a NaN budget was accepted, propagated through
-  `flops_remaining`, and made the exhaustion comparison always False —
-  `BudgetExhaustedError` became unreachable and the budget silently stopped
-  enforcing. No billed amount changes.
-- **budget**: `wall_time_s` and `residual_wall_time_s` now report live values
-  while the context is open instead of `None`, matching what
-  `budget_summary_dict()` already reported for the same two quantities. Both
-  route through the helper the summary path uses. Values read after the
-  context exits — what Whestbench bills from — are unchanged. The client is
-  changed the same way for the same two reads (see the client entry below), so
-  an in-process live read and a client live read both answer a float.
-- **cost-model**: `cov` and `corrcoef` given a 0-d `y` now raise `ValueError`
-  with a message naming the operand, instead of an `IndexError` from
-  flopscope's own shape arithmetic. The guard runs before `budget.deduct`, so
-  nothing is billed before or after — the refusal set is unchanged, only the
-  exception class and message. numpy refuses the same calls whenever `x`
-  carries more than one observation; it accepts a 0-d `y` in the single
-  observation case (`np.cov([1.0], np.float64(2.0))`), which flopscope refused
-  before this change and still refuses. Un-refusing it would change
-  accept/refuse on a billable call, so it is left for the repricing wave.
-- **client**: `fnp.array` and `fnp.asarray` now accept a `numpy.ndarray` (and
-  any other buffer-protocol object) at any rank. Both documented conversions
-  used to fail: `asarray` was an auto-generated proxy with no encoding for an
-  ndarray argument and raised `RemoteSerializationError`, while `array`'s
-  buffer path was gated on `mv.ndim <= 1` and raised `TypeError` for anything
-  above 1-D, even though the `create_from_data` wire call has always carried an
-  arbitrary shape. Fortran-order and strided inputs keep their logical values
-  (`memoryview.tobytes()` is C-order for both), and a 0-d buffer now has rank 0
-  instead of the rank 1 the old `nbytes // itemsize` length produced. Buffers
-  with no wire dtype — byte-swapped, structured, string — still raise. The
-  client remains numpy-free: everything goes through `memoryview`. **No billed
-  amount changes.** `asarray` materializes locally only for values the wire
-  refuses today and then dispatches exactly as before, so every call that
-  already worked keeps its dispatch and its charge; what changes is that calls
-  that used to error now run and bill at the existing `array`/`asarray` rates.
-  One asymmetry is now reachable above rank 1 and is pinned rather than
-  changed: a buffer carrying `dtype=` is ingested free and then cast
-  server-side, where a nested list packs directly in the target dtype and bills
-  nothing — the buffer route is the more expensive of the two, at the same
-  per-element rate it has always charged at rank 1. This is participant-visible
-  and needs a starter-kit pin bump at release (#194).
-- **client**: structured results keep their type over the wire, so
-  `fnp.linalg.svd(a).U` — and `.S`, `.Vh`, `.Q`, `.R`, `.eigenvalues`,
-  `.eigenvectors`, `.sign`, `.logabsdet`, and the `unique_all`/`unique_counts`/
-  `unique_inverse` fields — resolve against a server as they always have
-  in-process. They previously raised `AttributeError`: the wire's multi-result
-  form (`{"multi": [...]}`) had no slot for the container type, having been
-  designed for ops returning a homogeneous list of arrays (`nonzero` returns
-  one per dimension), and a namedtuple **is** a tuple, so every structured
-  result flowed down that path and arrived stripped. The server now describes
-  the container generically from `type(result).__name__` and
-  `type(result)._fields` — no numpy-specific table, so a numpy release that
-  adds a structured result needs no change — and the client rebuilds it with
-  `collections.namedtuple`, which adds no dependency (pyzmq and msgpack
-  remain the client's only ones). Results are still tuples, so indexing and
-  unpacking (`q, r = fnp.linalg.qr(x)`) are unaffected, and plain-tuple
-  returns (`nonzero`, `modf`, `frexp`) stay plain tuples. Additive and
-  compatible both ways: an older client ignores the new key and still sees a
-  plain tuple, and a newer client against an older server sees exactly what it
-  sees today. **No billed amount changes** — in-process or on the grader. What
-  changes is the label on a container the caller already received; the item
-  payloads are byte-for-byte identical, so no handle is minted or withheld and
-  nothing downstream is repriced. Measured on a linalg-heavy workload over a
-  real client/server round trip, all four version pairings bill an identical
-  3,997,936 grader FLOPs. Participant-visible; needs a starter-kit pin bump at
-  release (#193).
-- **client**: `BudgetContext.wall_time_s` and
-  `BudgetContext.residual_wall_time_s` are now live while the context is open,
-  instead of returning `None` until it closed while `summary_dict()` reported
-  live values for the same two quantities — one quantity with two different
-  answers. Both are measured locally from the process clock and the local
-  dispatch accumulator, so a read costs no round trip; only the
-  backend/overhead split of that dispatch time needs the server's kernel
-  measurement, and `flopscope_backend_time_s` / `flopscope_overhead_time_s` are
-  therefore still `0.0` until close. The property and the summary path now
-  share one measurement helper and cannot drift apart. Reads after the context
-  exits — the path scoring bills from — are unchanged, as are reads on a
-  context that was never entered, which still answer `None`. Reading is
-  deliberately not counted as flopscope dispatch: the read is the caller's own
-  Python and stays in the billed residual, so polling the property cannot shave
-  it. Participant-visible (a live read answers a float where it answered
-  `None`); needs a starter-kit pin bump at release (#211, client half).
-- **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
-  it, and refuses what numpy refuses before any budget is charged. Three
-  measured gaps, all of them a charge for work that never ran or a rejection
-  of work numpy runs: a repeated contracted axis (`axes=([0, 0], [0, 0])`) was
-  priced as a genuine double contraction and charged before numpy's
-  `ValueError`; numpy integer scalars (`np.int64`, `np.int32`, ...) failed an
-  `isinstance(..., int)` test and were rejected with `TypeError` in both the
-  whole-`axes` and per-operand spellings, though numpy accepts them; and a
-  one-shot `axes` spec was drained for flopscope's own geometry and the
-  exhausted object then forwarded on, so the contraction was priced and
-  charged and only afterwards refused. numpy now receives the normalised
-  pairing rather than the caller's object, so the spec is read exactly once.
-  Every `axes` spelling numpy accepts is still accepted and bills exactly what
-  it billed before. What is guaranteed for an *invalid* spec is that it is
-  refused before `budget.deduct`, so `flops_used` is untouched; the exception
-  **type** is not guaranteed to match `np.tensordot`'s, because numpy reorders
-  these checks between its own releases. numpy 2.4 added an explicit
-  duplicate-axis check ahead of the shape indexing that 2.0-2.3 reach first,
-  so `axes=([0, 0], [0, 1])` against a rank-1 second operand is an `IndexError`
-  on numpy 2.2 and a `ValueError` on 2.4; no single fixed order can match the
-  supported range. flopscope validates in one order on every numpy -- axis
-  counts, then axis validity and range, then duplicates, then extents -- and a
-  differential sweep against live `np.tensordot` runs as a test, asserting the
-  accept/reject decision, `flops_used == 0` on every refusal, and identical
-  results, but not the exception type.
-- **cost-model**: a `tensordot` contracted axis given as a 0-d `ndarray` no
-  longer charges for a call that then fails on numpy 2.4. numpy accepts that
-  spelling up to 2.3 and refuses it from 2.4, where its new duplicate check
-  hashes the axis objects and a 0-d `ndarray` is unhashable — so the raw
-  object being forwarded meant `budget.deduct` had already charged the
-  contraction when numpy raised. Each axis is now canonicalised to a plain
-  `int` before pricing and before being handed back to numpy, so the call runs,
-  and bills the same amount, on every supported numpy. This is deliberately
-  more permissive than numpy 2.4 on that one spelling; refusing it instead
-  would break working code on the numpy currently pinned in production.
-- **billing**: floor `ufunc.reduceat` at one base-ufunc application per produced cell.
-- **billing**: route `fnp.ix_` through the NumPy timing boundary so Boolean-mask
-  scans count as backend time instead of Flopscope overhead.
-- **billing**: `UnsupportedDtypeError` raised from inside a wrapper built by
-  an internal factory (e.g. `mean`/`std`/`var`/`nanmean`/`nanstd`/`nanvar`)
-  now names the actual operation in its message instead of the factory's
-  generic internal closure name.
-- **docs**: `cost-model.md` now states the shipped weights for module-level
-  `random.choice` (4.0, the reorder tier) and `random.sample` (1.0, the
-  plain-draw tier). The page had carried the pre-review values since the
-  four-factor rewrite, contradicting `default_weights.json` in both
-  directions. Documentation only — no billed amount changes. Also narrows
-  the "fixed output dtype ⇒ not neutral" rule to the *distribution* samplers,
-  which the Random section had already carved `choice`/`shuffle`/
-  `permutation`/`permuted` out of. Reported in #176.
-- **cost-model**: contraction wrappers now share one einsum subscript
-  allocator and one out-of-letters price. Previously `tensordot`, `dot`/
-  `inner`, and `tensordot`'s full-inner fast path each allocated subscript
-  labels independently and disagreed about what to do when the 52-letter
-  alphabet ran out: `tensordot` fell back to a multiply-only formula that
-  charged `alpha` instead of the honest `2 * alpha - M`, `dot` and `inner`
-  let a bare `StopIteration` escape, and the full-inner path allocated only
-  26 letters and leaked a NumPy `ValueError` above 26 dimensions. All four
-  call sites now route through `_contraction_subscripts`; when it runs out
-  of letters they price the contraction from the same FMA=2 model without
-  an einsum subscript string, and the resulting charge is never lower than
-  what the einsum path would compute for the same operands, though it can
-  be higher. A `CostFallbackWarning` — deduplicated per operation name, and
-  suppressible with `flops.configure(symmetry_warnings=False)` — flags the
-  calls where symmetry or repeated-operand savings could be forfeited.
-  Where the fallback's charge is the accumulation total itself, complex
-  operands now bill at the exact `(8K - 2) / (2K - 1)` ratio instead of
-  raising; where a symmetry adjustment moves the charge off that total,
-  they still fail closed with the existing `RuntimeError`.
-- **cost-model**: `dot` and `inner` now keep a `SymmetricTensor` operand's
-  surviving symmetry when the 52-letter budget is exceeded, instead of
-  dropping it. `tensordot`'s partial-contraction, non-oversized fallback arm
-  already composed the post-contraction group onto the output axes and
-  priced the unique-element fraction there — its full-inner fallback and its
-  oversized-symmetry arm both discard the group instead (`out_sym = None`);
-  the shared `dot`/`inner` fallback discarded it on every arm, so the same
-  contraction cost more above the budget than below it purely because of
-  rank, and returned a plain array where the einsum path returns a
-  `SymmetricTensor` (measured: 64 versus 40 FLOPs on a 2-axis-symmetric
-  rank-27 operand). The direction was over-billing, never under-billing.
-  The composition bails to the dense price — unchanged from before — when a
-  group's order exceeds
-  `dimino_budget` or the enumeration exceeds it mid-composition, so neither
-  operation gains a failure mode above the budget. Repeated-operand
-  (`dot(x, x)`) savings are still forfeited there, and still warned about.
-- **cost-model**: `tensordot`'s label-budget fallback never normalised
-  negative axis indices, mispricing partial contractions above the
-  52-letter budget in both directions. A negative axis skipped by the
-  contracted-size divisor left it at 1, over-billing (a reproduced 256x
-  ratio at rank sum 54, `axes=([-26], [0])`: 33,488,896 instead of
-  130,816); a negative axis that leaked into the output shape inflated `M`
-  until `2*alpha - M` collapsed to the old multiply-only price,
-  under-billing (`axes=([1], [-27])`: 65,536 instead of 130,816). Both now
-  cost 130,816, matching the positive-axis spelling. Those figures are FLOP
-  costs, before the op weight and dtype rate that scale them into a bill.
-  An axis still out-of-range after normalisation now raises `IndexError`
-  before `budget.deduct` runs, rather than being silently skipped.
-- **cost-model**: `dot`, `inner` and `tensordot` now refuse a contraction
-  whose paired axes do not line up — unequal numbers of paired axes, or a
-  pair whose extents differ — with `ValueError` before any cost is computed
-  and before `budget.deduct` runs. `deduct` charges on entry and does not
-  roll back when the wrapped NumPy call raises, so such a call previously
-  consumed budget for arithmetic that never happened, and could report
-  `BudgetExhaustedError` in place of NumPy's shape error. Neither pricing
-  path caught it on its own: above the 52-letter subscript budget the
-  arithmetic fallback prices from shapes alone and never inspects the
-  pairing, and below it the einsum route only appears to — `einsum`
-  broadcasts an extent of 1, so `ij,jk->ik` priced `j=1` against `j=7` in
-  full (measured: 390 FLOPs on a rank-2 pair) before NumPy rejected the
-  call. All three pricing arms of `tensordot` (full-inner, oversized-
-  symmetry, and the ordinary partial contraction) are covered, on both sides
-  of the letter budget. The check is exactly NumPy's own predicate: none of
-  the three operations broadcasts a size-1 contracted axis, every unequal
-  pair including `0` against `n` is a `ValueError`, and equal extents are
-  always accepted — `0` against `0` included, which stays a legal empty
-  contraction costing 0. Valid contractions are unaffected: a 900-case
-  differential sweep against plain NumPy found no accepted call whose price
-  or outcome changed. An axis spec that is both mis-paired and out of range
-  reports the pairing `ValueError`, matching NumPy's own ordering, rather
-  than the `IndexError` for the out-of-range index.
-- **cost-model**: a legal empty contraction (a contracted axis of extent `0`)
-  now costs 0 even when a non-trivial symmetry survives on the output. The
-  symmetry scaler floored its adjusted charge at 1 — correct for real work
-  whose scaled price rounds down to nothing, wrong for a contraction that
-  performed no multiplies and no accumulations — so above the 52-letter
-  subscript budget, where the label-free fallback routes through that scaler,
-  `dot`, `inner` and `tensordot` charged 1 FLOP for arithmetic that never
-  happened, breaking the zero-domain rule the arithmetic fallback and the
-  einsum path both hold. The floored charge also no longer matched the
-  accumulation total it was derived from, so the call site withheld its exact
-  complex factor and the fail-closed guard raised `RuntimeError` on complex
-  operands: the same call billed 0 below the letter budget and failed above
-  it. Both are fixed by preserving a zero input cost through the scaler. The
-  floor itself is unchanged for non-zero costs, symmetry discounts on
-  non-empty contractions are unchanged (measured: a rank-27 pair with a
-  surviving `S_2` still bills 315 of a dense 525), and `ufunc.outer`, the
-  scaler's other caller, clamps its dense cost to at least 1 before calling
-  and so is unaffected. Those figures are FLOP costs, before the op weight
-  and dtype rate that scale them into a bill.
+### Refactor
 
-### Test
+- **cost-model**: generalise tensordot subscript allocator
+- centralize budget record updates
+- add incremental budget rollups
 
-- **weights**: the weight-tier policy guard no longer accepts `8.0`. No shipped
-  op carries that tier — it is retired — so admitting it meant 408 of 472 ops
-  could regress onto it with CI green. It is now named as retired rather than
-  merely dropped, so a regression reports as "retired tier" instead of as an
-  unknown value. No weight changes; the shipped table already satisfies the
-  tightened guard. (#175)
-- **conformance**: the compute-dtype sweep exempts 16 index-output ops
-  (`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`,
-  `searchsorted`, `count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple
-  forms, and kin) from the result-dtype floor, which is correct — they return
-  `int64` indices at any operand width — but nothing replaced it, leaving
-  `billed_rate >= 1.0`. Since no resolvable dtype rates below 1.0 and every
-  probe input was int32, that assertion could not fail: the oracle was switched
-  off, not relaxed. Those ops are now held to an operand-dtype floor probed at
-  `float64`, plus a guard-on-the-guard that fails if the probe dtype is ever
-  narrowed back to the minimum rate. A second pass narrows the probes to
-  `float32` and requires the billed rate to follow down, which separates billing
-  the operand from billing the `int64` index result — both rate 2.0, so a floor
-  alone cannot tell them apart. All 16 pass against the shipped table, so no
-  undercount was hiding behind the disabled assertion and no billed amount
-  changes. (#191)
-- **cost-model docs**: added a cross-check that every op named in
-  `cost-model.md`'s weight-0 lists actually resolves in `ops.json` at weight
-  0.0. The pre-existing guard only scans `attach_docstring()` calls in source,
-  so names appearing only in doc prose were invisible to it. The new guard
-  parses the lists out of the document's structure rather than copying their
-  members, so it catches the next stale name too. A documented name with no
-  `ops.json` row (an array method such as `view`) is exercised and must bill 0
-  rather than merely resolve, since inherited `ndarray` methods resolve whether
-  or not they are free. (#190)
+### Perf
 
-### Docs
-
-- **cost-model**: removed `asfortranarray` and `ascontiguousarray` from both
-  weight-0 free-tier lists. Neither op exists — both raise `AttributeError` and
-  appear nowhere in `ops.json`. They were deliberately **not** implemented at
-  weight 0: `fnp.asarray(a, order='F')` bills `numel` today, so a free
-  `asfortranarray` would move the same elements for nothing, which the doc's
-  own layout-coincidence rule forbids. Also corrected the false "manually
-  handled in flopscope" comment covering both names in `scripts/numpy_audit.py`.
-  (#190)
-- **cost-model**: corrected the weight-tier invariant row, which claimed
-  arithmetic ops may weigh "0, 1, or 4" while the guard has always enforced
-  0 or 1. The prose was wrong, not the guard. (#175)
-- **cost-model**: documented why `gcd`/`lcm` sit at weight 16 — an iterative
-  Euclidean per-element kernel rather than a single instruction — and added the
-  missing `ix_` row to the index-generators table with its shipped formula,
-  `sum(numel(outputs)) + sum(numel(Boolean inputs))` at weight 1.0, including
-  the Boolean-mask scan term. Both document already-shipped behavior. (#177)
-- **cost-model**: the "Guaranteed coverage" paragraph now discloses the
-  index-output carve-out in the compute-dtype sweep and the operand-dtype floor
-  that replaces it. (#191)
-
-**No billed amounts change in any of the above.** Every entry in these two
-sections is documentation or test-strength only; no weight, rate, complex
-factor, or cost formula was touched, and no re-evaluation is needed.
+- remove history scans from budget summaries
+- aggregate closed budget contexts incrementally
+- materialize context summaries from rollups
 
 ## v0.10.0 (2026-07-31)
 
