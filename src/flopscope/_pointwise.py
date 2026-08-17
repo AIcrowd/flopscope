@@ -852,6 +852,45 @@ def _wrap_multi_result(result, *, out=None, symmetry=None):
     )
 
 
+def _wrap_metered_result(result):
+    """Wrap an ndarray result; hand a numpy scalar back exactly as numpy made it.
+
+    The two branches mirror the server's own ``_pack_result``, which tests
+    ``isinstance(result, np.ndarray)`` BEFORE ``isinstance(result, np.generic)``:
+
+    * an ndarray is stored as a handle and reaches the participant as a
+      ``RemoteArray``, whose arithmetic is dispatched to the server and billed;
+    * a numpy scalar is *usually* packed by value and reaches them as a
+      ``RemoteScalar``, whose arithmetic runs locally in Python and is billed
+      nothing. "Usually", because ``_pack_result`` packs by value only when
+      ``.item()`` is msgpack-native: a ``complex128`` scalar is not, so it
+      falls back to ``store_array`` and reaches them as a handle after all.
+      See :func:`test_complex_scalar_results_are_a_recorded_residual_gap`.
+
+    So for an ndarray result the in-process path was the one that was wrong --
+    it handed back a raw ``numpy.ndarray`` and billed 0 for downstream
+    arithmetic the grader was charging (#193) -- and wrapping it makes the two
+    agree. For a by-value scalar result the two already agree at 0, and
+    wrapping it would *break* that agreement: a 0-d ``FlopscopeArray`` is an
+    ``ndarray``, so the server would store it as a handle and start charging
+    downstream arithmetic that costs nothing today. That is a repricing, not a
+    fix, so scalars are passed through untouched.
+
+    That leaves the handle-packed scalars above as a residual #193 gap rather
+    than a resolved case: locally free, billed on the grader. Closing it is not
+    just "wrap them too" -- it is wire-neutral only for the dtypes that already
+    fall back to a handle, so it needs its own dtype-by-dtype measurement.
+
+    Tuple results are handled element by element, matching ``_pack_result``'s
+    own per-element branch order for a tuple return.
+    """
+    if isinstance(result, tuple):
+        return tuple(_wrap_metered_result(part) for part in result)
+    if isinstance(result, _np.ndarray):
+        return _wrap_result(result)
+    return result
+
+
 def _pointwise_symmetry(operands, output_shape):
     aligned_groups = []
     dense_operand_present = False
@@ -3410,7 +3449,7 @@ def sort_complex(a: ArrayLike) -> FlopscopeArray:
         dtypes=(_sort_complex_billing_dtype(a.dtype),),
     ):
         result = _call_numpy(_np.sort_complex, _to_base_ndarray(a))
-    return result  # type: ignore[return-value]  # wrapped at fnp.sort_complex import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 spacing = _counted_unary(_np.spacing, "spacing")
@@ -5011,7 +5050,29 @@ def _einsum_routed_binary(
             return SymmetricTensor(_np.asarray(result), symmetry=output_symmetry)
     if out is not None:
         return out
-    return _asflopscope(result) if inputs_were_whest else result
+    # Two branches, not one, and the asymmetry is deliberate.
+    #
+    # A flopscope operand has always left here through ``_asflopscope``, which
+    # converts even numpy's SCALAR (the 1-D x 1-D shape of dot/inner/matmul/
+    # vecdot) into a 0-d FlopscopeArray. The server packs that as an array
+    # handle, the participant gets a RemoteArray, and downstream arithmetic is
+    # billed. Collapsing this branch into ``_wrap_metered_result`` -- which
+    # passes scalars through untouched -- would hand the scalar back, the
+    # server would pack it by value, and the grader's charge for that
+    # arithmetic would drop from billed to 0. That is a repricing of shipped
+    # behaviour, so the branch stays exactly as it was.
+    #
+    # A plain-numpy operand took ``return result``, handing back the raw
+    # ndarray numpy allocated: arithmetic on it billed 0 in-process while the
+    # grader billed it through the client's RemoteArray (#193). Only the
+    # ndarray half of that is wrong -- a numpy scalar of an msgpack-native
+    # dtype reaches the grader by value and is free on both sides -- which is
+    # exactly the line ``_wrap_metered_result`` draws. A complex128 scalar is
+    # the documented exception: it packs as a handle, so it stays a residual
+    # #193 gap here rather than a case this change closes.
+    if inputs_were_whest:
+        return _asflopscope(result)
+    return _wrap_metered_result(result)
 
 
 @_counted_wrapper
@@ -5233,8 +5294,10 @@ def outer(
         )
     if output_sym is None and not isinstance(out, SymmetricTensor):
         if out is not None:
+            # numpy's out= contract is identity: hand back the caller's own
+            # object, unwrapped. Only the allocated result below may be wrapped.
             return out
-        return result  # type: ignore[return-value]
+        return _wrap_metered_result(result)  # type: ignore[return-value]
     # A SymmetricTensor destination reaches _wrap_result even when the result
     # carries no symmetry. It used to take the branch above and return itself
     # UNWRITTEN: numpy had been handed out=None, nothing ever copied the answer
@@ -5630,7 +5693,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
             )
         if out_sym is not None:
             return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]
-        return result  # type: ignore[return-value]
+        return _wrap_metered_result(result)  # type: ignore[return-value]
     # Fallback: keep the existing sophisticated direct_product_groups path
     # for partial contractions and unusual axes specs.
     # `a_contract_axes` is already normalised to `[0, a.ndim)` above, so
@@ -5761,7 +5824,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes: Any = 2) -> FlopscopeArray:
         )
     if out_sym is not None:
         return _wrap_result(result, symmetry=out_sym)  # type: ignore[return-value]
-    return result  # type: ignore[return-value]  # wrapped at fnp.tensordot import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(tensordot, _np.tensordot, "counted_custom", "product of all dims")
@@ -5799,8 +5862,10 @@ def vdot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         complex_factor_override=complex_override,
     ):
         result = _call_numpy(_np.vdot, _to_base_ndarray(a), _to_base_ndarray(b))
-    # vdot returns a scalar, never a SymmetricTensor.
-    return result  # type: ignore[return-value]
+    # vdot returns a numpy scalar, never a SymmetricTensor. It stays a numpy
+    # scalar: the server packs it by value, so downstream arithmetic on it is
+    # free on the grader too, and wrapping it would start charging for that.
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(vdot, _np.vdot, "counted_custom", "size of input FLOPs")
@@ -5824,7 +5889,7 @@ def kron(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         dtypes=(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.kron, _to_base_ndarray(a), _to_base_ndarray(b))
-    return result  # type: ignore[return-value]  # wrapped at fnp.kron import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(kron, _np.kron, "counted_custom", "output size FLOPs")
@@ -5857,7 +5922,11 @@ def cross(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:
         _op.set_cost(
             _builtins.max(3 * (result.size if hasattr(result, "size") else 1), 1)
         )
-    return result  # type: ignore[return-value]
+    # Safe at every vector width, including the 2-vector form that contracts the
+    # vector axis away: numpy.cross returns a 0-d ndarray there, not a numpy
+    # scalar, so the server already stored a handle and the wrap cannot flip the
+    # wire form. See test_cross_results_were_already_array_handles.
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -5930,7 +5999,7 @@ def diff(
         dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.diff, _to_base_ndarray(a), n=n, axis=axis, **np_kwargs)
-    return result  # type: ignore[return-value]  # wrapped at fnp.diff import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6050,7 +6119,9 @@ def gradient(
             *[_to_base_ndarray(v) for v in varargs],
             **kwargs,
         )
-    return result  # type: ignore[return-value]  # wrapped at fnp.gradient import time
+    # np.gradient returns a tuple for multi-axis input and a single array
+    # otherwise; _wrap_metered_result covers both, element by element.
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6093,7 +6164,7 @@ def ediff1d(ary: ArrayLike, **kwargs: Any) -> FlopscopeArray:
             for k, v in kwargs.items()
         }
         result = _call_numpy(_np.ediff1d, _to_base_ndarray(ary), **stripped_kwargs)
-    return result  # type: ignore[return-value]  # wrapped at fnp.ediff1d import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(ediff1d, _np.ediff1d, "counted_custom", "numel(output) FLOPs")
@@ -6140,7 +6211,7 @@ def convolve(a: ArrayLike, v: ArrayLike, mode: str = "full") -> FlopscopeArray:
         result = _call_numpy(
             _np.convolve, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
         )  # type: ignore[arg-type]
-    return result  # type: ignore[return-value]  # wrapped at fnp.convolve import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6228,7 +6299,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode: str = "valid") -> FlopscopeArray
         result = _call_numpy(
             _np.correlate, _to_base_ndarray(a), _to_base_ndarray(v), mode=mode
         )  # type: ignore[arg-type]
-    return result  # type: ignore[return-value]  # wrapped at fnp.correlate import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6237,6 +6308,31 @@ attach_docstring(
     "counted_custom",
     "per-mode FLOPs (FMA=2): full 2nm-n-m+1; valid (2*min-1)*(max-min+1); same exact dot-length sum",
 )
+
+
+def _reject_zero_d_y(y_arr, op_name: str) -> None:
+    """Refuse a 0-d ``y`` with ``ValueError``, before any shape indexing.
+
+    The feature-count reads below are guarded only by ``ndim == 1``, so a 0-d
+    ``y`` fell through to ``y_arr.shape[0]`` and raised flopscope's own
+    IndexError. This runs inside the cost helper, which completes before
+    ``budget.deduct``, so nothing is billed before or after and the set of
+    calls flopscope refuses is unchanged -- only the exception class and the
+    message move.
+
+    numpy refuses the same call whenever ``x`` carries more than one
+    observation. It *accepts* a 0-d ``y`` in the single-observation case,
+    broadcasting it to ``(1, 1)``: ``np.cov([1.0], np.float64(2.0))`` returns a
+    2x2 array. flopscope refused that before this guard (with the IndexError)
+    and still refuses it. Accepting it would change accept/refuse on a billable
+    call, which is a pricing decision, so the divergence is deliberate and
+    pinned by ``test_numpy_accepts_zero_d_y_for_a_single_observation``.
+    """
+    if y_arr.ndim == 0:
+        raise ValueError(
+            f"{op_name}: y must be at least 1-dimensional, got a 0-d operand "
+            f"(shape {y_arr.shape}, dtype {y_arr.dtype})"
+        )
 
 
 def _cov_cost(x, y=None, rowvar=True):
@@ -6269,6 +6365,7 @@ def _cov_cost(x, y=None, rowvar=True):
         f, s = x.shape[1], x.shape[0]
     if y is not None:
         y_arr = _np.asarray(y)
+        _reject_zero_d_y(y_arr, "cov")
         if y_arr.ndim == 1:
             f2 = 1
         elif rowvar:
@@ -6302,6 +6399,7 @@ def _corrcoef_cost(x, y=None, rowvar=True):
         f = x.shape[1]
     if y is not None:
         y_arr = _np.asarray(y)
+        _reject_zero_d_y(y_arr, "corrcoef")
         if y_arr.ndim == 1:
             f2 = 1
         elif rowvar:
@@ -6338,7 +6436,7 @@ def corrcoef(x: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> Flopsco
             y=_to_base_ndarray(y) if y is not None else None,  # type: ignore[arg-type]
             **kwargs,
         )
-    return result  # type: ignore[return-value]  # wrapped at fnp.corrcoef import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6376,7 +6474,7 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
             y=_to_base_ndarray(y) if y is not None else None,  # type: ignore[arg-type]
             **kwargs,
         )
-    return result  # type: ignore[return-value]  # wrapped at fnp.cov import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6411,7 +6509,7 @@ def trapezoid(
             dx=dx,
             axis=axis,
         )
-    return result  # type: ignore[return-value]  # wrapped at fnp.trapezoid import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(
@@ -6447,7 +6545,7 @@ if hasattr(_np, "trapz"):
                 dx=dx,
                 axis=axis,
             )
-        return result  # type: ignore[return-value]  # wrapped at fnp.trapz import time
+        return _wrap_metered_result(result)  # type: ignore[return-value]
 
     attach_docstring(
         trapz, _np.trapz, "counted_custom", "4 * numel(input) FLOPs (FMA=2)"
@@ -6490,7 +6588,7 @@ def interp(x: ArrayLike, xp: ArrayLike, fp: ArrayLike, **kwargs: Any) -> Flopsco
             _to_base_ndarray(fp),  # type: ignore[arg-type]
             **kwargs,
         )
-    return result  # type: ignore[return-value]  # wrapped at fnp.interp import time
+    return _wrap_metered_result(result)  # type: ignore[return-value]
 
 
 attach_docstring(

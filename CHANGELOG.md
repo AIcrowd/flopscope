@@ -57,6 +57,100 @@
   `FlopscopeArray` inputs, but now rejects foreign NumPy `ndarray` subclasses,
   including `MaskedArray` and `memmap`, because their hooks cannot be safely
   billed.
+- **No billed amount changes for the metered-wrapper return-type fix below.**
+  It raises the LOCAL, in-process estimate only. Measured on a
+  contraction-heavy workload doing arithmetic downstream of the affected ops:
+  local `flops_used` 2,230,766 → 2,326,380 (+95,614, +4.29%), while the same
+  workload driven over a real client/server round trip bills 2,327,658 grader
+  FLOPs on both the old and the new code — byte-identical. The local estimate
+  moves toward the amount the grader was already charging; no re-evaluation
+  follows from it.
+- **No billed amount changes for the linalg return-type fix below either.**
+  Same shape, measured the same way. A decomposition-heavy workload built from
+  PLAIN numpy operands (the only case that moves — every linalg op already
+  wrapped its result when an operand was a `FlopscopeArray`): local
+  `flops_used` 8,283,360 → 8,352,480 (+69,120, +0.83%). The same workload built
+  from `FlopscopeArray` operands reads 8,352,480 on both old and new code, so
+  what the change does is make the plain-operand path agree with the one the
+  grader already charged. **That percentage is workload-specific, not a
+  characteristic figure.** The newly-billed work is the downstream elementwise
+  arithmetic, which is O(n²), while the decompositions that dominate the total
+  are O(n³) — so the rise falls as matrices get bigger. The same
+  cholesky/inv/qr/eigh/solve loop measured across sizes moves +11.1% at n=4,
+  +5.3% at n=8, +2.6% at n=16, +1.3% at n=32 and +0.64% at n=64; a submission
+  doing heavier algebra per decomposition sits higher still. Read it as "single
+  digit percent on typical geometry, more on small matrices", not as 0.83%.
+  On the grader side, 64 measurements — 31 linalg ops
+  plus `multi_dot(out=)`, each on both operand kinds — driven through the
+  server's real `RequestHandler.handle` → `_pack_result` produce a
+  byte-identical wire form, op-call cost and downstream-multiply cost on both
+  trees, and a real client/server round trip over the same 28 ops bills 10,112
+  grader FLOPs either way with every `RemoteArray`/`RemoteScalar` split
+  unchanged. The reason is structural: `Session.store_array` already view-casts
+  every stored ndarray to `FlopscopeArray`, so the server never saw the
+  difference.
+- **No billed amount changes for the cross/outer/contraction return-type fix
+  below either.** Local only, measured the same way. The workload, stated
+  precisely enough to re-run: 40 iterations at n=32 of `matmul(a, b)`,
+  `dot(a, b)`, `outer(u, w)`, `cross(v3, w3)`, `matvec(a, u)` and a scalar
+  `inner(u, w)`, with one elementwise expression on each array result
+  (`m*0.5 + m`, `d - d*0.25`, `o + o`, `c*2.0`, `mv + mv`) and a `.sum()` over
+  each: local `flops_used` 10,570,880 → 11,231,760 on plain-numpy
+  operands (+660,880, +6.25%) and 11,067,600 → 11,231,760 on `FlopscopeArray`
+  operands (+164,160, +1.48%). The two operand kinds now read the SAME total,
+  which is the point — `cross` and `outer` were raw on both kinds, the
+  contraction helper only on plain numpy, and the remaining spread was the
+  local estimate disagreeing with itself. **Those percentages are
+  workload-specific, not characteristic figures:** the newly-billed work is
+  O(n²) elementwise arithmetic while the contractions that dominate are O(n³),
+  so the rise shrinks as arrays grow. On the grader side, 146 measurements —
+  73 call shapes across `cross`, `outer`, every contraction op and their
+  unaffected neighbours, each on both operand kinds — driven through the
+  server's real `RequestHandler._pack_result` give a byte-identical wire form
+  (handle vs by-value, shape, dtype), a byte-identical op-call cost, and
+  unchanged `out=`/operand identity on both trees: 0 differences in all three.
+- **No billed amount changes for the fft free-op return-type fix below
+  either.** Local only, same shape, measured the same way. A realistic spectral
+  workload — 20 iterations of `fft2` → `fftshift` → an `abs()²` power spectrum
+  weighted by an `fftfreq` grid → `ifftshift` → `ifft2` — moves local
+  `flops_used` by +2.86% at n=16 (1,075,840 → 1,106,560), +1.60% at n=32
+  (5,121,280 → 5,203,200), +1.03% at n=64 (23,759,360 → 24,005,120) and +0.76%
+  at n=128 (108,139,520 → 108,958,720). The rise shrinks with n for the usual
+  reason: the newly-billed work is O(n²) elementwise arithmetic while the
+  transforms that dominate are O(n² log n). A workload made of nothing but the
+  four helpers and arithmetic on their results is the other end of the range
+  and roughly doubles — 990,720 → 1,661,600, +67.7% — so read the figure as
+  "low single-digit percent on spectral code, much more if the helpers are the
+  whole workload". Both operand kinds read identically before and after, since
+  these four returned raw on plain numpy and `FlopscopeArray` input alike. On
+  the grader side, 134 measurements — 67 call shapes covering all four ops at
+  ranks 0–3, int/bool/float32/complex operands, every `axes` form, list and
+  Python-float inputs, the eight fft transforms and the ops the earlier stages
+  touched, each on both operand kinds — driven through the server's real
+  `RequestHandler._pack_result` give a byte-identical wire form, op-call cost
+  and argument identity on both trees: 0 differences in all three. A real
+  client/server round trip over the same probes is byte-identical too, for a
+  second reason worth stating plainly: **the client exposes no `fft` proxy at
+  all** — `flopscope/fft/__init__.py` is a stub and every registered `fft.*`
+  name raises `AttributeError` — so none of these ops can reach the grader
+  today in the first place.
+- **No billed amount changes for the `bmat` alignment below either**, and here
+  the local estimate does not merely move toward the grader's — it lands on it
+  exactly. A workload that is nothing but `bmat` and arithmetic on its result
+  (20 iterations of a 2×2 nest of an n×n block, then `m*m`, `+`, `.sum()`)
+  reads local `flops_used` 2,560 → 10,200 at n=4, 10,240 → 40,920 at n=8,
+  40,960 → 163,800 at n=16 and 163,840 → 655,320 at n=32. Every one of those
+  new totals is the number the same workload bills over a real client/server
+  round trip, on the old tree and the new tree alike — the grader column is
+  10,200 / 40,920 / 163,800 / 655,320 either way. **That ~4× is the extreme
+  end of the range, not a characteristic figure:** it is what happens when
+  every operation after the `bmat` was billing 0 locally and nothing else is
+  in the workload. `bmat`'s own call cost is untouched (8 FLOPs for a 2×2
+  float64 probe under the packaged table, before and after, in-process and
+  remote), and the packed wire form is unchanged — same array handle, same
+  shape, same dtype, stored as the same `FlopscopeArray` — because
+  `Session.store_array` was already view-casting the `numpy.matrix` away on
+  receipt.
 
 ### Fix
 
@@ -135,6 +229,279 @@
   Validation is skipped, not misapplied, where the default pair is not the
   pair numpy contracts — a 0-d operand, or an `axis=`/`axes=` that relocates
   the gufunc's core dimension.
+- **billing**: `tensordot`, `kron`, `diff`, `gradient`, `ediff1d`, `convolve`,
+  `correlate`, `cov`, `sort_complex`, and the array-returning shapes of
+  `corrcoef`, `interp`, `trapezoid`, and `trapz` now return flopscope types
+  instead of the raw `numpy.ndarray` their inner numpy call produced.
+  Arithmetic performed on one of those results billed **0** FLOPs in-process
+  while the grader billed it: the server stores an ndarray result as a handle,
+  so the participant gets a `RemoteArray` whose arithmetic is dispatched and
+  charged. Local estimates therefore read low against what was actually
+  charged, and they now rise to meet it (figures under *Billing impact*
+  above). `gradient`'s multi-axis tuple return is preserved.
+  **A numpy SCALAR result is deliberately left unwrapped** — `vdot`, and
+  `trapezoid`/`trapz`/`interp`/`corrcoef` on the argument shapes where numpy
+  returns a scalar. The server packs a numpy scalar by value, so the
+  participant gets a `RemoteScalar` whose arithmetic runs locally and costs
+  nothing; the in-process path already agreed at 0. A 0-d `FlopscopeArray` is
+  an `ndarray`, so wrapping those results would have flipped them to handles
+  and started charging downstream arithmetic that is free today — a change to
+  grader billing, which this release deliberately does not make.
+  The 14 sites carried a `# wrapped at fnp.<name> import time` comment
+  describing a wrapping mechanism that does not exist; the comments are
+  removed. A registry-driven sweep now probes every metered op, in every
+  argument form it accepts, and pins the set that still returns a raw
+  `numpy.ndarray` as a shrink-only inventory, so a new wrapper cannot regress
+  silently. That sweep also found 36 further ops with the same defect,
+  concentrated in `linalg` and `fft` and including structured returns
+  (`EigResult`, `QRResult`, `SVDResult`), plain tuples (`histogramdd`,
+  `linalg.lstsq`) and a `numpy.matrix` (`bmat`). The 19 `linalg.*` entries are
+  closed by the next item, 8 contraction/product ops by the one after it, and
+  the 4 `fft` index/frequency helpers by the one after that, and `bmat` by the
+  last of them; the remaining 4 (`histogramdd`, `isfinite`, `isinf`, `isnan`)
+  are recorded, not changed. #193 is therefore referenced, not closed.
+- **billing**: every array-returning op in `flopscope.numpy.linalg` now returns
+  a flopscope type on plain-numpy operands too, closing 19 of the 36 raw
+  returns the sweep above found. These ops already wrapped their result when
+  an operand was a `FlopscopeArray`, so the gap was the plain-numpy case: a
+  participant holding `numpy` arrays got a raw ndarray back from `cholesky`,
+  `eig`, `inv`, `qr`, `solve`, `svd`, `lstsq` and the rest, and the arithmetic
+  that followed billed 0 in-process while the grader billed it. The module
+  gained the same `wrap_module_returns` call nine other modules already carry,
+  which wraps ndarray returns only: `det`, `norm`, `cond`, `matrix_rank`,
+  `slogdet`'s `sign`/`logabsdet` and `lstsq`'s `rank` stay numpy scalars, so
+  they still reach the participant as a `RemoteScalar` packed by value and
+  their downstream arithmetic stays free. `EigResult`, `EighResult`,
+  `QRResult`, `SVDResult` and `SlogdetResult` keep their named type — the wrap
+  rebuilds them rather than flattening them to tuples, so `.eigenvalues`,
+  `.U` and `.sign` still resolve. `linalg.multi_dot` is deliberately excluded:
+  it is the one op here that takes `out=` and returns that buffer by identity,
+  and wrapping the return turned `multi_dot([m, n], out=dest) is dest` from
+  True to False for a plain-ndarray destination. That exclusion has a price,
+  stated rather than glossed: `multi_dot`'s ordinary array-returning shape
+  still hands back a raw ndarray on plain-numpy operands, so the honest count
+  across this release is 32 closed, 4 still inventoried, and 1
+  closed-off-by-exclusion. It cannot
+  go in `KNOWN_RAW_RETURN_OPS` — that inventory is exact in both directions and
+  the sweep classifies `multi_dot` as clean, because the only probe form that
+  fits it returns a scalar — so it is pinned by a dedicated test instead.
+  `linalg.tensorsolve`, which
+  no sweep probe form fits, is fixed by the same call and carries its own
+  assertion. Retracts a documented promise: `solve` and `lstsq` claimed
+  numpy's subclass-return policy (a plain `b` yields a plain-ndarray solution
+  even when `a` is a `FlopscopeArray`). That no longer holds and the
+  docstrings saying so are deleted. `linalg` was the only module honouring it
+  — `sort`, `cumsum`, `tensordot` and `fft.fft` on plain numpy input all
+  already return `FlopscopeArray`.
+- **billing**: `cross`, `outer`, `linalg.outer`, and the array-returning shapes
+  of `dot`, `inner`, `matmul`, `vecdot`, `matvec`, `vecmat`, `linalg.matmul`
+  and `linalg.vecdot` now return flopscope types, closing 8 more of the 36 raw
+  returns and leaving 9. Same defect as the two items above — arithmetic on the
+  result billed 0 in-process while the grader billed it through the client's
+  `RemoteArray` — and the same shape of fix, but deliberately applied one
+  `return` statement at a time rather than module-wide, because all three sites
+  share their return path with cases that must not be wrapped. `outer`'s
+  destination early exit still hands back the caller's own buffer (`out is
+  result` stays True for a plain and a `FlopscopeArray` destination alike), and
+  `outer(v, v)` still returns a `SymmetricTensor` carrying its S2 group, which
+  is what halves a symmetric outer's price.
+  **The contraction site is asymmetric on purpose.** `dot`, `inner`, `matmul`,
+  `vecdot`, `matvec`, `vecmat`, `linalg.matmul` and `linalg.vecdot` all return
+  through one helper, and that helper already wrapped its result whenever an
+  operand was a `FlopscopeArray` — through `_asflopscope`, which converts even
+  numpy's SCALAR (the 1-D × 1-D shape) into a 0-d array. Those calls therefore
+  reach the grader as an array handle today and their downstream arithmetic is
+  charged. Only the plain-numpy branch changes. Rewriting the whole return to
+  the scalar-preserving wrap — the obvious one-liner — would have REMOVED that
+  existing wrap and cut grader billing on 1-D × 1-D contractions from billed to
+  0; measured through the server's own `_pack_result`, it moves 7 wire forms
+  from a handle to by-value. Wrapping unconditionally instead moves 15 the
+  other way. The form shipped here moves none of them, and both failure
+  directions are now pinned by tests rather than by review attention.
+  One residual is recorded rather than closed: a **complex** scalar
+  contraction result is still a #193 divergence. Scalars are passed through on
+  the reasoning that they are free in-process and free on the grader, but
+  `_pack_result` only packs by value when `.item()` is msgpack-native, and a
+  `complex128` scalar is not — it falls back to a handle the grader bills while
+  in-process billing stays 0. It packs identically on the pre-fix tree, so
+  nothing regressed; it is now written down and pinned instead of implied.
+- **billing**: `fft.fftfreq`, `fft.rfftfreq`, `fft.fftshift` and
+  `fft.ifftshift` now return flopscope types, closing 4 more of the 36 raw
+  returns and leaving 5. Same defect as the three items above: all four ended
+  in a bare `return result` with no wrapping of any kind, so arithmetic on a
+  frequency grid or a shifted array billed 0 in-process while the grader would
+  bill it. Closed module-wide — the same `wrap_module_returns` call `linalg`
+  and nine other modules already carry — rather than one `return` at a time,
+  because `flopscope/numpy/fft/_free.py` contains nothing but those four
+  metered wrappers: its only other public names are imports, which the default
+  `check_module=True` filter excludes. That was enumerated before the form was
+  chosen, and a test now pins both halves of it — the set of names the pass may
+  reach, and the identity of the imported helpers it must leave alone.
+  None of the four takes `out=`, so there is no caller-buffer identity to
+  break, and no `skip_names` is needed.
+  **There is no scalar shape to trap on here**, which is what makes the
+  module-wide form safe: wrapping a numpy scalar would flip a by-value
+  `RemoteScalar` into an array handle and start charging arithmetic that is
+  free today. `fftfreq`/`rfftfreq` take an int and always build a rank-1 grid,
+  including at `n=1`; `fftshift`/`ifftshift` of a 0-d input never reaches
+  flopscope's return line at all, because `numpy.roll` raises `ValueError`
+  first. Both are asserted against numpy's own behaviour rather than
+  remembered, so they track numpy rather than this changelog.
+  `tests/test_fft_free.py` keeps its billed numbers (8, 5, 8, 8) and moves its
+  `numpy.allclose` check outside the budgeted region: the comparison is a
+  metered op now that the result is a flopscope type, so the old form measured
+  the op plus the check and read 63 where it means 8. Restructured, not
+  relaxed, with the premise pinned by its own test.
+- **billing**: `bmat` now returns a plain `FlopscopeArray` instead of the
+  `numpy.matrix` numpy hands back, closing the 5th of the 36 raw returns and
+  leaving 4. **This one is participant-visible in-process and needs a
+  starter-kit pin bump at release (#193).** Unlike the four items above, the
+  divergence here was not only a FLOP gap: the two backends disagreed on the
+  ARITHMETIC ANSWER. `numpy.matrix` overloads `*` as matrix multiplication, so
+  on `[[1, 2], [3, 4]]` an in-process `m * m` gave `[[7, 10], [15, 22]]` while
+  the same code on the grader gave `[[1, 4], [9, 16]]` — the server's
+  `Session.store_array` view-casts every stored ndarray that is not already a
+  `FlopscopeArray`, so the matrix subclass was dropped on receipt and never
+  reached a participant at all. "Change nothing" was therefore not the neutral
+  option it is for `histogramdd` and the three `is*` predicates; it left a
+  silent wrong answer in place. The in-process path is the one that moved, to
+  reproduce what the remote already did. **What local callers lose, each item
+  pinned by a test:**
+  - **`*` and `**` are elementwise, not matrix multiply and matrix power.**
+    `m * m` and `m ** 2` both gave `[[7, 10], [15, 22]]` on the operand above
+    and both now give `[[1, 4], [9, 16]]`. These are the two silent ones — the
+    answer changes with no exception and no warning.
+  - **The result is no longer permanently 2-D.** `numpy.matrix` re-inflated
+    every dimension-reducing result back to a row; a `FlopscopeArray` does not.
+    So `bm[0]` on a 1×3 gives `(3,)` where it gave `(1, 3)`, and on a 2×2
+    `.sum(axis=0)`, `.mean(axis=0)` and `.max(axis=0)` give `(2,)` where they
+    gave `(1, 2)`, while `.ravel()`, `.flatten()`, `.reshape(4)` and iterating
+    the rows give `(4,)`/`(2,)` where they gave `(1, 4)`/`(1, 2)`. Downstream
+    broadcasting changes silently with them.
+  - **`.I`, `.A`, `.H` and `.A1` no longer exist** — use `fnp.linalg.inv`,
+    `numpy.asarray`, `.conj().T` and `.ravel()`. This one fails loudly, with
+    `AttributeError`.
+  - **In-place `m *= x` and `m **= x` now raise `TypeError`** rather than
+    mutating with matrix semantics, because flopscope arrays are immutable.
+    Also loud; the message names the functional replacement.
+
+  None of these ever worked against the grader, so code written for the remote
+  backend is unaffected; code written and only ever run in-process may need
+  those edits. The two silent items are the reason this needs a starter-kit
+  pin bump rather than just a release note. The cast is
+  `_asplainflopscope` rather than the usual `_asflopscope`, which returns
+  non-flopscope ndarray subclasses unchanged so `SymmetricTensor` metadata
+  survives and is a no-op on a matrix. The matrix surface is one op wide and
+  stays that way — `asmatrix` is blacklisted, and `matrix`/`mat` are not
+  exposed — which is asserted rather than assumed. `bmat`'s cost, refusals and
+  wire form are unchanged (figures under *Billing impact* above).
+- **docs**: `bmat`'s published reference no longer states the wrong return
+  type. Wrappers inherit NumPy's docstring wholesale, which is right almost
+  everywhere — a `FlopscopeArray` *is* an `ndarray`, so an inherited
+  "out : ndarray" stays true — but NumPy's `bmat` documents "out : matrix",
+  and the alignment above made that the one false sentence on the page. Both
+  surfaces that publish it are corrected: `attach_docstring` takes an optional
+  `returns=` override for `help(fnp.bmat)`, and because
+  `scripts/generate_api_docs.py` builds the website from NumPy's docstring
+  directly rather than from the wrapper's, the override is also recorded on
+  the wrapper as `__flopscope_returns__` and applied there. Opt-in and used by
+  exactly one op, with the no-override path pinned so the other 256 call sites
+  are provably untouched. Documentation only — no weight, rate or formula is
+  involved, and the grader round trip is byte-identical either side.
+- **symmetry**: `expand_dims` no longer dies on high-rank input. The
+  symmetry-transport helper allocated an `np.empty` of `(ndim + 1)!` float64
+  elements — 152 TiB at rank 15 — solely to read one `.shape`, and did so even
+  when the array carried no symmetry group, so calls failed somewhere around
+  rank 14 while numpy itself handles rank 41. The remap is now pure shape
+  arithmetic that allocates nothing, with axis normalization delegated to
+  numpy's own `normalize_axis_tuple` so negative, tuple, repeated, and
+  out-of-range axis forms raise exactly what `numpy.expand_dims` raises across
+  the supported numpy range. Symmetry groups for calls that already worked are
+  unchanged, and `expand_dims` still bills 0 FLOPs.
+- **budget**: a non-finite `flop_budget` is now refused at construction.
+  Validation only tested `flop_budget <= 0`, and NaN compares False against
+  every bound, so a NaN budget was accepted, propagated through
+  `flops_remaining`, and made the exhaustion comparison always False —
+  `BudgetExhaustedError` became unreachable and the budget silently stopped
+  enforcing. No billed amount changes.
+- **budget**: `wall_time_s` and `residual_wall_time_s` now report live values
+  while the context is open instead of `None`, matching what
+  `budget_summary_dict()` already reported for the same two quantities. Both
+  route through the helper the summary path uses. Values read after the
+  context exits — what Whestbench bills from — are unchanged. The client is
+  changed the same way for the same two reads (see the client entry below), so
+  an in-process live read and a client live read both answer a float.
+- **cost-model**: `cov` and `corrcoef` given a 0-d `y` now raise `ValueError`
+  with a message naming the operand, instead of an `IndexError` from
+  flopscope's own shape arithmetic. The guard runs before `budget.deduct`, so
+  nothing is billed before or after — the refusal set is unchanged, only the
+  exception class and message. numpy refuses the same calls whenever `x`
+  carries more than one observation; it accepts a 0-d `y` in the single
+  observation case (`np.cov([1.0], np.float64(2.0))`), which flopscope refused
+  before this change and still refuses. Un-refusing it would change
+  accept/refuse on a billable call, so it is left for the repricing wave.
+- **client**: `fnp.array` and `fnp.asarray` now accept a `numpy.ndarray` (and
+  any other buffer-protocol object) at any rank. Both documented conversions
+  used to fail: `asarray` was an auto-generated proxy with no encoding for an
+  ndarray argument and raised `RemoteSerializationError`, while `array`'s
+  buffer path was gated on `mv.ndim <= 1` and raised `TypeError` for anything
+  above 1-D, even though the `create_from_data` wire call has always carried an
+  arbitrary shape. Fortran-order and strided inputs keep their logical values
+  (`memoryview.tobytes()` is C-order for both), and a 0-d buffer now has rank 0
+  instead of the rank 1 the old `nbytes // itemsize` length produced. Buffers
+  with no wire dtype — byte-swapped, structured, string — still raise. The
+  client remains numpy-free: everything goes through `memoryview`. **No billed
+  amount changes.** `asarray` materializes locally only for values the wire
+  refuses today and then dispatches exactly as before, so every call that
+  already worked keeps its dispatch and its charge; what changes is that calls
+  that used to error now run and bill at the existing `array`/`asarray` rates.
+  One asymmetry is now reachable above rank 1 and is pinned rather than
+  changed: a buffer carrying `dtype=` is ingested free and then cast
+  server-side, where a nested list packs directly in the target dtype and bills
+  nothing — the buffer route is the more expensive of the two, at the same
+  per-element rate it has always charged at rank 1. This is participant-visible
+  and needs a starter-kit pin bump at release (#194).
+- **client**: structured results keep their type over the wire, so
+  `fnp.linalg.svd(a).U` — and `.S`, `.Vh`, `.Q`, `.R`, `.eigenvalues`,
+  `.eigenvectors`, `.sign`, `.logabsdet`, and the `unique_all`/`unique_counts`/
+  `unique_inverse` fields — resolve against a server as they always have
+  in-process. They previously raised `AttributeError`: the wire's multi-result
+  form (`{"multi": [...]}`) had no slot for the container type, having been
+  designed for ops returning a homogeneous list of arrays (`nonzero` returns
+  one per dimension), and a namedtuple **is** a tuple, so every structured
+  result flowed down that path and arrived stripped. The server now describes
+  the container generically from `type(result).__name__` and
+  `type(result)._fields` — no numpy-specific table, so a numpy release that
+  adds a structured result needs no change — and the client rebuilds it with
+  `collections.namedtuple`, which adds no dependency (pyzmq and msgpack
+  remain the client's only ones). Results are still tuples, so indexing and
+  unpacking (`q, r = fnp.linalg.qr(x)`) are unaffected, and plain-tuple
+  returns (`nonzero`, `modf`, `frexp`) stay plain tuples. Additive and
+  compatible both ways: an older client ignores the new key and still sees a
+  plain tuple, and a newer client against an older server sees exactly what it
+  sees today. **No billed amount changes** — in-process or on the grader. What
+  changes is the label on a container the caller already received; the item
+  payloads are byte-for-byte identical, so no handle is minted or withheld and
+  nothing downstream is repriced. Measured on a linalg-heavy workload over a
+  real client/server round trip, all four version pairings bill an identical
+  3,997,936 grader FLOPs. Participant-visible; needs a starter-kit pin bump at
+  release (#193).
+- **client**: `BudgetContext.wall_time_s` and
+  `BudgetContext.residual_wall_time_s` are now live while the context is open,
+  instead of returning `None` until it closed while `summary_dict()` reported
+  live values for the same two quantities — one quantity with two different
+  answers. Both are measured locally from the process clock and the local
+  dispatch accumulator, so a read costs no round trip; only the
+  backend/overhead split of that dispatch time needs the server's kernel
+  measurement, and `flopscope_backend_time_s` / `flopscope_overhead_time_s` are
+  therefore still `0.0` until close. The property and the summary path now
+  share one measurement helper and cannot drift apart. Reads after the context
+  exits — the path scoring bills from — are unchanged, as are reads on a
+  context that was never entered, which still answer `None`. Reading is
+  deliberately not counted as flopscope dispatch: the read is the caller's own
+  Python and stays in the billed residual, so polling the property cannot shave
+  it. Participant-visible (a live read answers a float where it answered
+  `None`); needs a starter-kit pin bump at release (#211, client half).
 - **cost-model**: `tensordot` now parses `axes` the way `np.tensordot` parses
   it, and refuses what numpy refuses before any budget is charged. Three
   measured gaps, all of them a charge for work that never ran or a rejection
@@ -274,6 +641,65 @@
   scaler's other caller, clamps its dense cost to at least 1 before calling
   and so is unaffected. Those figures are FLOP costs, before the op weight
   and dtype rate that scale them into a bill.
+
+### Test
+
+- **weights**: the weight-tier policy guard no longer accepts `8.0`. No shipped
+  op carries that tier — it is retired — so admitting it meant 408 of 472 ops
+  could regress onto it with CI green. It is now named as retired rather than
+  merely dropped, so a regression reports as "retired tier" instead of as an
+  unknown value. No weight changes; the shipped table already satisfies the
+  tightened guard. (#175)
+- **conformance**: the compute-dtype sweep exempts 16 index-output ops
+  (`argmax`/`argmin`, `argsort`, `nonzero`/`flatnonzero`/`argwhere`,
+  `searchsorted`, `count_nonzero`, `digitize`, `lexsort`, the `unique_*` tuple
+  forms, and kin) from the result-dtype floor, which is correct — they return
+  `int64` indices at any operand width — but nothing replaced it, leaving
+  `billed_rate >= 1.0`. Since no resolvable dtype rates below 1.0 and every
+  probe input was int32, that assertion could not fail: the oracle was switched
+  off, not relaxed. Those ops are now held to an operand-dtype floor probed at
+  `float64`, plus a guard-on-the-guard that fails if the probe dtype is ever
+  narrowed back to the minimum rate. A second pass narrows the probes to
+  `float32` and requires the billed rate to follow down, which separates billing
+  the operand from billing the `int64` index result — both rate 2.0, so a floor
+  alone cannot tell them apart. All 16 pass against the shipped table, so no
+  undercount was hiding behind the disabled assertion and no billed amount
+  changes. (#191)
+- **cost-model docs**: added a cross-check that every op named in
+  `cost-model.md`'s weight-0 lists actually resolves in `ops.json` at weight
+  0.0. The pre-existing guard only scans `attach_docstring()` calls in source,
+  so names appearing only in doc prose were invisible to it. The new guard
+  parses the lists out of the document's structure rather than copying their
+  members, so it catches the next stale name too. A documented name with no
+  `ops.json` row (an array method such as `view`) is exercised and must bill 0
+  rather than merely resolve, since inherited `ndarray` methods resolve whether
+  or not they are free. (#190)
+
+### Docs
+
+- **cost-model**: removed `asfortranarray` and `ascontiguousarray` from both
+  weight-0 free-tier lists. Neither op exists — both raise `AttributeError` and
+  appear nowhere in `ops.json`. They were deliberately **not** implemented at
+  weight 0: `fnp.asarray(a, order='F')` bills `numel` today, so a free
+  `asfortranarray` would move the same elements for nothing, which the doc's
+  own layout-coincidence rule forbids. Also corrected the false "manually
+  handled in flopscope" comment covering both names in `scripts/numpy_audit.py`.
+  (#190)
+- **cost-model**: corrected the weight-tier invariant row, which claimed
+  arithmetic ops may weigh "0, 1, or 4" while the guard has always enforced
+  0 or 1. The prose was wrong, not the guard. (#175)
+- **cost-model**: documented why `gcd`/`lcm` sit at weight 16 — an iterative
+  Euclidean per-element kernel rather than a single instruction — and added the
+  missing `ix_` row to the index-generators table with its shipped formula,
+  `sum(numel(outputs)) + sum(numel(Boolean inputs))` at weight 1.0, including
+  the Boolean-mask scan term. Both document already-shipped behavior. (#177)
+- **cost-model**: the "Guaranteed coverage" paragraph now discloses the
+  index-output carve-out in the compute-dtype sweep and the operand-dtype floor
+  that replaces it. (#191)
+
+**No billed amounts change in any of the above.** Every entry in these two
+sections is documentation or test-strength only; no weight, rate, complex
+factor, or cost formula was touched, and no re-evaluation is needed.
 
 ## v0.10.0 (2026-07-31)
 

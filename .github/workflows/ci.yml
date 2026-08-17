@@ -386,17 +386,22 @@ jobs:
       - name: "Parity GATE: fast client/in-process differential"
         run: make test-parity-fast
 
-      # Reports on pull requests so a divergence is seen and triaged BEFORE it
-      # can turn the release gate below red on main. Non-blocking here on
-      # purpose: the sweep takes about five minutes and runs concurrently with
-      # the rest of the job matrix, so it costs no serialised PR latency.
-      - name: "Parity full sweep (report-only on pull requests)"
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        run: make test-parity-full
-
-      - name: "Parity full sweep (release gate; blocks push to main)"
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      # Blocking on pull requests as well as on push. This was report-only on
+      # pull requests, on the theory that a divergence would be seen and
+      # triaged before it could turn the release gate red on main. It does not
+      # work: a step that cannot fail the run is a step nobody reads. The
+      # sweep also fails on STALE entries -- an allowlist entry matching
+      # nothing means the divergence it excused got fixed and the entry should
+      # have been deleted in the same pull request -- so the ordinary act of
+      # fixing a divergence turns main red one merge later. Ten entries went
+      # stale across #213-#221 and main was red on six consecutive merges
+      # before anyone noticed.
+      #
+      # Blocking here costs no serialised latency: the sweep runs about two
+      # minutes, concurrently with the rest of the job matrix, and it fails the
+      # pull request that actually caused the divergence rather than the merge
+      # after it.
+      - name: "Parity full sweep (release gate)"
         run: make test-parity-full
 
   client-server-sync:

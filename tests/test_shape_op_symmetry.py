@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest import mock
+
 import numpy as np
 import pytest
 
@@ -761,6 +763,138 @@ class TestTransportBroadcastExpand:
         G = _sym(0, 1)
         result = transport_expand_dims(G, input_ndim=2, axis=2)
         assert result is not None and set(result.axes or ()) == {0, 1}
+
+
+class TestExpandDimsHighRankAndAxisParity:
+    """expand_dims must not allocate a probe array, and must match numpy's axes.
+
+    ``remap_group_for_expand_dims`` used to allocate ``np.empty`` of
+    ``(ndim+1)!`` float64 elements just to read one shape, unconditionally --
+    even when the array carried no symmetry group -- so ``expand_dims`` died
+    around rank 14 where numpy handles 41 (#173).
+    """
+
+    # Rank 14 is a CONTROL, not evidence: the old probe's rank-14 allocation is
+    # about 10 TB, which the OS hands out lazily rather than refusing, so that
+    # cell passed before the fix too. Ranks 20 and 32 are the ones that
+    # reproduce #173 -- both fail against origin/main.
+    HIGH_RANKS = [14, 20, 32]
+
+    @pytest.mark.parametrize("rank", HIGH_RANKS)
+    def test_expand_dims_survives_high_rank(self, rank):
+        """Far past the old probe's MemoryError threshold, far below numpy's 64."""
+        a = fnp.ones((1,) * rank)
+        out = fnp.expand_dims(a, axis=0)
+        assert np.asarray(out).ndim == rank + 1
+
+    @pytest.mark.parametrize("rank", HIGH_RANKS)
+    def test_expand_dims_high_rank_matches_numpy_shape(self, rank):
+        base = np.ones((1,) * rank)
+        expected = np.expand_dims(base, axis=(0, 2)).shape
+        a = fnp.asarray(base)
+        assert np.asarray(fnp.expand_dims(a, axis=(0, 2))).shape == expected
+
+    def test_expand_dims_allocates_nothing_for_the_remap(self):
+        """The defect itself, pinned directly rather than via a rank threshold.
+
+        The old implementation reached the shape it needed by allocating
+        ``np.empty(tuple(range(2, 2 + ndim)))`` -- ``(ndim + 1)!`` float64
+        elements. Asserting no allocation happens is what actually fails on the
+        old code at EVERY rank, instead of only at the ranks where the
+        allocation is large enough for the OS to refuse it.
+        """
+        calls = []
+        real_empty = np.empty
+
+        def spy(*args, **kwargs):
+            calls.append(args[0] if args else kwargs.get("shape"))
+            return real_empty(*args, **kwargs)
+
+        base = np.ones((2, 3, 4))
+        a = fnp.asarray(base)
+        with mock.patch.object(np, "empty", spy):
+            out = fnp.expand_dims(a, axis=1)
+
+        assert np.asarray(out).shape == np.expand_dims(base, axis=1).shape
+        factorial_shaped = [
+            shape
+            for shape in calls
+            if isinstance(shape, tuple) and tuple(shape) == tuple(range(2, 2 + 3))
+        ]
+        assert not factorial_shaped, (
+            f"expand_dims still allocates a factorial-sized probe array: {calls}"
+        )
+
+    # (0, 0) is the repeated case and 99 / -99 the out-of-range ones -- the
+    # forms most likely to diverge if axis normalization is reimplemented.
+    AXIS_CASES = [0, 1, -1, -2, 3, -4, (0, 2), (-1, 0), (0, 0), 99, -99, (0, 99)]
+
+    @pytest.mark.parametrize("axis", AXIS_CASES)
+    def test_expand_dims_matches_numpy_axis_semantics(self, axis):
+        """Pin flopscope's outcome against numpy's OWN outcome, per axis form.
+
+        Never against a remembered exception class -- that is the #209/#210
+        lesson.
+        """
+        base = np.ones((2, 3, 4))
+        try:
+            expected_shape = np.expand_dims(base, axis=axis).shape
+            expected_exc = None
+        except Exception as exc:  # noqa: BLE001 -- mirroring numpy's own outcome
+            expected_shape, expected_exc = None, type(exc)
+
+        a = fnp.asarray(base)
+        if expected_exc is not None:
+            with pytest.raises(expected_exc):
+                fnp.expand_dims(a, axis=axis)
+        else:
+            assert np.asarray(fnp.expand_dims(a, axis=axis)).shape == expected_shape
+
+    @pytest.mark.parametrize("axis", AXIS_CASES)
+    def test_remap_helper_matches_numpy_axis_semantics(self, axis):
+        """Same parity, one level down, where the normalization actually lives.
+
+        The op wrapper calls numpy first, so numpy's own error masks the
+        helper's; this exercises the helper directly.
+        """
+        from flopscope._symmetry_utils import remap_group_for_expand_dims
+
+        base = np.ones((2, 3, 4))
+        try:
+            np.expand_dims(base, axis=axis)
+            expected_exc = None
+        except Exception as exc:  # noqa: BLE001 -- mirroring numpy's own outcome
+            expected_exc = type(exc)
+
+        if expected_exc is not None:
+            with pytest.raises(expected_exc):
+                remap_group_for_expand_dims(None, ndim=3, axis=axis)
+        else:
+            remap_group_for_expand_dims(None, ndim=3, axis=axis)
+
+    @pytest.mark.parametrize(
+        "axis, expected_axes",
+        [
+            (0, {1, 2}),
+            (2, {0, 1}),
+            (-1, {0, 1}),
+            # the two inserted axes carry their own S_2 on top of the remapped group
+            ((0, 1), {0, 1, 2, 3}),
+        ],
+    )
+    def test_group_axes_are_remapped_the_same_as_before(self, axis, expected_axes):
+        from flopscope._symmetry_transport import transport_expand_dims
+
+        result = transport_expand_dims(_sym(0, 1), input_ndim=2, axis=axis)
+        assert result is not None
+        assert set(result.axes or ()) == expected_axes
+
+    def test_two_inserted_axes_still_carry_their_own_symmetry(self):
+        from flopscope._symmetry_transport import transport_expand_dims
+
+        result = transport_expand_dims(None, input_ndim=2, axis=(0, 1))
+        assert result is not None
+        assert set(result.axes or ()) == {0, 1}
 
 
 class TestOutOfScopeOpsWarn:

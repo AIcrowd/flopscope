@@ -7,6 +7,7 @@ operations are dispatched to the server transparently.
 
 from __future__ import annotations
 
+import collections as _collections
 import inspect
 import struct
 import sys
@@ -1377,6 +1378,42 @@ class RemoteSeedSequence:
 # Module-level helper
 # ---------------------------------------------------------------------------
 
+#: Namedtuple classes rebuilt from ``multi_type`` descriptions, keyed by
+#: ``(name, fields)``. A description that cannot be honoured caches ``None``,
+#: so a hot loop neither rebuilds a class per call nor re-attempts a
+#: construction that is already known to fail.
+_NAMEDTUPLE_CACHE: dict[tuple[str, tuple[str, ...]], type | None] = {}
+
+
+def _namedtuple_class(name: Any, fields: Any) -> type | None:
+    """Return a cached namedtuple class for *name*/*fields*, or ``None``.
+
+    ``None`` means "this description cannot be honoured" — the caller falls
+    back to a plain tuple, which is exactly what every client did before the
+    server started describing containers. Nothing here raises: a result that
+    arrives fully intact must never be lost to a quibble about its label.
+
+    Pure stdlib by design. The client's only runtime dependencies are pyzmq
+    and msgpack, so the container is rebuilt with ``collections.namedtuple``
+    rather than by importing numpy's own result types.
+    """
+    if not isinstance(name, str) or not isinstance(fields, (list, tuple)):
+        return None
+    if not all(isinstance(field, str) for field in fields):
+        return None
+    key = (name, tuple(fields))
+    if key in _NAMEDTUPLE_CACHE:
+        return _NAMEDTUPLE_CACHE[key]
+    try:
+        # rename=False: a field name this client cannot honour must degrade to
+        # a plain tuple, not silently become `_0` and answer to a name the
+        # server never sent.
+        cls: type | None = _collections.namedtuple(name, list(fields), rename=False)
+    except (ValueError, TypeError):
+        cls = None
+    _NAMEDTUPLE_CACHE[key] = cls
+    return cls
+
 
 def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | dict:
     """Convert a server response dict into the appropriate proxy object.
@@ -1384,7 +1421,8 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
     Examines the ``"result"`` key:
 
     * ``"value"`` present  -> :class:`RemoteScalar`
-    * ``"multi"`` present  -> ``tuple`` of :class:`RemoteArray`
+    * ``"multi"`` present  -> ``tuple`` of :class:`RemoteArray`, rebuilt as a
+      namedtuple when the response also carries ``"multi_type"``
     * ``"id"``   present  -> single :class:`RemoteArray`
     * otherwise           -> raw dict
     """
@@ -1432,6 +1470,17 @@ def _result_from_response(resp: dict) -> RemoteArray | RemoteScalar | tuple | di
                 )
             else:
                 items.append(item)
+        # A structured result (linalg.svd -> SVDResult, linalg.qr -> QRResult,
+        # unique_all -> UniqueAllResult, ...) arrives with its container
+        # described; rebuild it so `.U` / `.Q` / `.eigenvalues` resolve the way
+        # they do in-process. A server that predates the description sends no
+        # `multi_type` and still yields a plain tuple. Either way the result is
+        # a tuple, so indexing and unpacking are unaffected.
+        multi_type = result.get("multi_type")
+        if isinstance(multi_type, dict):
+            cls = _namedtuple_class(multi_type.get("name"), multi_type.get("fields"))
+            if cls is not None and len(cls._fields) == len(items):  # type: ignore[attr-defined]
+                return cls(*items)
         return tuple(items)
 
     if "id" in result:

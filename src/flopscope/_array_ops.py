@@ -2157,6 +2157,23 @@ def bmat(*args, **kwargs):
 
     Nested-block assembly is structurally identical to ``block``; both copy elements
     once, so weight 1.0 (matching ``block``).
+
+    Returns a plain ``FlopscopeArray``, NOT the ``numpy.matrix`` numpy hands
+    back. That is an alignment with the remote backend, not a preference:
+    ``Session.store_array`` view-casts every stored ndarray that is not
+    already a ``FlopscopeArray``, so the matrix subclass never survived the
+    trip to a participant anyway. Returning it in-process meant local and
+    remote disagreed on the ARITHMETIC ANSWER -- ``m * m`` was matrix
+    multiplication here and elementwise there -- as well as on the FLOPs, a
+    raw ndarray return billing 0 for downstream arithmetic the remote backend
+    charges (#193). Casting here makes the in-process path reproduce what the
+    remote already did.
+
+    The cast is deliberately ``_asplainflopscope`` and not ``_asflopscope``:
+    the latter returns non-flopscope ndarray subclasses unchanged, to preserve
+    ``SymmetricTensor`` metadata, and so is a no-op on a ``numpy.matrix``.
+    It also sits outside the ``deduct_after`` block, after the cost has been
+    read off numpy's own result, so it cannot reach the price.
     """
     budget = require_budget()
     # First arg may be a string OR a nested sequence of arrays
@@ -2174,10 +2191,30 @@ def bmat(*args, **kwargs):
         # than arrays at all.
         _op.set_dtypes((result.dtype,) if hasattr(result, "dtype") else ())
         _op.set_cost(result.size if hasattr(result, "size") else 1)
-    return result
+    return _asplainflopscope(result)
 
 
-attach_docstring(bmat, _np.bmat, "counted_custom", "numel(output) FLOPs")
+attach_docstring(
+    bmat,
+    _np.bmat,
+    "counted_custom",
+    "numel(output) FLOPs",
+    # NumPy's own Returns section says "out : matrix", which is the one
+    # statement in its docstring this wrapper makes false. Overridden rather
+    # than inherited so the published reference does not promise a type the
+    # op does not return -- and so it names the semantic difference, which is
+    # what actually bites a caller porting local code. Written without a
+    # ``numpy.`` prefix on purpose: the docs generator rewrites that prefix to
+    # ``flops.``, which would point the text at names flopscope does not have.
+    returns=(
+        "FlopscopeArray",
+        "A plain 2-D flopscope array. Upstream returns a ``matrix``; this "
+        "wrapper does not, because the remote backend never did. So ``*`` "
+        "and ``**`` are elementwise rather than matrix multiply and matrix "
+        "power, ``.I``/``.A``/``.H``/``.A1`` are absent, and the result is "
+        "not re-inflated to 2-D by indexing, reduction or flattening.",
+    ),
+)
 
 
 @_counted_wrapper

@@ -312,7 +312,12 @@ def test_unentered_context_matches_core_empty_mapping_without_network() -> None:
     assert ctx.summary_dict(True)["by_namespace"] == {}
 
 
-def test_live_summary_preserves_property_none_semantics(monkeypatch) -> None:
+def test_live_summary_and_properties_both_answer_while_open(monkeypatch) -> None:
+    """summary_dict() answers live, and so do the two timing properties.
+
+    They used to disagree: the summary reported live values while the
+    properties returned ``None`` for the same two quantities (#211).
+    """
     ctx, conn = _open_mock_context(monkeypatch)
     monkeypatch.setattr(
         ctx,
@@ -332,9 +337,78 @@ def test_live_summary_preserves_property_none_semantics(monkeypatch) -> None:
         "by_namespace": False,
     }
     assert result["wall_time_s"] == 2.0
-    assert ctx.wall_time_s is None
-    assert ctx.residual_wall_time_s is None
+    assert isinstance(ctx.wall_time_s, float)
+    assert isinstance(ctx.residual_wall_time_s, float)
+    assert ctx.wall_time_s >= 0.0
+    assert ctx.residual_wall_time_s >= 0.0
     assert ctx.flops_used == 7
+
+
+def test_live_timing_properties_match_the_live_summary(monkeypatch) -> None:
+    """One quantity, one answer: property and summary agree to the digit.
+
+    Both read the same local measurement, so #211's "two APIs disagree" cannot
+    come back as drift between two copies of the arithmetic. The server's own
+    wall/residual numbers (99.0 here) are replaced by the client's local
+    measurement in both paths -- which is exactly why the property needs no
+    round trip to answer.
+    """
+    _clock, advance = _fake_dispatch_clock(monkeypatch)
+    ctx, conn = _open_mock_context(monkeypatch)
+    conn.send_recv.return_value = _summary_response(
+        flops_used=7,
+        wall_time_s=99.0,
+        residual_wall_time_s=99.0,
+        by_namespace=False,
+    )
+
+    advance(250_000_000)  # 0.25 s of participant Python
+
+    live = ctx.summary_dict(False)
+    assert live["wall_time_s"] == 0.25
+    assert live["residual_wall_time_s"] == 0.25
+    assert ctx.wall_time_s == live["wall_time_s"]
+    assert ctx.residual_wall_time_s == live["residual_wall_time_s"]
+
+
+def test_live_timing_read_needs_no_connection(monkeypatch) -> None:
+    """Reading the properties must not touch the wire.
+
+    Delegating to the server behind an attribute read would be slow, could
+    raise connection errors, and would invite hot-loop polling of the grader
+    connection. Both quantities are local, so neither needs it.
+    """
+    _clock, advance = _fake_dispatch_clock(monkeypatch)
+    ctx, conn = _open_mock_context(monkeypatch)
+    calls_after_open = conn.send_recv.call_count
+
+    advance(100_000_000)
+    assert ctx.wall_time_s == 0.1
+    assert ctx.residual_wall_time_s == 0.1
+    assert conn.send_recv.call_count == calls_after_open
+
+
+def test_reading_live_timing_does_not_shift_time_out_of_residual(monkeypatch) -> None:
+    """A property read is participant Python and stays billed as residual.
+
+    residual is the billed bucket (C_m = F_m + lambda * residual) and dispatch
+    overhead is not, so if the read opened a dispatch span a caller could shave
+    the billed residual by polling the property in a loop. The read must not
+    move the dispatch accumulator.
+    """
+    import flopscope._dispatch as dispatch_module
+
+    _clock, advance = _fake_dispatch_clock(monkeypatch)
+    ctx, _conn = _open_mock_context(monkeypatch)
+    dispatch_before = dispatch_module.total_dispatch_ns()
+
+    advance(50_000_000)
+    for _ in range(5):
+        _ = ctx.wall_time_s
+        _ = ctx.residual_wall_time_s
+
+    assert dispatch_module.total_dispatch_ns() == dispatch_before
+    assert ctx.residual_wall_time_s == 0.05
 
 
 def test_live_summary_attributes_validation_and_copy_time_to_overhead(

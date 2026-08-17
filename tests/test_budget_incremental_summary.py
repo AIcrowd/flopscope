@@ -172,7 +172,11 @@ def _assert_bucket_mapping_matches(actual: dict, expected: dict) -> None:
 
 
 def _scan_context(ctx, by_namespace: bool, *, now: float | None = None) -> dict:
-    wall = ctx.wall_time_s
+    # Mirror _materialize_context_summary, which reads the stored _wall_time_s
+    # and samples the clock itself when it is unset. The public wall_time_s
+    # property is live inside an open context (#211) and would sample the clock
+    # here, defeating the scripted-clock oracle.
+    wall = ctx._wall_time_s
     if wall is None and ctx._start_time is not None:
         wall = ctx.elapsed_s if now is None else now - ctx._start_time
     wall, backend, overhead, residual = _timing_summary(
@@ -490,7 +494,7 @@ def test_generated_context_and_session_transitions_match_scan(
                 else None
             )
             context_sample_calls = int(
-                ctx.wall_time_s is None and ctx._start_time is not None
+                ctx._wall_time_s is None and ctx._start_time is not None
             )
             clock.begin_accessor(
                 sample_calls=context_sample_calls,

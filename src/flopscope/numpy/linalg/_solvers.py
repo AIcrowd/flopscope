@@ -58,15 +58,17 @@ def solve_cost(n: int, nrhs: int = 1, symmetric: bool = False) -> int:
 def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     """Solve linear system ``a @ x = b`` with FLOP counting.
 
-    The result adopts the subclass of ``b`` (matching numpy's
-    ``np.linalg.solve`` policy): if ``b`` is a plain ndarray the
-    solution is plain ndarray even when ``a`` is a ``FlopscopeArray``;
-    if ``b`` is a ``FlopscopeArray`` the solution is wrapped accordingly.
+    Called as ``fnp.linalg.solve`` the result is always a ``FlopscopeArray``,
+    so arithmetic on it is billed in-process the way the grader bills
+    arithmetic on the ``RemoteArray`` the same call produces. The wrapping for
+    a plain-ndarray ``b`` is applied by the module-wide
+    ``wrap_module_returns`` pass at the foot of ``flopscope/numpy/linalg/
+    __init__.py``, not here, so this function object on its own still returns
+    a plain ndarray for a plain ``b``. ``b_was_whest`` below is therefore only
+    the difference between wrapping here and wrapping there; both land on
+    ``_asflopscope``.
     """
     budget = require_budget()
-    # Match NumPy's ``linalg.solve`` subclass-return policy: the result
-    # adopts the subclass of ``b``. ``np.linalg.solve(FlopscopeArray, plain)``
-    # therefore returns plain ndarray to keep parity with raw NumPy.
     b_was_whest = isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
@@ -226,17 +228,16 @@ def lstsq(
 ) -> tuple[FlopscopeArray, FlopscopeArray, int, FlopscopeArray]:
     """Least-squares solution with FLOP counting.
 
-    Returns a 4-tuple ``(solution, residuals, rank, singular_values)``.
-    The solution and the array elements adopt the subclass of ``b``
-    (matching numpy's ``np.linalg.lstsq`` policy): if ``b`` is a plain
-    ndarray the outputs are plain ndarray even when ``a`` is a
-    ``FlopscopeArray``; if ``b`` is a ``FlopscopeArray`` they are wrapped
-    accordingly.
+    Returns a 4-tuple ``(solution, residuals, rank, singular_values)``. Called
+    as ``fnp.linalg.lstsq`` the three array elements are always
+    ``FlopscopeArray``, so arithmetic on them is billed in-process the way the
+    grader bills it; for a plain-ndarray ``b`` that wrapping comes from the
+    module-wide ``wrap_module_returns`` pass at the foot of
+    ``flopscope/numpy/linalg/__init__.py``, so this function object on its own
+    still returns plain ndarrays. ``rank`` stays the numpy integer numpy itself
+    returns -- it is not an array, and the grader delivers it by value.
     """
     budget = require_budget()
-    # Match NumPy's ``linalg.lstsq`` subclass-return policy: the solution
-    # adopts the subclass of ``b``. The residuals and singular-values
-    # arrays follow the same rule (whatever wrapping ``b`` would imply).
     b_was_whest = isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
