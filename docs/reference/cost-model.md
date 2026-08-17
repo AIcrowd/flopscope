@@ -372,11 +372,21 @@ are refused outright rather than priced at any rate — see the note directly be
 > instead of billing it, including flopscope's own conversion ops
 > (`array`/`asarray`/`astype`/`fromiter`/`require`/`full`/`full_like`) and
 > every random sampler, which refuse non-numeric input rather than convert
-> or relocate it. One exception: a zero-itemsize dtype (an empty structured
-> spec, or a zero-length string/bytes dtype) is let through regardless of
-> kind — zero bytes per element cannot embed an object field or carry any
-> itemsize-dependent cost, and NumPy's own internals allocate one as a
-> zero-byte shape-computation placeholder. To work with mixed, ragged, or
+> or relocate it. A raw Python sequence is judged by its leaves: `str`,
+> `bytes`, a NumPy scalar whose own dtype is non-numeric, and a stdlib
+> `date`/`time`/`timedelta` are refused wherever they appear inside a
+> list/tuple operand, so `fnp.random.choice(['a','b','c','d'], 2)` is refused
+> exactly like the `np.array(['a','b','c','d'])` spelling of it. A bare
+> string ARGUMENT is untouched — `ord='fro'`, an einsum subscript, a
+> `casting=` mode and a `requirements=`/`order=`/`signature=`/`optimize=`
+> specifier are options, not payloads. One exception on the dtype side: a dtype that is
+> still zero-itemsize once NumPy *materialises* it (an empty structured spec,
+> or `'V0'`) is let through regardless of kind — zero bytes per element
+> cannot embed an object field or carry any itemsize-dependent cost, and
+> NumPy's own internals allocate one as a zero-byte shape-computation
+> placeholder. A zero-length *string* dtype is not in that exception: NumPy
+> promotes `'U0'`/`'S0'` to `'U1'`/`'S1'` on allocation, so it is refused
+> like any other string dtype. To work with mixed, ragged, or
 > non-numeric data, convert with plain NumPy *before* it reaches flopscope —
 > `clean = np.array(x, dtype=np.float64)`, **not** `fnp.array(...)`, since
 > flopscope's own conversion ops refuse non-numeric input too — or hold it
@@ -783,7 +793,7 @@ each backed by a CI-enforced test you can open and read:
 | **Faithful cost** | each `flop_cost` is the real standard-algorithm op count, with every shape/algorithm constant inside `flop_cost` | per-op evidence in [§Cost by family](#cost-by-family); `test_cost_constant_unification.py`, `test_cost_formula_vs_code.py` |
 | **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0 or 1; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
-| **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a zero-itemsize dtype is the one exception, since it carries no data either way | `tests/test_object_dtype_ban.py` |
+| **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a dtype that is still zero-itemsize once NumPy materialises it is the one exception, since it carries no data either way — `'U0'`/`'S0'` are not, because NumPy promotes them to `'U1'`/`'S1'` on allocation | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |

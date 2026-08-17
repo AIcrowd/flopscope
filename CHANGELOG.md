@@ -17,11 +17,14 @@
   other kinds are bounded, but their real per-element cost (itemsize for
   string/bytes/structured, the underlying integer rate for
   datetime64/timedelta64) is not the fixed unit a flat rate assumed. One
-  exception: a zero-itemsize dtype (an empty structured spec, or a
-  zero-length string/bytes dtype) is let through regardless of kind, since it
-  carries no data either way — NumPy's own internals allocate one as a
-  zero-byte shape-computation placeholder. This includes flopscope's own
-  conversion ops (`array`/`asarray`/`astype`/`fromiter`/`require`/`full`/
+  exception: a dtype that is still zero-itemsize once NumPy MATERIALISES it
+  (an empty structured spec, or `'V0'`) is let through regardless of kind,
+  since it carries no data either way — NumPy's own internals allocate one as
+  a zero-byte shape-computation placeholder. A zero-length *string* dtype
+  (`'U0'`/`'S0'`) is not in that exception: NumPy promotes it to `'U1'`/`'S1'`
+  on allocation, so it is refused like any other string dtype. This includes
+  flopscope's own conversion ops
+  (`array`/`asarray`/`astype`/`fromiter`/`require`/`full`/
   `full_like`) and every random sampler (module-level, `Generator`, and
   `RandomState`) and `flopscope.stats` distribution, all of which refuse
   non-numeric input rather than convert or relocate through it. Calls that
@@ -151,6 +154,81 @@
 
 ### Fix
 
+- **billing**: the non-numeric ban now reaches a raw Python SEQUENCE of
+  non-numeric values, not only an `np.ndarray` of them. The operand scan
+  walked a list/tuple hunting for an `np.ndarray` to read a dtype off; a
+  sequence like `['a', 'b', 'c', 'd']` holds no array anywhere, so the walk
+  matched nothing and the op ran — while the ndarray spelling of the very
+  same call raised. The ops that leaked are the ones with no source check of
+  their own, all of which declare `dtypes=()` and so never reach `deduct`'s
+  refusal either: `fnp.random.choice(['a','b','c','d'], 2)` billed 8 FLOPs and
+  handed back a real `<U1` array, `fnp.random.permutation`/`fnp.random.shuffle`
+  billed 16, and `fnp.transpose`/`fnp.flip`/`fnp.permute_dims` relocated one
+  for 0. A leaf inside a list/tuple is now classified by its TYPE — `str`,
+  `bytes`, a NumPy scalar whose own dtype is non-numeric (`np.str_`,
+  `np.bytes_`, `np.datetime64`, `np.timedelta64`, `np.void`), and a stdlib
+  `date`/`time`/`timedelta` are refused. `bytearray` is deliberately NOT
+  refused despite resembling `bytes`: NumPy realises it through the buffer
+  protocol as **uint8**, the same numeric dtype it gives a `memoryview`, so
+  every `bytearray` call bills exactly what it billed before. Classification
+  never reads
+  an attribute of the leaf and never realises the sequence, so it runs no
+  participant code, the same invariant the ndarray branch already held. The
+  rule stops there deliberately: `None`, a callable, a set and a range all
+  realise as object dtype, but they are also how NumPy spells `fftn`'s
+  per-axis `s=(None, 8)` sentinel, `piecewise`'s funclist, `tensordot`'s
+  `axes=({1}, {0})`, and a tuple `out=`, and this scan sees every argument of
+  every counted op with no way to tell those from a payload — failing closed
+  there would refuse calls NumPy runs. For the same reason the rule is off at
+  depth 0 (a bare `str` argument is `ord='fro'`, an einsum subscript, a
+  `casting=` mode) and off for the string-specifier parameters
+  (`requirements=`, `order=`, a ufunc `signature`/`sig`, `einsum`'s explicit
+  `optimize=['einsum_path', ...]`), in the positional spelling as well as the
+  keyword one. No billed amount changes for any call
+  that was already valid. Measured per-call cost of the added check, against
+  the operand scan alone (CPU time, floor of many rounds, both versions
+  round-robin in one process): +50 to +78 ns (+4-5%) for a call whose operands
+  are already `ndarray`s — that path executes one extra argument push and
+  nothing else — and +190 to +290 ns (+10-17%) for a Python list operand with
+  eight numeric leaves, which is one `isinstance` per leaf the scan already
+  visited.
+- **billing**: the ban's zero-itemsize carve-out now reads the dtype NumPy
+  MATERIALISES rather than the one that was requested. `np.dtype('U0')`
+  reports `itemsize == 0` and so passed a guard whose entire justification was
+  "zero bytes per element cannot carry an itemsize-dependent cost" — but NumPy
+  promotes `'U0'`/`'S0'` to `'U1'`/`'S1'` the moment it allocates, so
+  `fnp.zeros(1000, dtype='U0')` billed 0 FLOPs and returned a real 4000-byte
+  `<U1` array (`'S0'`: 1000 bytes). Both are now refused, as are the
+  equivalent bare `'U'`/`'S'`/`np.str_`/`np.bytes_` spellings — which is also
+  what makes the sequence-leaf refusal above and `refuse_non_numeric_source`'s
+  representative string dtype fire. `'V0'` and an empty structured spec keep
+  working unchanged: void genuinely stays at zero bytes per element through
+  construction, which is the case the carve-out exists for (NumPy's own
+  `broadcast_shapes` allocates `np.empty(shape, dtype=np.dtype([]))`). The
+  test is behavioural — NumPy is asked, via a zero-element allocation cached
+  per dtype — rather than a kind table, so it keeps holding on NumPy releases
+  that do not exist yet. `heavier_billing_dtype` shares the one predicate, so
+  the two cannot drift apart.
+- **cost-model**: `matmul` and its broadcasting siblings now refuse a
+  mis-paired contraction BEFORE `budget.deduct`, like `dot`/`inner`/
+  `tensordot` already did. `deduct` charges on entry and does not roll back
+  when the wrapped numpy call raises, and these four route through
+  `_einsum_routed_binary` with a `...`-broadcasting subscript that makes the
+  contracted pairing implicit rather than checked — einsum BROADCASTS an
+  extent of 1 where numpy's gufunc core rejects it. So
+  `fnp.matmul(fnp.ones((3,1)), fnp.ones((7,5)))` charged 390 FLOPs for
+  arithmetic that never ran and only then raised numpy's `ValueError`, which
+  on a tight budget surfaced as `BudgetExhaustedError` instead;
+  `fnp.vecdot`, `fnp.matvec` and `fnp.vecmat` charged the same way, as did the
+  `@` operator, which routes through `fnp.matmul`. All four now supply their
+  contracted axis pair to the existing `_validate_contracted_extents`, so an
+  impossible contraction leaves `flops_used` at 0. Every contraction numpy
+  accepts still runs and bills exactly what it billed before, including the
+  two a careless predicate breaks: a size-1 axis contracted against another
+  size-1 axis (legal, and not a broadcast) and 0 against 0 (legal, and free).
+  Validation is skipped, not misapplied, where the default pair is not the
+  pair numpy contracts — a 0-d operand, or an `axis=`/`axes=` that relocates
+  the gufunc's core dimension.
 - **billing**: `tensordot`, `kron`, `diff`, `gradient`, `ediff1d`, `convolve`,
   `correlate`, `cov`, `sort_complex`, and the array-returning shapes of
   `corrcoef`, `interp`, `trapezoid`, and `trapz` now return flopscope types

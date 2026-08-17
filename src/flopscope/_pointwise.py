@@ -3564,8 +3564,16 @@ if hasattr(_np, "vecdot"):
     @_counted_wrapper
     def vecdot(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
         """Counted version of np.vecdot (vector dot product along last axis)."""
+        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
         return _einsum_routed_binary(
-            "vecdot", _np.vecdot, "...n,...n->...", a, b, **kwargs
+            "vecdot",
+            _np.vecdot,
+            "...n,...n->...",
+            a,
+            b,
+            a_contract_axis=a_axis,
+            b_contract_axis=b_axis,
+            **kwargs,
         )
 
 else:
@@ -3583,8 +3591,16 @@ if hasattr(_np, "matvec"):
         A is (..., m, n), v is (..., n), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
+        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
         return _einsum_routed_binary(
-            "matvec", _np.matvec, "...mn,...n->...m", a, b, **kwargs
+            "matvec",
+            _np.matvec,
+            "...mn,...n->...m",
+            a,
+            b,
+            a_contract_axis=a_axis,
+            b_contract_axis=b_axis,
+            **kwargs,
         )
 
 else:
@@ -3602,8 +3618,16 @@ if hasattr(_np, "vecmat"):
         v is (..., n), A is (..., n, m), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
+        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 2, kwargs)
         return _einsum_routed_binary(
-            "vecmat", _np.vecmat, "...n,...nm->...m", a, b, **kwargs
+            "vecmat",
+            _np.vecmat,
+            "...n,...nm->...m",
+            a,
+            b,
+            a_contract_axis=a_axis,
+            b_contract_axis=b_axis,
+            **kwargs,
         )
 
 else:
@@ -4768,6 +4792,44 @@ def _validate_contracted_extents(
             )
 
 
+def _core_contraction_axes(
+    a: Any, b: Any, b_core_from_end: int, call_kwargs: dict[str, Any]
+) -> tuple[Any, Any, int | None, int | None]:
+    """Coerce a gufunc contraction's operands and locate its contracted pair.
+
+    ``matmul``'s broadcasting siblings -- ``vecdot`` (``(n),(n)->()``),
+    ``matvec`` (``(m,n),(n)->(m)``) and ``vecmat`` (``(n),(n,m)->(m)``) --
+    each contract a's LAST axis against b's ``b_core_from_end``-th from the
+    end. Their pairing is implicit in the ``...``-broadcasting subscript they
+    are priced with, which is not the same as being checked by it: einsum
+    broadcasts an extent of 1, numpy's gufunc core does not, so a size-1
+    contracted axis was priced and charged against a size-n one before numpy
+    refused the call. Returning the pair gets it validated ahead of any cost
+    -- see :func:`_validate_contracted_extents`.
+
+    Both axes come back ``None``, skipping validation, in the two cases where
+    the default pair is not the pair numpy will contract:
+
+    * An operand with too few dimensions to have that axis. numpy rejects the
+      call for the missing core dimension, which is not this check's to
+      pre-empt (and it already charged nothing for it).
+    * An explicit ``axis=``/``axes=``, which relocates the core dimension off
+      the position the subscript assumes. Validating the default pair there
+      would refuse calls numpy runs -- a worse failure than the
+      charge-then-fail this closes. Those spellings also price from the
+      default layout, a separate pre-existing gap this does not touch.
+    """
+    if not isinstance(a, _np.ndarray):
+        a = _np.asarray(a)
+    if not isinstance(b, _np.ndarray):
+        b = _np.asarray(b)
+    if "axis" in call_kwargs or "axes" in call_kwargs:
+        return a, b, None, None
+    a_axis = a.ndim - 1 if a.ndim >= 1 else None
+    b_axis = b.ndim - b_core_from_end if b.ndim >= b_core_from_end else None
+    return a, b, a_axis, b_axis
+
+
 def _fallback_contraction_output_symmetry(
     op_name: str,
     a: Any,
@@ -4874,9 +4936,12 @@ def _einsum_routed_binary(
     supplies the pair it is validated against the operand shapes on every
     path, before any cost is computed and before `budget.deduct` -- see
     `_validate_contracted_extents` for why neither path validates on its own.
-    Callers whose contracted pairing is implicit in a broadcasting `subs`
-    (`matmul`, `vecdot`, `matvec`, `vecmat`) leave both `None` and are
-    unaffected.
+    Every caller supplies it, the broadcasting ones (`matmul`, `vecdot`,
+    `matvec`, `vecmat`) included: a `...`-broadcasting `subs` makes the
+    pairing implicit, not checked, and einsum broadcasts an extent of 1 that
+    the gufunc core rejects. `None` means only that this call has no such pair
+    to check -- a 0-d operand, or an `axis=`/`axes=` that relocated the core
+    dimension (see `_core_contraction_axes`).
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -5077,8 +5142,29 @@ def matmul(
         subs = "...mk,k->...m"  # (...,m,k) @ (k,) -> (...,m)
     else:
         subs = "...ij,...jk->...ik"  # 2-D and batched/broadcast N-D
+    # ``np.matmul`` pairs the same two axes ``np.dot`` does -- a's last against
+    # b's only axis when b is 1-D, b's last-but-one otherwise -- on every
+    # branch above. The pairing being implicit in a broadcasting subscript is
+    # not the same as it being CHECKED: einsum broadcasts an extent of 1 and
+    # the matmul gufunc's core does not, so ``...ij,...jk->...ik`` happily
+    # priced ``j=1`` against ``j=7``, charged it, and only then hit numpy's
+    # ValueError. Supplying the pair validates it before any cost is computed
+    # -- see `_validate_contracted_extents`. A 0-d operand has no contracted
+    # axis at all; numpy rejects it for the missing core dimension, which is
+    # not this check's to pre-empt.
+    a_axis = a.ndim - 1 if a.ndim else None
+    b_axis = (0 if b.ndim == 1 else b.ndim - 2) if b.ndim else None
     return _einsum_routed_binary(
-        "matmul", _np.matmul, subs, a, b, errstate=True, nan_check=True, out=out
+        "matmul",
+        _np.matmul,
+        subs,
+        a,
+        b,
+        errstate=True,
+        nan_check=True,
+        out=out,
+        a_contract_axis=a_axis,
+        b_contract_axis=b_axis,
     )
 
 

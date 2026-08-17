@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import functools
 import inspect
 import math
@@ -704,6 +705,80 @@ def _resolve_dtype_kwarg_value(fn: Any, args: tuple, kwargs: dict) -> Any:
     return bound.arguments.get("dtype", _NO_DTYPE)
 
 
+#: NumPy parameters whose value is legitimately a SEQUENCE OF STRINGS --
+#: memory-layout and requirement flags (``require``'s ``requirements``,
+#: ``sort``'s field-name ``order``), a ufunc's per-slot dtype codes
+#: (``signature``/``sig``), and ``einsum``'s explicit path spec
+#: (``optimize=['einsum_path', (0, 1)]``) -- rather than array data. The
+#: operand scan's leaf check is skipped for these, in either spelling,
+#: because refusing them would refuse calls numpy runs. Every other string
+#: keyword on the counted surface (``casting``, ``kind``, ``mode``, ``norm``,
+#: ``side``) takes a BARE string, which the depth-0 exemption already covers.
+#: ``dtype`` is not listed: it is excluded earlier and by a different route
+#: (its own resolution through ``_plain_dtype_like``, which refuses a
+#: non-numeric one). Nothing here is an array-operand slot in any counted
+#: wrapper, so exempting them cannot let a non-numeric payload bill as data.
+_STRING_SPEC_PARAMETERS = frozenset(
+    {"requirements", "order", "signature", "sig", "optimize"}
+)
+
+#: Per-function cache of which POSITIONAL slots bind to a
+#: ``_STRING_SPEC_PARAMETERS`` name, so the walk over a wrapper's signature
+#: is paid once per wrapper rather than once per refusal. Shares the
+#: ``_SIGNATURE_CACHE`` entry ``_resolve_dtype_kwarg_value`` populates.
+_STRING_SPEC_SLOT_CACHE: dict[Any, frozenset[int]] = {}
+
+_POSITIONAL_KINDS = (
+    inspect.Parameter.POSITIONAL_ONLY,
+    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+)
+
+
+def _is_string_spec_slot(fn: Any, slot: Any) -> bool:
+    """Whether the argument slot *slot* of *fn* -- a keyword name, or a
+    positional index -- is one of the ``_STRING_SPEC_PARAMETERS``.
+
+    Reached only once the operand scan has found a leaf that is not plainly
+    numeric, never on the hot path, which is why it may cost a signature
+    walk.
+    """
+    if isinstance(slot, str):
+        return slot in _STRING_SPEC_PARAMETERS
+    return slot in _string_spec_positional_slots(fn)
+
+
+def _string_spec_positional_slots(fn: Any) -> frozenset[int]:
+    """Positional indices of *fn* that bind a ``_STRING_SPEC_PARAMETERS``
+    name, so the scan can exempt e.g. ``np.require``'s third positional
+    ``requirements`` exactly as it exempts the keyword spelling.
+
+    A ``*args`` parameter ends the walk: past it no fixed index maps to a
+    name, and guessing is worse than not exempting.
+    """
+    try:
+        return _STRING_SPEC_SLOT_CACHE[fn]
+    except KeyError:
+        pass
+    try:
+        sig = _SIGNATURE_CACHE[fn]
+    except KeyError:
+        try:
+            sig = inspect.signature(fn)
+        except (TypeError, ValueError):
+            sig = None
+        _SIGNATURE_CACHE[fn] = sig
+    slots: set[int] = set()
+    if sig is not None:
+        for index, parameter in enumerate(sig.parameters.values()):
+            if parameter.kind not in _POSITIONAL_KINDS:
+                break
+            if parameter.name in _STRING_SPEC_PARAMETERS:
+                slots.add(index)
+    resolved = frozenset(slots)
+    _STRING_SPEC_SLOT_CACHE[fn] = resolved
+    return resolved
+
+
 #: Leaf types ``_is_inert_dtype_spec`` accepts inside a list/tuple dtype
 #: specifier without recursing further. Each is data, not a duck-typed
 #: proxy, so encountering one cannot run participant code -- unlike an
@@ -776,7 +851,7 @@ def _plain_dtype_like(value: Any) -> _np.dtype | None:
 
 
 def _refuse_non_numeric_operands(
-    fn: Any, args: tuple, kwargs: dict, op_name: str
+    fn: Any, args: tuple, kwargs: dict, op_name: str, public_fn: Any = None
 ) -> None:
     """Backstop for ops whose ``dtypes=`` declaration never reaches
     ``deduct()``'s non-numeric-dtype refusal.
@@ -792,6 +867,14 @@ def _refuse_non_numeric_operands(
     closure's literal definition-time name (``"wrapper"``) forever, no
     matter what the factory renames afterward. The caller passes the live
     name of the object actually being called instead.
+
+    ``public_fn`` is that same live object, and is read for ONE purpose:
+    mapping a positional index to the parameter name the caller aimed at (see
+    ``_string_spec_positional_slots``). Many wrappers are ``def f(*args,
+    **kwargs)`` internally and carry numpy's real signature on the decorated
+    object via ``attach_docstring``, so ``fn`` alone cannot answer that.
+    ``fn`` remains what ``_resolve_dtype_kwarg_value`` binds against -- the
+    callable actually being invoked -- which is a different question.
 
     Two gaps land here, both upstream of any FLOP charge:
 
@@ -810,8 +893,9 @@ def _refuse_non_numeric_operands(
       A dtype-LIKE object whose own ``.dtype`` is a property is left to the
       op's own resolution, which for ``zeros``/``empty`` does not exist.
 
-    Only genuine ``np.ndarray`` instances are inspected, and only through
-    ``_NDARRAY_DTYPE_DESCRIPTOR`` rather than plain attribute access:
+    A TOP-LEVEL argument is inspected only if it is a genuine ``np.ndarray``,
+    and then only through ``_NDARRAY_DTYPE_DESCRIPTOR`` rather than plain
+    attribute access:
 
     * flopscope's own internals pass ordinary non-array defaults through
       counted wrappers (e.g. ``linalg.norm``'s ``ord=None``), and
@@ -826,6 +910,30 @@ def _refuse_non_numeric_operands(
       ``value.dtype`` isn't safe -- reading through the base descriptor's
       own ``__get__`` bypasses the subclass's MRO entry and returns the
       real dtype unconditionally.
+
+    INSIDE a list/tuple the leaves are classified too, by
+    ``refuse_non_numeric_sequence_leaf``. Hunting only for an ``np.ndarray``
+    to read a dtype off left a raw Python sequence -- which holds no array
+    anywhere -- entirely unrefused, so ``fnp.random.choice(['a','b'], 2)``
+    billed and returned a ``<U1`` array while the ndarray spelling of the
+    same call raised. The classification is by TYPE only and never realizes
+    the sequence, so it stays as free of participant code as the ndarray
+    branch above, and adds nothing to the hot path of a call whose operands
+    are already arrays.
+
+    Two exemptions keep that leaf rule off argument slots that are not array
+    payloads:
+
+    * It does not apply at depth 0. A bare ``str`` or ``bytes`` argument is
+      an option, not a payload -- ``ord='fro'``, einsum subscripts,
+      ``casting=``, ``kind=``, an ``astype`` dtype code -- and refusing those
+      would break every op numpy spells with a string mode. A bare
+      non-sequence payload stays the business of
+      ``refuse_non_numeric_source``, called at the one point an op is about
+      to cast it.
+    * It does not apply to the ``_STRING_SPEC_PARAMETERS`` slots, in either
+      the positional or the keyword spelling, since those hold a sequence of
+      strings by design.
     """
     from flopscope._dtype_billing import refuse_non_numeric_dtype
 
@@ -844,11 +952,29 @@ def _refuse_non_numeric_operands(
     # exponential in depth for a container with more than one self-reference;
     # raising here reaches the same outcome without that cost.
     active: set[int] = set()
+    # The op the caller actually invoked, for slot-name resolution only.
+    spec_target = public_fn if public_fn is not None else fn
 
-    def check(value: Any, _depth: int = 0) -> None:
+    # `_slot` (the TOP-LEVEL argument this walk descended from: a positional
+    # index or a keyword name) and `_target` are threaded as DEFAULT
+    # arguments, not read from the enclosing scope. Referring to either by
+    # closure would turn them -- and the parameters they come from -- into
+    # cell variables, and `check` is rebuilt on every counted call: measured
+    # against the ndarray hot path, the cells cost ~5x what passing them
+    # does. `_target` is never passed by the recursive call below its own
+    # default, so it costs nothing to carry.
+    def check(
+        value: Any, _depth: int = 0, _slot: Any = 0, _target: Any = spec_target
+    ) -> None:
         if isinstance(value, _np.ndarray):
             refuse_non_numeric_dtype(op_name, _NDARRAY_DTYPE_DESCRIPTOR.__get__(value))
-        elif isinstance(value, (list, tuple)) and _depth < _DTYPE_SCAN_MAX_DEPTH:
+        elif isinstance(value, (list, tuple)):
+            # Past the cap, stop looking rather than fall through to the leaf
+            # branch: a container is not a leaf, and treating one as a bare
+            # payload would misclassify it. NumPy's own construction still
+            # raises from here.
+            if _depth >= _DTYPE_SCAN_MAX_DEPTH:
+                return
             marker = id(value)
             if marker in active:
                 raise ValueError(
@@ -861,9 +987,16 @@ def _refuse_non_numeric_operands(
             active.add(marker)
             try:
                 for item in value:
-                    check(item, _depth + 1)
+                    check(item, _depth + 1, _slot, _target)
             finally:
                 active.discard(marker)
+        elif _depth and not isinstance(value, _NUMERIC_LEAF_TYPES):
+            # A plainly-numeric leaf -- nearly all of them -- costs exactly
+            # the `isinstance` above and stops here, with no call. Everything
+            # past it is rare enough to pay for the slot exemption, which
+            # needs the wrapper's signature.
+            if not _is_string_spec_slot(_target, _slot):
+                refuse_non_numeric_sequence_leaf(op_name, value)
 
     dtype_kwarg = _resolve_dtype_kwarg_value(fn, args, kwargs)
     if dtype_kwarg is not _NO_DTYPE and dtype_kwarg is not None:
@@ -871,11 +1004,111 @@ def _refuse_non_numeric_operands(
         if plain is not None:
             refuse_non_numeric_dtype(op_name, plain)
 
+    slot = 0
     for value in args:
-        check(value)
+        check(value, 0, slot)
+        slot += 1
     for key, value in kwargs.items():
         if key != "dtype":
-            check(value)
+            check(value, 0, key)
+
+
+#: Leaf types NumPy realizes into a NUMERIC array dtype. ``bool`` is a
+#: subclass of ``int``, and ``np.float64``/``np.complex128`` subclass
+#: ``float``/``complex``, so this one tuple covers those spellings too. Every
+#: other NumPy scalar is an ``np.generic`` and is classified by its own dtype
+#: instead -- which may well be ``M8``/``m8``/``U``/``S``/``V``, so a blanket
+#: "numpy scalars are numeric" rule would be wrong.
+_NUMERIC_LEAF_TYPES = (bool, int, float, complex)
+
+#: Leaf types NumPy stores as an ``object`` array and that carry a real,
+#: unambiguous payload rather than any numpy specifier -- a date or a
+#: duration is never an axis, a flag, or a callback. Kept narrow on purpose;
+#: see ``refuse_non_numeric_sequence_leaf`` for why an arbitrary object is
+#: NOT on this list.
+_TEMPORAL_LEAF_TYPES = (_dt.date, _dt.time, _dt.timedelta)
+
+#: Representative dtypes for the non-numeric leaf categories, selected from
+#: the leaf's TYPE alone -- never by coercing the value, which is what keeps
+#: this safe to run against an arbitrary participant object.
+#: ``np.dtype(np.str_)``/``np.dtype(np.bytes_)`` are the UNSIZED ``'<U'``/
+#: ``'S'`` spellings, which is exactly right: the width depends on the payload
+#: numpy has not been asked to look at yet, and the ban refuses them because
+#: numpy promotes an unsized string dtype to a sized one when it materializes
+#: (see ``_dtype_billing._materialised_itemsize``).
+_STR_LEAF_DTYPE = _np.dtype(_np.str_)
+_BYTES_LEAF_DTYPE = _np.dtype(_np.bytes_)
+_OBJECT_LEAF_DTYPE = _np.dtype(_np.object_)
+
+
+def refuse_non_numeric_sequence_leaf(op_name: str, value: Any) -> None:
+    """Refuse a leaf of a list/tuple operand whose TYPE puts the realized
+    array outside the numeric allowlist.
+
+    The sequence counterpart to ``refuse_non_numeric_dtype``, for the operand
+    scans that walk a list/tuple: those find a dtype to check only when the
+    tree actually contains an ``np.ndarray``, so a raw Python sequence
+    (``['a', 'b']``, ``[date(2020, 1, 1), ...]``) coerced to a non-numeric
+    array by the op itself was never refused, while the ndarray spelling of
+    the same call was.
+
+    Numeric leaves -- ``bool``/``int``/``float``/``complex`` and a NumPy
+    scalar whose own dtype is numeric -- pass. Refused are the leaf types
+    that are unambiguously DATA and unambiguously non-numeric: ``str``,
+    ``bytes``, a NumPy scalar whose own dtype is not numeric (``np.str_``,
+    ``np.bytes_``, ``np.datetime64``, ``np.timedelta64``, ``np.void``), and a
+    stdlib date/time/timedelta.
+
+    ``bytearray`` is NOT in that list even though ``bytes`` is. NumPy realizes
+    a ``bytearray`` leaf through the buffer protocol as **uint8**, not as an
+    "S" array -- the same numeric dtype it gives a ``memoryview`` leaf -- so
+    refusing it would reject a numeric payload rather than close a leak.
+
+    Everything ELSE -- ``None``, a callable, a set, a range, an arbitrary
+    object -- is deliberately left alone even though numpy would store it as
+    ``object``. This scan sees every argument of every counted op, and cannot
+    tell an array payload from a specifier that legitimately holds those same
+    leaves: ``fnp.piecewise``'s ``funclist`` is a list of callables,
+    ``fnp.fft.fftn(a, s=(None, 8))`` uses ``None`` as a per-axis sentinel,
+    ``fnp.tensordot(a, b, axes=({1}, {0}))`` is a pair of sets, and a ufunc
+    ``signature``/tuple ``out=`` holds whatever the caller put there. Failing
+    closed on those would refuse calls numpy runs -- a worse failure than the
+    mis-pricing it would prevent. That surface stays covered where it is
+    unambiguous: the ndarray branch above, and the per-op
+    ``refuse_non_numeric_source`` call sites (``array``/``asarray``/
+    ``astype``/``fromiter``/``require``/``full``, every random sampler, the
+    stats distributions), which know they are about to cast a source.
+
+    Classification is by TYPE alone. No attribute of *value* is read and the
+    sequence is never realized, so this runs no participant code -- the same
+    invariant the ndarray branch maintains by reading through
+    ``_NDARRAY_DTYPE_DESCRIPTOR`` -- and costs one ``isinstance`` on the
+    common numeric leaf.
+    """
+    if isinstance(value, _NUMERIC_LEAF_TYPES):
+        return
+    from flopscope._dtype_billing import refuse_non_numeric_dtype
+
+    if isinstance(value, _np.generic):
+        # Before the str/bytes branches: `np.str_` subclasses `str` and
+        # `np.bytes_` subclasses `bytes`, and their real (already sized)
+        # dtype is the better thing to report. A numeric NumPy scalar that
+        # is not a `float`/`complex` subclass (every `np.int*`, `np.bool_`,
+        # `np.float16`, ...) also lands here and passes on its own kind.
+        refuse_non_numeric_dtype(op_name, _NP_GENERIC_DTYPE_DESCRIPTOR.__get__(value))
+    elif isinstance(value, str):
+        refuse_non_numeric_dtype(op_name, _STR_LEAF_DTYPE)
+    # `bytes` only -- NOT `bytearray`. They look alike but NumPy realizes them
+    # differently: a `bytes` leaf becomes an "S" array, while a `bytearray`
+    # leaf goes through the buffer protocol and becomes **uint8**, which is
+    # numeric and inside the allowlist (`np.array([bytearray(b"ab")]).dtype`
+    # is uint8, the same as for a `memoryview` leaf). Refusing it would reject
+    # a numeric payload -- including a mixed call like
+    # `concatenate([np.ones(4, np.uint8), bytearray(b"abcd")])`.
+    elif isinstance(value, bytes):
+        refuse_non_numeric_dtype(op_name, _BYTES_LEAF_DTYPE)
+    elif isinstance(value, _TEMPORAL_LEAF_TYPES):
+        refuse_non_numeric_dtype(op_name, _OBJECT_LEAF_DTYPE)
 
 
 def refuse_non_numeric_source(op_name: str, value: Any) -> _np.dtype:
@@ -969,7 +1202,9 @@ def _counted_wrapper(fn=None, *, preflight=None):
                 # op_name`) renames THIS object, not the closure `inner_fn` still
                 # refers to -- see _refuse_non_numeric_operands's docstring. Read
                 # live, so it reflects the name the factory left behind.
-                _refuse_non_numeric_operands(inner_fn, args, kwargs, wrapped.__name__)
+                _refuse_non_numeric_operands(
+                    inner_fn, args, kwargs, wrapped.__name__, wrapped
+                )
                 return inner_fn(*args, **kwargs)
             finally:
                 wall = time.perf_counter() - fs_t0

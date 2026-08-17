@@ -9,6 +9,7 @@ but their real per-element cost is not the fixed unit a flat rate assumes.
 Both are refused outright rather than mis-priced.
 """
 
+import datetime
 import multiprocessing
 
 import numpy as np
@@ -76,16 +77,67 @@ def test_python_scalars_are_ignored():
     refuse_non_numeric_dtype("multiply", 1.0, True, 3, None)  # must not raise
 
 
-@pytest.mark.parametrize("dt", [np.dtype([]), np.dtype("U0"), np.dtype("S0")])
+@pytest.mark.parametrize("dt", [np.dtype([]), np.dtype("V0"), np.dtype("V")])
 def test_zero_itemsize_non_numeric_dtypes_are_allowed(dt):
     """Zero bytes per element cannot embed an object field or any
     itemsize-dependent cost, so a zero-itemsize dtype is let through
     regardless of kind -- NumPy's own ``broadcast_shapes`` allocates
     ``np.empty(shape, dtype=np.dtype([]))`` internally as a zero-byte
     shape-computation placeholder, so this dtype must not be refused as if
-    a caller had asked to compute something in it."""
+    a caller had asked to compute something in it.
+
+    The carve-out is measured against what numpy MATERIALISES, not against
+    what was requested -- see
+    ``test_zero_length_string_dtypes_are_refused_because_numpy_promotes_them``
+    below for the family that requests zero bytes and gets more. Void is the
+    kind that genuinely keeps its zero itemsize through construction."""
     assert dt.itemsize == 0
+    assert np.empty(0, dtype=dt).dtype.itemsize == 0  # numpy keeps it at zero
     refuse_non_numeric_dtype("empty", dt)  # must not raise
+
+
+@pytest.mark.parametrize("spec", ["U0", "S0", "U", "S", np.str_, np.bytes_])
+def test_zero_length_string_dtypes_are_refused_because_numpy_promotes_them(spec):
+    """The zero-itemsize carve-out must read the MATERIALISED dtype.
+
+    ``np.dtype('U0').itemsize`` is 0, so a guard written on the requested
+    dtype let it through -- but numpy promotes an unsized/zero-length string
+    dtype to a one-character one the moment it actually allocates, so
+    ``fnp.zeros(1000, dtype='U0')`` handed back a real 4000-byte ``<U1``
+    array for free. Zero bytes per element was the whole justification for
+    the carve-out, and this family never gets zero bytes per element.
+
+    ``np.dtype(np.str_)``/``np.dtype(np.bytes_)`` are the same unsized
+    spellings, and are what ``refuse_non_numeric_source`` and the operand
+    scan's leaf check hand in as the representative dtype for a bare
+    ``str``/``bytes`` payload -- so this is also what makes those refusals
+    fire."""
+    dt = np.dtype(spec)
+    assert dt.itemsize == 0  # requested: zero bytes
+    assert np.empty(0, dtype=dt).dtype.itemsize != 0  # materialised: not zero
+    with pytest.raises(UnsupportedDtypeError):
+        refuse_non_numeric_dtype("empty", dt)
+
+
+@pytest.mark.parametrize("spec", ["U0", "S0"])
+def test_zero_length_string_creation_is_refused_end_to_end(spec):
+    """The reported repro: a free, 0-FLOP creation op manufacturing a real
+    string array. ``fnp.zeros(1000, dtype='U0')`` billed 0 FLOPs and returned
+    4000 bytes of ``<U1``."""
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.zeros(1000, dtype=spec)
+        assert bc.flops_used == 0
+
+
+def test_zero_itemsize_void_creation_still_works():
+    """The documented carve-out must keep working end to end: numpy's own
+    zero-byte placeholder stays zero-byte through construction, so it is not
+    a way to get free string storage."""
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        result = fnp.zeros(1000, dtype="V0")
+        assert result.nbytes == 0
+        assert bc.flops_used == 0
 
 
 def test_nonzero_itemsize_structured_dtype_is_still_refused():
@@ -1027,6 +1079,286 @@ def test_diamond_shared_sublist_is_not_mistaken_for_a_cycle():
     x = [shared, shared]
     with BudgetContext(BUDGET, quiet=True):
         fnp.array(x)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# the operand scan must judge a raw Python sequence by its LEAVES
+# ---------------------------------------------------------------------------
+#
+# `_refuse_non_numeric_operands.check()` walked a list/tuple looking only for
+# an `np.ndarray` to read a dtype off. A raw Python sequence of str/bytes/
+# datetime holds no array anywhere, so the walk found nothing and the op ran
+# -- while the ndarray spelling of the very same call was refused. The ops
+# that leaked are exactly the ones with no source check of their own: the
+# dtype-neutral movement family (`transpose`, `flip`, `permute_dims`) and the
+# random pool ops (`choice`, `permutation`, `shuffle`), all of which declare
+# `dtypes=()` and so never reach `deduct`'s refusal either.
+#
+# The rule refuses the leaf types that are unambiguously DATA and
+# unambiguously non-numeric: str, bytes/bytearray, a NumPy scalar whose own
+# dtype is not numeric, and a stdlib date/time/timedelta. It stops there --
+# `None`, a callable, a set and a range all realise as object dtype, but they
+# are also how numpy spells `fftn`'s per-axis sentinel, `piecewise`'s
+# funclist, and `tensordot`'s `axes` pair, and this scan sees every argument
+# of every counted op with no way to tell those apart from a payload. Two
+# exemptions follow from the same reasoning: the rule applies only INSIDE a
+# list/tuple (a bare `str` argument is an option string -- `ord='fro'`,
+# einsum subscripts, `casting=`), and never to the string-specifier
+# parameters (`requirements=["C"]`, `order=["x"]`, a ufunc `signature`).
+
+
+def _str_pool_list():
+    return ["a", "b", "c", "d"]
+
+
+SEQUENCE_REPROS = [
+    ("choice", lambda pool: fnp.random.choice(pool, 2)),
+    ("permutation", lambda pool: fnp.random.permutation(pool)),
+    ("shuffle", lambda pool: fnp.random.shuffle(pool)),
+    ("transpose", lambda pool: fnp.transpose([pool, pool])),
+    ("flip", lambda pool: fnp.flip(pool)),
+    ("permute_dims", lambda pool: fnp.permute_dims(pool, (0,))),
+    ("reshape", lambda pool: fnp.reshape(pool, (4,))),
+    ("tuple spelling", lambda pool: fnp.flip(tuple(pool))),
+    ("nested", lambda pool: fnp.transpose([[pool[0], pool[1]], [pool[2], pool[3]]])),
+]
+
+
+@pytest.mark.parametrize(
+    "label,call", SEQUENCE_REPROS, ids=[label for label, _ in SEQUENCE_REPROS]
+)
+def test_python_sequence_of_strings_is_refused_and_bills_nothing(label, call):
+    """The reported repros. `fnp.random.choice(['a','b','c','d'], 2)` billed
+    8 FLOPs and handed back a real `<U1` array; the ndarray spelling of the
+    same call already raised."""
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        with pytest.raises(UnsupportedDtypeError):
+            call(_str_pool_list())
+        assert bc.flops_used == 0
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [
+        "a",
+        b"a",
+        np.str_("a"),
+        np.bytes_(b"a"),
+        np.datetime64("2020-01-01"),
+        np.timedelta64(1, "D"),
+        np.void(b"ab"),
+        datetime.date(2020, 1, 1),
+        datetime.datetime(2020, 1, 1),
+        datetime.time(1, 2),
+        datetime.timedelta(days=1),
+    ],
+    ids=[
+        "str",
+        "bytes",
+        "np.str_",
+        "np.bytes_",
+        "datetime64",
+        "timedelta64",
+        "np.void",
+        "date",
+        "datetime",
+        "time",
+        "timedelta",
+    ],
+)
+def test_every_non_numeric_leaf_category_is_refused(leaf):
+    """One entry per branch of the leaf classifier: str, bytes, a NumPy
+    scalar carrying its own non-numeric dtype, and a stdlib temporal value
+    (`datetime.datetime` subclasses `datetime.date`)."""
+    with BudgetContext(BUDGET, quiet=True):
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.flip([leaf, leaf])
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: fnp.piecewise(np.linspace(-2, 2, 8), [np.zeros(8, bool)], [0.0, 1.0]),
+        lambda: fnp.fft.fftn(np.ones((4, 8)), s=(None, 8)),
+        lambda: fnp.tensordot(np.ones((2, 3)), np.ones((3, 4)), axes=({1}, {0})),
+        lambda: fnp.tensordot(
+            np.ones((2, 3)), np.ones((3, 4)), axes=(range(1, 2), range(0, 1))
+        ),
+        lambda: fnp.require(np.ones(4), requirements=["C"]),
+        lambda: fnp.sort(np.ones(4), order=None),
+        lambda: fnp.multiply(np.ones(4), np.ones(4), signature=("d", "d", "d")),
+    ],
+    ids=["piecewise", "fftn-s", "axes-set", "axes-range", "require", "order", "sig"],
+)
+def test_specifier_slots_holding_non_array_leaves_still_run(call):
+    """The over-rejection guard for the rule's deliberate stopping point.
+
+    Every one of these is a numpy spelling whose SPECIFIER holds leaves that
+    realise as object or string dtype: a funclist of callables, `None` as a
+    per-axis sentinel, a pair of sets/ranges, a list of flag names, a ufunc
+    signature. A leaf rule that fails closed on the whole non-numeric family
+    refuses all of them -- calls numpy runs."""
+    with BudgetContext(BUDGET, quiet=True):
+        call()  # must not raise
+
+
+def test_einsum_explicit_path_spec_is_not_refused_by_the_ban():
+    """`optimize=['einsum_path', (0, 1)]` is a list whose first leaf is a
+    STRING -- the one string-specifier slot the leaf rule would otherwise
+    catch in a positional-looking operand list.
+
+    flopscope's `einsum` has a separate, pre-existing gap on that spelling
+    (opt_einsum rejects the path list with a `TypeError` before numpy sees
+    it, on `origin/main` too), so this pins the ban specifically: whatever
+    einsum does with the path, it must not be `UnsupportedDtypeError`."""
+    with BudgetContext(BUDGET, quiet=True):
+        with pytest.raises(Exception) as exc:  # noqa: B017 - type is not the point
+            fnp.einsum(
+                "ij,jk->ik",
+                np.ones((2, 3)),
+                np.ones((3, 4)),
+                optimize=["einsum_path", (0, 1)],
+            )
+    assert not isinstance(exc.value, UnsupportedDtypeError)
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        [1.0, 2.0],
+        [1, 2],
+        [True, False],
+        [1 + 2j, 3 + 4j],
+        [np.float32(1.0), np.float32(2.0)],
+        [np.int8(1), np.uint64(2)],
+        [np.bool_(True)],
+        [[1.0, 2.0], [3.0, 4.0]],
+        ([1.0, 2.0], (3.0, 4.0)),
+        [],
+        [np.ones(2), np.ones(2)],
+    ],
+    ids=[
+        "float",
+        "int",
+        "bool",
+        "complex",
+        "np.float32",
+        "np.int8/np.uint64",
+        "np.bool_",
+        "nested",
+        "mixed-containers",
+        "empty",
+        "arrays",
+    ],
+)
+def test_numeric_python_sequences_are_untouched(seq):
+    """The over-rejection guard. Every numeric leaf category numpy realises
+    into a numeric dtype must still construct, at every nesting depth."""
+    with BudgetContext(BUDGET, quiet=True):
+        fnp.array(seq)  # must not raise
+
+
+def test_numeric_sequence_billing_is_unchanged():
+    """A leaf check on the operand scan must not move a single billed FLOP
+    for a call that was already valid."""
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        fnp.multiply([1.0, 2.0], [3.0, 4.0])
+        assert bc.flops_used == 2
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        fnp.array([1.0, 2.0])
+        assert bc.flops_used == 2
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [bytearray(b"abcd"), memoryview(b"abcd")],
+    ids=["bytearray", "memoryview"],
+)
+def test_buffer_leaves_are_numeric_and_still_bill(leaf):
+    """A buffer leaf realizes as uint8, so it is INSIDE the allowlist.
+
+    ``bytearray`` looks like ``bytes`` and is not: NumPy reads it through the
+    buffer protocol, so ``np.array([bytearray(b"ab")]).dtype`` is uint8 where
+    ``np.array([b"ab"]).dtype`` is "S". Refusing it would reject a numeric
+    payload, and unlike the ``str`` case the ndarray spelling never refused it
+    either -- so refusing the sequence spelling would MANUFACTURE an asymmetry
+    rather than close one. Pinned against numpy's own realization so this
+    tracks numpy rather than a remembered list.
+    """
+    assert np.array([leaf]).dtype == np.uint8
+
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        result = fnp.sum([leaf])
+    assert bc.flops_used > 0, f"a {type(leaf).__name__} leaf must still bill"
+    assert np.asarray(result).dtype.kind in "biufc"
+
+    # The mixed spelling is unambiguously a numeric call.
+    with BudgetContext(BUDGET, quiet=True) as bc:
+        fnp.concatenate([np.ones(4, np.uint8), leaf])
+    assert bc.flops_used > 0
+
+
+def test_top_level_string_arguments_are_not_treated_as_operands():
+    """A bare `str`/`bytes` argument is an option, not an array payload.
+
+    The leaf rule fires only inside a list/tuple; refusing a top-level one
+    would break every op numpy spells with a string mode -- `ord=`, einsum
+    subscripts, `casting=`, `kind=`, an `astype` dtype code."""
+    a = np.ones((3, 3))
+    with BudgetContext(BUDGET, quiet=True):
+        fnp.linalg.norm(a, ord="fro")
+        fnp.einsum("ij,jk->ik", a, a)
+        fnp.astype(a, "float64")
+        fnp.sort(a, kind="stable")
+        fnp.sum(a, dtype="float64")
+        fnp.pad(a, 1, mode="constant")
+
+
+def test_leaf_check_never_executes_participant_code():
+    """The scan's standing invariant, extended to the leaf branch: a value
+    reached inside a list is classified from its TYPE alone, so no attribute
+    of it is read on the way past -- refused or not.
+
+    A `str` SUBCLASS is the case that makes this non-trivial: it is refused,
+    and the classifier must reach that conclusion without asking the instance
+    anything (no `len()`, no `.dtype`, no `__array__`)."""
+
+    class _HostileStr(str):
+        def __getattr__(self, name):  # pragma: no cover - must never run
+            raise AssertionError(f"operand scan touched .{name}")
+
+        def __len__(self):  # pragma: no cover - must never run
+            raise AssertionError("operand scan measured the leaf")
+
+    with BudgetContext(BUDGET, quiet=True):
+        with pytest.raises(UnsupportedDtypeError):
+            fnp.flip([_HostileStr("a"), _HostileStr("b")])
+
+
+def test_string_spec_positional_slots_cover_the_positional_spelling():
+    """`requirements` is exempt however it is passed. The keyword spelling is
+    a name lookup; the positional one needs the wrapper's signature, resolved
+    once per wrapper rather than once per call."""
+    from flopscope._budget import _string_spec_positional_slots
+
+    with BudgetContext(BUDGET, quiet=True):
+        fnp.require(np.ones(4), None, ["C"])  # must not raise
+    # `require`'s wrapper body is `(*args, **kwargs)`; the numpy signature
+    # that maps slot 2 to `requirements` lives on the DECORATED object, which
+    # is why the scan resolves slots against that rather than the closure.
+    assert _string_spec_positional_slots(fnp.require) == frozenset({2})
+
+
+def test_refuse_non_numeric_sequence_leaf_unit():
+    """Direct unit coverage for the classifier, independent of any op."""
+    from flopscope._budget import refuse_non_numeric_sequence_leaf
+
+    passes = (True, 1, 1.5, 1 + 2j, np.float16(1.0), np.int32(1), None, object(), {1})
+    for value in passes:
+        refuse_non_numeric_sequence_leaf("multiply", value)  # must not raise
+    for non_numeric in ("a", b"a", np.datetime64("2020-01-01"), datetime.date.today()):
+        with pytest.raises(UnsupportedDtypeError):
+            refuse_non_numeric_sequence_leaf("multiply", non_numeric)
 
 
 # --- sibling sequence-coercion routes: fromiter/require/full/full_like,
