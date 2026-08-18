@@ -972,6 +972,97 @@ def test_gradient_invalid_axis_raises_numpy_error_without_charging():
         assert b.flops_used == 0
 
 
+# ---- gradient edge_order=2: the 2nd-order boundary stencil must be priced ----
+# numpy runs the 5-FLOP boundary stencil (a*f0 + b*f1 + c*f2) instead of the
+# 2-FLOP one-sided difference for ANY accepted edge_order != 1 (0, 2, or a
+# non-integer in (1, 2]; > 2 is rejected). Each of the two boundary hyperplanes
+# (S//L elements) then costs 3 FLOPs more, so a selected axis costs
+# 2*S + 6*(S//L) instead of 2*S. Reading only `axis` and never `edge_order`
+# under-billed this by 6*(S//L) per axis -- size-scaling (up to 2x at L=3) and
+# remotely reachable via fnp.gradient(a, edge_order=2).
+
+
+@pytest.mark.parametrize("L", [3, 4, 5, 10, 50, 1000])
+def test_gradient_edge_order_2_billed_matches_honest_uniform(L):
+    # 1-D uniform: honest = 2*S + 6*(S//L) with S = L, hp = S//L = 1.
+    a = fnp.asarray(np.random.default_rng(0).random(L))
+    S = L
+    assert cost(lambda: fnp.gradient(a, edge_order=2)) == 2 * S + 6 * (S // L)
+    # edge_order=1 keeps the flat 2*S (no boundary surcharge).
+    assert cost(lambda: fnp.gradient(a, edge_order=1)) == 2 * S
+
+
+@pytest.mark.parametrize("dtype", _GRADIENT_DTYPES)
+def test_gradient_edge_order_2_scales_with_dtype(dtype):
+    # The +6*(S//L) boundary term is billed at the SAME dtype rate as the base,
+    # so billed(e2)*(2S) == billed(e1)*(2S + 6*(S//L)) exactly for every dtype
+    # (complex included), without needing to know the dtype multiplier.
+    shape, ax, L = (100, 3), 1, 3
+    S = 300
+    a = fnp.asarray(np.random.default_rng(0).random(shape).astype(dtype))
+    e1 = cost(lambda: fnp.gradient(a, axis=ax, edge_order=1))
+    e2 = cost(lambda: fnp.gradient(a, axis=ax, edge_order=2))
+    assert e2 > e1  # the boundary stencil is actually priced
+    assert e2 * (2 * S) == e1 * (2 * S + 6 * (S // L))
+
+
+def test_gradient_edge_order_2_sum_over_axes_invariant():
+    # Each selected axis costs 2*S + 6*(S//L); the per-axis costs still sum to
+    # the all-axes cost exactly for edge_order=2.
+    a = fnp.asarray(np.random.default_rng(0).random((6, 5, 4)))
+    S = 120
+    all_axes = cost(lambda: fnp.gradient(a, edge_order=2))
+    per = [cost(lambda k=k: fnp.gradient(a, axis=k, edge_order=2)) for k in range(3)]
+    assert sum(per) == all_axes
+    assert per == [2 * S + 6 * (S // L) for L in (6, 5, 4)]
+
+
+def test_gradient_edge_order_0_and_noninteger_price_the_e2_stencil():
+    # numpy runs the 2nd-order boundary stencil for ANY accepted edge_order != 1;
+    # only edge_order == 1 gets the cheap one-sided edge. Pricing solely
+    # edge_order == 2 would leave edge_order in {0, 1.5, ...} under-billed.
+    a = fnp.asarray(np.random.default_rng(0).random((100, 3)))
+    S = 300
+    e2 = cost(lambda: fnp.gradient(a, axis=1, edge_order=2))
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=0)) == e2
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=1.5)) == e2
+    assert e2 == 2 * S + 6 * (S // 3)
+
+
+def test_gradient_edge_order_2_regression_guard():
+    # Concrete guard: gradient((100,3), axis=1, edge_order=2) must bill the full
+    # 1200 (= 2*300 base + 6*100 boundary), NOT the 600 that ignoring edge_order
+    # would charge. FAILS if edge_order stops being priced.
+    a = fnp.asarray(np.random.default_rng(0).random((100, 3)))
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=2)) == 1200
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=1)) == 600
+
+
+def test_gradient_nonuniform_edge_order_2_no_underbill():
+    # For non-uniform coordinate arrays, edge_order=2 upgrades ONLY the two
+    # boundary hyperplanes (2 -> 5 FLOPs/elem); the interior is identical to
+    # edge_order=1. So billed(e2) - billed(e1) is exactly the honest boundary
+    # increment 6*(S//L), with no residual under-bill on top of the surcharge.
+    rng = np.random.default_rng(0)
+    for shape, ax in [((5,), 0), ((100, 3), 1), ((6, 5, 4), 2)]:
+        length = shape[ax]
+        size = int(np.prod(shape))
+        f_arr = fnp.asarray(rng.random(shape))
+        x = fnp.asarray(np.sort(rng.random(length)))
+        e1 = cost(
+            lambda f_arr=f_arr, x=x, ax=ax: fnp.gradient(
+                f_arr, x, axis=ax, edge_order=1
+            )
+        )
+        e2 = cost(
+            lambda f_arr=f_arr, x=x, ax=ax: fnp.gradient(
+                f_arr, x, axis=ax, edge_order=2
+            )
+        )
+        assert e2 - e1 == 6 * (size // length)
+        assert e2 > e1
+
+
 def test_nanmean_matches_mean():
     # spec: flop_cost(nanmean) == flop_cost(mean) for all shapes/axes
     a = fnp.asarray(np.random.rand(8, 5))

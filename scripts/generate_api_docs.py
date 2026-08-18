@@ -526,8 +526,9 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         r"$\text{numel}(\text{input}) - 1$",
     ),
     "gradient": (
-        "sum over axes of 2*S*(L-2)//L (uniform); + surcharge for coordinate-array spacing",
-        r"$\sum_{\text{ax}} 2S(L-2)/L$",
+        "sum over selected axes of 2*S (uniform, edge_order=1); edge_order!=1 adds "
+        "6*S/L per axis; + surcharge for coordinate-array spacing",
+        r"$\sum_{\text{ax}} \left(2S + [\text{edge\_order} \ne 1]\, 6S/L\right)$",
     ),
     "convolve": (
         "full: 2*n*m - n - m; valid: (2*min - 1)*(max - min + 1); same: variable-length dot sum",

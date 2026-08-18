@@ -6094,13 +6094,20 @@ def gradient(
 
     Base cost (no coord arrays, or uniform scalar spacing), summed over the
     axes ``axis=`` actually selects (every axis when ``axis`` is None):
-      sum over requested axes of 2 * f.size
+      sum over requested axes of 2 * f.size            (edge_order == 1)
+      sum over requested axes of 2 * f.size + 6 * (f.size // L)   (otherwise)
 
     np.gradient emits one output value per input element along each
-    differentiated axis (interior central differences AND both boundary
-    hyperplanes) at ~2 FLOPs each, so every axis costs 2 * f.size regardless
-    of its length. A single-axis gradient is thus exactly 1/ndim of the
-    all-axes gradient and the per-axis costs add back up to it exactly.
+    differentiated axis: the interior central difference costs 2 FLOPs
+    (sub + div) and, with edge_order == 1, so does each one-sided boundary
+    ``(f[1]-f[0])/dx``, giving a flat 2 * f.size per axis independent of its
+    length L. For any other accepted edge_order (0, 2, or a non-integer in
+    (1, 2]; > 2 numpy rejects) numpy runs the second-order 3-term boundary
+    stencil ``a*f[0] + b*f[1] + c*f[2]`` (5 FLOPs), +3 per boundary element;
+    the two boundary hyperplanes hold f.size // L elements each, so that adds
+    6 * (f.size // L) per axis (L = f.shape[axis]). A single-axis gradient is
+    thus exactly 1/ndim of the all-axes gradient and the per-axis costs add
+    back up to it exactly.
 
     Spacing surcharge per coord-array axis (1-D array length == shape[ax]):
       - If coord diffs are bit-exactly uniform (e.g. np.arange): +3*(L-1)
@@ -6137,16 +6144,28 @@ def gradient(
         # over-bill).
         #
         # Each axis produces one output value per input element -- interior
-        # AND both boundary hyperplanes -- at ~2 FLOPs each, so an axis of
-        # length L costs 2*(L-2) interior + 4 boundary = 2*L per line, times
-        # S/L lines = 2*S, independent of L. Billing only the interior term
-        # (2*S*(L-2)//L) dropped the two boundaries -- a 4*S//L undercount
-        # that became TOTAL at L=2, where gradient along that axis was billed
-        # a flat 2 FLOPs for ~2*S honest work. Charge the honest 2*S per axis.
-        base = _builtins.max(
-            _builtins.sum(2 * f.size for _ax in axes),
-            1,
-        )
+        # AND both boundary hyperplanes. The interior central difference is
+        # 2 FLOPs/element (sub + div), so an axis of length L costs
+        # 2*(L-2) interior + (2 boundaries) per line, times S/L lines.
+        #
+        # The boundary stencil depends on ``edge_order``. numpy runs the
+        # cheap one-sided difference ``(f[1]-f[0])/dx`` (2 FLOPs) ONLY when
+        # edge_order == 1; for any other accepted value (0, 2, or a
+        # non-integer in (1, 2]; > 2 numpy rejects) it runs the second-order
+        # 3-term boundary stencil ``a*f[0] + b*f[1] + c*f[2]`` (3 mul + 2 add
+        # = 5 FLOPs), +3 FLOPs per boundary element. With edge_order == 1
+        # every element costs a flat 2 FLOPs so an axis is exactly 2*S
+        # regardless of L; otherwise the two boundary hyperplanes (S/L
+        # elements each) each cost 3 FLOPs more, adding 6*(S//L) per axis.
+        edge_order = kwargs.get("edge_order", 1)
+        per_axis_costs = []
+        for ax in axes:
+            per = 2 * f.size
+            if edge_order != 1 and f.shape[ax] > 0:
+                # 2 boundary hyperplanes * (S//L lines) * +3 FLOPs each
+                per += 6 * (f.size // f.shape[ax])
+            per_axis_costs.append(per)
+        base = _builtins.max(_builtins.sum(per_axis_costs), 1)
 
         # --- spacing surcharge ---
         # ``varargs`` pair up positionally with ``axes``, so the surcharge is
@@ -6191,7 +6210,7 @@ attach_docstring(
     gradient,
     _np.gradient,
     "counted_custom",
-    "uniform: sum over requested axes of 2*S; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
+    "uniform: sum over requested axes of 2*S (edge_order=1), +6*S/L per axis for edge_order!=1; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
 )
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 
