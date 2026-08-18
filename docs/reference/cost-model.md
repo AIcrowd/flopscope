@@ -1171,7 +1171,7 @@ factorization does roughly `4×` the real arithmetic of its real counterpart.
 | `linalg.norm` (ord=2, nuc) | `(2ab² + 2b³) × n_groups`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: values-only SVD cost per group | `_properties.py:norm_cost` |
 | `linalg.vector_norm` | `2 × numel(effective_shape) × n_groups` (standard ord); `(18 × numel + 16) × n_groups` (general fractional p-norm: abs + pow per element) | DERIVED: FMA=2 | `_properties.py:vector_norm_cost` |
 | `linalg.matrix_norm` | same as `linalg.norm` | DERIVED | `_properties.py` |
-| `linalg.trace` | `min(m,n) × batch` | DERIVED: n−1 diagonal adds, batch-multiplied | `_properties.py:trace_cost` |
+| `linalg.trace` | `diagonal_len × batch`, `diagonal_len = min(m,n)` reduced by `|offset|` (floored at 1) | DERIVED: diagonal adds, batch-multiplied | `_properties.py:trace_cost` |
 | `linalg.tensorinv` | `2n³`, `n = prod(shape[:ind])` | DERIVED: via inv | `_solvers.py:tensorinv_cost` |
 | `linalg.tensorsolve` | `2n³/3 + 2n²`, `n = isqrt(prod(shape))` | DERIVED: via solve; n is the solved system's true dimension, independent of `axes` reordering | `_solvers.py:tensorsolve_cost` |
 | `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: values-only SVD + `min(m,n)` threshold comparisons | `_properties.py:matrix_rank_cost` |
@@ -1475,7 +1475,7 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `gradient` | base: `sum_ax 2·S·(L−2)/L`; each coord-array axis adds a spacing surcharge (uniform: `+3(L−1)`; non-uniform: `+3S(L−2)/L + 10(L−2) + 3(L−1) + 4S/L`) | DERIVED | `_pointwise.py:gradient` |
 | `allclose` | `7·numel(broadcast) − 1` (6 FLOPs/elem tolerance core + numel−1 all-reduce) | DERIVED | `_counting_ops.py` |
 | `isclose` | `6·numel(broadcast)` (sub + 2·abs + mul + add + cmp per element) | DECLARED | `_pointwise.py` |
-| `trace` (numpy.trace) | `min(shape[ax1], shape[ax2]) × n_traces` (diagonal length, floored at 1) where `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied) | DERIVED | `_counting_ops.py:trace` |
+| `trace` (numpy.trace) | `diagonal_len × n_traces` where `diagonal_len = min(shape[ax1], shape[ax2])` reduced by `|offset|` (floored at 1) and `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied); bills identically to `linalg.trace` on matched axes | DERIVED | `_counting_ops.py:trace` |
 | `correlate` | mode-aware: `full` = `2nm−n−m+1`; `valid` = `(2·min−1)·(max−min+1)`; `same` = exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:_correlate_cost` |
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |
 | `cov` | `2f²s + 2fs` (f = features, s = samples) | DERIVED: Gram term `f²` dot products of length `s` (2f²s) + centering pass `fs` elements × 2 FLOPs | `_pointwise.py:_cov_cost` |

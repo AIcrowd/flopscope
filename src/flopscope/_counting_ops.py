@@ -66,7 +66,18 @@ def trace(
     ax1 = axis1 % ndim if ndim > 0 else 0
     ax2 = axis2 % ndim if ndim > 0 else 0
     if ndim >= 2 and a.shape[ax1] > 0 and a.shape[ax2] > 0:
-        k = _builtins.max(_builtins.min(a.shape[ax1], a.shape[ax2]), 1)
+        n1, n2 = a.shape[ax1], a.shape[ax2]
+        # ``offset`` shifts the diagonal, shortening it exactly the way
+        # numpy.linalg.trace already bills: a positive offset moves toward
+        # ax2 (columns), a negative offset toward ax1 (rows). Ignoring it
+        # over-bills every off-diagonal trace by the full main-diagonal
+        # length (e.g. a 256x256 trace at offset=255 billed 256 instead of 1).
+        k = _builtins.min(n1, n2)
+        if offset > 0:
+            k = _builtins.min(k, n2 - offset)
+        elif offset < 0:
+            k = _builtins.min(k, n1 + offset)
+        k = _builtins.max(k, 1)
         # Number of independent trace evaluations = product of all other axes
         n_traces = a.size // (a.shape[ax1] * a.shape[ax2])
         cost = k * n_traces
