@@ -71,21 +71,57 @@ def test_every_billed_op_is_in_ops_json_or_an_alias():
     )
 
 
+AREA_MARKERS = {
+    "core": "elementwise",
+    "fft": "fft",
+    "linalg": "linalg",
+    "random": "random",
+    "stats": "stats",
+}
+
+
+def _areas_missing_a_family_section(doc: str, areas: set[str]) -> list[str]:
+    """Areas with no `### <Family>` heading under "Cost by family".
+
+    Scoped to headings on purpose. A substring search over the whole document
+    is vacuous -- every area marker also occurs in tables, op names and prose,
+    so a deleted section still leaves dozens of matches behind.
+    """
+    body = doc[doc.index("## Cost by family") :]
+    headings = [
+        line[4:].strip().lower() for line in body.splitlines() if line.startswith("### ")
+    ]
+    return sorted(
+        a for a in areas
+        if not any(AREA_MARKERS.get(a, a) in h for h in headings)
+    )
+
+
 def test_every_ops_json_area_has_a_doc_family():
     ops = json.loads(OPS_JSON.read_text())["operations"]
     areas = {str(o["area"]) for o in ops}  # {'core','fft','linalg','random','stats'}
-    doc = COST_MODEL_MD.read_text().lower()
-    # Each area must be represented by family heading(s) in §4 Cost by family.
-    area_markers = {
-        "core": "elementwise",
-        "fft": "fft",
-        "linalg": "linalg",
-        "random": "random",
-        "stats": "stats",
-    }
-    missing = [a for a in areas if area_markers.get(a, a) not in doc]
+    missing = _areas_missing_a_family_section(COST_MODEL_MD.read_text(), areas)
     assert not missing, (
         f"ops.json areas with no cost-model.md family section: {missing}"
+    )
+
+
+def test_family_coverage_guard_is_not_vacuous():
+    """The guard must FAIL when a family section is removed.
+
+    It previously passed a whole-document substring search, so deleting the
+    entire FFT section (2,755 chars) left it green -- "fft" still occurred 30
+    times elsewhere. A guard that cannot fail is not a guard.
+    """
+    doc = COST_MODEL_MD.read_text()
+    start = doc.index("### FFT")
+    end = doc.index("### Polynomial")
+    mutated = doc[:start] + doc[end:]
+
+    areas = {str(o["area"]) for o in json.loads(OPS_JSON.read_text())["operations"]}
+    missing = _areas_missing_a_family_section(mutated, areas)
+    assert "fft" in missing, (
+        "removing the FFT family section did not trip the coverage guard"
     )
 
 
