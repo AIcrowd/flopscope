@@ -875,19 +875,30 @@ only representatives are listed and the full set is a filter in
 
 **Family rule**: `flop_cost = numel(output)` for a single-output op. A **multi-output
 ufunc** (`divmod`, `frexp`, `modf` — the only NumPy ufuncs with `nout > 1` flopscope
-counts) writes `nout` full output buffers per call, so its `flop_cost = nout ×
-numel(output)`. This follows directly from the cost model's own "[every byte written is
-metered](#the-unifying-philosophy--every-byte-written-is-metered)" principle: `divmod`
-writes a quotient array **and** a remainder array, `frexp` writes a mantissa array **and**
-an exponent array, `modf` writes a fractional-part array **and** an integral-part array —
-each is a separate charged write, not a shared one. Billing only the first output priced
-these ops at a flat fraction of their honest cost (`divmod` at exactly half of
-`floor_divide` + `mod` combined; `modf`/`frexp` at the same `flop_cost` as a one-output
-unary of the same shape, despite writing two arrays). `out=` does not multiply this a
-second time — the `nout` scaling lives in `flop_cost` (the cell-count axis), which is
-independent of the `out=` destination-dtype-rate axis described in [Which dtype prices a
-call](#which-dtype-prices-a-call); supplying `out=` widens the rate exactly as it would for
-any other op, never the cell count.
+counts) is priced as `nout` independent applications of the reference algorithm, so its
+`flop_cost = nout × numel(output)`: `divmod` bills what running `floor_divide` and `mod`
+separately would bill, combined; `modf`/`frexp` bill twice a one-output unary of the same
+shape. The justification is **not** the write-metering principle above — arithmetic
+weight, not buffer traffic, dominates these ops, so that clause does not govern them.
+The justification is the model's standing rule that pricing tracks a **standardized
+reference algorithm**, not whatever compute-sharing a specific backend implementation
+happens to do — stated earlier as "we bill the textbook standard-algorithm cost, not
+literal BLAS/LAPACK" (see [Billing model & design
+principles](#billing-model--design-principles)) and already the basis for the FMA=2
+convention and the `trapz`/`nanstd`/`linspace` fixes. A backend that computes several
+outputs more cheaply than the sum of independent calls does not earn its caller a
+discount; without this rule, an efficient combined op becomes a way to obtain two
+deliverables for the price of one. Measured backend timing makes this explicit rather
+than contradicting it: at N=500,000, `np.divmod` runs in ~0.98x a single
+`np.floor_divide` (~0.49x `floor_divide`+`mod` combined) — NumPy's `divmod` genuinely
+shares the division and derives the remainder almost for free — yet flopscope prices it
+at `2×` `floor_divide` anyway, by the reference-algorithm rule above; the bill is a
+deliberate ceiling on what a participant could otherwise obtain via an efficient
+combined op, not a measurement of `divmod`'s own backend cost. `out=` does not multiply
+this a second time — the `nout` scaling lives in `flop_cost` (the cell-count axis),
+which is independent of the `out=` destination-dtype-rate axis described in [Which
+dtype prices a call](#which-dtype-prices-a-call); supplying `out=` widens the rate
+exactly as it would for any other op, never the cell count.
 
 **Baseline tier (weight 1.0)**: arithmetic (+, −, ×, ÷, √), rounding
 (ceil, floor, trunc, rint, around/round), sign/abs, logical (not, and, or,
