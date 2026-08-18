@@ -21,7 +21,12 @@ from flopscope._ndarray import FlopscopeArray
 from flopscope._registry import REGISTRY
 
 DEMONSTRATED = [
-    "copyto", "putmask", "place", "select", "cov", "corrcoef",
+    "copyto",
+    "putmask",
+    "place",
+    "select",
+    "cov",
+    "corrcoef",
     "linalg.tensorsolve",
 ]
 
@@ -37,7 +42,7 @@ def _numpy_callable(dotted):
 
 def _covered():
     """Set of numpy callables flopscope will route rather than fail open on."""
-    dispatch = FlopscopeArray._get_array_function_dispatch()   # forces lazy build
+    dispatch = FlopscopeArray._get_array_function_dispatch()  # forces lazy build
     passthrough = FlopscopeArray._PASSTHROUGH or set()
     return set(dispatch) | set(passthrough)
 
@@ -53,8 +58,7 @@ def test_dispatch_coverage_does_not_silently_shrink():
     """A floor, so removing an entry is caught even before full coverage."""
     covered = _covered()
     hit = sum(
-        1 for n in REGISTRY
-        if (fn := _numpy_callable(n)) is not None and fn in covered
+        1 for n in REGISTRY if (fn := _numpy_callable(n)) is not None and fn in covered
     )
     assert hit >= 100, f"dispatch coverage dropped to {hit}; entries were removed"
 
@@ -64,6 +68,7 @@ def test_mixed_operands_do_not_fail_open():
     args fail closed, which is why existing tests are blind to it."""
     import flopscope as flops
     import flopscope.numpy as fnp
+
     F = fnp.array(np.random.default_rng(0).random((200, 200)))
     raw = np.random.default_rng(1).random((200, 200))
     with flops.budget(10**14, quiet=True) as b:
