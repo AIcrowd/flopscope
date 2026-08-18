@@ -89,11 +89,12 @@ def _areas_missing_a_family_section(doc: str, areas: set[str]) -> list[str]:
     """
     body = doc[doc.index("## Cost by family") :]
     headings = [
-        line[4:].strip().lower() for line in body.splitlines() if line.startswith("### ")
+        line[4:].strip().lower()
+        for line in body.splitlines()
+        if line.startswith("### ")
     ]
     return sorted(
-        a for a in areas
-        if not any(AREA_MARKERS.get(a, a) in h for h in headings)
+        a for a in areas if not any(AREA_MARKERS.get(a, a) in h for h in headings)
     )
 
 
