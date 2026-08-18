@@ -1441,7 +1441,7 @@ the whole array:
 | `diag` (2-D input, extract) | `0` — a view, no write at all | DECLARED |
 | `diag` (1-D input, construct) | `numel(v)` — the zero background is free | DECLARED |
 | `diagflat` | `numel(v)` — the zero background is free | DECLARED |
-| `fill_diagonal` | `min(m, n)` | DECLARED |
+| `fill_diagonal` | `min(m, n)`, or the full wrapped count when `wrap=True` and the array is taller than it is wide (`m > n`) — every cell NumPy's flat-slice write actually touches | DECLARED |
 
 **Gather — computed-index read (weight 4.0, `flop_cost = numel(output)`)** — a
 non-sequential memory access, the [access tier](#access-tier-weight-40): `take`,

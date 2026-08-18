@@ -2680,6 +2680,25 @@ def extract(
 attach_docstring(extract, _np.extract, "counted_custom", "numel(input) FLOPs")
 
 
+def _fill_diagonal_cells(shape: tuple[int, ...], wrap: bool) -> int:
+    """Cells ``np.fill_diagonal`` writes, mirroring its flat-slice semantics.
+
+    NumPy writes ``a.flat[:end:step]`` with ``step = n + 1``. For a tall 2-D
+    array with ``wrap=True`` the write runs to the end of the buffer, so the
+    count grows with the number of rows; ``wrap`` was previously ignored,
+    which billed a constant no matter how much was written.
+    """
+    if len(shape) < 2:
+        return int(_np.prod(shape)) if shape else 0
+    if len(shape) > 2:
+        # N-D: numpy requires all dims equal and writes exactly that many.
+        return shape[0]
+    m, n = shape[0], shape[1]
+    step = n + 1
+    end = m * n if (wrap and m > n) else min(n * n, m * n)
+    return len(range(0, end, step))
+
+
 @_counted_wrapper
 def fill_diagonal(
     a: ArrayLike,
@@ -2687,10 +2706,10 @@ def fill_diagonal(
     wrap: bool = False,
     **kwargs: Any,
 ) -> None:
-    """Fill main diagonal of array in-place. Cost: min(m,n)."""
+    """Fill main diagonal of array in-place. Cost: cells written (wrap-aware)."""
     budget = require_budget()
     a_arr = _np.asarray(a)
-    cost = min(a_arr.shape[0], a_arr.shape[1]) if a_arr.ndim >= 2 else a_arr.size
+    cost = _fill_diagonal_cells(a_arr.shape, wrap)
     with budget.deduct(
         "fill_diagonal",
         flop_cost=cost,
@@ -2706,7 +2725,12 @@ def fill_diagonal(
     return result
 
 
-attach_docstring(fill_diagonal, _np.fill_diagonal, "counted_custom", "min(m,n) FLOPs")
+attach_docstring(
+    fill_diagonal,
+    _np.fill_diagonal,
+    "counted_custom",
+    "cells written: min(m,n), or the wrapped count when wrap=True and m>n",
+)
 
 
 @_counted_wrapper

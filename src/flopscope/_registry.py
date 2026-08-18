@@ -2191,7 +2191,9 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Fill main diagonal of given array. Cost: min(m,n).",
+        "notes": "Fill main diagonal of given array. Cost: min(m,n), or the wrapped "
+        "count (up to numel(a)) when wrap=True and the array has more rows than "
+        "columns.",
     },
     "tri": {
         "category": "counted_custom",
