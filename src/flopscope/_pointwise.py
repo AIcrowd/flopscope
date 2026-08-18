@@ -4419,11 +4419,13 @@ def nanpercentile(
         result = _call_numpy(
             _np.nanpercentile,
             _to_base_ndarray(a),
-            q,
+            _to_base_ndarray(q),
             axis=axis,
             out=out_stripped,
             keepdims=keepdims,
-            **kwargs,
+            # q (an array of percentiles) and weights= are secondary operands;
+            # strip both or an fnp-built q/weights trips the in-wrapper tripwire.
+            **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
     return _wrap_result(result, out=out, symmetry=out_sym)  # type: ignore[return-value]
 
@@ -4500,11 +4502,13 @@ def nanquantile(
         result = _call_numpy(
             _np.nanquantile,
             _to_base_ndarray(a),
-            q,
+            _to_base_ndarray(q),
             axis=axis,
             out=out_stripped,
             keepdims=keepdims,
-            **kwargs,
+            # q (an array of probabilities) and weights= are secondary operands;
+            # strip both or an fnp-built q/weights trips the in-wrapper tripwire.
+            **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
     return _wrap_result(result, out=out, symmetry=out_sym)  # type: ignore[return-value]
 
@@ -4586,11 +4590,13 @@ def percentile(
         result = _call_numpy(
             _np.percentile,
             _to_base_ndarray(a),
-            q,
+            _to_base_ndarray(q),
             axis=axis,
             out=out_stripped,
             keepdims=keepdims,
-            **kwargs,
+            # q (an array of percentiles) and weights= are secondary operands;
+            # strip both or an fnp-built q/weights trips the in-wrapper tripwire.
+            **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
     return _wrap_result(result, out=out, symmetry=out_sym)  # type: ignore[return-value]
 
@@ -4667,11 +4673,13 @@ def quantile(
         result = _call_numpy(
             _np.quantile,
             _to_base_ndarray(a),
-            q,
+            _to_base_ndarray(q),
             axis=axis,
             out=out_stripped,
             keepdims=keepdims,
-            **kwargs,
+            # q (an array of probabilities) and weights= are secondary operands;
+            # strip both or an fnp-built q/weights trips the in-wrapper tripwire.
+            **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
     return _wrap_result(result, out=out, symmetry=out_sym)  # type: ignore[return-value]
 
@@ -6554,7 +6562,9 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
             _np.cov,
             _to_base_ndarray(m),
             y=_to_base_ndarray(y) if y is not None else None,  # type: ignore[arg-type]
-            **kwargs,
+            # fweights=/aweights= are secondary array operands; strip them or an
+            # fnp-built weights array trips the in-wrapper tripwire.
+            **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
     return _wrap_metered_result(result)  # type: ignore[return-value]
 

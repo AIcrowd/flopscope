@@ -63,8 +63,16 @@ def _make_counted_method(
             call_args = tuple(
                 _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v for v in args
             )
+            # Secondary array kwargs (choice's p=, permuted's out=) must be
+            # stripped too, or an fnp-built probability/destination array reaches
+            # numpy still wrapped and trips the in-wrapper tripwire.
+            call_kwargs = {
+                k: _to_base_ndarray(v) if isinstance(v, _np.ndarray) else v
+                for k, v in kwargs.items()
+            }
         else:
             call_args = args
+            call_kwargs = kwargs
             # A genuine sampler casts every distribution parameter
             # (loc/scale/lam/a/b/...) to float64 itself, below, running any
             # object payload's __float__ per element with nothing billed for
@@ -83,7 +91,7 @@ def _make_counted_method(
             note_write(out)
         if method_name == "shuffle" and args:
             note_write(args[0])
-        result = base_method(plain, *call_args, **kwargs)
+        result = base_method(plain, *call_args, **call_kwargs)
         cost = formula(args, kwargs, result)
         if method_name in _movement_methods:
             billing_dtypes: tuple = ()

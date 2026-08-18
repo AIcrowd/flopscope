@@ -265,7 +265,13 @@ def searchsorted(
         dtypes=(a.dtype, v_arr.dtype),
     ):
         result = _call_numpy(
-            _np.searchsorted, _to_base_ndarray(a), _to_base_ndarray(v), **kwargs
+            _np.searchsorted,
+            _to_base_ndarray(a),
+            _to_base_ndarray(v),
+            # sorter= is a secondary index array; strip it or an fnp-built
+            # sorter trips the in-wrapper tripwire. (Distinct loop name from the
+            # ``v`` parameter above, which is a different array.)
+            **{k: _to_base_ndarray_tree(kw) for k, kw in kwargs.items()},
         )
     return result  # type: ignore[return-value]
 
