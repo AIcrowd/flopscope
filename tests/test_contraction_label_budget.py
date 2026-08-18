@@ -401,10 +401,13 @@ def test_tensordot_accumulation_for_billing_guard_stays_none_when_symmetry_scale
     rng = np.random.default_rng(0)
     a_vals = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
     tail_axes = list(range(3, a_vals.ndim))
-    a_vals = sum(
-        a_vals.transpose(list(perm) + tail_axes)
-        for perm in itertools.permutations(range(3))
-    ) / 6
+    a_vals = (
+        sum(
+            a_vals.transpose(list(perm) + tail_axes)
+            for perm in itertools.permutations(range(3))
+        )
+        / 6
+    )
     a = wrap_with_symmetry(a_vals, group)
     b = rng.standard_normal((4, 5)) + 1j * rng.standard_normal((4, 5))
     assert a.ndim + b.ndim > 52

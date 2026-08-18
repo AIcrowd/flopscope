@@ -5,8 +5,7 @@ import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
-from flopscope import SymmetricTensor
-from flopscope import SymmetryGroup
+from flopscope import SymmetricTensor, SymmetryGroup
 from flopscope._perm_group import _Permutation as P
 
 
@@ -23,7 +22,7 @@ def test_constructing_over_asymmetric_data_is_refused_or_charged():
         try:
             SymmetricTensor(raw, symmetry=sym)
         except flops.SymmetryError:
-            return                      # refusing is an acceptable outcome
+            return  # refusing is an acceptable outcome
         assert b.flops_used > 0, "validated a tag without charging for it"
 
 
@@ -40,7 +39,7 @@ def test_forged_tag_does_not_discount_downstream_pointwise():
 
 def test_genuinely_symmetric_data_still_works():
     raw = np.random.default_rng(1).random((6, 6))
-    raw = raw + raw.T                    # actually symmetric
+    raw = raw + raw.T  # actually symmetric
     with flops.budget(10**12, quiet=True):
         t = SymmetricTensor(raw, symmetry=SymmetryGroup(P([1, 0]), axes=(0, 1)))
     assert t.symmetry is not None
