@@ -619,7 +619,9 @@ def choice(a, size=None, replace=True, p=None):
             shapes=((out_size,),),
             dtypes=(),
         ):
-            result = _call_numpy(_npr.choice, a, size=size, replace=replace, p=p)
+            result = _call_numpy(
+                _npr.choice, a, size=size, replace=replace, p=_to_base_ndarray(p)
+            )
     else:
         if p is None:
             # Legacy RandomState.choice is permutation(pop_size)[:size] —
@@ -638,7 +640,9 @@ def choice(a, size=None, replace=True, p=None):
             shapes=((n,),),
             dtypes=(),
         ):
-            result = _call_numpy(_npr.choice, a, size=size, replace=replace, p=p)
+            result = _call_numpy(
+                _npr.choice, a, size=size, replace=replace, p=_to_base_ndarray(p)
+            )
     # Preserve identity when picking a scalar from an object-dtype array:
     # numpy returns the exact object stored in the input, and user code
     # (e.g. `choice(object_array) is original_object`) relies on that.
