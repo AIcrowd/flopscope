@@ -800,6 +800,7 @@ each backed by a CI-enforced test you can open and read:
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
 | **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
 | **End-to-end billing** | production billing is pinned per weight tier `{0,1,4,16}` (catches a silent weight regression); the retired `8.0` tier is documented as retired rather than silently dropped | `test_production_weight_billing.py` |
+| **No free path-search wall time** | `opt_einsum.contract_path` runs as pure Python inside the counted wrapper, never through `_call_user_code`, so its wall time books to the unbilled `flopscope_overhead_time_s` bucket rather than to backend FLOPs or residual. Once operand count `k ≥ _LARGE_K_THRESHOLD` (8), `optimize=` is resolved through an **allowlist**, not a denylist: only strategies known to run in linear time (`'greedy'`, `'eager'`, `'opportunistic'`, `'random-greedy'`, `'random-greedy-128'`), `False` (no search), and an explicit user-supplied path (a `list`/`tuple` — the order is already decided, so there is no search to bound) pass through verbatim; everything else — every current `opt_einsum` alias for an exhaustive or superlinear search (`'auto'`, `'auto-hq'`, `'optimal'`, `'branch-all'`, `'branch-2'`, `'branch-1'`, `'dp'`, `'dynamic-programming'`), `True`, `None`, a custom `PathOptimizer`, and any future `opt_einsum` string this list doesn't recognize — downgrades to `'greedy'`. The allowlist replaced an earlier denylist that missed the `'dynamic-programming'` alias (the exact same function object as `'dp'`, registered under a second name) plus `'auto-hq'`/`'branch-1'`; a live repro parked 45.75s of free wall time via `optimize='dynamic-programming'` at k=20 before the allowlist closed it | `_resolve_optimize_for_k` in `_einsum.py`; `tests/test_einsum_path_search_billing.py`, `tests/accumulation/test_path_aware_cost.py::test_large_k_auto_fallback_to_greedy` and `::test_large_k_covers_every_opt_einsum_path_alias` (the latter iterates `opt_einsum.paths._PATH_OPTIONS` directly, so a future `opt_einsum` release adding a new exhaustive-search alias fails CI instead of silently reopening the hole) |
 
 An auditor can read this table top-to-bottom and, for each claim, open the named test
 to see exactly what guarantees it. The first two rows are the load-bearing ones: an exact
@@ -844,6 +845,16 @@ charged operation.
 The place the cost model is genuinely sensitive is the narrower one where work happens
 *inside* the meter for a mispriced amount — which is what every invariant in the table
 above is defending.
+
+**Timing attribution inside a metered call** has three buckets, not two:
+`wall_time_s == flopscope_backend_time_s + flopscope_overhead_time_s +
+residual_wall_time_s`, and `residual_wall_time_s` is defined as `wall − backend −
+overhead` — so `flopscope_overhead_time_s` (flopscope's own dispatch code: wrapper
+preambles, bookkeeping, path search) sits outside *both* billed FLOPs and the
+λ-rated residual `R`. It is meant to be small and bounded (dispatch bookkeeping),
+not a channel a caller can inflate; see the **No free path-search wall time**
+invariant above for the one case where an unbounded pure-Python computation
+(`opt_einsum.contract_path`) used to run inside it.
 
 ---
 
@@ -988,7 +999,12 @@ number of unique (output + contracted) index combinations — equal to `K·M` fo
 single clean contraction, but more general for multi-index or broadcast
 subscripts. A multi-operand einsum (`≥ 3` operands) walks the `opt_einsum`
 optimal binary path and sums per-step costs. Batched/stacked variants of any row
-above multiply the closed form by the batch size.
+above multiply the closed form by the batch size. The path search that picks
+this binary order runs unbilled (see the **No free path-search wall time**
+invariant in [§Non-exploitability](#non-exploitability)), so at `k ≥ 8`
+operands only an allowlisted, linear-time `optimize=` choice runs verbatim —
+every other choice, including every `opt_einsum` alias for an exhaustive or
+superlinear search, is downgraded to `'greedy'` before the search runs.
 
 **Compound linalg** ops are *chains* of matmuls, billed as the sum of their steps
 through the `matmul_cost(m, k, n)` helper — which itself delegates to
