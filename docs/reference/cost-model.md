@@ -795,11 +795,13 @@ each backed by a CI-enforced test you can open and read:
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a dtype that is still zero-itemsize once NumPy materialises it is the one exception, since it carries no data either way — `'U0'`/`'S0'` are not, because NumPy promotes them to `'U1'`/`'S1'` on allocation | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
+| **No free symmetry tag over a bare top-level constructor call** | a *bare, top-level* `SymmetricTensor(data, symmetry=…)` call cannot mint a tag over data that doesn't actually satisfy the claimed group: it now validates the claim through the same check `as_symmetric(data, symmetry=…)` already used, raising `SymmetryError` on a mismatch and charging `k·(7n − 1)` (`k` = non-identity generators, `n = data.size`) for a genuine one — and symmetry a flopscope op derives *internally* (e.g. `exp` propagating the tag of an already-validated operand, or a slice/transpose view) is exempt from re-paying, since it never reaches an unvalidated, caller-supplied claim. **Two narrower, in-process-only routes remain open and are NOT closed by this**: calling `flopscope._symmetry_utils.wrap_with_symmetry` directly (it only checks that the group's axes fit `ndim`, never buffer contents — trusted by this constructor for its ~30 legitimate internal uses in `_array_ops.py`), and constructing inside a participant callback a counted host op invokes (`fnp.apply_along_axis`, `fnp.piecewise`, …), which inherits the host op's trust. Neither is remotely reachable — `wrap_with_symmetry` is outside the server's op REGISTRY and unexported, and callback ops raise `RemoteCallbackError` on the server backend — so both are pinned as `strict=True` `xfail` regression tests rather than fixed, to avoid repricing the ~34 internal call sites that legitimately rely on the same trust | `tests/test_symmetric_tensor_new_validation.py` (incl. the two pinned `xfail`s); `tests/test_symmetric_cost.py` (`k·(7n−1)` rate) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
 | **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
 | **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests) |
 | **End-to-end billing** | production billing is pinned per weight tier `{0,1,4,16}` (catches a silent weight regression); the retired `8.0` tier is documented as retired rather than silently dropped | `test_production_weight_billing.py` |
+| **No free path-search wall time** | `opt_einsum.contract_path` runs as pure Python inside the counted wrapper, never through `_call_user_code`, so its wall time books to the unbilled `flopscope_overhead_time_s` bucket rather than to backend FLOPs or residual. Once operand count `k ≥ _LARGE_K_THRESHOLD` (8), `optimize=` is resolved through an **allowlist**, not a denylist: only strategies known to run in linear time (`'greedy'`, `'eager'`, `'opportunistic'`, `'random-greedy'`, `'random-greedy-128'`), `False` (no search), and an explicit user-supplied path (a `list`/`tuple` — the order is already decided, so there is no search to bound) pass through verbatim; everything else — every current `opt_einsum` alias for an exhaustive or superlinear search (`'auto'`, `'auto-hq'`, `'optimal'`, `'branch-all'`, `'branch-2'`, `'branch-1'`, `'dp'`, `'dynamic-programming'`), `True`, `None`, a custom `PathOptimizer`, and any future `opt_einsum` string this list doesn't recognize — downgrades to `'greedy'`. The allowlist replaced an earlier denylist that missed the `'dynamic-programming'` alias (the exact same function object as `'dp'`, registered under a second name) plus `'auto-hq'`/`'branch-1'`; a live repro parked 45.75s of free wall time via `optimize='dynamic-programming'` at k=20 before the allowlist closed it | `_resolve_optimize_for_k` in `_einsum.py`; `tests/test_einsum_path_search_billing.py`, `tests/accumulation/test_path_aware_cost.py::test_large_k_auto_fallback_to_greedy` and `::test_large_k_covers_every_opt_einsum_path_alias` (the latter iterates `opt_einsum.paths._PATH_OPTIONS` directly, so a future `opt_einsum` release adding a new exhaustive-search alias fails CI instead of silently reopening the hole) |
 
 An auditor can read this table top-to-bottom and, for each claim, open the named test
 to see exactly what guarantees it. The first two rows are the load-bearing ones: an exact
@@ -845,14 +847,23 @@ The place the cost model is genuinely sensitive is the narrower one where work h
 *inside* the meter for a mispriced amount — which is what every invariant in the table
 above is defending.
 
+**Timing attribution inside a metered call** has three buckets, not two:
+`wall_time_s == flopscope_backend_time_s + flopscope_overhead_time_s +
+residual_wall_time_s`, and `residual_wall_time_s` is defined as `wall − backend −
+overhead` — so `flopscope_overhead_time_s` (flopscope's own dispatch code: wrapper
+preambles, bookkeeping, path search) sits outside *both* billed FLOPs and the
+λ-rated residual `R`. It is meant to be small and bounded (dispatch bookkeeping),
+not a channel a caller can inflate; see the **No free path-search wall time**
+invariant above for the one case where an unbounded pure-Python computation
+(`opt_einsum.contract_path`) used to run inside it.
+
 **NEP 18 dispatch coverage.** A second, narrower boundary gap sits in-process only (the
 graded sandbox has no local `numpy` for a participant to import and mix in). `np.<func>(a,
 b)` where `a` is a `FlopscopeArray` and `b` a plain `ndarray` falls through to NumPy's own
 `__array_function__` protocol whenever `func` is not in
 `FlopscopeArray._ARRAY_FUNCTION_DISPATCH`, and NumPy runs its default implementation
-directly on the raw buffers — bypassing the meter for real, billable work. This only fires
-when a *plain* `ndarray` rides along; the same call with every argument a `FlopscopeArray`
-fails **closed** instead, with a `TypeError` ("no implementation found"). The following are
+directly on the raw buffers, so that work is not counted. The same call with every argument
+a `FlopscopeArray` fails **closed** instead, with a `TypeError` ("no implementation found"). The following are
 explicitly bound so a mixed call routes through the metered implementation the same as an
 all-`FlopscopeArray` call already does:
 
@@ -868,9 +879,7 @@ all-`FlopscopeArray` call already does:
 
 `tests/test_array_function_dispatch_coverage.py` pins this floor — it forces the lazy
 dispatch-map build via `FlopscopeArray._get_array_function_dispatch()` and asserts each of
-the seven above is present. Coverage is a floor, not a completeness guarantee: a `func` not
-in `FlopscopeArray._ARRAY_FUNCTION_DISPATCH` and not in `FlopscopeArray._PASSTHROUGH` still
-falls open on a mixed call.
+the seven above is present. Coverage is a floor, not a completeness guarantee; the bound set is the one the test pins.
 
 ---
 
@@ -1015,7 +1024,12 @@ number of unique (output + contracted) index combinations — equal to `K·M` fo
 single clean contraction, but more general for multi-index or broadcast
 subscripts. A multi-operand einsum (`≥ 3` operands) walks the `opt_einsum`
 optimal binary path and sums per-step costs. Batched/stacked variants of any row
-above multiply the closed form by the batch size.
+above multiply the closed form by the batch size. The path search that picks
+this binary order runs unbilled (see the **No free path-search wall time**
+invariant in [§Non-exploitability](#non-exploitability)), so at `k ≥ 8`
+operands only an allowlisted, linear-time `optimize=` choice runs verbatim —
+every other choice, including every `opt_einsum` alias for an exhaustive or
+superlinear search, is downgraded to `'greedy'` before the search runs.
 
 **Compound linalg** ops are *chains* of matmuls, billed as the sum of their steps
 through the `matmul_cost(m, k, n)` helper — which itself delegates to

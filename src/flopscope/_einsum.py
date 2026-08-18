@@ -292,14 +292,60 @@ def _execute_pairwise(path_info, operands: list):
 _LARGE_K_THRESHOLD = 8
 
 
+# Allowlist, not a denylist. A denylist over a third-party library's alias
+# table cannot stay correct: opt_einsum registers multiple names for the same
+# underlying function (``_PATH_OPTIONS['dp'] is
+# _PATH_OPTIONS['dynamic-programming']``), ships additional aliases
+# (``'auto-hq'``, ``'branch-1'``) a denylist can miss, and may add more in a
+# future release with no signal to us. Every string below dispatches straight
+# to ``opt_einsum.paths.greedy`` (``'eager'`` and ``'opportunistic'`` are
+# literally the same function object as ``'greedy'`` in
+# ``opt_einsum.paths._PATH_OPTIONS``) -- linear in k, not exhaustive -- so
+# they are the only strings cheap enough to honour verbatim once k is large.
+_CHEAP_OPTIMIZE_STRATEGIES = frozenset(
+    {"greedy", "eager", "opportunistic", "random-greedy", "random-greedy-128"}
+)
+
+
 def _resolve_optimize_for_k(optimize, k: int):
-    """Auto-downgrade 'auto' to 'greedy' for k >= 8 to avoid optimal/B&B
-    cold-call latency on large operand counts. Explicit user choices
-    (optimal/branch/dp/etc.) are honored verbatim.
+    """Downgrade any non-allowlisted path search to greedy once k is large.
+
+    The search (``opt_einsum.contract_path``) runs as pure Python inside
+    ``@_counted_wrapper`` and is never routed through ``_call_user_code``,
+    so its wall time books to ``flopscope_overhead_time_s`` -- a free
+    bucket, excluded from both billed FLOPs and the lambda-rated residual.
+    With lambda = 1e11, one free second is worth 36.8% of a 272 GFLOP
+    per-MLP budget, so an explicit ``optimize='optimal'`` at k=10 bought
+    roughly the entire budget for only 2,016 billed FLOPs -- and
+    ``optimize='dynamic-programming'`` at k=20 bought 45.75s of free wall
+    time for 7,443,968 billed FLOPs, because an earlier denylist
+    (``{'auto','optimal','branch-all','branch-2','dp'}``) missed that
+    exact alias.
+
+    The cost model cannot price a search it does not meter, so once
+    k >= _LARGE_K_THRESHOLD only known-cheap choices pass through
+    verbatim: the strings in ``_CHEAP_OPTIMIZE_STRATEGIES`` (``'greedy'``,
+    ``'eager'``, ``'opportunistic'``, ``'random-greedy'``,
+    ``'random-greedy-128'``), ``False`` (no search -- one-shot naive
+    contraction), and an explicit user-supplied path (a ``list``/``tuple``
+    -- also no search, the order is already decided). Everything else --
+    ``'auto'``, ``'auto-hq'``, ``'optimal'``, every ``'branch-*'`` and
+    ``'dp'``/``'dynamic-programming'`` alias, ``True``, ``None``, a custom
+    ``opt_einsum.paths.PathOptimizer`` instance, or any future opt_einsum
+    string this list doesn't know about -- downgrades to ``'greedy'``.
+    Erring toward downgrading is deliberate: over-downgrading an exotic
+    cheap strategy costs a slightly worse contraction path; under-
+    downgrading costs free wall time worth more than a whole budget.
     """
-    if optimize == "auto" and k >= _LARGE_K_THRESHOLD:
-        return "greedy"
-    return optimize
+    if k < _LARGE_K_THRESHOLD:
+        return optimize
+    if optimize is False:
+        return optimize
+    if isinstance(optimize, (list, tuple)):
+        return optimize
+    if isinstance(optimize, str) and optimize in _CHEAP_OPTIMIZE_STRATEGIES:
+        return optimize
+    return "greedy"
 
 
 def _normalize_optimize(optimize):
