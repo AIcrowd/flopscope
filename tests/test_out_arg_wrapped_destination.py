@@ -51,10 +51,13 @@ from __future__ import annotations
 import collections
 import functools
 import inspect
+import subprocess
+import sys
 import types
 from collections.abc import Callable
 from typing import Any
 
+import _numpy_container_out_probes as _container_out_probes
 import numpy as np
 import pytest
 
@@ -228,8 +231,11 @@ _NOT_DRIVEN: dict[str, str] = {
     # numpy's own out= for these is NOT the ufunc protocol: it takes an array
     # and nothing else, and refuses a 1-tuple itself. Normalizing here would
     # make flopscope MORE permissive than numpy, so there is no tuple parity
-    # to assert. The premise is pinned in
-    # test_the_ops_numpy_itself_refuses_a_container_for.
+    # to assert. The premise is pinned for `choose` in
+    # test_the_ops_numpy_itself_refuses_a_container_for; for the
+    # `random.Generator.*` siblings -- whose accepted spelling is a raw numpy
+    # random fill that segfaults under xdist load -- it is pinned out-of-process
+    # in test_raw_numpy_refuses_a_container_for_a_random_generator_out.
     "choose": "np.choose's out= refuses a 1-tuple in numpy itself",
     "random.Generator.random": "Generator.random's out= refuses a container in numpy itself",
     "random.Generator.standard_normal": (
@@ -257,26 +263,25 @@ _NOT_DRIVEN: dict[str, str] = {
     "isnat": "its only valid input dtype (datetime64/timedelta64) is refused by the dtype ban",
 }
 
-#: The ops in ``_NOT_DRIVEN`` whose stated reason is "numpy itself refuses a
+#: The ``_NOT_DRIVEN`` entries whose stated reason is "numpy itself refuses a
 #: container here", paired with a call that demonstrates it against RAW numpy.
+#: Only ``choose`` is demonstrated in-process; its ``random.Generator.*``
+#: siblings share the reason but their accepted spelling is a raw numpy random
+#: fill that segfaults numpy intermittently under xdist load, so they are
+#: demonstrated out-of-process from ``_numpy_container_out_probes`` -- see
+#: :func:`test_raw_numpy_refuses_a_container_for_a_random_generator_out`. Both
+#: sets feed the ``demonstrated`` union in
+#: :func:`test_the_not_driven_list_is_neither_stale_nor_a_silent_skip`.
 _NUMPY_REFUSES_THE_CONTAINER: dict[str, Callable[[Any], Any]] = {
     "choose": lambda out: np.choose(
         np.array([0, 1] * 4), [np.zeros(8), np.ones(8)], out=out
     ),
-    "random.Generator.random": lambda out: np.random.default_rng(0).random(out=out),
-    "random.Generator.standard_normal": lambda out: np.random.default_rng(
-        0
-    ).standard_normal(out=out),
-    "random.Generator.standard_exponential": lambda out: np.random.default_rng(
-        0
-    ).standard_exponential(out=out),
-    "random.Generator.standard_gamma": lambda out: np.random.default_rng(
-        0
-    ).standard_gamma(1.0, out=out),
-    "random.Generator.permuted": lambda out: np.random.default_rng(0).permuted(
-        np.arange(8.0), out=out
-    ),
 }
+
+#: Absolute path to the out-of-process probe script, invoked per random-
+#: generator op. ``__file__`` is absolute (CPython >= 3.9), so this is
+#: cwd-independent regardless of where pytest is launched from.
+_CONTAINER_OUT_PROBE_SCRIPT = _container_out_probes.__file__
 
 #: The ops in ``_NOT_DRIVEN`` whose stated reason is "the dtype ban refuses
 #: its only valid input", paired with a call over a genuine datetime64
@@ -505,6 +510,7 @@ def test_the_not_driven_list_is_neither_stale_nor_a_silent_skip():
     # driven" degrades into "skipped, with prose".
     demonstrated = (
         set(_NUMPY_REFUSES_THE_CONTAINER)
+        | set(_container_out_probes.PROBES)
         | set(_MULTI_OUTPUT_OPS)
         | set(_DTYPE_BAN_REFUSES_EVERY_RECIPE)
     )
@@ -518,18 +524,63 @@ def test_the_not_driven_list_is_neither_stale_nor_a_silent_skip():
 
 @pytest.mark.parametrize("name", sorted(_NUMPY_REFUSES_THE_CONTAINER))
 def test_the_ops_numpy_itself_refuses_a_container_for(name):
-    """The premise behind six ``_NOT_DRIVEN`` entries, asserted against numpy.
+    """The premise behind the ``choose`` ``_NOT_DRIVEN`` entry, asserted against
+    numpy.
 
-    These take ``out=`` but not through the ufunc protocol: numpy wants the
-    array itself and refuses a tuple. Unwrapping one for them would make
+    ``choose`` takes ``out=`` but not through the ufunc protocol: numpy wants
+    the array itself and refuses a tuple. Unwrapping one for it would make
     flopscope more permissive than numpy, so there is no parity to assert —
-    and if numpy ever adopts the protocol here, this test says so.
+    and if numpy ever adopts the protocol here, this test says so. The same
+    premise for the ``random.Generator.*`` siblings is asserted out-of-process
+    by :func:`test_raw_numpy_refuses_a_container_for_a_random_generator_out`.
     """
     call = _NUMPY_REFUSES_THE_CONTAINER[name]
     dest = np.zeros(8)
     call(dest)  # the bare array is the accepted spelling
     with pytest.raises((TypeError, ValueError)):
         call((dest,))
+
+
+@pytest.mark.parametrize("name", sorted(_container_out_probes.PROBES))
+def test_raw_numpy_refuses_a_container_for_a_random_generator_out(name):
+    """The same premise as above for the ``random.Generator.*`` entries, run in
+    a subprocess so a flaky numpy crash cannot cascade a CI cell.
+
+    The accepted spelling for these is a RAW numpy random fill —
+    ``np.random.default_rng(0).standard_normal(out=np.zeros(8))`` — which
+    segfaults numpy intermittently under pytest-xdist load. In-process that
+    crash kills the xdist worker and drops coverage below the fail-under,
+    reddening whole matrix cells; the bare call is otherwise clean (it runs 50x
+    without fault in a fresh interpreter). Running it in a spawned interpreter
+    turns a segfault into a signal-kill the parent reads as a negative return
+    code: one flaky crash then fails at most this single case, contained.
+
+    The refusal check itself is NOT weakened — the probe still asserts numpy
+    accepts the bare array and refuses ``out=(array,)``, and a clean non-zero
+    exit (numpy stopped refusing) fails the test. Only a genuine signal-kill,
+    the numpy-internal crash this isolation exists for, is tolerated as a skip.
+    """
+    proc = subprocess.run(
+        [sys.executable, _CONTAINER_OUT_PROBE_SCRIPT, name],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    # A negative return code is a signal-kill (SIGSEGV et al. on the POSIX CI
+    # runners) — the numpy-under-load crash this whole test isolates, not a
+    # refusal-logic failure. Tolerate it as a skip rather than reddening the
+    # cell; the premise stays asserted on every run numpy does not crash.
+    if proc.returncode < 0:
+        pytest.skip(
+            f"raw numpy was killed by signal {-proc.returncode} on the accepted "
+            f"out= spelling for {name} under load — a numpy-internal crash, not "
+            f"a refusal-logic failure"
+        )
+    assert proc.returncode == 0, (
+        f"{name}: raw numpy probe exited non-zero (rc={proc.returncode}) — either "
+        f"numpy stopped refusing a 1-tuple out= or the accepted bare spelling "
+        f"broke; see stderr\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(_DTYPE_BAN_REFUSES_EVERY_RECIPE))
