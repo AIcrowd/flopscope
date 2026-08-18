@@ -219,25 +219,69 @@ def test_path_cache_distinguishes_on_per_op_symmetries():
 
 
 def test_large_k_auto_fallback_to_greedy():
-    """For k >= 8, downgrade any exhaustive path search to greedy: the search
-    runs unmetered (pure Python, wall time books to the free overhead
+    """For k >= 8, downgrade any non-allowlisted path search to greedy: the
+    search runs unmetered (pure Python, wall time books to the free overhead
     bucket), so honouring an explicit exhaustive choice verbatim let a
     caller buy free wall time (k=10 optimize='optimal' cost ~4.4s free for
-    2,016 billed FLOPs -- 1.02x a 272 GFLOP budget at lambda=1e11)."""
+    2,016 billed FLOPs -- 1.02x a 272 GFLOP budget at lambda=1e11). This is
+    an allowlist, not a denylist -- FIX ROUND 1 found that a denylist over
+    opt_einsum's alias table missed 'dynamic-programming' (the exact same
+    function object as 'dp', just registered under a second name) plus
+    'auto-hq' and 'branch-1'; a live repro parked 45.75s of free wall time
+    via optimize='dynamic-programming' at k=20. Only known-cheap strings,
+    False, and explicit user-supplied paths pass through; everything else,
+    including unrecognized strings and True, downgrades to 'greedy'."""
     from flopscope._einsum import _resolve_optimize_for_k
 
     assert _resolve_optimize_for_k("auto", k=8) == "greedy"
     assert _resolve_optimize_for_k("auto", k=10) == "greedy"
     assert _resolve_optimize_for_k("auto", k=7) == "auto"
-    # Explicit exhaustive-search choices are downgraded too, once k is large.
+    # Explicit exhaustive-search choices are downgraded too, once k is large --
+    # including the alias that slipped past the earlier denylist.
     assert _resolve_optimize_for_k("optimal", k=10) == "greedy"
     assert _resolve_optimize_for_k("optimal", k=7) == "optimal"
     assert _resolve_optimize_for_k("branch-all", k=10) == "greedy"
     assert _resolve_optimize_for_k("branch-2", k=10) == "greedy"
+    assert _resolve_optimize_for_k("branch-1", k=10) == "greedy"
+    assert _resolve_optimize_for_k("auto-hq", k=10) == "greedy"
     assert _resolve_optimize_for_k("dp", k=10) == "greedy"
-    # Non-exhaustive / already-cheap choices and explicit paths pass through.
+    assert _resolve_optimize_for_k("dynamic-programming", k=10) == "greedy"
+    # Cheap/allowlisted choices, False (no search), and explicit paths pass through.
     assert _resolve_optimize_for_k("greedy", k=10) == "greedy"
-    assert _resolve_optimize_for_k("branch", k=10) == "branch"
+    assert _resolve_optimize_for_k("eager", k=10) == "eager"
+    assert _resolve_optimize_for_k("opportunistic", k=10) == "opportunistic"
+    assert _resolve_optimize_for_k("random-greedy", k=10) == "random-greedy"
+    assert _resolve_optimize_for_k("random-greedy-128", k=10) == "random-greedy-128"
+    assert _resolve_optimize_for_k(False, k=10) is False
+    path = [(0, 1), (0, 1)]
+    assert _resolve_optimize_for_k(path, k=10) == path
+    # An unrecognized string is NOT a known-cheap strategy, so -- unlike the
+    # old denylist, which passed anything it didn't recognize straight
+    # through -- it downgrades too. Erring toward downgrading is deliberate:
+    # under-downgrading costs free wall time worth more than a whole budget.
+    assert _resolve_optimize_for_k("branch", k=10) == "greedy"
+    assert _resolve_optimize_for_k(True, k=10) == "greedy"
+
+
+def test_large_k_covers_every_opt_einsum_path_alias():
+    """Every strategy opt_einsum currently knows about must resolve to a
+    cheap, allowlisted choice once k is large -- derived from opt_einsum's
+    own alias table (``opt_einsum.paths._PATH_OPTIONS``) rather than a
+    hardcoded name list, so a future opt_einsum release adding a new
+    exhaustive-search alias cannot silently reopen this hole the way
+    'dynamic-programming' did against the first (denylist) fix."""
+    from opt_einsum.paths import _PATH_OPTIONS
+
+    from flopscope._einsum import _CHEAP_OPTIMIZE_STRATEGIES, _resolve_optimize_for_k
+
+    assert _PATH_OPTIONS, "opt_einsum reports no registered path strategies"
+    for name in _PATH_OPTIONS:
+        resolved = _resolve_optimize_for_k(name, k=10)
+        assert resolved in _CHEAP_OPTIMIZE_STRATEGIES, (
+            f"opt_einsum path strategy {name!r} resolved to {resolved!r} at "
+            f"k=10, which is not in the cheap allowlist "
+            f"{sorted(_CHEAP_OPTIMIZE_STRATEGIES)}"
+        )
 
 
 def test_large_k_einsum_completes_within_one_second():
