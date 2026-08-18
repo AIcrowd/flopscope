@@ -435,13 +435,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Return fractional and integral parts element-wise. Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "Return fractional and integral parts element-wise. Writes TWO output buffers (fractional part + integral part) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
     },
     "frexp": {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Decompose x into mantissa and exponent element-wise. Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "Decompose x into mantissa and exponent element-wise. Writes TWO output buffers (mantissa + exponent) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
     },
     "isclose": {
         "category": "counted_unary",
@@ -765,7 +765,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_binary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Element-wise (quotient, remainder) tuple. Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "Element-wise (quotient, remainder) tuple. Writes TWO output buffers (quotient + remainder) per call, so flop_cost = 2 * numel(output), not numel(output) -- bills the same total as running floor_divide and mod separately. Complex-illegal: numpy raises TypeError on complex input.",
     },
     "vecdot": {
         "category": "counted_binary",

@@ -66,7 +66,10 @@ def test_frexp_natural_destinations_are_price_neutral():
     natural = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float32), np.empty(N, np.int32)))
     )
-    assert bare == natural == N  # was 10,000 vs 20,000
+    # was 10,000 vs 20,000 (single-output pricing); frexp writes TWO output
+    # buffers per call (mantissa + exponent), so the honest floor is nout=2
+    # times numel -- see tests/test_multi_output_ufunc_cost.py.
+    assert bare == natural == 2 * N
 
 
 def test_frexp_natural_destinations_price_neutral_at_float64():
@@ -75,7 +78,7 @@ def test_frexp_natural_destinations_price_neutral_at_float64():
     natural = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float64), np.empty(N, np.int32)))
     )
-    assert bare == natural == 2 * N
+    assert bare == natural == 4 * N
 
 
 def test_frexp_wider_mantissa_still_widens_the_rate():
@@ -83,7 +86,7 @@ def test_frexp_wider_mantissa_still_widens_the_rate():
     wide = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float64), np.empty(N, np.int32)))
     )
-    assert wide == 2 * N  # float64 rate, not the float32 loop's
+    assert wide == 4 * N  # float64 rate, not the float32 loop's
 
 
 def test_frexp_wider_exponent_still_widens_the_rate():
@@ -92,7 +95,7 @@ def test_frexp_wider_exponent_still_widens_the_rate():
     wide = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float32), np.empty(N, np.int64)))
     )
-    assert wide == 2 * N
+    assert wide == 4 * N
 
 
 def test_frexp_narrower_exponent_never_discounts():
@@ -101,14 +104,14 @@ def test_frexp_narrower_exponent_never_discounts():
     narrow = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float32), np.empty(N, np.int16)))
     )
-    assert narrow == _billed(lambda: fnp.frexp(a)) == N
+    assert narrow == _billed(lambda: fnp.frexp(a)) == 2 * N
 
 
 def test_frexp_partial_out_slots_price_like_the_slots_given():
     a = _f32()
-    assert _billed(lambda: fnp.frexp(a, out=_out(None, np.empty(N, np.int32)))) == N
+    assert _billed(lambda: fnp.frexp(a, out=_out(None, np.empty(N, np.int32)))) == 2 * N
     assert (
-        _billed(lambda: fnp.frexp(a, out=_out(np.empty(N, np.float64), None))) == 2 * N
+        _billed(lambda: fnp.frexp(a, out=_out(np.empty(N, np.float64), None))) == 4 * N
     )
 
 
@@ -124,7 +127,7 @@ def test_frexp_int32_exponent_floor_survives_a_narrow_mantissa():
     natural = _billed(
         lambda: fnp.frexp(a, out=_out(np.empty(N, np.float16), np.empty(N, np.int32)))
     )
-    assert bare == natural == N
+    assert bare == natural == 2 * N
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +141,9 @@ def test_modf_natural_destinations_are_price_neutral():
     natural = _billed(
         lambda: fnp.modf(a, out=_out(np.empty(N, np.float32), np.empty(N, np.float32)))
     )
-    assert bare == natural == N
+    # modf writes TWO output buffers (fractional + integral part) per call --
+    # nout=2 times numel, same reasoning as frexp above.
+    assert bare == natural == 2 * N
 
 
 def test_modf_wider_destination_still_widens_the_rate():
@@ -146,7 +151,7 @@ def test_modf_wider_destination_still_widens_the_rate():
     wide = _billed(
         lambda: fnp.modf(a, out=_out(np.empty(N, np.float32), np.empty(N, np.float64)))
     )
-    assert wide == 2 * N
+    assert wide == 4 * N
 
 
 def test_divmod_natural_destinations_are_price_neutral():

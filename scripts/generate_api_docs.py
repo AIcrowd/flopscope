@@ -497,6 +497,21 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "vdot": ("2*n - 1", r"$2n - 1$"),
     "vecdot": ("n", "$n$"),
     "kron": ("m1*m2 * n1*n2", r"$m_1 m_2 \cdot n_1 n_2$"),
+    # Multi-output ufuncs (nout=2): every output is a full written buffer,
+    # so the family's usual numel(output) is doubled -- see the "every byte
+    # written is metered" discussion in docs/reference/cost-model.md.
+    "divmod": (
+        "2 * numel(output)",
+        r"$2 \cdot \text{numel}(\text{output})$",
+    ),
+    "modf": (
+        "2 * numel(output)",
+        r"$2 \cdot \text{numel}(\text{output})$",
+    ),
+    "frexp": (
+        "2 * numel(output)",
+        r"$2 \cdot \text{numel}(\text{output})$",
+    ),
     "clip": (
         "max(n_bounds, 1) * numel(output)",
         r"$\max(n_{\text{bounds}}, 1) \cdot \text{numel}(\text{output})$",

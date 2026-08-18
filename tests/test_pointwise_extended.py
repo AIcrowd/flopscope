@@ -22,7 +22,9 @@ def test_modf():
     x = numpy.array([1.5, 2.7, -0.3])
     with BudgetContext(flop_budget=10**6) as budget:
         frac, intpart = ops.modf(x)
-        assert budget.flops_used == x.size
+        # modf writes two output buffers (fractional + integral part) per
+        # call, so it bills nout=2 * numel(x).
+        assert budget.flops_used == 2 * x.size
     assert numpy.allclose(frac + intpart, x)
 
 
@@ -30,7 +32,9 @@ def test_frexp():
     x = numpy.array([1.0, 4.0, 0.5])
     with BudgetContext(flop_budget=10**6) as budget:
         mant, exp = ops.frexp(x)
-        assert budget.flops_used == x.size
+        # frexp writes two output buffers (mantissa + exponent) per call, so
+        # it bills nout=2 * numel(x).
+        assert budget.flops_used == 2 * x.size
     assert numpy.allclose(mant * (2**exp), x)
 
 
@@ -44,7 +48,9 @@ def test_divmod():
     y = numpy.array([3.0, 3.0, 3.0])
     with BudgetContext(flop_budget=10**6) as budget:
         quot, rem = ops.divmod(x, y)
-        assert budget.flops_used == x.size
+        # divmod writes a quotient AND a remainder buffer per call, so it
+        # bills nout=2 * numel(output).
+        assert budget.flops_used == 2 * x.size
     assert numpy.allclose(quot * y + rem, x)
 
 

@@ -649,7 +649,9 @@ class TestMultiOutputOps:
         ref = numpy.modf(x)
         assert numpy.allclose(result[0], ref[0])
         assert numpy.allclose(result[1], ref[1])
-        assert budget.flops_used == 3
+        # modf writes two output buffers (fractional + integral part) per
+        # call, so it bills nout=2 * numel(x) = 2 * 3, not 3.
+        assert budget.flops_used == 6
 
     def test_frexp_returns_tuple(self):
         x = numpy.array([2.0, 4.0, 8.0])
@@ -1007,7 +1009,9 @@ class TestBinaryMultiScalar:
         with BudgetContext(flop_budget=10**6) as budget:
             result = divmod(x, 3.0)
         assert isinstance(result, tuple)
-        assert budget.flops_used == 2
+        # divmod writes a quotient AND a remainder buffer per call, so it
+        # bills nout=2 * numel(x) = 2 * 2, not 2.
+        assert budget.flops_used == 4
 
 
 # ---------------------------------------------------------------------------
