@@ -53,6 +53,14 @@ def test_ufunc_aliases_bill_identically_to_canonical():
     # 16.0 transcendental weight: 100 * 2.0 * 16.0 = 3200. The parity
     # invariant (ca == cc) is what matters -- the absolute just tracks the
     # dtype-aware billing migration.
+    #
+    # divmod is the one entry that is NOT a true 1:1 alias: unlike
+    # acos/arccos (literally the same ufunc object), np.divmod is a distinct
+    # two-output ufunc (nin=2, nout=2) from np.floor_divide (nin=2, nout=1).
+    # _UFUNC_ALIAS_RENAMES only borrows floor_divide's WEIGHT for divmod (a
+    # conservative floor); divmod's flop_cost is nout=2 * numel(output), so
+    # it must bill exactly 2x its canonical twin's flop_cost, not the same
+    # value -- see tests/test_multi_output_ufunc_cost.py.
     with np.errstate(all="ignore"):  # arccosh(<1) etc. NaN harmlessly
         for alias, canon in ALIAS_CANONICAL:
             fa, fc = getattr(fnp, alias), getattr(fnp, canon)
@@ -60,4 +68,7 @@ def test_ufunc_aliases_bill_identically_to_canonical():
                 ca, cc = _cost(fa, v, v), _cost(fc, v, v)
             else:
                 ca, cc = _cost(fa, v), _cost(fc, v)
-            assert ca == cc == 3200, f"{alias}={ca} vs {canon}={cc} (want 3200)"
+            if alias == "divmod":
+                assert ca == 2 * cc == 6400, f"divmod={ca} vs floor_divide={cc}"
+            else:
+                assert ca == cc == 3200, f"{alias}={ca} vs {canon}={cc} (want 3200)"

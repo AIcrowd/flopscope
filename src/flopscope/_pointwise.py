@@ -1142,7 +1142,18 @@ def _counted_unary_multi(np_func, op_name: str):
         out = _normalize_out(out, op_name, nout=nout)
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
-        cost = pointwise_cost(x.shape, symmetry=symmetry)
+        # A multi-output ufunc writes ``nout`` full output buffers per call
+        # (modf's fractional AND integral part; frexp's mantissa AND
+        # exponent) -- under the "every byte written is metered" doctrine
+        # each buffer is a separate charged write, so the cell count scales
+        # by nout. Billing only one output priced modf/frexp at a flat
+        # single-output rate (half their honest cost against a same-shape
+        # two-output call). This is the cell-count (flop_cost) axis; it is
+        # applied before billing_dtypes is resolved below and is therefore
+        # orthogonal to the out= dtype-rate axis (see
+        # multi_store_billing_dtypes) -- supplying out= does not multiply
+        # this again.
+        cost = nout * pointwise_cost(x.shape, symmetry=symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool
@@ -1435,7 +1446,11 @@ def _counted_binary_multi(np_func, op_name: str):
                 ((x, x_sym), (y, y_sym)),
                 output_shape,
             )
-        cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        # divmod writes BOTH a quotient buffer and a remainder buffer per
+        # call -- nout full output writes, not one. See the matching note in
+        # _counted_unary_multi for the "every byte written is metered"
+        # reasoning and why this is independent of the out= dtype-rate axis.
+        cost = nout * pointwise_cost(output_shape, symmetry=out_symmetry)
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool

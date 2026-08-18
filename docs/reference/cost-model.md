@@ -261,11 +261,19 @@ tier factor.
 
 ### NumPy 2.x ufunc aliases
 
-NumPy 2.x introduced `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`,
-`atan2`, `pow`, and `divmod` as canonical aliases for their `arc*` /
-`power` / `floor_divide` counterparts (identical ufunc objects).  flopscope
-resolves these via `_UFUNC_ALIAS_RENAMES` in `_weights.py` so each alias
-charges the same weight as its canonical twin.  
+NumPy 2.x introduced `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`, `atan2`, and
+`pow` as canonical aliases for their `arc*` / `power` counterparts — literally the same
+ufunc object (`np.acos is np.arccos`). flopscope resolves these via
+`_UFUNC_ALIAS_RENAMES` in `_weights.py` so each alias charges the same **weight** as its
+canonical twin.
+
+`divmod` rides the same rename map but is not a true 1:1 alias: `np.divmod` is a distinct
+two-output ufunc (`nin=2, nout=2`) from `np.floor_divide` (`nin=2, nout=1`) —
+`np.divmod is np.floor_divide` is `False`. `_UFUNC_ALIAS_RENAMES` only borrows
+`floor_divide`'s **weight** (16.0) for `divmod` as a conservative floor; `divmod`'s
+`flop_cost` is its own `nout=2 × numel(output)` (see
+[Elementwise](#elementwise-pointwise-unary-and-binary)), so it bills 2× `floor_divide`'s
+total, not the same total.
 
 ---
 
@@ -505,13 +513,16 @@ Worked consequences:
   letting NumPy allocate them costs. A **multi-output** op can have an output whose dtype
   belongs to the op signature rather than to its arithmetic: `frexp`'s second output is
   always `int32`, whatever precision the mantissa runs at, so `frexp(a_f32, out=(m_f32,
-  e_i32))` bills what `frexp(a_f32)` bills (`10000` for a 10,000-element call), not the
-  float64 rate that `result_type(float32, float32, int32)` would have promoted to. An
+  e_i32))` bills what `frexp(a_f32)` bills (`20000` for a 10,000-element call — `frexp` is
+  `nout=2`, so its own `flop_cost` is already `2 × numel(output)`, see
+  [Elementwise](#elementwise-pointwise-unary-and-binary)), not the float64 rate that
+  `result_type(float32, float32, int32)` would have promoted to. An
   **index reduction**'s destination holds positions, not values: `argmin`/`argmax`/
   `nanargmin`/`nanargmax` return `intp` regardless of the input's precision, so
   `argmin(a_f32, out=intp_arr)` bills what `argmin(a_f32)` bills (`9999`). Widening past
   NumPy's own choice still widens the rate in both families — a float64 mantissa or an
-  int64 exponent on `frexp` bills `20000`. Index reductions additionally constrain `out=`
+  int64 exponent on `frexp` bills `40000` (double the natural `20000`, from the rate, not
+  from `nout` a second time). Index reductions additionally constrain `out=`
   by **kind**: NumPy accepts any integer or boolean buffer at any width and refuses every
   float and complex one, and that refusal is decided before the reduction runs, so it
   costs `0`.
@@ -862,15 +873,31 @@ only representatives are listed and the full set is a filter in
 
 ### Elementwise (pointwise unary and binary)
 
-**Family rule**: `flop_cost = numel(output)`.
+**Family rule**: `flop_cost = numel(output)` for a single-output op. A **multi-output
+ufunc** (`divmod`, `frexp`, `modf` — the only NumPy ufuncs with `nout > 1` flopscope
+counts) writes `nout` full output buffers per call, so its `flop_cost = nout ×
+numel(output)`. This follows directly from the cost model's own "[every byte written is
+metered](#the-unifying-philosophy--every-byte-written-is-metered)" principle: `divmod`
+writes a quotient array **and** a remainder array, `frexp` writes a mantissa array **and**
+an exponent array, `modf` writes a fractional-part array **and** an integral-part array —
+each is a separate charged write, not a shared one. Billing only the first output priced
+these ops at a flat fraction of their honest cost (`divmod` at exactly half of
+`floor_divide` + `mod` combined; `modf`/`frexp` at the same `flop_cost` as a one-output
+unary of the same shape, despite writing two arrays). `out=` does not multiply this a
+second time — the `nout` scaling lives in `flop_cost` (the cell-count axis), which is
+independent of the `out=` destination-dtype-rate axis described in [Which dtype prices a
+call](#which-dtype-prices-a-call); supplying `out=` widens the rate exactly as it would for
+any other op, never the cell count.
 
 **Baseline tier (weight 1.0)**: arithmetic (+, −, ×, ÷, √), rounding
 (ceil, floor, trunc, rint, around/round), sign/abs, logical (not, and, or,
 xor), bitwise (and, or, xor, invert, left_shift, right_shift), comparisons
 (equal, not_equal, greater, less, greater_equal, less_equal), copies
-(positive, negative, conj/conjugate, fabs, modf, frexp, spacing,
+(positive, negative, conj/conjugate, fabs, spacing,
 nan_to_num, isclose, isneginf, isposinf, deg2rad/degrees, rad2deg/radians,
-ldexp, nextafter, copysign, heaviside, signbit), and their NumPy aliases.
+ldexp, nextafter, copysign, heaviside, signbit), and their NumPy aliases. `modf` and
+`frexp` are also weight 1.0, but — being `nout=2` — bill `2 × numel(output)`, not
+`numel(output)`; see the family rule above.
 (`real`/`imag` are **not** here — component extraction is free; see
 [View / free](#view--free-weight-00).)
 
@@ -884,6 +911,10 @@ logaddexp2, floor_divide, mod/remainder, fmod, float_power. NumPy's selected
 `float_power` loop has no real signature narrower than `dd->d` and no complex signature
 narrower than `DD->D`, so float32 operands bill as float64 and complex64 operands bill
 as complex128. This comes from NumPy's loop table, not a hand-maintained family mapping.
+`divmod` sits in this tier too, at `floor_divide`'s weight (see [NumPy 2.x ufunc
+aliases](#numpy-2x-ufunc-aliases)) — but being `nout=2`, its `flop_cost` is `2 ×
+numel(output)`, so a bare `divmod` call bills exactly what running `floor_divide` and
+`mod` separately would bill, combined.
 
 **Iterative integer tier (weight 16.0)**: `gcd`, `lcm`. These sit at the weight-16 tier
 without being transcendental functions, and the reason is the same one the tier exists

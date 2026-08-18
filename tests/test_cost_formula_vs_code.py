@@ -108,8 +108,6 @@ _UNARY_NUMEL = [
     "tanh",
     "trunc",
     "angle",
-    "frexp",
-    "modf",
     "real_if_close",
     "bitwise_invert",
     "bitwise_not",
@@ -154,6 +152,18 @@ def test_unary_numel(name, we):
     # (real input).
     expected = 200 if name in ("real_if_close", "angle") else 100
     assert cost == expected, f"{name}: expected {expected}, got {cost}"
+
+
+@pytest.mark.parametrize("name", ["frexp", "modf"])
+def test_two_output_unary_numel_bills_nout_times(name, we):
+    """frexp/modf write TWO full output buffers (mantissa+exponent,
+    fractional+integral part) per call, unlike every other op in
+    _UNARY_NUMEL. flop_cost = nout * numel(input) = 2 * 100, not 100 --
+    see tests/test_multi_output_ufunc_cost.py for the dedicated coverage."""
+    fn = getattr(we, name)
+    inp = _unary_input(name)
+    cost = _cost_of(fn, inp)
+    assert cost == 200, f"{name}: expected 200 (nout=2 * numel 100), got {cost}"
 
 
 def test_isclose_numel(we):
