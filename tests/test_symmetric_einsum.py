@@ -78,3 +78,55 @@ def test_total_never_exceeds_k_times_dense_baseline():
     cost = fps.einsum_accumulation_cost("ijk,abc->ic", A_sym, A_sym)
     upper_bound = cost.num_terms * cost.dense_baseline
     assert cost.total <= upper_bound
+
+
+def test_accumulation_cost_ignores_uninitialized_proxy_buffer(monkeypatch):
+    """einsum_accumulation_cost must not validate its internal np.empty proxy.
+
+    Regression for a spurious ``SymmetryError`` on a *direct*
+    ``einsum_accumulation_cost`` call: ``_build_symmetric_proxy`` allocates an
+    uninitialized ``np.empty`` buffer purely for its shape+symmetry metadata,
+    but used to wrap it through the *validating* public ``SymmetricTensor``
+    constructor. When the reused heap page held leftover non-zero floats
+    (e.g. after any prior (4,4,4) float allocation in the same xdist worker),
+    validation of the non-symmetric garbage raised ``SymmetryError``.
+
+    Here we deterministically force ``np.empty`` to hand back non-symmetric
+    data and assert the cost query still succeeds and is unchanged.
+    """
+    import numpy as np
+
+    import flopscope as fps
+    from flopscope._accumulation import _cache
+
+    A_sym = fps.as_symmetric(np.zeros((4, 4, 4)), symmetry=(0, 1, 2))
+    subs = "ijk,abc->ic"
+
+    # Baseline on clean memory.
+    _cache._accumulation_cache.cache_clear()
+    expected = fps.einsum_accumulation_cost(subs, A_sym, A_sym)
+
+    # Poison np.empty so the internal proxy buffer is non-symmetric garbage.
+    real_empty = np.empty
+    garbage = np.random.default_rng(0).standard_normal((4, 4, 4)).copy()
+    guard = {"filling": False}
+
+    def dirty_empty(shape, *args, **kwargs):
+        buf = real_empty(shape, *args, **kwargs)
+        if not guard["filling"]:
+            arr = np.asarray(buf)
+            if arr.shape == (4, 4, 4) and arr.dtype == np.float64:
+                guard["filling"] = True
+                arr[...] = garbage
+                guard["filling"] = False
+        return buf
+
+    monkeypatch.setattr(np, "empty", dirty_empty)
+    # Force a cache miss so the proxy is rebuilt under the poisoned allocator.
+    _cache._accumulation_cache.cache_clear()
+
+    got = fps.einsum_accumulation_cost(subs, A_sym, A_sym)  # must not raise
+
+    assert got.total == expected.total
+    assert got.num_terms == expected.num_terms
+    assert got.dense_baseline == expected.dense_baseline

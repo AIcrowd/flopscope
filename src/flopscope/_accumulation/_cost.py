@@ -30,19 +30,25 @@ def _build_symmetric_proxy(shape, sym):
     reduction_accumulation_cost only inspects shape + symmetry on its input;
     a numpy.empty(shape) wrapped in a SymmetricTensor (if sym is non-None) is
     sufficient and avoids materializing actual values.  We bypass validation
-    (as_symmetric would raise for uninitialized data) since we only need the
-    symmetry metadata, not correct tensor values.  Used by per-step
-    pre-reduction detection to compute Tier-1 reduction cost without owning
-    the operand data itself.
+    (the public SymmetricTensor constructor would raise for uninitialized
+    data) since we only need the symmetry metadata, not correct tensor
+    values.  ``wrap_with_trusted_symmetry`` is the sanctioned no-validate
+    path (its code object is in ``_TRUSTED_SYMMETRY_WRAPPER_CODES``); using
+    the public constructor here instead makes the bypass conditional on a
+    ``@_counted_wrapper`` frame being on the stack, so a *direct*
+    ``einsum_accumulation_cost`` call validated the ``np.empty`` buffer and
+    raised a spurious ``SymmetryError`` whenever the reused heap page held
+    leftover non-zero floats.  Used by per-step pre-reduction detection to
+    compute Tier-1 reduction cost without owning the operand data itself.
     """
     import numpy as np
 
     arr = np.empty(shape)
     if sym is None:
         return arr
-    from flopscope._symmetric import SymmetricTensor
+    from flopscope._symmetry_utils import wrap_with_trusted_symmetry
 
-    return SymmetricTensor(arr, symmetry=sym)
+    return wrap_with_trusted_symmetry(arr, sym)
 
 
 def compute_step_cost_from_joint_group(
