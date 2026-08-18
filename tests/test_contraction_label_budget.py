@@ -383,7 +383,15 @@ def test_tensordot_accumulation_for_billing_guard_stays_none_when_symmetry_scale
     fallback's dense path is in play, with the contracted axis chosen so the
     S_3 symmetry fully survives into the output and actually scales the
     dense cost down (unique elements < dense output size).
+
+    ``a_vals`` is genuinely Reynolds-symmetrized over axes (0, 1, 2) (plain
+    numpy, uncounted): ``wrap_with_symmetry`` calls the public, validating
+    ``SymmetricTensor`` constructor here (this call isn't nested inside any
+    counted flopscope op), so unlike before, the data must actually satisfy
+    the claimed group, not just carry its label.
     """
+    import itertools
+
     from flopscope._perm_group import SymmetryGroup
     from flopscope._symmetry_utils import wrap_with_symmetry
 
@@ -392,6 +400,14 @@ def test_tensordot_accumulation_for_billing_guard_stays_none_when_symmetry_scale
     shape = (3, 3, 3) + (1,) * 47 + (4,)
     rng = np.random.default_rng(0)
     a_vals = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+    tail_axes = list(range(3, a_vals.ndim))
+    a_vals = (
+        sum(
+            a_vals.transpose(list(perm) + tail_axes)
+            for perm in itertools.permutations(range(3))
+        )
+        / 6
+    )
     a = wrap_with_symmetry(a_vals, group)
     b = rng.standard_normal((4, 5)) + 1j * rng.standard_normal((4, 5))
     assert a.ndim + b.ndim > 52

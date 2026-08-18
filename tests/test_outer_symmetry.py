@@ -87,9 +87,16 @@ class TestOuterSymmetryPropagation:
 
     def test_outer_symmetric_out_with_wrong_symmetry_fails(self):
         v = np.array([1.0, 2.0, 3.0])
+        # Trivial (identity-only) group: dimensionally valid for a (3, 3)
+        # buffer (unlike a 3-axis group, which SymmetricTensor's now-
+        # validating constructor refuses outright as shape-incompatible),
+        # and zeros trivially satisfy it, so construction succeeds -- but it
+        # is still the WRONG symmetry for an outer product's natural full
+        # exchange symmetry, so fnp.outer's own out= mismatch check is what
+        # this test wants to exercise.
         out = flops.SymmetricTensor(
             np.zeros((v.size, v.size)),
-            symmetry=flops.SymmetryGroup.from_generators([[0, 1, 2]], axes=(0, 1, 2)),
+            symmetry=flops.SymmetryGroup.from_generators([[0, 1]], axes=(0, 1)),
         )
 
         with BudgetContext(flop_budget=10**8, quiet=True):

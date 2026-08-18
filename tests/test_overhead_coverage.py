@@ -100,6 +100,13 @@ def test_every_wrapper_with_budget_deduct_is_decorated():
                 # nothing but call this; wrapping it too would double-bracket
                 # every call. Same shape as _einsum_routed_binary above.
                 "_counted_predicate",
+                # Shared symmetry-tag validate-and-charge formula
+                # (src/flopscope/_symmetric.py), called by the already-
+                # decorated `as_symmetric` AND by `SymmetricTensor.__new__`
+                # (a constructor, never itself a @_counted_wrapper target) --
+                # must not be wrapped a second time, same shape as
+                # _einsum_routed_binary above.
+                "_validate_and_charge_symmetry",
             ):
                 continue
             if not _has_counted_wrapper_decorator(fn):
