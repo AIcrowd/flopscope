@@ -450,6 +450,24 @@ class FlopscopeArray(_np.ndarray):
         for name in ("nonzero",):
             _bind(name, name)
 
+        # ----- Mutation / conditional-select -----
+        # ``np.<func>(FlopscopeArray, plain_ndarray)`` falls through to
+        # NumPy's default __array_function__ implementation whenever the
+        # plain-ndarray operand isn't excluded and ``func`` isn't in this
+        # map -- billing 0 on real work. All-flopscope calls fail closed
+        # (TypeError) instead, which is why tests that only ever pass
+        # flopscope arrays never caught this. Bind these four so a mixed
+        # call routes through the metered ``fnp.*`` implementation exactly
+        # like the all-flopscope call already does.
+        for name in ("copyto", "putmask", "place", "select"):
+            _bind(name, name)
+
+        # ----- Statistics -----
+        # Same mixed-operand fail-open hole as above: np.cov(flopscope, raw)
+        # and np.corrcoef(flopscope, raw) billed 0 before this bind.
+        for name in ("cov", "corrcoef"):
+            _bind(name, name)
+
         # ----- Free / structural (asarray excluded) -----
         for name in (
             "where",
@@ -558,6 +576,10 @@ class FlopscopeArray(_np.ndarray):
             "multi_dot",
             "matrix_power",
             "slogdet",
+            # Mixed-operand fail-open fix (see "Mutation / conditional-select"
+            # above): np.linalg.tensorsolve(flopscope, raw) billed 0 before
+            # this bind.
+            "tensorsolve",
         ):
             _bind(f"linalg.{name}", f"linalg.{name}")
 

@@ -857,6 +857,30 @@ not a channel a caller can inflate; see the **No free path-search wall time**
 invariant above for the one case where an unbounded pure-Python computation
 (`opt_einsum.contract_path`) used to run inside it.
 
+**NEP 18 dispatch coverage.** A second, narrower boundary gap sits in-process only (the
+graded sandbox has no local `numpy` for a participant to import and mix in). `np.<func>(a,
+b)` where `a` is a `FlopscopeArray` and `b` a plain `ndarray` falls through to NumPy's own
+`__array_function__` protocol whenever `func` is not in
+`FlopscopeArray._ARRAY_FUNCTION_DISPATCH`, and NumPy runs its default implementation
+directly on the raw buffers, so that work is not counted. The same call with every argument
+a `FlopscopeArray` fails **closed** instead, with a `TypeError` ("no implementation found"). The following are
+explicitly bound so a mixed call routes through the metered implementation the same as an
+all-`FlopscopeArray` call already does:
+
+| `np.<func>` | routes to |
+|---|---|
+| `copyto` | `fnp.copyto` |
+| `putmask` | `fnp.putmask` |
+| `place` | `fnp.place` |
+| `select` | `fnp.select` |
+| `cov` | `fnp.cov` |
+| `corrcoef` | `fnp.corrcoef` |
+| `linalg.tensorsolve` | `fnp.linalg.tensorsolve` |
+
+`tests/test_array_function_dispatch_coverage.py` pins this floor — it forces the lazy
+dispatch-map build via `FlopscopeArray._get_array_function_dispatch()` and asserts each of
+the seven above is present. Coverage is a floor, not a completeness guarantee; the bound set is the one the test pins.
+
 ---
 
 ## Cost by family
