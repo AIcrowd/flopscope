@@ -219,15 +219,24 @@ def test_path_cache_distinguishes_on_per_op_symmetries():
 
 
 def test_large_k_auto_fallback_to_greedy():
-    """For k >= 8 with optimize='auto', resolve to greedy to avoid optimal/B&B
-    cold-call latency blowup."""
+    """For k >= 8, downgrade any exhaustive path search to greedy: the search
+    runs unmetered (pure Python, wall time books to the free overhead
+    bucket), so honouring an explicit exhaustive choice verbatim let a
+    caller buy free wall time (k=10 optimize='optimal' cost ~4.4s free for
+    2,016 billed FLOPs -- 1.02x a 272 GFLOP budget at lambda=1e11)."""
     from flopscope._einsum import _resolve_optimize_for_k
 
     assert _resolve_optimize_for_k("auto", k=8) == "greedy"
     assert _resolve_optimize_for_k("auto", k=10) == "greedy"
     assert _resolve_optimize_for_k("auto", k=7) == "auto"
-    # Explicit user choice always honored.
-    assert _resolve_optimize_for_k("optimal", k=10) == "optimal"
+    # Explicit exhaustive-search choices are downgraded too, once k is large.
+    assert _resolve_optimize_for_k("optimal", k=10) == "greedy"
+    assert _resolve_optimize_for_k("optimal", k=7) == "optimal"
+    assert _resolve_optimize_for_k("branch-all", k=10) == "greedy"
+    assert _resolve_optimize_for_k("branch-2", k=10) == "greedy"
+    assert _resolve_optimize_for_k("dp", k=10) == "greedy"
+    # Non-exhaustive / already-cheap choices and explicit paths pass through.
+    assert _resolve_optimize_for_k("greedy", k=10) == "greedy"
     assert _resolve_optimize_for_k("branch", k=10) == "branch"
 
 

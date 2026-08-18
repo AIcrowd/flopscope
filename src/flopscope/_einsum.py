@@ -292,12 +292,27 @@ def _execute_pairwise(path_info, operands: list):
 _LARGE_K_THRESHOLD = 8
 
 
+_EXHAUSTIVE_OPTIMIZE_KINDS = ("auto", "optimal", "branch-all", "branch-2", "dp")
+
+
 def _resolve_optimize_for_k(optimize, k: int):
-    """Auto-downgrade 'auto' to 'greedy' for k >= 8 to avoid optimal/B&B
-    cold-call latency on large operand counts. Explicit user choices
-    (optimal/branch/dp/etc.) are honored verbatim.
+    """Downgrade any exhaustive path search to greedy once k is large.
+
+    The search (``opt_einsum.contract_path``) runs as pure Python inside
+    ``@_counted_wrapper`` and is never routed through ``_call_user_code``,
+    so its wall time books to ``flopscope_overhead_time_s`` -- a free
+    bucket. With lambda = 1e11, one free second is worth 36.8% of a
+    272 GFLOP per-MLP budget, so an explicit ``optimize='optimal'`` at
+    k=10 bought roughly the entire budget for only 2,016 billed FLOPs.
+    Honouring the caller's exhaustive-search choice verbatim was the
+    hole: the cost model cannot price a search it does not meter, so any
+    of 'auto'/'optimal'/'branch-all'/'branch-2'/'dp' gets downgraded to
+    'greedy' once k >= _LARGE_K_THRESHOLD. Explicit user-supplied paths
+    (lists/tuples) and 'greedy'/False are left untouched.
     """
-    if optimize == "auto" and k >= _LARGE_K_THRESHOLD:
+    if k < _LARGE_K_THRESHOLD:
+        return optimize
+    if optimize in _EXHAUSTIVE_OPTIMIZE_KINDS:
         return "greedy"
     return optimize
 
