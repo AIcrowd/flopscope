@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys as _sys
+
 import numpy as np
 
 from flopscope._budget import _counted_wrapper
@@ -16,6 +18,8 @@ from flopscope._symmetry_utils import (
     remap_group_axes,
     restrict_group_to_axes,
     validate_symmetry_group,
+    wrap_with_symmetry,
+    wrap_with_trusted_symmetry,
 )
 from flopscope._validation import require_budget
 from flopscope._write_epoch import epoch_of
@@ -177,8 +181,11 @@ def symmetrize(
         projected = _project_core(array, group)
         # D1: internal validation runs but is NOT billed — build the tensor
         # directly rather than calling the (later-counted) as_symmetric.
+        # Uses the trusted, non-revalidating constructor so this validated-
+        # but-uncharged pass isn't repeated (and charged for) by
+        # SymmetricTensor's public constructor.
         validate_symmetry_groups(projected, [group])
-        return SymmetricTensor(projected, symmetry=group)
+        return SymmetricTensor._construct_trusted(projected, symmetry=group)
 
 
 def validate_symmetry_groups(data: np.ndarray, groups: list) -> None:
@@ -213,6 +220,36 @@ def validate_symmetry_groups(data: np.ndarray, groups: list) -> None:
             if not np.allclose(data, transposed, atol=1e-6, rtol=1e-5):
                 max_dev = float(np.max(np.abs(data - transposed)))
                 raise SymmetryError(axes=tuple(axes), max_deviation=max_dev)
+
+
+def _validate_and_charge_symmetry(
+    array: np.ndarray,
+    group: SymmetryGroup,
+    *,
+    op_name: str = "as_symmetric",
+) -> None:
+    """Validate *array* against *group* and bill the same rate as
+    :func:`as_symmetric` (``k * (7n - 1)``, ``k`` = non-identity generators).
+
+    A symmetry tag is a billing claim about buffer CONTENTS: any path that
+    mints a tag over caller-supplied data must pay to have that claim
+    checked, using this SAME check. Shared by :func:`as_symmetric` and
+    :class:`SymmetricTensor`'s public constructor so the two paths can never
+    disagree about what counts as symmetric. Raises :class:`SymmetryError`
+    (via :func:`validate_symmetry_groups`) if the claim is false.
+    """
+    n = array.size
+    k = _nonidentity_generator_count(group)
+    cost = max(k * (7 * n - 1), 1)
+    budget = require_budget()
+    with budget.deduct(
+        op_name,
+        flop_cost=cost,
+        subscripts=None,
+        shapes=(array.shape,),
+        dtypes=(array.dtype,),
+    ):
+        validate_symmetry_groups(array, [group])
 
 
 def _resolve_symmetry_argument(
@@ -595,7 +632,28 @@ def _merge_symmetry_groups(groups) -> SymmetryGroup | None:
 def _wrap_tensor_result(data: np.ndarray, symmetry: SymmetryGroup | None):
     if symmetry is None:
         return _asplainflopscope(data)
-    return SymmetricTensor(data, symmetry=symmetry)
+    # symmetry here is DERIVED (propagated from an already-validated tensor
+    # via slicing/transpose/etc.), not a caller-supplied claim over fresh
+    # data, so it goes through the trusted, non-revalidating constructor --
+    # matching the rule that views must not be charged.
+    return SymmetricTensor._construct_trusted(data, symmetry=symmetry)
+
+
+# `wrap_with_symmetry`/`wrap_with_trusted_symmetry` (flopscope._symmetry_utils)
+# are themselves the trusted attachment path for symmetry DERIVED by an array
+# transform (reshape/ravel/squeeze/split/... in _array_ops.py) rather than a
+# fresh, caller-supplied claim: `wrap_with_symmetry` already runs its own
+# structural (ndim/axes) check before calling the constructor below, and
+# `wrap_with_trusted_symmetry` is documented as being for call sites where
+# the symmetry "was generated or revalidated by trusted constructor logic"
+# already. Re-running the heavier data-content check here would be pure
+# duplicated cost for those callers, not a gap they introduce. Identified by
+# code-object identity of the IMMEDIATE caller (they call the constructor
+# directly, no intermediate frame) -- the same technique `_called_from_wrapper`
+# (flopscope._budget) uses for the deeper, op-nesting case below.
+_TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset(
+    {wrap_with_symmetry.__code__, wrap_with_trusted_symmetry.__code__}
+)
 
 
 class SymmetricTensor(FlopscopeArray):
@@ -616,6 +674,64 @@ class SymmetricTensor(FlopscopeArray):
         *,
         symmetry: SymmetryGroup,
     ) -> SymmetricTensor:
+        # A tag is a billing claim about buffer CONTENTS. Minting one here
+        # without validating granted the 1/|G| discount over arbitrary
+        # data, bypassing the validate-and-charge path `as_symmetric`
+        # already goes through. Route through that SAME validator (rather
+        # than a second one that could disagree) so a bare, top-level
+        # `SymmetricTensor(data, symmetry=...)` pays -- and is checked --
+        # exactly like `as_symmetric`.
+        #
+        # Skip validation only when called from INSIDE another flopscope
+        # op's `@_counted_wrapper`-decorated frame: many call sites
+        # elsewhere in this package (pointwise, einsum, solvers,
+        # random.symmetric, accumulation -- all outside this file) tag a
+        # result whose symmetry they have already established mathematically
+        # (e.g. exp() of a symmetric input actually is symmetric; a cost-
+        # estimation proxy over uninitialized memory needs the metadata, not
+        # a real check -- see `_accumulation/_cost.py`'s
+        # `_build_symmetric_proxy`, which documents exactly this bypass).
+        # `_called_from_wrapper` (shared with `FlopscopeArray`'s protocol
+        # dispatch, in flopscope._budget) detects that nesting; it is False
+        # for ordinary top-level construction, which is this defect's
+        # exploit path, so that path still always validates and pays. The
+        # immediate-caller check below covers the sibling case one level
+        # up: `wrap_with_symmetry`/`wrap_with_trusted_symmetry` themselves
+        # calling this constructor directly, not nested inside a wrapper.
+        from flopscope._budget import _called_from_wrapper
+
+        array = np.asarray(input_array)
+        trusted = (
+            _sys._getframe(1).f_code in _TRUSTED_SYMMETRY_WRAPPER_CODES
+            or _called_from_wrapper()
+        )
+        if not trusted:
+            _validate_and_charge_symmetry(array, symmetry, op_name="as_symmetric")
+        obj = array.view(cls)
+        obj._symmetry = symmetry
+        obj._symmetry_inferred = False
+        return obj
+
+    @classmethod
+    def _construct_trusted(
+        cls,
+        input_array: np.ndarray,
+        *,
+        symmetry: SymmetryGroup | None,
+    ) -> SymmetricTensor:
+        """Wrap data as a SymmetricTensor without validating or charging.
+
+        Internal-only bypass around the public, validating ``__new__``
+        above. Used exclusively by code within this module that has
+        already established the symmetry claim itself: ``as_symmetric``
+        and ``symmetrize``'s Reynolds-projected output (both validated
+        inline just above their own call sites, per decision D1 for the
+        latter) and ``_wrap_tensor_result``, which propagates symmetry
+        DERIVED from an already-validated tensor via slicing/transpose --
+        never a fresh, caller-supplied claim. Do not call this from
+        outside the module: it is exactly the bypass the public
+        constructor exists to close.
+        """
         obj = np.asarray(input_array).view(cls)
         obj._symmetry = symmetry
         obj._symmetry_inferred = False
@@ -883,16 +999,8 @@ def as_symmetric(
     group = _resolve_symmetry_argument(data, symmetry=symmetry)
     assert group is not None  # required=True raises if symmetry is None
     array = np.asarray(data)
-    n = array.size
-    k = _nonidentity_generator_count(group)
-    cost = max(k * (7 * n - 1), 1)
-    budget = require_budget()
-    with budget.deduct(
-        "as_symmetric",
-        flop_cost=cost,
-        subscripts=None,
-        shapes=(array.shape,),
-        dtypes=(array.dtype,),
-    ):
-        validate_symmetry_groups(array, [group])
-        return SymmetricTensor(array, symmetry=group)
+    _validate_and_charge_symmetry(array, group, op_name="as_symmetric")
+    # Already validated and charged above -- construct via the trusted,
+    # non-revalidating path so this doesn't pay (or re-check) twice through
+    # SymmetricTensor's public, validating constructor.
+    return SymmetricTensor._construct_trusted(array, symmetry=group)
