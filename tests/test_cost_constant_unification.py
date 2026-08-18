@@ -1063,36 +1063,50 @@ def test_gradient_nonuniform_edge_order_2_no_underbill():
         assert e2 > e1
 
 
-def test_nanmean_matches_mean():
-    # spec: flop_cost(nanmean) == flop_cost(mean) for all shapes/axes
+def test_nanmean_matches_mean_plus_isnan_pass():
+    # #177.4: flop_cost(nanmean) == flop_cost(mean) + numel(input) (the extra
+    # isnan pass nanmean runs and mean does not), for all shapes/axes.
     a = fnp.asarray(np.random.rand(8, 5))
-    assert cost(lambda: fnp.nanmean(a)) == cost(lambda: fnp.mean(a))
-    assert cost(lambda: fnp.nanmean(a, axis=1)) == cost(lambda: fnp.mean(a, axis=1))
+    assert cost(lambda: fnp.nanmean(a)) == cost(lambda: fnp.mean(a)) + a.size
+    assert (
+        cost(lambda: fnp.nanmean(a, axis=1))
+        == cost(lambda: fnp.mean(a, axis=1)) + a.size
+    )
     a2 = fnp.asarray(np.random.rand(1000, 2))
-    assert cost(lambda: fnp.nanmean(a2, axis=1)) == cost(lambda: fnp.mean(a2, axis=1))
+    assert (
+        cost(lambda: fnp.nanmean(a2, axis=1))
+        == cost(lambda: fnp.mean(a2, axis=1)) + a2.size
+    )
 
 
-def test_nanmean_full_reduction_100():
-    # (10,10) full reduction: mean charges sum_cost(99) + 1 divide = 100
+def test_nanmean_full_reduction_200():
+    # (10,10) full reduction: mean charges sum_cost(99) + 1 divide = 100,
+    # plus the isnan pass over the 100-element input: 100 + 100 = 200.
     a = fnp.asarray(np.random.rand(10, 10))
-    assert cost(lambda: fnp.nanmean(a)) == 100  # was 99
+    assert cost(lambda: fnp.nanmean(a)) == 200  # was 99, then 100 pre-#177.4
 
 
-def test_nanmedian_matches_median():
-    # spec: flop_cost(nanmedian) == flop_cost(median) for all shapes/axes
+def test_nanmedian_matches_median_plus_isnan_pass():
+    # #177.4: flop_cost(nanmedian) == flop_cost(median) + numel(input) (the
+    # extra isnan pass nanmedian runs and median does not), for all shapes/axes.
     a = fnp.asarray(np.random.rand(8, 5))
-    assert cost(lambda: fnp.nanmedian(a)) == cost(lambda: fnp.median(a))
-    assert cost(lambda: fnp.nanmedian(a, axis=1)) == cost(lambda: fnp.median(a, axis=1))
+    assert cost(lambda: fnp.nanmedian(a)) == cost(lambda: fnp.median(a)) + a.size
+    assert (
+        cost(lambda: fnp.nanmedian(a, axis=1))
+        == cost(lambda: fnp.median(a, axis=1)) + a.size
+    )
     a2 = fnp.asarray(np.random.rand(1000, 2))
-    assert cost(lambda: fnp.nanmedian(a2, axis=1)) == cost(
-        lambda: fnp.median(a2, axis=1)
+    assert (
+        cost(lambda: fnp.nanmedian(a2, axis=1))
+        == cost(lambda: fnp.median(a2, axis=1)) + a2.size
     )
 
 
 def test_nanmedian_tier2_full_reduction():
-    # (10,10) full reduction: Tier-2 = 1 orbit × 100 = 100 (was 99)
+    # (10,10) full reduction: Tier-2 = 1 orbit × 100 = 100, plus the isnan
+    # pass over the 100-element input: 100 + 100 = 200.
     a = fnp.asarray(np.random.rand(10, 10))
-    assert cost(lambda: fnp.nanmedian(a)) == 100  # was 99
+    assert cost(lambda: fnp.nanmedian(a)) == 200  # was 99, then 100 pre-#177.4
 
 
 def test_stats_gap_fixes_packaged_weight_unity():
@@ -1119,10 +1133,16 @@ def test_stats_gap_fixes_packaged_weight_unity():
 
 
 def test_nanpercentile_nanquantile_positional_q_and_cost():
+    # #177.4: the nan* forms cost their plain sibling's Tier-2 cost plus a
+    # full numel(input) isnan pass the plain form does not run.
     a = fnp.asarray(np.random.rand(500, 2))
-    assert cost(lambda: fnp.nanpercentile(a, 50)) == cost(lambda: fnp.percentile(a, 50))
-    assert cost(lambda: fnp.nanquantile(a, 0.5, axis=1)) == cost(
-        lambda: fnp.quantile(a, 0.5, axis=1)
+    assert (
+        cost(lambda: fnp.nanpercentile(a, 50))
+        == cost(lambda: fnp.percentile(a, 50)) + a.size
+    )
+    assert (
+        cost(lambda: fnp.nanquantile(a, 0.5, axis=1))
+        == cost(lambda: fnp.quantile(a, 0.5, axis=1)) + a.size
     )
     with f.BudgetContext(flop_budget=10**9, quiet=True):
         r = np.asarray(fnp.nanpercentile(a, 50, axis=1))

@@ -46,6 +46,13 @@ def _f32():
     return np.random.default_rng(0).standard_normal(N).astype(np.float32)
 
 
+def _expected_bare_cost(op_name: str) -> int:
+    # nanargmin/nanargmax run the #177.4 isnan pass in addition to the
+    # N-1 scan their plain argmin/argmax sibling runs.
+    base = N - 1
+    return base + N if op_name.startswith("nan") else base
+
+
 @pytest.mark.parametrize("op_name", OPS)
 def test_refused_destination_costs_zero(op_name):
     a = _f32()
@@ -62,14 +69,17 @@ def test_index_destination_prices_exactly_like_the_bare_call(op_name):
     fs_func = getattr(fnp, op_name)
     bare = _billed(lambda: fs_func(a))
     with_out = _billed(lambda: fs_func(a, out=np.empty((), np.intp)))
-    assert bare == with_out == N - 1  # was 9,999 vs 19,998
+    expected = _expected_bare_cost(op_name)
+    assert bare == with_out == expected  # was 9,999 vs 19,998
 
 
 @pytest.mark.parametrize("op_name", OPS)
 def test_narrow_index_destination_does_not_discount_either(op_name):
     a = _f32()
     fs_func = getattr(fnp, op_name)
-    assert _billed(lambda: fs_func(a, out=np.empty((), np.int8))) == N - 1
+    assert _billed(lambda: fs_func(a, out=np.empty((), np.int8))) == (
+        _expected_bare_cost(op_name)
+    )
 
 
 @pytest.mark.parametrize("op_name", OPS)

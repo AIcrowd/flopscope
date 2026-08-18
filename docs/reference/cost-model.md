@@ -995,6 +995,10 @@ Ops that do more than one accumulation pass carry the extra passes in
 `flop_cost` (never in the weight column): the variance family makes four
 passes (mean-sum, centre, square, variance-sum), `ptp` makes two (max + min)
 plus the per-output subtract, and `mean`/`average` add the per-output divide.
+Every `nan*` variant in this family — including `nanmedian`, `nanpercentile`,
+and `nanquantile` — adds a further `numel(input)` on top of its plain
+sibling's formula, billed at the input's own rate, for the `isnan` test pass
+the `nan*` form runs before reducing that its plain sibling does not.
 
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
@@ -1008,7 +1012,7 @@ plus the per-output subtract, and `mean`/`average` add the per-output divide.
 | `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
-| `nanmean` | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides; billed identically to mean |
+| `nanmean` | 2 × numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides + the `nan*` isnan pass (numel) |
 
 **Complex dtypes**: sum-type reductions (`sum`, `mean`, `cumsum`, `nansum`, …) bill factor
 2 (complex add); product reductions (`prod`, `cumprod`, `nanprod`) factor 6 (complex
