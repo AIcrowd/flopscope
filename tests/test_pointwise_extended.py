@@ -165,7 +165,9 @@ def test_gradient():
     f = numpy.array([1.0, 2.0, 4.0, 7.0])
     with BudgetContext(flop_budget=10**6) as budget:
         result = ops.gradient(f)
-        assert budget.flops_used == f.size
+        # one output value per element (interior + both boundaries), ~2 FLOPs
+        # each -> 2 * f.size
+        assert budget.flops_used == 2 * f.size
     assert isinstance(result, numpy.ndarray)
 
 

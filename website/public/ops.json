@@ -2954,7 +2954,7 @@
       "free": false,
       "module": "numpy",
       "name": "gradient",
-      "notes": "Gradient using central differences. Cost is summed over the axes `axis=` actually selects (every axis when axis is None), 2*S*max(L-2,0)//L per axis with S = f.size and L = f.shape[axis], floored at 1 FLOP -- so a single-axis gradient costs about 1/ndim of the all-axes gradient and the per-axis costs sum back to it. A 1-D coordinate-array vararg adds a surcharge on its own axis: 3*(L-1) when its diffs are bit-exactly uniform, otherwise 3*S*(L-2)//L + 10*(L-2) + 3*(L-1) + 4*S//L.",
+      "notes": "Gradient using central differences. Cost is summed over the axes `axis=` actually selects (every axis when axis is None), 2*S per axis with S = f.size -- np.gradient emits one output value per input element along each axis (interior differences and both boundary hyperplanes) at ~2 FLOPs each, so the cost is independent of axis length. A single-axis gradient is exactly 1/ndim of the all-axes gradient and the per-axis costs sum back to it. A 1-D coordinate-array vararg adds a surcharge on its own axis: 3*(L-1) when its diffs are bit-exactly uniform, otherwise 3*S*(L-2)//L + 10*(L-2) + 3*(L-1) + 4*S//L with L = f.shape[axis].",
       "numpy_ref": "np.gradient",
       "slug": "gradient",
       "status": "supported",

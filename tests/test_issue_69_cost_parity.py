@@ -116,35 +116,38 @@ def _setup_gradient_2d(rng):
     return (f,), {}
 
 
-def _oracle_gradient_2d(f):
-    # Mirror numpy.gradient: for each axis, central diff (interior) +
-    # boundary forward/backward diff + divide by 2 (interior).
-    for axis in (0, 1):
-        slc1 = [slice(None)] * 2
-        slc2 = [slice(None)] * 2
-        slc_mid = [slice(None)] * 2
-        slc1[axis] = slice(2, None)
-        slc2[axis] = slice(None, -2)
-        slc_mid[axis] = slice(1, -1)
-        fnp.subtract(f[tuple(slc1)], f[tuple(slc2)])
-        fnp.divide(f[tuple(slc_mid)], 2.0)
+def _oracle_gradient(f):
+    # Honest mirror of numpy.gradient (edge_order=1): for EACH axis it emits one
+    # output value per input element, so the oracle must count both the interior
+    # AND the two boundary hyperplanes -- omitting the boundaries (as an earlier
+    # oracle did) is exactly the under-count that issue #188 fixed. Per axis:
+    #   interior: central difference = subtract(f[2:], f[:-2]) + divide(.../2)
+    #             over the L-2 interior planes;
+    #   each edge: one-sided difference = subtract(two planes) + divide over the
+    #              single boundary plane.
+    # That is 2*S*(L-2)/L + 4*S/L = 2*S FLOPs per axis (S = f.size).
+    ndim = f.ndim
+    for axis in range(ndim):
+        interior_hi = [slice(None)] * ndim
+        interior_lo = [slice(None)] * ndim
+        interior_mid = [slice(None)] * ndim
+        interior_hi[axis] = slice(2, None)
+        interior_lo[axis] = slice(None, -2)
+        interior_mid[axis] = slice(1, -1)
+        fnp.subtract(f[tuple(interior_hi)], f[tuple(interior_lo)])
+        fnp.divide(f[tuple(interior_mid)], 2.0)
+        for near, far in ((slice(1, 2), slice(0, 1)), (slice(-1, None), slice(-2, -1))):
+            edge_near = [slice(None)] * ndim
+            edge_far = [slice(None)] * ndim
+            edge_near[axis] = near
+            edge_far[axis] = far
+            fnp.subtract(f[tuple(edge_near)], f[tuple(edge_far)])
+            fnp.divide(f[tuple(edge_near)], 1.0)
 
 
 def _setup_gradient_3d(rng):
     f = fnp.asarray(rng.random((20, 20, 20)))
     return (f,), {}
-
-
-def _oracle_gradient_3d(f):
-    for axis in range(3):
-        slc1 = [slice(None)] * 3
-        slc2 = [slice(None)] * 3
-        slc_mid = [slice(None)] * 3
-        slc1[axis] = slice(2, None)
-        slc2[axis] = slice(None, -2)
-        slc_mid[axis] = slice(1, -1)
-        fnp.subtract(f[tuple(slc1)], f[tuple(slc2)])
-        fnp.divide(f[tuple(slc_mid)], 2.0)
 
 
 CASES.extend(
@@ -153,14 +156,14 @@ CASES.extend(
             name="gradient_2d",
             setup=_setup_gradient_2d,
             wrapper=fnp.gradient,
-            oracle=_oracle_gradient_2d,
+            oracle=_oracle_gradient,
             tolerance=0.05,
         ),
         CostParityCase(
             name="gradient_3d",
             setup=_setup_gradient_3d,
             wrapper=fnp.gradient,
-            oracle=_oracle_gradient_3d,
+            oracle=_oracle_gradient,
             tolerance=0.05,
         ),
     ]

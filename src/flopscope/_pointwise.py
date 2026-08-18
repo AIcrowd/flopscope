@@ -6094,11 +6094,13 @@ def gradient(
 
     Base cost (no coord arrays, or uniform scalar spacing), summed over the
     axes ``axis=`` actually selects (every axis when ``axis`` is None):
-      sum over requested axes of 2 * f.size * max(shape[ax]-2, 0) // shape[ax]
+      sum over requested axes of 2 * f.size
 
-    Each axis contributes only its own central-difference pass, so a
-    single-axis gradient costs roughly 1/ndim of the all-axes gradient and
-    the per-axis costs add back up to it exactly.
+    np.gradient emits one output value per input element along each
+    differentiated axis (interior central differences AND both boundary
+    hyperplanes) at ~2 FLOPs each, so every axis costs 2 * f.size regardless
+    of its length. A single-axis gradient is thus exactly 1/ndim of the
+    all-axes gradient and the per-axis costs add back up to it exactly.
 
     Spacing surcharge per coord-array axis (1-D array length == shape[ax]):
       - If coord diffs are bit-exactly uniform (e.g. np.arange): +3*(L-1)
@@ -6132,14 +6134,17 @@ def gradient(
         # REQUESTED axis, so the base cost sums over ``axes`` -- not over
         # every axis of ``f``. Summing over range(f.ndim) charged a
         # single-axis gradient the full n-dimensional price (an ndim-fold
-        # over-bill). Each axis's term is floored independently, exactly as
-        # in the all-axes sum, so the per-axis bills still add up to the
-        # all-axes bill.
+        # over-bill).
+        #
+        # Each axis produces one output value per input element -- interior
+        # AND both boundary hyperplanes -- at ~2 FLOPs each, so an axis of
+        # length L costs 2*(L-2) interior + 4 boundary = 2*L per line, times
+        # S/L lines = 2*S, independent of L. Billing only the interior term
+        # (2*S*(L-2)//L) dropped the two boundaries -- a 4*S//L undercount
+        # that became TOTAL at L=2, where gradient along that axis was billed
+        # a flat 2 FLOPs for ~2*S honest work. Charge the honest 2*S per axis.
         base = _builtins.max(
-            _builtins.sum(
-                2 * f.size * _builtins.max(f.shape[ax] - 2, 0) // f.shape[ax]
-                for ax in axes
-            ),
+            _builtins.sum(2 * f.size for _ax in axes),
             1,
         )
 
@@ -6186,7 +6191,7 @@ attach_docstring(
     gradient,
     _np.gradient,
     "counted_custom",
-    "uniform: sum over requested axes of 2*S*(L-2)/L; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
+    "uniform: sum over requested axes of 2*S; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
 )
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 

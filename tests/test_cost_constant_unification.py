@@ -816,36 +816,41 @@ def test_correlate_scalar():
 
 def test_gradient_spacing_surcharge_arange():
     # np.arange(100.) passes the bit-exact uniformity test → only diff+equal+all-reduce
-    # surcharge = 3*(L-1) = 3*99 = 297; base = 196; total = 493
+    # surcharge = 3*(L-1) = 3*99 = 297 (UNCHANGED); base = 2*S = 2*100 = 200; total = 497
     f = fnp.asarray(np.linspace(0, 1, 100) ** 2)
     x = fnp.asarray(np.arange(100.0))
-    assert cost(lambda: fnp.gradient(f, x)) == 196 + 297
+    assert cost(lambda: fnp.gradient(f, x)) == 200 + 297
 
 
 def test_gradient_spacing_surcharge_nonuniform():
-    # non-uniform float spacing: full surcharge
+    # non-uniform float spacing: full surcharge (UNCHANGED)
     # 1-D L=100, S=100: 3*100*98//100 + 10*98 + 3*99 + 4*100//100
-    #                  = 294 + 980 + 297 + 4 = 1575; total = 196 + 1575 = 1771
+    #                  = 294 + 980 + 297 + 4 = 1575; base = 2*S = 200; total = 1775
     rng = np.random.default_rng(0)
     f = fnp.asarray(rng.random(100))
     x = fnp.asarray(np.sort(rng.random(100)))
-    assert cost(lambda: fnp.gradient(f, x)) == 1771
+    assert cost(lambda: fnp.gradient(f, x)) == 200 + 1575
 
 
 def test_gradient_uniform_scalar_unchanged():
-    # uniform scalar spacing (no coord array): no surcharge; base unchanged
+    # uniform scalar spacing (no coord array): no surcharge; base = 2*S = 2*100 = 200
     f = fnp.asarray(np.linspace(0, 1, 100) ** 2)
-    assert cost(lambda: fnp.gradient(f)) == 196
-    assert cost(lambda: fnp.gradient(f, 0.5)) == 196
+    assert cost(lambda: fnp.gradient(f)) == 200
+    assert cost(lambda: fnp.gradient(f, 0.5)) == 200
 
 
 # ---- gradient: cost follows the axes actually differentiated (issue #188) ----
-# np.gradient runs one independent central-difference pass per requested axis,
-# so `axis=` must scale the bill. The base cost used to sum over range(f.ndim)
-# regardless of `axis`, charging a single-axis gradient the full n-dimensional
-# price -- a 3x over-bill at rank 3, 4x at rank 4, growing with rank.
+# np.gradient emits one output value per input element along each differentiated
+# axis (interior central differences AND both boundary hyperplanes) at ~2 FLOPs
+# each, so every requested axis costs a flat 2*S (S = f.size) regardless of its
+# length. Two bugs are pinned here:
+#   1. The base used to sum over range(f.ndim) regardless of `axis=`, charging a
+#      single-axis gradient the full n-dimensional price (3x at rank 3, growing).
+#   2. An interior-only term (2*S*(L-2)//L) dropped the two boundaries -- a
+#      4*S//L undercount that became TOTAL at L=2, billing a flat floor for a
+#      size-scaling amount of real work. Both are fixed by the flat 2*S per axis.
 
-_GRADIENT_SHAPES = [(200,), (40, 50), (12, 9, 7), (6, 5, 4, 7)]
+_GRADIENT_SHAPES = [(200,), (40, 50), (12, 9, 7), (6, 5, 4, 7), (4, 5, 3, 6, 2)]
 _GRADIENT_DTYPES = ["float64", "float32", "int32", "complex64", "complex128"]
 
 
@@ -856,30 +861,33 @@ def test_gradient_per_axis_costs_sum_to_all_axes(shape, dtype):
     a = fnp.asarray(np.random.default_rng(0).random(shape).astype(dtype))
     all_axes = cost(lambda: fnp.gradient(a))
     per_axis = [cost(lambda k=k: fnp.gradient(a, axis=k)) for k in range(len(shape))]
+    # EXACT split, no floor slack: the per-axis costs sum to the all-axes cost.
     assert sum(per_axis) == all_axes
-    # every single-axis gradient is a strict fraction of the all-axes one
-    if len(shape) > 1:
-        assert all(0 < c < all_axes for c in per_axis)
+    # every axis costs the same flat 2*S (independent of axis length), so a
+    # single-axis gradient is exactly 1/ndim of the all-axes gradient.
+    assert len(set(per_axis)) == 1
+    assert per_axis[0] * len(shape) == all_axes
 
 
 def test_gradient_single_axis_exact_costs_rank3():
-    # S = 60*70*80 = 336000; per axis 2*S*(L-2)//L
+    # S = 60*70*80 = 336000; every axis bills a flat 2*S = 672000
     a = fnp.asarray(np.random.default_rng(0).random((60, 70, 80)))
-    assert cost(lambda: fnp.gradient(a, axis=0)) == 649_600
-    assert cost(lambda: fnp.gradient(a, axis=1)) == 652_800
-    assert cost(lambda: fnp.gradient(a, axis=2)) == 655_200
-    # the all-axes total is deliberately UNCHANGED by the per-axis split
-    assert cost(lambda: fnp.gradient(a)) == 1_957_600
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 672_000
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 672_000
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 672_000
+    # all-axes is 3 * 2*S -- HIGHER than the old interior-only 1,957,600, which
+    # under-billed by dropping the boundary hyperplanes.
+    assert cost(lambda: fnp.gradient(a)) == 2_016_000
 
 
 def test_gradient_single_axis_exact_costs_rank4():
-    # S = 20*25*30*35 = 525000; per axis 2*S*(L-2)//L
+    # S = 20*25*30*35 = 525000; every axis bills a flat 2*S = 1050000
     a = fnp.asarray(np.random.default_rng(0).random((20, 25, 30, 35)))
-    assert cost(lambda: fnp.gradient(a, axis=0)) == 945_000
-    assert cost(lambda: fnp.gradient(a, axis=1)) == 966_000
-    assert cost(lambda: fnp.gradient(a, axis=2)) == 980_000
-    assert cost(lambda: fnp.gradient(a, axis=3)) == 990_000
-    assert cost(lambda: fnp.gradient(a)) == 3_881_000
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=3)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a)) == 4_200_000
 
 
 def test_gradient_axis_spellings_agree():
@@ -931,15 +939,24 @@ def test_gradient_uniform_coord_array_surcharge_follows_its_own_axis():
     assert surcharges == [3 * (L - 1) for L in (30, 40, 50)]
 
 
-def test_gradient_zero_interior_axis_pays_the_one_flop_minimum():
-    # An axis of length 2 has no interior points, so its central-difference
-    # term is 0. The pre-existing max(..., 1) floor still charges 1 FLOP for a
-    # real call, so per-axis bills exceed the all-axes bill by exactly one
-    # FLOP per zero-interior axis. This is the floor, not an axis mis-split.
-    a = fnp.asarray(np.random.default_rng(0).random((2, 10)))
-    assert cost(lambda: fnp.gradient(a, axis=0)) == 1
-    assert cost(lambda: fnp.gradient(a, axis=1)) == 32
-    assert cost(lambda: fnp.gradient(a)) == 32
+def test_gradient_length_2_axis_bills_honest_2s_not_a_bare_floor():
+    # REGRESSION GUARD for the launch-blocking under-bill: a length-2 axis has
+    # no INTERIOR points, so an interior-only term (2*S*(L-2)//L) collapses to 0
+    # and the call would be billed the bare max(..., 1) floor -- a flat handful
+    # of FLOPs for ~2*S honest work, a size-scaling under-bill remotely reachable
+    # via the registry. gradient still emits one output per element along that
+    # axis (both boundaries), so it must bill the honest 2*S. This assertion
+    # FAILS if anyone reverts to the interior-only term.
+    N = 1000
+    a = fnp.asarray(np.random.default_rng(0).random((2, N)))
+    S = 2 * N
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 2 * S  # 4000, NOT a floor
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 2 * S
+    # exact split holds with NO per-zero-interior-axis slack: 2 axes * 2*S
+    assert cost(lambda: fnp.gradient(a)) == 2 * (2 * S)
+    # the under-bill is size-scaling: doubling N doubles the axis-0 bill
+    b = fnp.asarray(np.random.default_rng(0).random((2, 2 * N)))
+    assert cost(lambda: fnp.gradient(b, axis=0)) == 2 * (2 * 2 * N)
 
 
 def test_gradient_invalid_axis_raises_numpy_error_without_charging():

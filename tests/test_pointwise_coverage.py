@@ -1076,7 +1076,7 @@ class TestAdditionalCustomOps:
         x = numpy.array([1.0, 2.0, 4.0, 7.0])
         with BudgetContext(flop_budget=10**6) as budget:
             result = gradient(x)
-        assert budget.flops_used == 4
+        assert budget.flops_used == 2 * x.size  # 2*S: one output/elem, both ends
 
     def test_gradient_from_list(self):
         with BudgetContext(flop_budget=10**6):
