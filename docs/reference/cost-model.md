@@ -125,7 +125,7 @@ This tier covers four families, each detailed in its own section below:
   non-sequential memory access, unlike a materializing copy's sequential write (see
   [Copy and gather](#copy-and-gather)).
 - **Random reorder** — `random.permutation`, `random.shuffle`, `random.choice`, and the
-  `Generator`/`RandomState` `.choice` / `.permutation` / `.permuted` / `.shuffle`
+  `Generator`/`RandomState` `.choice` / `.permutation` / `.shuffle` (plus `Generator.permuted`)
   methods (see [Random](#random-module-level-generator-randomstate)). Note
   `random.sample` is *not* in this tier — despite the name it is numpy's alias for
   `random_sample`, a plain uniform draw.
@@ -199,7 +199,7 @@ but nothing is written into it:
    `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `view`,
    `real`/`imag` (component extraction), `split`, `hsplit`, `vsplit`,
    `array_split`, `unstack`, `diagonal` (the 2-D view path — see
-   [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
+   [Copy-and-gather](#copy-and-gather) for the
    1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
    `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
    (`ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`,
@@ -1155,8 +1155,16 @@ All ops use **weight 1.0** with all shape constants in `flop_cost`.  Per-matrix
 cost is multiplied by the batch dimension product for stacked inputs.  Zero-dim
 matrices charge 0.
 
-**Complex dtypes**: the dense linalg family bills `complex_factor = 4` — a complex
-factorization does roughly `4×` the real arithmetic of its real counterpart.
+**Complex dtypes**: most of the dense linalg family bills `complex_factor = 4` — a
+complex factorization does roughly `4×` the real arithmetic of its real counterpart —
+and `linalg.matrix_power` and `linalg.multi_dot` bill this flat `4` as well. The
+exceptions are the ops that mirror a bare `fnp.*` twin and take *its* complex factor
+instead of this dense rule: `linalg.outer` bills factor 6 like `outer`; `linalg.matmul`,
+`linalg.tensordot`, and `linalg.vecdot` bill the same **exact** per-call contraction
+factor as `matmul`/`tensordot`/`vecdot`; `linalg.trace` bills 2 like `trace` (a diagonal
+sum, not a factorization); and `linalg.cross` bills 4.7 like `cross`. (Where such a row
+still carries `complex_factor = 4.0` in the registry it is inert metadata — the
+delegation or the op-specific factor applies instead.)
 
 | Op | flop_cost (per matrix) | basis | source |
 |---|---|---|---|
@@ -1180,7 +1188,7 @@ factorization does roughly `4×` the real arithmetic of its real counterpart.
 | `linalg.lstsq` | `6ab² + 20b³ + matmul\_cost(k,m,c) + k·c + matmul\_cost(n,k,c)`, `k=min(m,n)`, `c=#rhs cols` | DERIVED: thin SVD (with vectors) + U^T b + divide by s + reconstruction | `_solvers.py:lstsq_cost` |
 | `linalg.cross` | `3 × numel(output)` (delegates to `fnp.cross`) | DERIVED | `_aliases.py` |
 | `linalg.multi_dot` | optimal chain matmul cost; each step uses `matmul_cost(m,k,n)` = `2mkn − mn` | DERIVED | `_compound.py:multi_dot_cost` |
-| `linalg.outer`, `linalg.tensordot`, `linalg.vecdot`, `linalg.matmul`, `linalg.matrix_power` | delegates to `fnp.*` | DERIVED | `_compound.py`, `_aliases.py` |
+| `linalg.outer`, `linalg.tensordot`, `linalg.vecdot`, `linalg.matmul` | delegates to `fnp.*` (inherits the bare op's cost *and* complex factor — see the complex-dtype note above) | DERIVED | `_compound.py`, `_aliases.py` |
 | `linalg.diagonal`, `linalg.matrix_transpose` | 0 (view) | DECLARED free | `_aliases.py` |
 
 ---
@@ -1275,6 +1283,7 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 | `polyfit` | `m×deg` (Vandermonde build) `+ lstsq_cost(m, deg+1, ncols)` (`ncols = y.shape[1]` for 2-D `y`, else 1) | DERIVED: builds an `(m, deg+1)` Vandermonde matrix and solves it via `lstsq` (SVD least-squares) — prices the identical solve `linalg.lstsq` charges for the same shape, rather than a cheaper standalone normal-equations estimate; the SVD factorization is shared across `ncols` RHS columns, so cost grows sublinearly in `ncols`, not linearly | `_polynomial.py:polyfit_cost` |
 | `polyadd`, `polysub` | size of the axis-0 zero-padded, broadcast-aligned result (= `numpy.polyadd(a1, a2).size`; reduces to `max(n1, n2, 1)` for 1-D inputs) | DERIVED: mirrors numpy's own zero-pad-then-broadcast algorithm on shapes, including higher-rank/broadcasting operands | `_polynomial.py` |
 | `polymul` | `2nm − n − m` (direct conv, FMA=2) | DERIVED | `_polynomial.py` |
+| `polydiv` | `1 + Q·(2·n2 + 1)`, `Q = max(n1 − n2 + 1, 0)` (`n1` = dividend length, `n2` = divisor length; each of the `Q` quotient terms costs 1 scale-divide + `n2` mul + `n2` sub — not `polymul`'s `2nm − n − m`, though the two happen to coincide at some shapes) | DERIVED | `_polynomial.py:polydiv_cost` |
 | `convolve` | `full`: `2nm − n − m`; `valid`: `(2·min−1)·(max−min+1)`; `same`: exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:convolve` |
 | `poly` (1-D, build from roots) | `(3n² + n) // 2`, `n = len(roots)` (iterative convolution with length-2 kernel per root; FMA=2) | DERIVED | `_polynomial.py:poly_cost` |
 | `polyder` | `t × n − t(t+1)/2`, `t = min(m, n−1)` (order-aware; one multiply per surviving coefficient per derivative step) | DERIVED | `_polynomial.py:polyder_cost` |
@@ -1283,7 +1292,9 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 
 `polyfit`, `polyder`, and `polyint` return float64 regardless of the input dtype, so
 their real bill is `2×` the `flop_cost` above; `polyval` preserves the input dtype and
-bills at its own rate.
+bills at its own rate. `polydiv` preserves a float or complex input dtype but floors an
+integer/bool input to float64 (numpy runs its scale-divide there), the same
+kind-conditional promotion an `eigvals`-backed linalg op uses.
 
 Source: `src/flopscope/_polynomial.py`.
 
@@ -1308,7 +1319,7 @@ Weight tiers:
   tier](#access-tier-weight-40) as sort and gather: `random.permutation`,
   `random.shuffle` and `random.choice` at module level, and every
   `Generator`/`RandomState`
-  `.choice` / `.permutation` / `.permuted` / `.shuffle` method. The module-level
+  `.choice` / `.permutation` / `.shuffle` method (plus `Generator.permuted`). The module-level
   surface delegates to the legacy `RandomState` singleton, so it runs the same
   selection machinery as the method surface and prices identically — a
   module-level entry at weight 1.0 would be a cheaper alias route around this
@@ -1319,7 +1330,8 @@ Weight tiers:
   distribution): `normal`, `standard_normal`, `randn`, `exponential`,
   `standard_exponential`, `poisson`, `binomial`, `geometric`,
   `hypergeometric`, `multivariate_hypergeometric`, `negative_binomial`,
-  `multinomial`, `beta`, `dirichlet`, `f`, `gamma`, `gumbel`, `laplace`,
+  `multinomial`, `beta`, `chisquare`, `noncentral_chisquare`, `dirichlet`,
+  `f`, `noncentral_f`, `gamma`, `gumbel`, `laplace`,
   `logistic`, `lognormal`, `logseries`, `pareto`, `power`, `rayleigh`,
   `standard_cauchy`, `standard_gamma`, `standard_t`, `triangular`,
   `vonmises`, `wald`, `weibull`, `zipf`, and all their Generator /
@@ -1344,7 +1356,7 @@ Weight tiers:
 | `random.multivariate_normal` | `26d³ + 2Nd² + 16Nd` (d=dims, N=size) | 1.0 | DERIVED composite: SVD factorization of covariance (`svd_cost(d,d,with_vectors=True)` = `6d·d² + 20d³` = `26d³`) + affine transform (`2Nd²`) + N·d transcendental normal draws (`16Nd`) | `_cost_formulas.py` |
 | `Generator.multivariate_hypergeometric` (`method='marginals'`, the default) | `numel(output)` | 16.0 | DECLARED | `_cost_formulas.py` |
 | `Generator.multivariate_hypergeometric` (`method='count'`) | `sum(colors) + 2 × num_variates × min(nsample, sum(colors) − nsample) + numel(output)` | 16.0 | DERIVED composite: numpy builds a temporary counting buffer of length `sum(colors)`, then for each of the `num_variates` output draws does a partial Fisher-Yates shuffle over `min(nsample, sum(colors) − nsample)` buffer entries (whichever of the sampled/excluded side is smaller), followed by a separate pass counting the colors of those same shuffled entries — two full passes over that length | `_cost_formulas.py` |
-| `random.beta`, `random.dirichlet`, `random.f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions; each draw resolves to its actual output dtype — float64 (rate 2.0) for the continuous members, int64 (rate 2.0) for the discrete `logseries`/`zipf` — so the full bill is `32 × numel` in practice | `_cost_formulas.py` |
+| `random.beta`, `random.chisquare`, `random.noncentral_chisquare`, `random.dirichlet`, `random.f`, `random.noncentral_f`, `random.gamma`, `random.gumbel`, `random.laplace`, `random.logistic`, `random.lognormal`, `random.logseries`, `random.pareto`, `random.power`, `random.rayleigh`, `random.standard_cauchy`, `random.standard_exponential`, `random.standard_gamma`, `random.standard_t`, `random.triangular`, `random.vonmises`, `random.wald`, `random.weibull`, `random.zipf` | `numel(output)` | 16.0 | DECLARED: flop_cost = numel(output); transcendental weight 16.0 for all continuous/transformed distributions; each draw resolves to its actual output dtype — float64 (rate 2.0) for the continuous members, int64 (rate 2.0) for the discrete `logseries`/`zipf` — so the full bill is `32 × numel` in practice | `_cost_formulas.py` |
 
 **Complex dtypes**: the distribution samplers produce **real-only** outputs, so a complex
 resolved dtype is `complex_factor = "illegal"` and raises. A draw bills at its **output

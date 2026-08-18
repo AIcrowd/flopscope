@@ -610,7 +610,7 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "hamming": ("18n", "$18n$"),
     "hanning": ("18n", "$18n$"),
     "kaiser": ("23n", "$23n$"),
-    "unwrap": ("numel(input)", r"$\text{numel}(\text{input})$"),
+    "unwrap": ("13 * numel(input)", r"$13 \cdot \text{numel}(\text{input})$"),
     # stats distributions (not in numpy registry — these are scipy-compatible)
     "stats.norm.pdf": ("10n", r"$10n$"),
     "stats.norm.cdf": ("20n", r"$20n$"),
