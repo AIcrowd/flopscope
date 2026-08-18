@@ -231,12 +231,15 @@ def _validate_and_charge_symmetry(
     """Validate *array* against *group* and bill the same rate as
     :func:`as_symmetric` (``k * (7n - 1)``, ``k`` = non-identity generators).
 
-    A symmetry tag is a billing claim about buffer CONTENTS: any path that
-    mints a tag over caller-supplied data must pay to have that claim
-    checked, using this SAME check. Shared by :func:`as_symmetric` and
-    :class:`SymmetricTensor`'s public constructor so the two paths can never
-    disagree about what counts as symmetric. Raises :class:`SymmetryError`
-    (via :func:`validate_symmetry_groups`) if the claim is false.
+    A symmetry tag is a billing claim about buffer CONTENTS: whoever calls
+    this helper pays to have that claim checked. Shared by
+    :func:`as_symmetric` and :class:`SymmetricTensor`'s public constructor
+    (``__new__``, for a bare top-level call) so those two paths can never
+    disagree about what counts as symmetric -- but NOT every path that can
+    end up attaching a tag calls this helper; see the "WHAT THIS DOES NOT
+    CLOSE" comment on ``SymmetricTensor.__new__`` for the two that don't.
+    Raises :class:`SymmetryError` (via :func:`validate_symmetry_groups`) if
+    the claim is false.
     """
     n = array.size
     k = _nonidentity_generator_count(group)
@@ -640,17 +643,29 @@ def _wrap_tensor_result(data: np.ndarray, symmetry: SymmetryGroup | None):
 
 
 # `wrap_with_symmetry`/`wrap_with_trusted_symmetry` (flopscope._symmetry_utils)
-# are themselves the trusted attachment path for symmetry DERIVED by an array
-# transform (reshape/ravel/squeeze/split/... in _array_ops.py) rather than a
-# fresh, caller-supplied claim: `wrap_with_symmetry` already runs its own
-# structural (ndim/axes) check before calling the constructor below, and
-# `wrap_with_trusted_symmetry` is documented as being for call sites where
-# the symmetry "was generated or revalidated by trusted constructor logic"
-# already. Re-running the heavier data-content check here would be pure
-# duplicated cost for those callers, not a gap they introduce. Identified by
-# code-object identity of the IMMEDIATE caller (they call the constructor
-# directly, no intermediate frame) -- the same technique `_called_from_wrapper`
-# (flopscope._budget) uses for the deeper, op-nesting case below.
+# are the trusted attachment path used ~30 times across _array_ops.py for
+# symmetry DERIVED by an array transform (reshape/ravel/squeeze/split/...)
+# rather than a fresh, caller-supplied claim, so this constructor treats
+# either one, called directly, as trusted by code-object identity.
+#
+# KNOWN GAP (not closed by this fix): `wrap_with_symmetry` is an ordinary
+# importable function -- `flopscope._symmetry_utils.wrap_with_symmetry` --
+# and its own check is structural only (do the group's axes fit `ndim`); it
+# never inspects buffer contents. Code that imports it directly and calls
+# `wrap_with_symmetry(asymmetric_data, fake_claim)` gets the exact same free,
+# unvalidated tag this whole fix exists to close, just one function call
+# away from the constructor. Pinned as an expected failure in
+# `tests/test_symmetric_tensor_new_validation.py::test_wrap_with_symmetry_does_not_mint_an_unvalidated_tag`.
+# Not remotely reachable: `wrap_with_symmetry` is absent from the server's op
+# REGISTRY and is not exported on `flopscope` or `flopscope.numpy`, so this
+# gap requires importing a private module directly -- consistent with this
+# task's in-process-only, not-a-launch-blocker scope. Closing it properly
+# needs either a capability token threaded through all ~34 internal call
+# sites of `wrap_with_symmetry`/`wrap_with_trusted_symmetry`
+# (_symmetry_utils.py + _array_ops.py) or a content check added inside
+# `wrap_with_symmetry` itself -- deliberately NOT attempted here: repricing
+# those 34 already-relied-upon call sites in a launch window is a larger risk
+# than the (unreachable) hole they'd close.
 _TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset(
     {wrap_with_symmetry.__code__, wrap_with_trusted_symmetry.__code__}
 )
@@ -674,14 +689,31 @@ class SymmetricTensor(FlopscopeArray):
         *,
         symmetry: SymmetryGroup,
     ) -> SymmetricTensor:
-        # A tag is a billing claim about buffer CONTENTS. Minting one here
-        # without validating granted the 1/|G| discount over arbitrary
-        # data, bypassing the validate-and-charge path `as_symmetric`
-        # already goes through. Route through that SAME validator (rather
-        # than a second one that could disagree) so a bare, top-level
-        # `SymmetricTensor(data, symmetry=...)` pays -- and is checked --
-        # exactly like `as_symmetric`.
+        # WHAT THIS CLOSES: a tag is a billing claim about buffer CONTENTS.
+        # Minting one here without validating granted the 1/|G| discount over
+        # arbitrary data, bypassing the validate-and-charge path
+        # `as_symmetric` already goes through. This now routes a BARE,
+        # TOP-LEVEL `SymmetricTensor(data, symmetry=...)` call through that
+        # SAME validator (rather than a second one that could disagree), so
+        # that specific call shape pays -- and is checked -- exactly like
+        # `as_symmetric`, and raises the identical `SymmetryError` for a
+        # false claim.
         #
+        # WHAT THIS DOES NOT CLOSE (two known, in-process-only, not-remotely-
+        # reachable gaps -- see `tests/test_symmetric_tensor_new_validation.py`
+        # for pinned `xfail` repros of both):
+        #   1. Calling `flopscope._symmetry_utils.wrap_with_symmetry` (or
+        #      `wrap_with_trusted_symmetry`) directly: they are trusted by
+        #      code-object identity below, and neither checks buffer
+        #      contents. See the comment on `_TRUSTED_SYMMETRY_WRAPPER_CODES`
+        #      just above this class for why that trust is not removed here.
+        #   2. Constructing from inside a participant callback that a
+        #      counted host op invokes (e.g. `fnp.apply_along_axis`,
+        #      `fnp.piecewise`): `_called_from_wrapper` walks the ENTIRE
+        #      call stack for any `@_counted_wrapper` frame, so it cannot
+        #      distinguish "genuinely inside the host op's own internal
+        #      code" from "arbitrary caller-supplied code the host op
+        #      happens to have called," and trusts both.
         # Skip validation only when called from INSIDE another flopscope
         # op's `@_counted_wrapper`-decorated frame: many call sites
         # elsewhere in this package (pointwise, einsum, solvers,
