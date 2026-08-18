@@ -41,8 +41,19 @@ def _numpy_callable(dotted):
 
 
 def _covered():
-    """Set of numpy callables flopscope will route rather than fail open on."""
-    dispatch = FlopscopeArray._get_array_function_dispatch()  # forces lazy build
+    """Set of numpy callables flopscope will route rather than fail open on.
+
+    Force a FRESH build of the dispatch map rather than trusting the
+    class-level cache. Under xdist the cache is populated by whichever test
+    first triggers the lazy build in a worker; if that happened while another
+    test's ``monkeypatch`` had replaced a dispatched numpy callable, the cache
+    would hold the patched object and this coverage check would spuriously
+    report the op as missing. Rebuilding in this test's own (unpatched) state
+    makes the measured set independent of collection order, and re-caches the
+    clean map for the rest of the worker.
+    """
+    FlopscopeArray._ARRAY_FUNCTION_DISPATCH = None
+    dispatch = FlopscopeArray._get_array_function_dispatch()
     passthrough = FlopscopeArray._PASSTHROUGH or set()
     return set(dispatch) | set(passthrough)
 
