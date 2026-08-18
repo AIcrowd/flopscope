@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as _np
 from numpy.exceptions import AxisError as _AxisError
+from numpy.lib.array_utils import normalize_axis_tuple as _normalize_axis_tuple
 from numpy.typing import ArrayLike
 
 from flopscope._accumulation._cost import AccumulationCost, contraction_complex_override
@@ -6091,8 +6092,22 @@ def gradient(
 ) -> FlopscopeArray | list[FlopscopeArray]:
     """Counted version of np.gradient.
 
-    Base cost (no coord arrays, or uniform scalar spacing):
-      sum over axes of 2 * f.size * max(shape[ax]-2, 0) // shape[ax]
+    Base cost (no coord arrays, or uniform scalar spacing), summed over the
+    axes ``axis=`` actually selects (every axis when ``axis`` is None):
+      sum over requested axes of 2 * f.size            (edge_order == 1)
+      sum over requested axes of 2 * f.size + 6 * (f.size // L)   (otherwise)
+
+    np.gradient emits one output value per input element along each
+    differentiated axis: the interior central difference costs 2 FLOPs
+    (sub + div) and, with edge_order == 1, so does each one-sided boundary
+    ``(f[1]-f[0])/dx``, giving a flat 2 * f.size per axis independent of its
+    length L. For any other accepted edge_order (0, 2, or a non-integer in
+    (1, 2]; > 2 numpy rejects) numpy runs the second-order 3-term boundary
+    stencil ``a*f[0] + b*f[1] + c*f[2]`` (5 FLOPs), +3 per boundary element;
+    the two boundary hyperplanes hold f.size // L elements each, so that adds
+    6 * (f.size // L) per axis (L = f.shape[axis]). A single-axis gradient is
+    thus exactly 1/ndim of the all-axes gradient and the per-axis costs add
+    back up to it exactly.
 
     Spacing surcharge per coord-array axis (1-D array length == shape[ax]):
       - If coord diffs are bit-exactly uniform (e.g. np.arange): +3*(L-1)
@@ -6109,25 +6124,52 @@ def gradient(
     if f.ndim == 0:
         cost = 1
     else:
-        base = _builtins.max(
-            _builtins.sum(
-                2 * f.size * _builtins.max(f.shape[ax] - 2, 0) // f.shape[ax]
-                for ax in range(f.ndim)
-            ),
-            1,
-        )
-
-        # --- spacing surcharge ---
-        # Normalise axes as numpy does
+        # Normalise ``axis`` with numpy's own helper -- the very call
+        # ``np.gradient`` itself makes -- so the billed axis set is exactly
+        # the differentiated one for every accepted spelling (bare int or
+        # any ``__index__`` object, tuple/list of ints, negative indices,
+        # None meaning every axis) and every rejected one raises numpy's own
+        # error, before anything is charged, rather than being silently
+        # folded into range with ``%``.
         ax_kw = kwargs.get("axis")
         if ax_kw is None:
-            axes = range(f.ndim)
-        elif isinstance(ax_kw, int):
-            axes = (ax_kw % f.ndim,)
+            axes = tuple(range(f.ndim))
         else:
-            axes = tuple(a % f.ndim for a in ax_kw)
-        axes = tuple(axes)
+            axes = _normalize_axis_tuple(ax_kw, f.ndim)
 
+        # np.gradient runs one independent central-difference pass per
+        # REQUESTED axis, so the base cost sums over ``axes`` -- not over
+        # every axis of ``f``. Summing over range(f.ndim) charged a
+        # single-axis gradient the full n-dimensional price (an ndim-fold
+        # over-bill).
+        #
+        # Each axis produces one output value per input element -- interior
+        # AND both boundary hyperplanes. The interior central difference is
+        # 2 FLOPs/element (sub + div), so an axis of length L costs
+        # 2*(L-2) interior + (2 boundaries) per line, times S/L lines.
+        #
+        # The boundary stencil depends on ``edge_order``. numpy runs the
+        # cheap one-sided difference ``(f[1]-f[0])/dx`` (2 FLOPs) ONLY when
+        # edge_order == 1; for any other accepted value (0, 2, or a
+        # non-integer in (1, 2]; > 2 numpy rejects) it runs the second-order
+        # 3-term boundary stencil ``a*f[0] + b*f[1] + c*f[2]`` (3 mul + 2 add
+        # = 5 FLOPs), +3 FLOPs per boundary element. With edge_order == 1
+        # every element costs a flat 2 FLOPs so an axis is exactly 2*S
+        # regardless of L; otherwise the two boundary hyperplanes (S/L
+        # elements each) each cost 3 FLOPs more, adding 6*(S//L) per axis.
+        edge_order = kwargs.get("edge_order", 1)
+        per_axis_costs = []
+        for ax in axes:
+            per = 2 * f.size
+            if edge_order != 1 and f.shape[ax] > 0:
+                # 2 boundary hyperplanes * (S//L lines) * +3 FLOPs each
+                per += 6 * (f.size // f.shape[ax])
+            per_axis_costs.append(per)
+        base = _builtins.max(_builtins.sum(per_axis_costs), 1)
+
+        # --- spacing surcharge ---
+        # ``varargs`` pair up positionally with ``axes``, so the surcharge is
+        # already attributed to the requested axes only.
         n_varargs = len(varargs)
         if n_varargs == 0 or (n_varargs == 1 and _np.ndim(varargs[0]) == 0):
             surcharge = 0  # no coord arrays or scalar spacing
@@ -6168,7 +6210,7 @@ attach_docstring(
     gradient,
     _np.gradient,
     "counted_custom",
-    "uniform: sum_ax 2*S*(L-2)/L; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
+    "uniform: sum over requested axes of 2*S (edge_order=1), +6*S/L per axis for edge_order!=1; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
 )
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 

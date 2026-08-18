@@ -1118,9 +1118,9 @@ def test_diff_cost_pinned(shape, n, expected, we):
 @pytest.mark.parametrize(
     "shape,expected",
     [
-        ((10,), 16),  # one axis: 2 * 10 * max(10-2, 0) // 10 = 2*10*8//10 = 16
-        ((50, 50), 9600),  # per-axis: 2*2500*48//50 = 4800; two axes: 9600
-        ((20, 20, 20), 43200),  # per-axis: 2*8000*18//20 = 14400; three axes: 43200
+        ((10,), 20),  # one axis: flat 2*S = 2*10 = 20 (one output/elem, both ends)
+        ((50, 50), 10000),  # per-axis: 2*S = 2*2500 = 5000; two axes: 10000
+        ((20, 20, 20), 48000),  # per-axis: 2*S = 2*8000 = 16000; three axes: 48000
     ],
 )
 def test_gradient_cost_pinned(shape, expected, we):

@@ -816,27 +816,251 @@ def test_correlate_scalar():
 
 def test_gradient_spacing_surcharge_arange():
     # np.arange(100.) passes the bit-exact uniformity test → only diff+equal+all-reduce
-    # surcharge = 3*(L-1) = 3*99 = 297; base = 196; total = 493
+    # surcharge = 3*(L-1) = 3*99 = 297 (UNCHANGED); base = 2*S = 2*100 = 200; total = 497
     f = fnp.asarray(np.linspace(0, 1, 100) ** 2)
     x = fnp.asarray(np.arange(100.0))
-    assert cost(lambda: fnp.gradient(f, x)) == 196 + 297
+    assert cost(lambda: fnp.gradient(f, x)) == 200 + 297
 
 
 def test_gradient_spacing_surcharge_nonuniform():
-    # non-uniform float spacing: full surcharge
+    # non-uniform float spacing: full surcharge (UNCHANGED)
     # 1-D L=100, S=100: 3*100*98//100 + 10*98 + 3*99 + 4*100//100
-    #                  = 294 + 980 + 297 + 4 = 1575; total = 196 + 1575 = 1771
+    #                  = 294 + 980 + 297 + 4 = 1575; base = 2*S = 200; total = 1775
     rng = np.random.default_rng(0)
     f = fnp.asarray(rng.random(100))
     x = fnp.asarray(np.sort(rng.random(100)))
-    assert cost(lambda: fnp.gradient(f, x)) == 1771
+    assert cost(lambda: fnp.gradient(f, x)) == 200 + 1575
 
 
 def test_gradient_uniform_scalar_unchanged():
-    # uniform scalar spacing (no coord array): no surcharge; base unchanged
+    # uniform scalar spacing (no coord array): no surcharge; base = 2*S = 2*100 = 200
     f = fnp.asarray(np.linspace(0, 1, 100) ** 2)
-    assert cost(lambda: fnp.gradient(f)) == 196
-    assert cost(lambda: fnp.gradient(f, 0.5)) == 196
+    assert cost(lambda: fnp.gradient(f)) == 200
+    assert cost(lambda: fnp.gradient(f, 0.5)) == 200
+
+
+# ---- gradient: cost follows the axes actually differentiated (issue #188) ----
+# np.gradient emits one output value per input element along each differentiated
+# axis (interior central differences AND both boundary hyperplanes) at ~2 FLOPs
+# each, so every requested axis costs a flat 2*S (S = f.size) regardless of its
+# length. Two bugs are pinned here:
+#   1. The base used to sum over range(f.ndim) regardless of `axis=`, charging a
+#      single-axis gradient the full n-dimensional price (3x at rank 3, growing).
+#   2. An interior-only term (2*S*(L-2)//L) dropped the two boundaries -- a
+#      4*S//L undercount that became TOTAL at L=2, billing a flat floor for a
+#      size-scaling amount of real work. Both are fixed by the flat 2*S per axis.
+
+_GRADIENT_SHAPES = [(200,), (40, 50), (12, 9, 7), (6, 5, 4, 7), (4, 5, 3, 6, 2)]
+_GRADIENT_DTYPES = ["float64", "float32", "int32", "complex64", "complex128"]
+
+
+@pytest.mark.parametrize("shape", _GRADIENT_SHAPES)
+@pytest.mark.parametrize("dtype", _GRADIENT_DTYPES)
+def test_gradient_per_axis_costs_sum_to_all_axes(shape, dtype):
+    # Operands are built OUTSIDE the budget so only the gradient calls are billed.
+    a = fnp.asarray(np.random.default_rng(0).random(shape).astype(dtype))
+    all_axes = cost(lambda: fnp.gradient(a))
+    per_axis = [cost(lambda k=k: fnp.gradient(a, axis=k)) for k in range(len(shape))]
+    # EXACT split, no floor slack: the per-axis costs sum to the all-axes cost.
+    assert sum(per_axis) == all_axes
+    # every axis costs the same flat 2*S (independent of axis length), so a
+    # single-axis gradient is exactly 1/ndim of the all-axes gradient.
+    assert len(set(per_axis)) == 1
+    assert per_axis[0] * len(shape) == all_axes
+
+
+def test_gradient_single_axis_exact_costs_rank3():
+    # S = 60*70*80 = 336000; every axis bills a flat 2*S = 672000
+    a = fnp.asarray(np.random.default_rng(0).random((60, 70, 80)))
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 672_000
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 672_000
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 672_000
+    # all-axes is 3 * 2*S -- HIGHER than the old interior-only 1,957,600, which
+    # under-billed by dropping the boundary hyperplanes.
+    assert cost(lambda: fnp.gradient(a)) == 2_016_000
+
+
+def test_gradient_single_axis_exact_costs_rank4():
+    # S = 20*25*30*35 = 525000; every axis bills a flat 2*S = 1050000
+    a = fnp.asarray(np.random.default_rng(0).random((20, 25, 30, 35)))
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a, axis=3)) == 1_050_000
+    assert cost(lambda: fnp.gradient(a)) == 4_200_000
+
+
+def test_gradient_axis_spellings_agree():
+    a = fnp.asarray(np.random.default_rng(0).random((12, 9, 7)))
+    per = [cost(lambda k=k: fnp.gradient(a, axis=k)) for k in range(3)]
+    # negative indices
+    assert [cost(lambda k=k: fnp.gradient(a, axis=k - 3)) for k in range(3)] == per
+    # anything with __index__ (numpy scalars included)
+    assert cost(lambda: fnp.gradient(a, axis=np.int64(1))) == per[1]
+    # tuple / list of axes bill exactly their members
+    assert cost(lambda: fnp.gradient(a, axis=(0, 2))) == per[0] + per[2]
+    assert cost(lambda: fnp.gradient(a, axis=[0, 2])) == per[0] + per[2]
+    assert cost(lambda: fnp.gradient(a, axis=(-3, -1))) == per[0] + per[2]
+    # axis=None is every axis
+    assert cost(lambda: fnp.gradient(a, axis=None)) == cost(lambda: fnp.gradient(a))
+    assert cost(lambda: fnp.gradient(a, axis=(0, 1, 2))) == sum(per)
+
+
+def test_gradient_array_function_route_bills_per_axis():
+    # np.gradient(FlopscopeArray) auto-routes through NEP-18 to fnp.gradient
+    a = fnp.asarray(np.random.default_rng(0).random((12, 9, 7)))
+    with pytest.warns(UserWarning, match="auto-routed"):
+        routed = cost(lambda: np.gradient(a, axis=1))
+    assert routed == cost(lambda: fnp.gradient(a, axis=1))
+
+
+def test_gradient_coord_array_surcharge_follows_its_own_axis():
+    rng = np.random.default_rng(0)
+    g = fnp.asarray(rng.random((30, 40, 50)))
+    coords = [np.sort(rng.random(n)) for n in (30, 40, 50)]
+    all_axes = cost(lambda: fnp.gradient(g, *coords))
+    per_axis = [cost(lambda k=k: fnp.gradient(g, coords[k], axis=k)) for k in range(3)]
+    assert sum(per_axis) == all_axes
+    # each single-axis call carries ITS OWN axis's non-uniform surcharge
+    plain = [cost(lambda k=k: fnp.gradient(g, axis=k)) for k in range(3)]
+    assert all(withc > without for withc, without in zip(per_axis, plain, strict=True))
+
+
+def test_gradient_uniform_coord_array_surcharge_follows_its_own_axis():
+    rng = np.random.default_rng(0)
+    g = fnp.asarray(rng.random((30, 40, 50)))
+    coords = [np.arange(float(n)) for n in (30, 40, 50)]
+    all_axes = cost(lambda: fnp.gradient(g, *coords))
+    per_axis = [cost(lambda k=k: fnp.gradient(g, coords[k], axis=k)) for k in range(3)]
+    assert sum(per_axis) == all_axes
+    # bit-exactly uniform coords: base + 3*(L-1) on that axis alone
+    plain = [cost(lambda k=k: fnp.gradient(g, axis=k)) for k in range(3)]
+    surcharges = [w - p for w, p in zip(per_axis, plain, strict=True)]
+    assert surcharges == [3 * (L - 1) for L in (30, 40, 50)]
+
+
+def test_gradient_length_2_axis_bills_honest_2s_not_a_bare_floor():
+    # REGRESSION GUARD for the launch-blocking under-bill: a length-2 axis has
+    # no INTERIOR points, so an interior-only term (2*S*(L-2)//L) collapses to 0
+    # and the call would be billed the bare max(..., 1) floor -- a flat handful
+    # of FLOPs for ~2*S honest work, a size-scaling under-bill remotely reachable
+    # via the registry. gradient still emits one output per element along that
+    # axis (both boundaries), so it must bill the honest 2*S. This assertion
+    # FAILS if anyone reverts to the interior-only term.
+    N = 1000
+    a = fnp.asarray(np.random.default_rng(0).random((2, N)))
+    S = 2 * N
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 2 * S  # 4000, NOT a floor
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 2 * S
+    # exact split holds with NO per-zero-interior-axis slack: 2 axes * 2*S
+    assert cost(lambda: fnp.gradient(a)) == 2 * (2 * S)
+    # the under-bill is size-scaling: doubling N doubles the axis-0 bill
+    b = fnp.asarray(np.random.default_rng(0).random((2, 2 * N)))
+    assert cost(lambda: fnp.gradient(b, axis=0)) == 2 * (2 * 2 * N)
+
+
+def test_gradient_invalid_axis_raises_numpy_error_without_charging():
+    a = fnp.asarray(np.random.default_rng(0).random((4, 5, 6)))
+    for bad, exc in ((3, np.exceptions.AxisError), (-4, np.exceptions.AxisError)):
+        with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+            with pytest.raises(exc):
+                fnp.gradient(a, axis=bad)
+            assert b.flops_used == 0
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        with pytest.raises(ValueError, match="repeated axis"):
+            fnp.gradient(a, axis=(0, 0))
+        assert b.flops_used == 0
+
+
+# ---- gradient edge_order=2: the 2nd-order boundary stencil must be priced ----
+# numpy runs the 5-FLOP boundary stencil (a*f0 + b*f1 + c*f2) instead of the
+# 2-FLOP one-sided difference for ANY accepted edge_order != 1 (0, 2, or a
+# non-integer in (1, 2]; > 2 is rejected). Each of the two boundary hyperplanes
+# (S//L elements) then costs 3 FLOPs more, so a selected axis costs
+# 2*S + 6*(S//L) instead of 2*S. Reading only `axis` and never `edge_order`
+# under-billed this by 6*(S//L) per axis -- size-scaling (up to 2x at L=3) and
+# remotely reachable via fnp.gradient(a, edge_order=2).
+
+
+@pytest.mark.parametrize("L", [3, 4, 5, 10, 50, 1000])
+def test_gradient_edge_order_2_billed_matches_honest_uniform(L):
+    # 1-D uniform: honest = 2*S + 6*(S//L) with S = L, hp = S//L = 1.
+    a = fnp.asarray(np.random.default_rng(0).random(L))
+    S = L
+    assert cost(lambda: fnp.gradient(a, edge_order=2)) == 2 * S + 6 * (S // L)
+    # edge_order=1 keeps the flat 2*S (no boundary surcharge).
+    assert cost(lambda: fnp.gradient(a, edge_order=1)) == 2 * S
+
+
+@pytest.mark.parametrize("dtype", _GRADIENT_DTYPES)
+def test_gradient_edge_order_2_scales_with_dtype(dtype):
+    # The +6*(S//L) boundary term is billed at the SAME dtype rate as the base,
+    # so billed(e2)*(2S) == billed(e1)*(2S + 6*(S//L)) exactly for every dtype
+    # (complex included), without needing to know the dtype multiplier.
+    shape, ax, L = (100, 3), 1, 3
+    S = 300
+    a = fnp.asarray(np.random.default_rng(0).random(shape).astype(dtype))
+    e1 = cost(lambda: fnp.gradient(a, axis=ax, edge_order=1))
+    e2 = cost(lambda: fnp.gradient(a, axis=ax, edge_order=2))
+    assert e2 > e1  # the boundary stencil is actually priced
+    assert e2 * (2 * S) == e1 * (2 * S + 6 * (S // L))
+
+
+def test_gradient_edge_order_2_sum_over_axes_invariant():
+    # Each selected axis costs 2*S + 6*(S//L); the per-axis costs still sum to
+    # the all-axes cost exactly for edge_order=2.
+    a = fnp.asarray(np.random.default_rng(0).random((6, 5, 4)))
+    S = 120
+    all_axes = cost(lambda: fnp.gradient(a, edge_order=2))
+    per = [cost(lambda k=k: fnp.gradient(a, axis=k, edge_order=2)) for k in range(3)]
+    assert sum(per) == all_axes
+    assert per == [2 * S + 6 * (S // L) for L in (6, 5, 4)]
+
+
+def test_gradient_edge_order_0_and_noninteger_price_the_e2_stencil():
+    # numpy runs the 2nd-order boundary stencil for ANY accepted edge_order != 1;
+    # only edge_order == 1 gets the cheap one-sided edge. Pricing solely
+    # edge_order == 2 would leave edge_order in {0, 1.5, ...} under-billed.
+    a = fnp.asarray(np.random.default_rng(0).random((100, 3)))
+    S = 300
+    e2 = cost(lambda: fnp.gradient(a, axis=1, edge_order=2))
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=0)) == e2
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=1.5)) == e2
+    assert e2 == 2 * S + 6 * (S // 3)
+
+
+def test_gradient_edge_order_2_regression_guard():
+    # Concrete guard: gradient((100,3), axis=1, edge_order=2) must bill the full
+    # 1200 (= 2*300 base + 6*100 boundary), NOT the 600 that ignoring edge_order
+    # would charge. FAILS if edge_order stops being priced.
+    a = fnp.asarray(np.random.default_rng(0).random((100, 3)))
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=2)) == 1200
+    assert cost(lambda: fnp.gradient(a, axis=1, edge_order=1)) == 600
+
+
+def test_gradient_nonuniform_edge_order_2_no_underbill():
+    # For non-uniform coordinate arrays, edge_order=2 upgrades ONLY the two
+    # boundary hyperplanes (2 -> 5 FLOPs/elem); the interior is identical to
+    # edge_order=1. So billed(e2) - billed(e1) is exactly the honest boundary
+    # increment 6*(S//L), with no residual under-bill on top of the surcharge.
+    rng = np.random.default_rng(0)
+    for shape, ax in [((5,), 0), ((100, 3), 1), ((6, 5, 4), 2)]:
+        length = shape[ax]
+        size = int(np.prod(shape))
+        f_arr = fnp.asarray(rng.random(shape))
+        x = fnp.asarray(np.sort(rng.random(length)))
+        e1 = cost(
+            lambda f_arr=f_arr, x=x, ax=ax: fnp.gradient(
+                f_arr, x, axis=ax, edge_order=1
+            )
+        )
+        e2 = cost(
+            lambda f_arr=f_arr, x=x, ax=ax: fnp.gradient(
+                f_arr, x, axis=ax, edge_order=2
+            )
+        )
+        assert e2 - e1 == 6 * (size // length)
+        assert e2 > e1
 
 
 def test_nanmean_matches_mean():

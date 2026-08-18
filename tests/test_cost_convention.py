@@ -548,7 +548,7 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     # ---- Diff / gradient --------------------------------------------------
     "diff": (lambda: fnp.diff(_v100), 99),
     "ediff1d": (lambda: fnp.ediff1d(_v100), 99),
-    "gradient": (lambda: fnp.gradient(_v100), 2 * 100 - 4),  # 196
+    "gradient": (lambda: fnp.gradient(_v100), 2 * 100),  # 2*S: one output/elem
     # ---- Miscellaneous counted_custom -------------------------------------
     # clip: 2 bounds → 2 compare-selects/elem → 2*numel(output); old pin was 1*numel
     "clip": (lambda: fnp.clip(_v100, -1.0, 1.0), 200),
