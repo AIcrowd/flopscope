@@ -2602,15 +2602,32 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
         if ufunc.__name__ in ("add", "multiply")
         else _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
     )
+    # ``out=`` is threaded through ``reduction_billing_dtype`` as
+    # ``out_dtype=`` -- the SAME accumulator model the generic reduce and
+    # accumulate paths already use -- rather than folded in with
+    # ``store_billing_dtypes``. reduceat's accumulator obeys numpy's reduce
+    # semantics exactly like ``reduce``/``accumulate``: ``out=`` is not an
+    # accumulator selector, it can only WIDEN. A wider ``out`` genuinely
+    # widens the loop (``add.reduceat(float32, out=float64)`` accumulates in
+    # float64 -- bit-verified -- so it is billed at the float64 rate), while a
+    # narrower ``out`` merely casts the final store and never lowers the bill.
+    # Folding the raw ``out`` dtype in with ``store_billing_dtypes`` instead
+    # let ``result_type`` promote a real accumulator against a narrower
+    # complex store up to the wide complex dtype -- e.g.
+    # ``add.reduceat(float64, out=complex64)`` priced at complex128 (4x) when
+    # numpy actually runs a complex64 loop (2x, the real part narrowed to
+    # float32) -- the over-bill this alignment removes. A non-numeric ``out=``
+    # is still refused: ``reduction_billing_dtype`` returns it unchanged into
+    # ``billing_dtypes`` for ``deduct`` to reject, exactly as the sibling
+    # paths rely on.
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
             explicit_dtype=explicit_dtype,
+            out_dtype=out_view.dtype if isinstance(out_view, _np.ndarray) else None,
             default_dtype=default_dtype,
         ),
     )
-    if isinstance(out_view, _np.ndarray):
-        billing_dtypes += store_billing_dtypes(out_view)
     with budget.deduct(
         f"{ufunc.__name__}.reduceat",
         flop_cost=cost,

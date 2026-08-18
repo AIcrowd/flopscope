@@ -939,3 +939,113 @@ def test_reduceat_out_view_captured_before_indices_resolves_bills_the_post_widen
         "the bill must reflect the post-widen store, not a snapshot taken "
         "before indices resolved"
     )
+
+
+# ----- out= dtype rate: reduceat's accumulator matches its siblings -----
+#
+# reduceat runs numpy's reduce accumulator, so its out= is threaded through
+# ``reduction_billing_dtype`` (``out_dtype=``) exactly like the generic
+# ``reduce``/``accumulate`` paths -- NOT folded in with
+# ``store_billing_dtypes``. Under numpy's reduce semantics out= is not an
+# accumulator selector: it can only WIDEN. A wider out= genuinely widens the
+# loop (``add.reduceat(float32, out=float64)`` accumulates in float64 --
+# bit-verified) and is billed for it; a narrower out= merely casts the final
+# store and never lowers the bill. Folding the raw out= dtype in with
+# ``store_billing_dtypes`` let ``result_type`` over-promote a real
+# accumulator against a narrower-rate complex store to the wide complex
+# dtype, over-billing ``add.reduceat(float64, out=complex64)`` at the
+# complex128 rate (4x) when numpy runs a complex64 loop (2x).
+
+_OUT_DTYPE_RATE_PAIRS = [
+    (np.float32, np.float64),  # wider: loop genuinely widens
+    (np.float32, np.complex128),  # wider + complex
+    (np.float64, np.float64),  # same
+    (np.complex64, np.complex128),  # complex widening
+    (np.float64, np.float32),  # narrower: store cast only, no rate drop
+    (np.float64, np.complex64),  # real loop, narrower-rate complex store
+    (np.float64, np.complex128),  # real loop, wider complex store
+    (np.float32, np.complex64),  # complex store at the input width
+    (np.int32, np.int64),  # integer widening
+]
+
+
+@pytest.mark.parametrize("in_dtype,out_dtype", _OUT_DTYPE_RATE_PAIRS)
+def test_reduceat_out_dtype_rate_matches_reduce_sibling(in_dtype, out_dtype):
+    """reduceat prices an out= buffer at exactly the rate multiple its
+    ``reduce`` sibling does, for every (input, out) dtype pair.
+
+    Both methods run the same numpy reduce accumulator, so out= must move
+    reduceat's bill by the same factor over its bare call that it moves
+    reduce's -- widening when out= genuinely widens the loop, and never
+    lowering it. Pinned against ``reduce`` (not magic numbers) so the two
+    stay aligned as the rate table evolves.
+    """
+    load_weights()
+    n = 4096
+    x = fnp.asarray(np.ones(n, in_dtype))
+    idx = [0, n // 2]
+
+    ra_bare = billed(lambda: np.add.reduceat(x, idx))
+    ra_out = billed(lambda: np.add.reduceat(x, idx, out=np.zeros(2, out_dtype)))
+    rd_bare = billed(lambda: np.add.reduce(x))
+    rd_out = billed(lambda: np.add.reduce(x, out=np.zeros((), out_dtype)))
+
+    # Same rate multiple over each method's bare call (cross-multiplied to
+    # stay exact on integer bills whose raw application counts differ).
+    assert ra_out * rd_bare == rd_out * ra_bare
+
+
+def test_reduceat_wider_out_is_billed_for_the_genuine_loop_widening():
+    """A wider out= is NOT free: numpy genuinely widens reduceat's loop.
+
+    ``add.reduceat(float32, out=float64)`` accumulates in float64 (verified
+    bit-for-bit against a native float64 reduction), so it does twice the
+    per-element work of the float32 bare call and is billed at twice the
+    rate. This pins the meter against under-billing a real widening -- out=
+    is a rate input, not an irrelevant annotation.
+    """
+    load_weights()
+    n = 4096
+    x = fnp.asarray(np.ones(n, np.float32))
+    idx = [0, n // 2]
+
+    bare = billed(lambda: np.add.reduceat(x, idx))
+    wider = billed(lambda: np.add.reduceat(x, idx, out=np.zeros(2, np.float64)))
+    assert wider == 2 * bare
+
+
+def test_reduceat_real_input_narrower_complex_out_does_not_overpromote():
+    """The over-bill fix: a real accumulator storing into a narrower-rate
+    complex out= must not be promoted to the wide complex dtype.
+
+    numpy runs ``add.reduceat(float64, out=complex64)`` as a complex64 loop
+    (the real part narrowed to float32), whose honest cost -- the complex64
+    rate times the complex factor -- equals the float64 real bare here (2x
+    the float32 unit), NOT the complex128 rate (4x) that folding out= in with
+    ``store_billing_dtypes`` produced. A genuinely wider complex128 out= is
+    still billed for its width.
+    """
+    load_weights()
+    n = 4096
+    x = fnp.asarray(np.ones(n, np.float64))
+    idx = [0, n // 2]
+
+    bare = billed(lambda: np.add.reduceat(x, idx))
+    c64_out = billed(lambda: np.add.reduceat(x, idx, out=np.zeros(2, np.complex64)))
+    c128_out = billed(lambda: np.add.reduceat(x, idx, out=np.zeros(2, np.complex128)))
+
+    assert c64_out == bare, "narrower-rate complex store must not over-promote"
+    assert c128_out == 2 * bare, "a genuinely wider complex store still widens"
+
+
+def test_reduceat_non_numeric_out_is_still_refused():
+    """Threading out= through ``reduction_billing_dtype`` instead of
+    ``store_billing_dtypes`` must not open a non-numeric out= laundering
+    hole: the resolver returns a non-numeric dtype unchanged into the
+    ``dtypes`` tuple so ``deduct`` still refuses it.
+    """
+    from flopscope.errors import UnsupportedDtypeError
+
+    a = fnp.asarray(np.ones(100, np.float32))
+    with pytest.raises(UnsupportedDtypeError):
+        billed(lambda: np.add.reduceat(a, [0, 50], out=np.zeros(2, dtype=object)))
