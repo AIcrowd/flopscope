@@ -839,6 +839,122 @@ def test_gradient_uniform_scalar_unchanged():
     assert cost(lambda: fnp.gradient(f, 0.5)) == 196
 
 
+# ---- gradient: cost follows the axes actually differentiated (issue #188) ----
+# np.gradient runs one independent central-difference pass per requested axis,
+# so `axis=` must scale the bill. The base cost used to sum over range(f.ndim)
+# regardless of `axis`, charging a single-axis gradient the full n-dimensional
+# price -- a 3x over-bill at rank 3, 4x at rank 4, growing with rank.
+
+_GRADIENT_SHAPES = [(200,), (40, 50), (12, 9, 7), (6, 5, 4, 7)]
+_GRADIENT_DTYPES = ["float64", "float32", "int32", "complex64", "complex128"]
+
+
+@pytest.mark.parametrize("shape", _GRADIENT_SHAPES)
+@pytest.mark.parametrize("dtype", _GRADIENT_DTYPES)
+def test_gradient_per_axis_costs_sum_to_all_axes(shape, dtype):
+    # Operands are built OUTSIDE the budget so only the gradient calls are billed.
+    a = fnp.asarray(np.random.default_rng(0).random(shape).astype(dtype))
+    all_axes = cost(lambda: fnp.gradient(a))
+    per_axis = [cost(lambda k=k: fnp.gradient(a, axis=k)) for k in range(len(shape))]
+    assert sum(per_axis) == all_axes
+    # every single-axis gradient is a strict fraction of the all-axes one
+    if len(shape) > 1:
+        assert all(0 < c < all_axes for c in per_axis)
+
+
+def test_gradient_single_axis_exact_costs_rank3():
+    # S = 60*70*80 = 336000; per axis 2*S*(L-2)//L
+    a = fnp.asarray(np.random.default_rng(0).random((60, 70, 80)))
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 649_600
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 652_800
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 655_200
+    # the all-axes total is deliberately UNCHANGED by the per-axis split
+    assert cost(lambda: fnp.gradient(a)) == 1_957_600
+
+
+def test_gradient_single_axis_exact_costs_rank4():
+    # S = 20*25*30*35 = 525000; per axis 2*S*(L-2)//L
+    a = fnp.asarray(np.random.default_rng(0).random((20, 25, 30, 35)))
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 945_000
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 966_000
+    assert cost(lambda: fnp.gradient(a, axis=2)) == 980_000
+    assert cost(lambda: fnp.gradient(a, axis=3)) == 990_000
+    assert cost(lambda: fnp.gradient(a)) == 3_881_000
+
+
+def test_gradient_axis_spellings_agree():
+    a = fnp.asarray(np.random.default_rng(0).random((12, 9, 7)))
+    per = [cost(lambda k=k: fnp.gradient(a, axis=k)) for k in range(3)]
+    # negative indices
+    assert [cost(lambda k=k: fnp.gradient(a, axis=k - 3)) for k in range(3)] == per
+    # anything with __index__ (numpy scalars included)
+    assert cost(lambda: fnp.gradient(a, axis=np.int64(1))) == per[1]
+    # tuple / list of axes bill exactly their members
+    assert cost(lambda: fnp.gradient(a, axis=(0, 2))) == per[0] + per[2]
+    assert cost(lambda: fnp.gradient(a, axis=[0, 2])) == per[0] + per[2]
+    assert cost(lambda: fnp.gradient(a, axis=(-3, -1))) == per[0] + per[2]
+    # axis=None is every axis
+    assert cost(lambda: fnp.gradient(a, axis=None)) == cost(lambda: fnp.gradient(a))
+    assert cost(lambda: fnp.gradient(a, axis=(0, 1, 2))) == sum(per)
+
+
+def test_gradient_array_function_route_bills_per_axis():
+    # np.gradient(FlopscopeArray) auto-routes through NEP-18 to fnp.gradient
+    a = fnp.asarray(np.random.default_rng(0).random((12, 9, 7)))
+    with pytest.warns(UserWarning, match="auto-routed"):
+        routed = cost(lambda: np.gradient(a, axis=1))
+    assert routed == cost(lambda: fnp.gradient(a, axis=1))
+
+
+def test_gradient_coord_array_surcharge_follows_its_own_axis():
+    rng = np.random.default_rng(0)
+    g = fnp.asarray(rng.random((30, 40, 50)))
+    coords = [np.sort(rng.random(n)) for n in (30, 40, 50)]
+    all_axes = cost(lambda: fnp.gradient(g, *coords))
+    per_axis = [cost(lambda k=k: fnp.gradient(g, coords[k], axis=k)) for k in range(3)]
+    assert sum(per_axis) == all_axes
+    # each single-axis call carries ITS OWN axis's non-uniform surcharge
+    plain = [cost(lambda k=k: fnp.gradient(g, axis=k)) for k in range(3)]
+    assert all(withc > without for withc, without in zip(per_axis, plain, strict=True))
+
+
+def test_gradient_uniform_coord_array_surcharge_follows_its_own_axis():
+    rng = np.random.default_rng(0)
+    g = fnp.asarray(rng.random((30, 40, 50)))
+    coords = [np.arange(float(n)) for n in (30, 40, 50)]
+    all_axes = cost(lambda: fnp.gradient(g, *coords))
+    per_axis = [cost(lambda k=k: fnp.gradient(g, coords[k], axis=k)) for k in range(3)]
+    assert sum(per_axis) == all_axes
+    # bit-exactly uniform coords: base + 3*(L-1) on that axis alone
+    plain = [cost(lambda k=k: fnp.gradient(g, axis=k)) for k in range(3)]
+    surcharges = [w - p for w, p in zip(per_axis, plain, strict=True)]
+    assert surcharges == [3 * (L - 1) for L in (30, 40, 50)]
+
+
+def test_gradient_zero_interior_axis_pays_the_one_flop_minimum():
+    # An axis of length 2 has no interior points, so its central-difference
+    # term is 0. The pre-existing max(..., 1) floor still charges 1 FLOP for a
+    # real call, so per-axis bills exceed the all-axes bill by exactly one
+    # FLOP per zero-interior axis. This is the floor, not an axis mis-split.
+    a = fnp.asarray(np.random.default_rng(0).random((2, 10)))
+    assert cost(lambda: fnp.gradient(a, axis=0)) == 1
+    assert cost(lambda: fnp.gradient(a, axis=1)) == 32
+    assert cost(lambda: fnp.gradient(a)) == 32
+
+
+def test_gradient_invalid_axis_raises_numpy_error_without_charging():
+    a = fnp.asarray(np.random.default_rng(0).random((4, 5, 6)))
+    for bad, exc in ((3, np.exceptions.AxisError), (-4, np.exceptions.AxisError)):
+        with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+            with pytest.raises(exc):
+                fnp.gradient(a, axis=bad)
+            assert b.flops_used == 0
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+        with pytest.raises(ValueError, match="repeated axis"):
+            fnp.gradient(a, axis=(0, 0))
+        assert b.flops_used == 0
+
+
 def test_nanmean_matches_mean():
     # spec: flop_cost(nanmean) == flop_cost(mean) for all shapes/axes
     a = fnp.asarray(np.random.rand(8, 5))

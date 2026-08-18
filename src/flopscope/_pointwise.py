@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as _np
 from numpy.exceptions import AxisError as _AxisError
+from numpy.lib.array_utils import normalize_axis_tuple as _normalize_axis_tuple
 from numpy.typing import ArrayLike
 
 from flopscope._accumulation._cost import AccumulationCost, contraction_complex_override
@@ -6091,8 +6092,13 @@ def gradient(
 ) -> FlopscopeArray | list[FlopscopeArray]:
     """Counted version of np.gradient.
 
-    Base cost (no coord arrays, or uniform scalar spacing):
-      sum over axes of 2 * f.size * max(shape[ax]-2, 0) // shape[ax]
+    Base cost (no coord arrays, or uniform scalar spacing), summed over the
+    axes ``axis=`` actually selects (every axis when ``axis`` is None):
+      sum over requested axes of 2 * f.size * max(shape[ax]-2, 0) // shape[ax]
+
+    Each axis contributes only its own central-difference pass, so a
+    single-axis gradient costs roughly 1/ndim of the all-axes gradient and
+    the per-axis costs add back up to it exactly.
 
     Spacing surcharge per coord-array axis (1-D array length == shape[ax]):
       - If coord diffs are bit-exactly uniform (e.g. np.arange): +3*(L-1)
@@ -6109,25 +6115,37 @@ def gradient(
     if f.ndim == 0:
         cost = 1
     else:
+        # Normalise ``axis`` with numpy's own helper -- the very call
+        # ``np.gradient`` itself makes -- so the billed axis set is exactly
+        # the differentiated one for every accepted spelling (bare int or
+        # any ``__index__`` object, tuple/list of ints, negative indices,
+        # None meaning every axis) and every rejected one raises numpy's own
+        # error, before anything is charged, rather than being silently
+        # folded into range with ``%``.
+        ax_kw = kwargs.get("axis")
+        if ax_kw is None:
+            axes = tuple(range(f.ndim))
+        else:
+            axes = _normalize_axis_tuple(ax_kw, f.ndim)
+
+        # np.gradient runs one independent central-difference pass per
+        # REQUESTED axis, so the base cost sums over ``axes`` -- not over
+        # every axis of ``f``. Summing over range(f.ndim) charged a
+        # single-axis gradient the full n-dimensional price (an ndim-fold
+        # over-bill). Each axis's term is floored independently, exactly as
+        # in the all-axes sum, so the per-axis bills still add up to the
+        # all-axes bill.
         base = _builtins.max(
             _builtins.sum(
                 2 * f.size * _builtins.max(f.shape[ax] - 2, 0) // f.shape[ax]
-                for ax in range(f.ndim)
+                for ax in axes
             ),
             1,
         )
 
         # --- spacing surcharge ---
-        # Normalise axes as numpy does
-        ax_kw = kwargs.get("axis")
-        if ax_kw is None:
-            axes = range(f.ndim)
-        elif isinstance(ax_kw, int):
-            axes = (ax_kw % f.ndim,)
-        else:
-            axes = tuple(a % f.ndim for a in ax_kw)
-        axes = tuple(axes)
-
+        # ``varargs`` pair up positionally with ``axes``, so the surcharge is
+        # already attributed to the requested axes only.
         n_varargs = len(varargs)
         if n_varargs == 0 or (n_varargs == 1 and _np.ndim(varargs[0]) == 0):
             surcharge = 0  # no coord arrays or scalar spacing
@@ -6168,7 +6186,7 @@ attach_docstring(
     gradient,
     _np.gradient,
     "counted_custom",
-    "uniform: sum_ax 2*S*(L-2)/L; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
+    "uniform: sum over requested axes of 2*S*(L-2)/L; non-uniform axis adds 3*S*(L-2)/L + 10*(L-2) + 3*(L-1) + 4*S/L FLOPs",
 )
 gradient.__signature__ = _inspect.signature(_np.gradient)  # pyright: ignore[reportFunctionMemberAccess]
 

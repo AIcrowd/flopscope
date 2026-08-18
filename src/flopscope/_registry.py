@@ -1094,7 +1094,15 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Gradient using central differences.",
+        "notes": (
+            "Gradient using central differences. Cost is summed over the axes `axis=` "
+            "actually selects (every axis when axis is None), 2*S*max(L-2,0)//L per "
+            "axis with S = f.size and L = f.shape[axis], floored at 1 FLOP -- so a "
+            "single-axis gradient costs about 1/ndim of the all-axes gradient and the "
+            "per-axis costs sum back to it. A 1-D coordinate-array vararg adds a "
+            "surcharge on its own axis: 3*(L-1) when its diffs are bit-exactly "
+            "uniform, otherwise 3*S*(L-2)//L + 10*(L-2) + 3*(L-1) + 4*S//L."
+        ),
     },
     "ediff1d": {
         "category": "counted_custom",
