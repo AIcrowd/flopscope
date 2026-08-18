@@ -946,42 +946,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-10",
     ),
     Entry(
-        case_id="grid/nanpercentile::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `nanpercentile` and a real server-side"
-            " failure is surfaced to the client as a generic `FlopscopeServerError`,"
-            " losing the concrete exception type numpy raises in-process (which varies"
-            " with the grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/nanquantile::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `nanquantile` and a real server-side"
-            " failure is surfaced to the client as a generic `FlopscopeServerError`,"
-            " losing the concrete exception type numpy raises in-process (which varies"
-            " with the grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/percentile::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `percentile` and a real server-side"
-            " failure is surfaced to the client as a generic `FlopscopeServerError`,"
-            " losing the concrete exception type numpy raises in-process (which varies"
-            " with the grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
         case_id="grid/positive::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -1002,18 +966,6 @@ ENTRIES: tuple[Entry, ...] = (
             " `FlopscopeServerError`, so the exception's base-class chain collapses to"
             " `[Exception, BaseException]` instead of the concrete in-process hierarchy"
             " (e.g. LookupError, ValueError, ArithmeticError)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/quantile::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `quantile` and a real server-side"
-            " failure is surfaced to the client as a generic `FlopscopeServerError`,"
-            " losing the concrete exception type numpy raises in-process (which varies"
-            " with the grid pattern's argument shape)."
         ),
         issue="INTERNAL-P5-family-10",
     ),
