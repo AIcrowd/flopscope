@@ -55,12 +55,30 @@ def test_demonstrated_ops_are_dispatch_covered(name):
 
 
 def test_dispatch_coverage_does_not_silently_shrink():
-    """A floor, so removing an entry is caught even before full coverage."""
+    """Pin the exact count so a deleted binding cannot hide behind slack.
+
+    121 registry entries currently resolve through the dispatch map or the
+    passthrough set (measured 2026-08-18, numpy 2.2.6). This is an equality
+    check on purpose: a floor with headroom lets bindings be deleted
+    silently. If you ADD dispatch coverage this test should fail -- bump the
+    number and say why in the commit message. If it fails without your
+    having touched the map, a binding was lost.
+
+    The count is plausibly numpy-version-dependent: ``_bind`` silently skips
+    a pair when either the np.<path> or me.<path> lookup misses (e.g. a
+    linalg function added in a newer NumPy, or one removed like ``in1d`` in
+    2.4), so a numpy bump can shift which REGISTRY entries resolve to a live
+    callable at all -- changing this number without any dispatch-map edit.
+    If a version bump trips this test, re-measure rather than assume a
+    binding was lost.
+    """
     covered = _covered()
     hit = sum(
         1 for n in REGISTRY if (fn := _numpy_callable(n)) is not None and fn in covered
     )
-    assert hit >= 100, f"dispatch coverage dropped to {hit}; entries were removed"
+    assert hit == 121, (
+        f"dispatch coverage is {hit}, expected 121 -- a binding was added or lost"
+    )
 
 
 def test_mixed_operands_do_not_fail_open():
