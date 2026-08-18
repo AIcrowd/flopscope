@@ -1169,8 +1169,8 @@ REGISTRY: dict[str, dict] = {
     "linalg.cross": {
         "category": "counted_custom",
         "module": "numpy.linalg",
-        "complex_factor": 4.0,
-        "notes": "Cross product; charges `3*numel(output)` FLOPs (2 mul + 1 sub per output component).",
+        "complex_factor": 4.7,
+        "notes": "Cross product of two 3-D vectors. Complex factor 4.7: base cost 3*numel (2 mul + 1 sub per component, non-FMA); honest complex (2*6 + 1*2)/3 = 4.67.",
     },
     "linalg.det": {
         "category": "counted_custom",
@@ -1317,7 +1317,7 @@ REGISTRY: dict[str, dict] = {
     "linalg.trace": {
         "category": "counted_custom",
         "module": "numpy.linalg",
-        "complex_factor": 4.0,
+        "complex_factor": 2.0,
         "notes": "Matrix trace. Cost: min(m,n) × batch (diagonal sum per matrix).",
     },
     "linalg.vecdot": {

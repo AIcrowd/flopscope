@@ -610,12 +610,14 @@ def test_linalg_tensorsolve_and_solve_asymmetric_complex_operand():
 
 def test_linalg_trace_accumulator_dtype_is_billed():
     # linalg.trace(real, dtype=complex) accumulates in complex -> must bill the
-    # complex factor via the dtype= kwarg, not just the input dtype.
+    # complex factor via the dtype= kwarg, not just the input dtype. trace's
+    # op-specific complex_factor is 2.0 (a diagonal sum: a complex add is 2 real
+    # flops), matching the bare `trace` spelling -- not a blanket linalg 4.0.
     load_weights()
     m = fnp.asarray(np.ones((8, 8), dtype=np.float64))
     real = _cost(lambda: fnp.linalg.trace(m))
     cplx = _cost(lambda: fnp.linalg.trace(m, dtype=np.complex128))
-    assert cplx == 4 * real
+    assert cplx == 2 * real
 
 
 # ---------------------------------------------------------------------------

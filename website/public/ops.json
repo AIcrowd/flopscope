@@ -4025,7 +4025,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.cross",
-      "notes": "Cross product; charges `3*numel(output)` FLOPs (2 mul + 1 sub per output component).",
+      "notes": "Cross product of two 3-D vectors. Complex factor 4.7: base cost 3*numel (2 mul + 1 sub per component, non-FMA); honest complex (2*6 + 1*2)/3 = 4.67.",
       "numpy_ref": "np.linalg.cross",
       "slug": "linalg-cross",
       "status": "supported",
