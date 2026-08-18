@@ -1482,7 +1482,7 @@ the whole array:
 | `diag` (2-D input, extract) | `0` — a view, no write at all | DECLARED |
 | `diag` (1-D input, construct) | `numel(v)` — the zero background is free | DECLARED |
 | `diagflat` | `numel(v)` — the zero background is free | DECLARED |
-| `fill_diagonal` | `min(m, n)` | DECLARED |
+| `fill_diagonal` | `min(m, n)`, or `ceil(m·n / (n+1))` when `wrap=True` and the array is taller than it is wide (`m > n`) — the count NumPy's flat-slice write (`step = n+1` over the full buffer) actually touches; converges to ~half of `numel(a)`, not all of it | DECLARED |
 
 **Gather — computed-index read (weight 4.0, `flop_cost = numel(output)`)** — a
 non-sequential memory access, the [access tier](#access-tier-weight-40): `take`,
