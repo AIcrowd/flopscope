@@ -125,7 +125,7 @@ This tier covers four families, each detailed in its own section below:
   non-sequential memory access, unlike a materializing copy's sequential write (see
   [Copy and gather](#copy-and-gather)).
 - **Random reorder** — `random.permutation`, `random.shuffle`, `random.choice`, and the
-  `Generator`/`RandomState` `.choice` / `.permutation` / `.permuted` / `.shuffle`
+  `Generator`/`RandomState` `.choice` / `.permutation` / `.shuffle` (plus `Generator.permuted`)
   methods (see [Random](#random-module-level-generator-randomstate)). Note
   `random.sample` is *not* in this tier — despite the name it is numpy's alias for
   `random_sample`, a plain uniform draw.
@@ -199,7 +199,7 @@ but nothing is written into it:
    `atleast_1d`/`atleast_2d`/`atleast_3d`, `broadcast_to`, `view`,
    `real`/`imag` (component extraction), `split`, `hsplit`, `vsplit`,
    `array_split`, `unstack`, `diagonal` (the 2-D view path — see
-   [Copy-and-gather](#copy-and-gather-ops-with-distinct-charged-siblings) for the
+   [Copy-and-gather](#copy-and-gather) for the
    1-D *construct* path, which writes), `linalg.diagonal`, `linalg.matrix_transpose`,
    `from_dlpack` (zero-copy ingest), and all other shape/stride/dtype introspection
    (`ndim`, `shape`, `size`, `nbytes`, `itemsize`, `dtype`, `flags`, `base`, `data`,
@@ -1155,14 +1155,16 @@ All ops use **weight 1.0** with all shape constants in `flop_cost`.  Per-matrix
 cost is multiplied by the batch dimension product for stacked inputs.  Zero-dim
 matrices charge 0.
 
-**Complex dtypes**: the dense linalg family bills `complex_factor = 4` — a complex
-factorization does roughly `4×` the real arithmetic of its real counterpart. The
-**delegating** rows (`linalg.outer`, `linalg.tensordot`, `linalg.vecdot`,
-`linalg.matmul`) are the exception: each forwards to its bare `fnp.*` op and inherits
-that op's cost *and* complex factor — the contraction family's **exact** per-call factor
-(e.g. `linalg.outer` bills factor 6 like `outer`, `linalg.matmul` bills the exact
-contraction total like `matmul`), not this factor-4 dense rule. (Their registry
-`complex_factor = 4.0` is inert metadata the delegation never applies.)
+**Complex dtypes**: most of the dense linalg family bills `complex_factor = 4` — a
+complex factorization does roughly `4×` the real arithmetic of its real counterpart —
+and `linalg.matrix_power` and `linalg.multi_dot` bill this flat `4` as well. The
+exceptions are the ops that mirror a bare `fnp.*` twin and take *its* complex factor
+instead of this dense rule: `linalg.outer` bills factor 6 like `outer`; `linalg.matmul`,
+`linalg.tensordot`, and `linalg.vecdot` bill the same **exact** per-call contraction
+factor as `matmul`/`tensordot`/`vecdot`; `linalg.trace` bills 2 like `trace` (a diagonal
+sum, not a factorization); and `linalg.cross` bills 4.7 like `cross`. (Where such a row
+still carries `complex_factor = 4.0` in the registry it is inert metadata — the
+delegation or the op-specific factor applies instead.)
 
 | Op | flop_cost (per matrix) | basis | source |
 |---|---|---|---|
@@ -1186,7 +1188,7 @@ contraction total like `matmul`), not this factor-4 dense rule. (Their registry
 | `linalg.lstsq` | `6ab² + 20b³ + matmul\_cost(k,m,c) + k·c + matmul\_cost(n,k,c)`, `k=min(m,n)`, `c=#rhs cols` | DERIVED: thin SVD (with vectors) + U^T b + divide by s + reconstruction | `_solvers.py:lstsq_cost` |
 | `linalg.cross` | `3 × numel(output)` (delegates to `fnp.cross`) | DERIVED | `_aliases.py` |
 | `linalg.multi_dot` | optimal chain matmul cost; each step uses `matmul_cost(m,k,n)` = `2mkn − mn` | DERIVED | `_compound.py:multi_dot_cost` |
-| `linalg.outer`, `linalg.tensordot`, `linalg.vecdot`, `linalg.matmul`, `linalg.matrix_power` | delegates to `fnp.*` (inherits the bare op's cost *and* complex factor — see the complex-dtype note above) | DERIVED | `_compound.py`, `_aliases.py` |
+| `linalg.outer`, `linalg.tensordot`, `linalg.vecdot`, `linalg.matmul` | delegates to `fnp.*` (inherits the bare op's cost *and* complex factor — see the complex-dtype note above) | DERIVED | `_compound.py`, `_aliases.py` |
 | `linalg.diagonal`, `linalg.matrix_transpose` | 0 (view) | DECLARED free | `_aliases.py` |
 
 ---
@@ -1317,7 +1319,7 @@ Weight tiers:
   tier](#access-tier-weight-40) as sort and gather: `random.permutation`,
   `random.shuffle` and `random.choice` at module level, and every
   `Generator`/`RandomState`
-  `.choice` / `.permutation` / `.permuted` / `.shuffle` method. The module-level
+  `.choice` / `.permutation` / `.shuffle` method (plus `Generator.permuted`). The module-level
   surface delegates to the legacy `RandomState` singleton, so it runs the same
   selection machinery as the method surface and prices identically — a
   module-level entry at weight 1.0 would be a cheaper alias route around this
