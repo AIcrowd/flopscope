@@ -10913,7 +10913,7 @@
       "free": false,
       "module": "numpy",
       "name": "trace",
-      "notes": "Matrix trace. Cost: min(m,n) \u00d7 batch (diagonal sum per matrix).",
+      "notes": "Matrix trace. Cost: diagonal length after offset (min(m, n), reduced by |offset|, floored at 1) \u00d7 batch (diagonal sum per matrix).",
       "numpy_ref": "np.trace",
       "slug": "trace",
       "status": "supported",

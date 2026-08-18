@@ -1689,7 +1689,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Matrix trace. Cost: min(m,n) × batch (diagonal sum per matrix).",
+        "notes": "Matrix trace. Cost: diagonal length after offset (min(m, n), reduced by |offset|, floored at 1) × batch (diagonal sum per matrix).",
     },
     "broadcast_to": {
         "category": "free",
