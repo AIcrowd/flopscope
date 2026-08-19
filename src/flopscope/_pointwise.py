@@ -3106,6 +3106,12 @@ def _counted_reduction(
         )
         _prepare_symmetric_out(out, new_symmetry)
         cost = reduction_cost(a.shape, axis, symmetry=symmetry) * cost_multiplier
+        # A nan-prefixed reduction tests every input element for NaN before
+        # reducing -- one extra full pass its plain sibling does not run. The
+        # model charges every other value test (count_nonzero, 1-arg where,
+        # isclose), so charge this one too, at the input rate.
+        if op_name.startswith("nan"):
+            cost += pointwise_cost(a.shape)
         if extra_output:
             # Pre-compute extra cost from output shape without running numpy yet
             if axis is None:
@@ -3841,6 +3847,12 @@ def _counted_mean(np_func, op_name: str):
             op_factor=1,
             extra_ops=num_orbits,  # one divide per output orbit
         ).total
+        # A nan-prefixed reduction tests every input element for NaN before
+        # reducing -- one extra full pass its plain sibling does not run. The
+        # model charges every other value test (count_nonzero, 1-arg where,
+        # isclose), so charge this one too, at the input rate.
+        if op_name.startswith("nan"):
+            cost += pointwise_cost(tuple(a.shape))
 
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -3937,6 +3949,12 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         symmetry = _symmetry_of(a)
         keepdims = bool(keepdims)
         cost = _variance_family_cost(a, axis, symmetry, with_sqrt=with_sqrt)
+        # A nan-prefixed reduction tests every input element for NaN before
+        # reducing -- one extra full pass its plain sibling does not run. The
+        # model charges every other value test (count_nonzero, 1-arg where,
+        # isclose), so charge this one too, at the input rate.
+        if op_name.startswith("nan"):
+            cost += pointwise_cost(tuple(a.shape))
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
             if symmetry is not None
@@ -4267,8 +4285,8 @@ nanargmin = _counted_reduction(_np.nanargmin, "nanargmin")
 nancumprod = _counted_reduction(_np.nancumprod, "nancumprod")
 nancumsum = _counted_reduction(_np.nancumsum, "nancumsum")
 nanmax = _counted_reduction(_np.nanmax, "nanmax")
-# nanmean: billed identically to mean (reduction + per-output divide; nan-masking not
-# charged, consistent with nansum/nanstd convention).
+# nanmean: mean's reduction + per-output divide, plus the isnan pass surcharge
+# _counted_mean applies for any op_name that starts with "nan".
 nanmean = _counted_mean(_np.nanmean, "nanmean")
 
 
@@ -4282,9 +4300,8 @@ def nanmedian(
 ) -> FlopscopeArray:
     """Counted version of np.nanmedian.
 
-    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model).
-    Billed identically to median; nan-masking overhead is not charged
-    (consistent with nanpercentile/nanquantile convention).
+    Cost = num_output_orbits × axis_dim (Tier-2 partition-based model),
+    plus one full isnan pass over the input (see the surcharge below).
     """
     import math as _math
 
@@ -4306,6 +4323,11 @@ def nanmedian(
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
     cost = _tier2_reduction_cost(a, axis, dense_per_output_cost=axis_dim)
+    # nanmedian tests every input element for NaN before partitioning -- one
+    # extra full pass median does not run. The model charges every other
+    # value test (count_nonzero, 1-arg where, isclose), so charge this one
+    # too, at the input rate.
+    cost += pointwise_cost(tuple(a.shape))
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -4352,7 +4374,8 @@ def nanpercentile(
 ) -> FlopscopeArray:
     """Counted version of np.nanpercentile.
 
-    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model),
+    plus one full isnan pass over the input (see the surcharge below).
     Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
     depends on whether weights= is given -- see _quantile_dense_cost.
     """
@@ -4390,6 +4413,11 @@ def nanpercentile(
             axis_dim, q_count, weighted=weighted
         ),
     )
+    # nanpercentile tests every input element for NaN before partitioning --
+    # one extra full pass percentile does not run. The model charges every
+    # other value test (count_nonzero, 1-arg where, isclose), so charge this
+    # one too, at the input rate.
+    cost += pointwise_cost(tuple(a.shape))
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -4444,7 +4472,8 @@ def nanquantile(
 ) -> FlopscopeArray:
     """Counted version of np.nanquantile.
 
-    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model).
+    Cost = num_output_orbits × per-output cost (Tier-2 partition-based model),
+    plus one full isnan pass over the input (see the surcharge below).
     Per-output cost is piecewise in axis_dim (n) and q.size (k), and also
     depends on whether weights= is given -- see _quantile_dense_cost.
     """
@@ -4482,6 +4511,11 @@ def nanquantile(
             axis_dim, q_count, weighted=weighted
         ),
     )
+    # nanquantile tests every input element for NaN before partitioning --
+    # one extra full pass quantile does not run. The model charges every
+    # other value test (count_nonzero, 1-arg where, isclose), so charge this
+    # one too, at the input rate.
+    cost += pointwise_cost(tuple(a.shape))
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)

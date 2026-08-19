@@ -282,6 +282,19 @@ _REDUCTION_NUMEL = [
     "prod",
     # ptp is excluded: 2-pass formula (2*numel - M); see test_ptp_two_passes
     "sum",
+    # nan* siblings are excluded here: same skeleton, plus a numel(input) isnan
+    # pass; see test_nan_reduction_numel_adds_isnan_pass
+    # nanmedian is excluded: Tier-2 cost (num_output_orbits × axis_dim); see test_nanmedian_tier2_full_reduction
+    # mean is excluded: it charges +1 divide for the scalar output orbit
+    # nanmean is excluded: mean's cost + the isnan pass; see test_nanmean_matches_mean
+    # average is excluded: now matches mean cost (reduction + M divides); see test_average_matches_mean_and_bills_weight_pipeline
+    # std/var/nanstd/nanvar are excluded: 4-pass formula; see test_variance_family_cost
+]
+
+# nan* reduction siblings: same orbit-mapping skeleton as their plain form,
+# plus a full numel(input) isnan pass (#177.4) -- see
+# tests/test_nan_reduction_pass_cost.py for the general invariant.
+_NAN_REDUCTION_NUMEL = [
     "nanargmax",
     "nanargmin",
     "nancumprod",
@@ -290,11 +303,6 @@ _REDUCTION_NUMEL = [
     "nanmin",
     "nanprod",
     "nansum",
-    # nanmedian is excluded: Tier-2 cost (num_output_orbits × axis_dim); see test_nanmedian_tier2_full_reduction
-    # mean is excluded: it charges +1 divide for the scalar output orbit
-    # nanmean is excluded: billed identically to mean (reduction + M divides); see test_nanmean_matches_mean
-    # average is excluded: now matches mean cost (reduction + M divides); see test_average_matches_mean_and_bills_weight_pipeline
-    # std/var/nanstd/nanvar are excluded: 4-pass formula; see test_variance_family_cost
 ]
 
 
@@ -308,20 +316,33 @@ def test_reduction_numel(name, we):
     assert cost == 99, f"{name}: expected orbit-mapping cost=99, got {cost}"
 
 
+@pytest.mark.parametrize("name", _NAN_REDUCTION_NUMEL)
+def test_nan_reduction_numel_adds_isnan_pass(name, we):
+    # Same orbit-mapping skeleton as the plain sibling (99), plus a full
+    # numel(input) isnan pass (100 for a (10,10) array): 99 + 100 = 199.
+    a = numpy.random.rand(10, 10)
+    fn = getattr(we, name)
+    cost = _cost_of(fn, a)
+    assert cost == 199, (
+        f"{name}: expected orbit-mapping cost + isnan pass=199, got {cost}"
+    )
+
+
 def test_variance_family_cost(we):
     # 4-pass honest cost for full reduction of (10,10) dense (N=100, M=1 scalar):
     # 2*pointwise(100) + reduce(op_factor=2, extra_ops=2*1) + 1 div
     # pointwise = 100; reduce: orbit-mapping 99 + 2 extra = 101 → *2 op_factor? No:
     # compute_reduction_accumulation_cost with op_factor=2, extra_ops=2: total = 2*99 + 2 = 200
     # var = 2*100 + 200 = 400, std = 400 + 1 = 401
+    # nanvar/nanstd add a further isnan pass over the input: +100.
     a = numpy.random.rand(10, 10)
     assert _cost_of(we.var, a) == 400, f"var: expected 400, got {_cost_of(we.var, a)}"
     assert _cost_of(we.std, a) == 401, f"std: expected 401, got {_cost_of(we.std, a)}"
-    assert _cost_of(we.nanvar, a) == 400, (
-        f"nanvar: expected 400, got {_cost_of(we.nanvar, a)}"
+    assert _cost_of(we.nanvar, a) == 500, (
+        f"nanvar: expected 500, got {_cost_of(we.nanvar, a)}"
     )
-    assert _cost_of(we.nanstd, a) == 401, (
-        f"nanstd: expected 401, got {_cost_of(we.nanstd, a)}"
+    assert _cost_of(we.nanstd, a) == 501, (
+        f"nanstd: expected 501, got {_cost_of(we.nanstd, a)}"
     )
 
 
@@ -344,21 +365,25 @@ def test_median_tier2_cost(we):
 
 
 def test_nanmedian_tier2_cost(we):
-    # nanmedian now uses Tier-2 model (same as median): num_output_orbits × axis_dim.
+    # nanmedian uses the same Tier-2 model as median (num_output_orbits ×
+    # axis_dim), plus a full numel(input) isnan pass (#177.4).
     # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar → 1 orbit.
-    # Cost = 1 * 100 = 100.  (Was 99 from _counted_reduction skeleton.)
+    # Cost = 1 * 100 + 100 (isnan pass) = 200.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.nanmedian, a)
-    assert cost == 100, f"nanmedian: expected Tier-2 cost=100, got {cost}"
+    assert cost == 200, f"nanmedian: expected Tier-2 cost + isnan pass=200, got {cost}"
 
 
 def test_nanmean_charges_sum_plus_one_divide(we):
-    # nanmean: billed identically to mean (reduction + per-output divide).
-    # Full reduction of (10,10) dense: sum cost = 99, scalar output → 1 divide.
-    # Total = 100. (Was 99 from _counted_reduction skeleton.)
+    # nanmean: mean's cost (reduction + per-output divide), plus a full
+    # numel(input) isnan pass (#177.4).
+    # Full reduction of (10,10) dense: sum cost = 99, scalar output → 1 divide,
+    # + 100 isnan pass. Total = 200.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(we.nanmean, a)
-    assert cost == 100, f"nanmean: expected sum_cost(99) + 1 divide = 100, got {cost}"
+    assert cost == 200, (
+        f"nanmean: expected sum_cost(99) + 1 divide + isnan pass(100) = 200, got {cost}"
+    )
 
 
 def test_percentile_tier2_cost(we):
@@ -373,13 +398,14 @@ def test_percentile_tier2_cost(we):
 
 @pytest.mark.parametrize("name", ["nanpercentile"])
 def test_nanpercentile_numel(name, we):
-    # nanpercentile now uses Tier-2 model (same as percentile):
-    # num_output_orbits × (axis_dim + 4*q.size).
+    # nanpercentile uses the same Tier-2 model as percentile
+    # (num_output_orbits × (axis_dim + 4*q.size)), plus a full numel(input)
+    # isnan pass (#177.4).
     # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
-    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) + 100 = 204.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=50)
-    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
+    assert cost == 204, f"{name}: expected Tier-2 cost + isnan pass=204, got {cost}"
 
 
 def test_quantile_tier2_cost(we):
@@ -394,13 +420,14 @@ def test_quantile_tier2_cost(we):
 
 @pytest.mark.parametrize("name", ["nanquantile"])
 def test_nanquantile_numel(name, we):
-    # nanquantile now uses Tier-2 model (same as quantile):
-    # num_output_orbits × (axis_dim + 4*q.size).
+    # nanquantile uses the same Tier-2 model as quantile
+    # (num_output_orbits × (axis_dim + 4*q.size)), plus a full numel(input)
+    # isnan pass (#177.4).
     # Full reduction of (10,10) dense: axis_dim = prod(shape) = 100, scalar q
-    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) = 104.
+    # (q.size=1) → +4, scalar output → 1 orbit. Cost = 1 * (100 + 4) + 100 = 204.
     a = numpy.random.rand(10, 10)
     cost = _cost_of(getattr(we, name), a, q=0.5)
-    assert cost == 104, f"{name}: expected Tier-2 cost=104, got {cost}"
+    assert cost == 204, f"{name}: expected Tier-2 cost + isnan pass=204, got {cost}"
 
 
 @pytest.mark.skipif(

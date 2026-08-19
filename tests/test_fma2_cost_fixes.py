@@ -62,9 +62,10 @@ def test_var_is_four_passes_and_shape_stable():
     assert cost(lambda: fnp.var(a, axis=1)) == 4_000_000  # shape-stable, not 2(N-M)
 
 
-def test_nanvar_matches_var_cost():
+def test_nanvar_matches_var_cost_plus_isnan_pass():
+    # #177.4: nanvar runs a further numel(input) isnan pass var does not.
     v = fnp.asarray(np.random.rand(1_000_000))
-    assert cost(lambda: fnp.nanvar(v)) == cost(lambda: fnp.var(v))
+    assert cost(lambda: fnp.nanvar(v)) == cost(lambda: fnp.var(v)) + v.size
 
 
 def test_trapezoid_is_four_per_element():
