@@ -1170,7 +1170,9 @@ def where(
             flop_cost=out_numel,
             subscripts=None,
             shapes=(cond_arr.shape, x_arr.shape, y_arr.shape),
-            dtypes=(x_arr.dtype, y_arr.dtype),
+            # A Python scalar is passed through so numpy's NEP 50 weak
+            # promotion applies -- it must not widen a narrow array's rate.
+            dtypes=(billing_operand(x, x_arr), billing_operand(y, y_arr)),
         ):
             result = _call_numpy(
                 _np.where,
@@ -3016,7 +3018,14 @@ def insert(
 ) -> FlopscopeArray:
     """Insert values along axis before given indices. Cost: numel(output)."""
     budget = require_budget()
-    _insert_dtypes = (_np.asarray(arr).dtype, _np.asarray(values).dtype)
+    _arr_coerced = _np.asarray(arr)
+    _values_coerced = _np.asarray(values)
+    # A Python scalar is passed through so numpy's NEP 50 weak promotion
+    # applies -- it must not widen a narrow array's rate.
+    _insert_dtypes = (
+        billing_operand(arr, _arr_coerced),
+        billing_operand(values, _values_coerced),
+    )
     with budget.deduct_after(
         "insert", subscripts=None, shapes=(), dtypes=_insert_dtypes
     ) as _op:

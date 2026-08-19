@@ -4424,6 +4424,22 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P2-family-1",
     ),
     Entry(
+        case_id="types/remote-scalar::second-positional",
+        dimension="flops",
+        category=Category.KNOWN_BUG,
+        reason=(
+            "`fnp.where(M, V[0], 0.0)` promotes to a different dtype on each backend"
+            " (see the accompanying `dtype` entry), which changes the billed FLOP"
+            " count for the same call: in-process resolves the genuine `float32`"
+            " scalar under NEP 50 weak promotion (24 FLOPs), while the client"
+            " resolves the dtype-stripped value it actually received, two weak"
+            " Python floats with no strong operand present, which NumPy promotes to"
+            " `float64` (48 FLOPs). Both backends bill correctly for the value each"
+            " one actually computed with."
+        ),
+        issue="INTERNAL-P2-family-1",
+    ),
+    Entry(
         case_id="types/nested-list::index-key",
         dimension="outcome",
         category=Category.KNOWN_BUG,
