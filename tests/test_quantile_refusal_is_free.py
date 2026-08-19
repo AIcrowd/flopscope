@@ -91,3 +91,57 @@ def test_quantile_inclusive_boundary_is_accepted_and_billed(func, boundary_q):
     with flops.budget(10**15, quiet=True) as b:
         func(x, boundary_q)
         assert b.flops_used > 0
+
+
+@pytest.mark.parametrize(
+    "func",
+    [fnp.percentile, fnp.nanpercentile, fnp.quantile, fnp.nanquantile],
+    ids=lambda f: f.__name__,
+)
+def test_nan_q_is_refused_free(func):
+    """A NaN q is out of range for numpy, so it must cost nothing here too.
+
+    NaN is the one input on which ``q.min() < 0 or q.max() > hi`` and numpy's
+    own ``not (q.min() >= 0 and q.max() <= hi)`` disagree: every comparison
+    against NaN is False, so the positive form does not fire, the full cost is
+    deducted, and numpy raises the identical ValueError immediately after --
+    the exact charge-then-refuse leak this guard exists to close. Measured
+    through the real client before the fix: 20008 FLOPs on ``quantile``,
+    40008 on ``nanquantile``.
+    """
+    x = fnp.array(np.arange(100, dtype=np.float64))
+    assert _charged_on_refusal(lambda: func(x, float("nan"))) == 0
+
+
+@pytest.mark.parametrize(
+    "func",
+    [fnp.percentile, fnp.nanpercentile, fnp.quantile, fnp.nanquantile],
+    ids=lambda f: f.__name__,
+)
+def test_array_q_with_a_nan_entry_is_refused_free(func):
+    """One NaN among otherwise valid entries is still a refusal, still free."""
+    x = fnp.array(np.arange(100, dtype=np.float64))
+    valid = 50.0 if func in (fnp.percentile, fnp.nanpercentile) else 0.5
+    assert _charged_on_refusal(lambda: func(x, [valid, float("nan")])) == 0
+
+
+@pytest.mark.parametrize(
+    "func, hi",
+    [
+        (fnp.percentile, 100),
+        (fnp.nanpercentile, 100),
+        (fnp.quantile, 1),
+        (fnp.nanquantile, 1),
+    ],
+    ids=lambda v: getattr(v, "__name__", str(v)),
+)
+def test_nan_q_refusal_message_matches_numpy(func, hi):
+    """The refusal must stay indistinguishable from numpy's own."""
+    x = np.arange(100, dtype=np.float64)
+    numpy_func = getattr(np, func.__name__)
+    with pytest.raises(ValueError) as numpy_exc:
+        numpy_func(x, float("nan"))
+    with flops.budget(10**15, quiet=True):
+        with pytest.raises(ValueError) as ours:
+            func(fnp.array(x), float("nan"))
+    assert str(ours.value) == str(numpy_exc.value)

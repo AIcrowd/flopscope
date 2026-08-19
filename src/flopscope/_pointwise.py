@@ -4251,6 +4251,16 @@ def _validate_q_range(q_arr: _np.ndarray, hi: int, message: str) -> None:
     quantile family) and numpy's own message, so the refusal is
     indistinguishable from numpy's. An empty q has no min/max and is never
     out of range (numpy accepts an empty q, returning an empty result).
+
+    The test is numpy's NEGATED form (``_quantile_is_valid``:
+    ``not (min >= 0 and max <= hi)``), not the equivalent-looking
+    ``min < 0 or max > hi``. The two agree on every real number and diverge
+    on exactly one input: **NaN**, where every comparison is False, so the
+    positive form does not fire, the caller is charged in full, and numpy
+    then raises the identical ``ValueError`` anyway -- the precise
+    charge-then-refuse leak this guard exists to close (measured: a NaN q
+    cost 20008 FLOPs on ``quantile`` and 40008 on ``nanquantile`` before
+    this form was adopted).
     ``q_arr`` is stripped to a plain ndarray first: an fnp-built q is itself
     a metered FlopscopeArray, and calling its own .min()/.max() here would
     double-bill the check. Every caller must invoke this as the first
@@ -4259,7 +4269,7 @@ def _validate_q_range(q_arr: _np.ndarray, hi: int, message: str) -> None:
     _normalize_out already gives out= at every call site above.
     """
     q_plain = _to_base_ndarray(q_arr)
-    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > hi):
+    if q_plain.size and not (q_plain.min() >= 0 and q_plain.max() <= hi):
         raise ValueError(message)
 
 
