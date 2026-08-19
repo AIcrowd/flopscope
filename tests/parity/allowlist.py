@@ -718,30 +718,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-10",
     ),
     Entry(
-        case_id="grid/dot::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `dot` and a real server-side failure is"
-            " surfaced to the client as a generic `FlopscopeServerError`, losing the"
-            " concrete exception type numpy raises in-process (which varies with the"
-            " grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/dot::*",
-        dimension="exc_bases",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client wraps `dot`'s server-side failure in a generic"
-            " `FlopscopeServerError`, so the exception's base-class chain collapses to"
-            " `[Exception, BaseException]` instead of the concrete in-process hierarchy"
-            " (e.g. LookupError, ValueError, ArithmeticError)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
         case_id="grid/dsplit::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
@@ -894,30 +870,6 @@ ENTRIES: tuple[Entry, ...] = (
             " is surfaced to the client as a generic `FlopscopeServerError`, losing the"
             " concrete exception type numpy raises in-process (which varies with the"
             " grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/inner::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `inner` and a real server-side failure"
-            " is surfaced to the client as a generic `FlopscopeServerError`, losing the"
-            " concrete exception type numpy raises in-process (which varies with the"
-            " grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
-        case_id="grid/inner::*",
-        dimension="exc_bases",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client wraps `inner`'s server-side failure in a generic"
-            " `FlopscopeServerError`, so the exception's base-class chain collapses to"
-            " `[Exception, BaseException]` instead of the concrete in-process hierarchy"
-            " (e.g. LookupError, ValueError, ArithmeticError)."
         ),
         issue="INTERNAL-P5-family-10",
     ),

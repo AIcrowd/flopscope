@@ -1330,20 +1330,18 @@ def test_tensordot_oversized_symmetry_arm_extent_mismatch_refuses_before_chargin
 def test_dot_inner_scalar_operand_behaviour_is_untouched():
     """A 0-d operand has no contracted axis, so the validator must skip it.
 
-    `np.dot`/`np.inner` treat a scalar operand as a plain multiply. flopscope
-    has a separate, pre-existing gap there (the subscript builder divides by
-    `a.ndim`), and this pins that the pairing check neither fixes nor
-    aggravates it -- it must not be the thing that raises.
+    `np.dot`/`np.inner` treat a scalar operand as a plain multiply. Both are
+    now priced and answered like numpy (#189) -- the pairing check added
+    here still correctly skips a 0-d operand rather than being the thing
+    that raises.
     """
     scalar = fnp.asarray(np.array(2.0))
     arr = fnp.asarray(np.ones((3, 4)))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        with flops.BudgetContext(flop_budget=10**16, quiet=True):
-            with pytest.raises(ZeroDivisionError):
-                fnp.inner(scalar, arr)
-            with pytest.raises(ZeroDivisionError):
-                fnp.dot(scalar, arr)
+    with flops.BudgetContext(flop_budget=10**16, quiet=True):
+        inner_result = fnp.inner(scalar, arr)
+        dot_result = fnp.dot(scalar, arr)
+    assert np.allclose(np.asarray(inner_result), np.inner(2.0, np.ones((3, 4))))
+    assert np.allclose(np.asarray(dot_result), np.dot(2.0, np.ones((3, 4))))
 
 
 # --- the broadcasting siblings: matmul, vecdot, matvec, vecmat -------------
