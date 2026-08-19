@@ -634,7 +634,7 @@ computation actually happens, not the input's label:
 
 | family | integer / bool inputs compute in | float inputs |
 |---|---|---|
-| unary float-only ufuncs (`exp`, `sin`, `sqrt`, …) | the same-size float (`int8`/`uint8`/`bool` → `float16`; `int16`/`uint16` → `float32`; `int32`/`int64`/`uint32`/`uint64` → `float64`) | unchanged |
+| unary float-only ufuncs (`exp`, `sin`, `sqrt`, …) | the same-size float (`int8`/`uint8`/`bool` → `float16`; `int16`/`uint16` → `float32`; `int32`/`int64`/`uint32`/`uint64` → `float64`) — `angle` is the one exception, flooring `bool` alone at `float64` (see below) | unchanged |
 | binary float-only ufuncs except division (`arctan2`, `hypot`, `logaddexp`, …) | NumPy-selected float loop (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) | unchanged — this replaces the old blanket-float64 rule for narrow integers |
 | `divide` / `true_divide` | integer pairs resolve to `float64` | unchanged |
 | `float_power` | NumPy's selected loop has a `float64` real minimum | `float64` real minimum — unchanged in effect |
@@ -651,6 +651,11 @@ signatures are `dd->d` and `DD->D`, respectively, so `complex64` promotes to
 `exp` prices its size-mapped loop directly: on a 1000-element input, `int8` and `int16`
 both still bill the `1.0` rate (**16000** — float16 and float32 share the baseline rate),
 while `int32`/`int64` bill the `2.0` float64 rate (**32000**).
+
+`angle` follows that same size-mapped loop for every actual integer/unsigned width, but
+`bool` is a documented exception: on a 1000-element input, `angle(bool_data)` bills the
+`float64` rate (**32000**) while `angle(int8_data)` and `sin(bool_data)` both bill the
+`float16` rate (**16000**).
 
 For a worked binary example, `hypot(int8, int8)` selects a float16 loop and
 `hypot(int16, int16)` selects a float32 loop; both bill the baseline dtype rate `1.0`.
