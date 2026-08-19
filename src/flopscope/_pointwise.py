@@ -172,10 +172,17 @@ def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> No
 # overcount unrelated to this undercount fix; see task-6-report.md).
 #
 # Also includes ``angle`` (arctan2(0, x) internally -- same size-mapped
-# promotion for every integer/unsigned width; a python-int-vs-bool-array NEP
-# 50 quirk means angle(bool_) actually computes float64 rather than the
-# float16 this mapping would predict, a narrow pre-existing gap this fix does
-# not chase) and the ``_counted_unary_multi`` pair ``modf``/``frexp`` (real
+# promotion as the rest of this family for every actual integer/unsigned
+# width, verified against int8/uint8/int16/uint16/int32/int64: each bills
+# the same rate sin/cos/etc. would for that width). Bool is the one
+# exception: a python-int-vs-bool-array NEP 50 quirk inside angle's
+# arctan2-based implementation computes float64 for a bool array even though
+# bool shares int8's itemsize (unlike sin(bool_), which genuinely does
+# compute float16, matching int8) -- billed via the inline override below,
+# not by moving angle to ``_UNARY_FLOAT64_MIN_OPS`` (that set floors EVERY
+# integer/unsigned width at float64, which would overcharge int8/uint8/
+# int16/uint16 relative to what angle actually computes for them). Also
+# includes the ``_counted_unary_multi`` pair ``modf``/``frexp`` (real
 # multi-output ufuncs with the identical same-size float loop for their
 # primary output; ``frexp``'s exponent output is handled separately, see
 # ``_counted_unary_multi``).
@@ -967,7 +974,13 @@ def _counted_unary(np_func, op_name: str):
         if op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:
-                billing_dtypes = (unary_float_loop_dtype(resolved),)
+                mapped = unary_float_loop_dtype(resolved)
+                # angle(bool_) computes float64, not the float16 the
+                # itemsize-based mapping predicts -- see the comment above
+                # _UNARY_FLOAT_LOOP_OPS.
+                if op_name == "angle" and resolved.kind == "b":
+                    mapped = _np.dtype(_np.float64)
+                billing_dtypes = (mapped,)
         elif op_name in _UNARY_FLOAT64_MIN_OPS:
             resolved = resolve_billing_dtype(billing_dtypes)
             if resolved is not None:

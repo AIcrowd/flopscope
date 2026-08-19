@@ -43,6 +43,10 @@ V3 = V[:3]  # length-3 (cross-product domain)
 V4 = V[:4]  # matches M's contracted dimension
 SHIFT = (V01 % 2).astype(np.int32) + 1  # 1s and 2s: safe int shift amounts
 
+# bool probe: the dtype whose unary-ufunc size-mapping target (float16) diverges
+# most from what several composites actually compute in (angle(bool_) -> float64).
+VB = (np.arange(8) % 2).astype(bool)
+
 # float64 fixtures for the dtype-resolving gather/assembly ops (choose/block/
 # bmat). They read/assemble from these arrays, so a float64 probe drives the
 # result-dtype floor to 2.0 -- a passing billed rate proves they resolve the
@@ -62,6 +66,10 @@ V.tofile(_FROMFILE_PATH)
 
 def _unary(name: str) -> Callable[[], Any]:
     return lambda: getattr(fnp, name)(V)
+
+
+def _unary_bool(name: str) -> Callable[[], Any]:
+    return lambda: getattr(fnp, name)(VB)
 
 
 def _binary(name: str) -> Callable[[], Any]:
@@ -1158,14 +1166,13 @@ def _result_dtypes(result: Any):
     return []
 
 
-@pytest.mark.parametrize("op", sorted(PROBES))
-def test_billed_rate_covers_compute_dtype(op: str):
+def _assert_billed_rate_covers_compute_dtype(op: str, call: Callable[[], Any]) -> None:
     load_weights()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
             try:
-                result = PROBES[op]()
+                result = call()
             except UnsupportedFunctionError as e:
                 # Version-gated op absent from the RUNNING numpy (e.g. matvec
                 # before 2.2); the matrix cells whose numpy has it still sweep
@@ -1189,6 +1196,37 @@ def test_billed_rate_covers_compute_dtype(op: str):
         f"{op!r} billed dtype {rec.resolved_dtype} (rate {billed_rate}) but "
         f"numpy produced {_result_dtypes(result)} (needs rate >= {floor})"
     )
+
+
+@pytest.mark.parametrize("op", sorted(PROBES))
+def test_billed_rate_covers_compute_dtype(op: str):
+    _assert_billed_rate_covers_compute_dtype(op, PROBES[op])
+
+
+# Ops in _UNARY_OPS that genuinely reject a bool operand (numpy itself
+# raises), excluded BY NAME with a one-line reason -- never a blanket
+# try/except, which would also swallow a real regression on an op that
+# should accept bool but silently stopped.
+_BOOL_UNSUPPORTED_UNARY: dict[str, str] = {
+    "negative": "numpy: boolean negative is not supported, use logical_not",
+    "positive": "numpy: ufunc 'positive' has no bool loop",
+    "sign": "numpy: ufunc 'sign' has no bool loop",
+}
+
+
+@pytest.mark.parametrize(
+    "op", [n for n in _UNARY_OPS if n not in _BOOL_UNSUPPORTED_UNARY]
+)
+def test_billed_rate_covers_compute_dtype_bool(op: str):
+    """Same floor as the int32 sweep, driven by a bool operand.
+
+    int32 alone cannot see the size-mapped unary float loop's bool anomaly
+    (angle(bool_) computes float64, not the float16 the itemsize-based
+    mapping predicts) -- both int32 and its size-mapped float loop already
+    land at float64, so the divergence only shows up when the operand is
+    actually bool.
+    """
+    _assert_billed_rate_covers_compute_dtype(op, _unary_bool(op))
 
 
 # ---------------------------------------------------------------------------
