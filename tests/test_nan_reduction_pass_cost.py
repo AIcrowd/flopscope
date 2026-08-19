@@ -17,6 +17,11 @@ under-bill above:
   dtype.
 * **symmetry.** The pass runs over the STORED orbits of a symmetric operand,
   not over its dense ``numel``, exactly like every other pass in these ops.
+* **op.** ``nanmax``/``nanmin`` carry NO surcharge at any dtype (Ruling R13).
+  For a plain non-object ndarray -- every operand flopscope hands them --
+  NumPy takes a fast path that reduces with ``fmax``/``fmin`` and then tests
+  the REDUCED OUTPUT with ``np.isnan(res).any()``; it never reaches
+  ``_replace_nan``, so there is no input-sized pass to charge.
 
 Beyond the eleven factory-built ops (`_counted_reduction`, `_counted_mean`,
 `_counted_variance`), `nanmedian`, `nanpercentile`, and `nanquantile` are
@@ -34,15 +39,15 @@ import flopscope as flops
 import flopscope.numpy as fnp
 
 # (nan op, plain sibling) -- every nan* reduction on the counted surface that
-# shares its plain sibling's single-array call signature.
+# shares its plain sibling's single-array call signature AND carries the
+# surcharge. ``nanmax``/``nanmin`` are deliberately absent: see
+# ``_NAN_PASS_EXEMPT`` and its tests at the bottom of this module.
 _PAIRS = [
     ("nansum", "sum"),
     ("nanprod", "prod"),
     ("nanmean", "mean"),
     ("nanvar", "var"),
     ("nanstd", "std"),
-    ("nanmax", "max"),
-    ("nanmin", "min"),
     ("nanargmax", "argmax"),
     ("nanargmin", "argmin"),
     ("nancumsum", "cumsum"),
@@ -143,8 +148,6 @@ _FACTORY_PAIRS = [
     ("nanmean", "mean"),
     ("nanvar", "var"),
     ("nanstd", "std"),
-    ("nanmax", "max"),
-    ("nanmin", "min"),
     ("nanargmax", "argmax"),
     ("nanargmin", "argmin"),
     ("nancumsum", "cumsum"),
@@ -207,7 +210,6 @@ def _pointwise_reference(operand) -> int:
         ("nansum", "sum", ()),
         ("nanmean", "mean", ()),
         ("nanvar", "var", ()),
-        ("nanmax", "max", ()),
         ("nanmedian", "median", ()),
         ("nanpercentile", "percentile", (50,)),
         ("nanquantile", "quantile", (0.5,)),
@@ -246,3 +248,60 @@ def test_symmetric_surcharge_is_strictly_below_the_dense_one():
         lambda: fnp.sum(dense)
     )
     assert 0 < sym_surcharge < dense_surcharge
+
+
+# ---------------------------------------------------------------------------
+# The surcharge's op limit: nanmax / nanmin (Ruling R13)
+# ---------------------------------------------------------------------------
+
+#: The two factory-built nan* reductions that never reach numpy's
+#: ``_replace_nan`` and therefore carry no input-sized isnan pass at all.
+_NAN_PASS_EXEMPT = [("nanmax", "max"), ("nanmin", "min")]
+
+
+@pytest.mark.parametrize("nan_name, plain_name", _NAN_PASS_EXEMPT)
+@pytest.mark.parametrize(
+    "dtype", [np.float64, np.float32, np.complex128, np.int32, np.bool_]
+)
+def test_nanmax_nanmin_bill_exactly_like_their_plain_sibling(
+    nan_name, plain_name, dtype
+):
+    """No surcharge on ``nanmax``/``nanmin``, at float OR at integer/bool.
+
+    numpy's fast path (`type(a) is np.ndarray and a.dtype != np.object_`,
+    which is every operand flopscope hands it) reduces with
+    ``np.fmax.reduce``/``np.fmin.reduce`` and then tests the REDUCED OUTPUT
+    with ``np.isnan(res).any()``. The ``_replace_nan`` branch the surcharge
+    models is the SLOW path, for ndarray subclasses and object arrays only.
+
+    Charging the input-sized pass here was wrong in both directions: a 2.00x
+    over-bill on float (``nanmax(float64[10000])`` billed 39998 against an
+    honest ~20002) and, under the inexact-dtype gate, nothing at all for the
+    output-sized pass numpy really does run on integer input. Both ops return
+    to their v0.11.0 price. This test is the guard against the surcharge
+    creeping back onto them.
+    """
+    x = fnp.array(np.ones(10_000, dtype=dtype))
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    assert _billed(lambda: nan_op(x)) == _billed(lambda: plain_op(x))
+
+
+@pytest.mark.parametrize("nan_name, plain_name", _NAN_PASS_EXEMPT)
+def test_nanmax_nanmin_exemption_holds_on_an_axis_reduction(nan_name, plain_name):
+    """The exemption is not an artefact of the full-reduction shape."""
+    x = fnp.array(np.arange(5000, dtype=np.float64).reshape(1, 5000))
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    assert _billed(lambda: nan_op(x, axis=0)) == _billed(lambda: plain_op(x, axis=0))
+
+
+@pytest.mark.parametrize("nan_name, plain_name", _NAN_PASS_EXEMPT)
+def test_nanmax_nanmin_exemption_holds_on_a_symmetric_operand(nan_name, plain_name):
+    """Symmetric operands too -- no surcharge means none to orbit-map."""
+    group = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.budget(10**15, quiet=True):
+        operand = fnp.random.symmetric((60, 60), group)
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    assert _billed(lambda: nan_op(operand)) == _billed(lambda: plain_op(operand))

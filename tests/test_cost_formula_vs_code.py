@@ -299,11 +299,16 @@ _NAN_REDUCTION_NUMEL = [
     "nanargmin",
     "nancumprod",
     "nancumsum",
-    "nanmax",
-    "nanmin",
     "nanprod",
     "nansum",
 ]
+
+# nanmax/nanmin are NOT here: numpy's fast path for a plain ndarray reduces
+# with fmax/fmin and tests the reduced OUTPUT, never reaching _replace_nan, so
+# they carry no input-sized isnan pass at any dtype and bill the plain
+# skeleton (99) like max/min -- see _NAN_PASS_EXEMPT_REDUCTIONS in
+# _pointwise.py and test_nan_reduction_pass_cost.py's exemption tests.
+_NAN_PASS_EXEMPT_REDUCTION_NUMEL = ["nanmax", "nanmin"]
 
 
 @pytest.mark.parametrize("name", _REDUCTION_NUMEL)
@@ -314,6 +319,16 @@ def test_reduction_numel(name, we):
     fn = getattr(we, name)
     cost = _cost_of(fn, a)
     assert cost == 99, f"{name}: expected orbit-mapping cost=99, got {cost}"
+
+
+@pytest.mark.parametrize("name", _NAN_PASS_EXEMPT_REDUCTION_NUMEL)
+def test_nan_pass_exempt_reduction_bills_the_plain_skeleton(name, we):
+    # No isnan pass is charged for these two at any dtype, so the bill is the
+    # same 99 the plain sibling carries -- not 199.
+    a = numpy.random.rand(10, 10)
+    fn = getattr(we, name)
+    cost = _cost_of(fn, a)
+    assert cost == 99, f"{name}: expected the plain skeleton cost=99, got {cost}"
 
 
 @pytest.mark.parametrize("name", _NAN_REDUCTION_NUMEL)

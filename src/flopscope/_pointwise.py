@@ -124,6 +124,26 @@ _INDEX_RETURNING_REDUCTIONS = frozenset(
 )
 
 
+# nan* reductions that do NOT run numpy's ``_replace_nan`` at all, and are
+# therefore excluded from the NaN-test-pass surcharge (Ruling R13).
+#
+# ``np.nanmax``/``np.nanmin`` take a fast path for any plain, non-object
+# ndarray -- which is every operand flopscope hands them -- that reduces with
+# ``np.fmax.reduce``/``np.fmin.reduce`` and then tests the REDUCED OUTPUT
+# with ``np.isnan(res).any()``. There is no pass over the input to charge:
+# the ``_replace_nan`` branch the surcharge models is the SLOW path, reached
+# only for ndarray subclasses and object arrays.
+#
+# Charging the input-sized surcharge here was wrong in both directions -- a
+# 2x over-bill on float (nanmax(float64[10000]) billed 39998 against an
+# honest ~20002) and, once the inexact-dtype gate landed, nothing at all for
+# the output-sized pass numpy really does run on integer input. Both ops
+# return to the price they carried at v0.11.0, before the surcharge was
+# introduced. Modelling the output-sized pass instead would be a new cost
+# model rather than a conformance fix, and is deliberately not attempted.
+_NAN_PASS_EXEMPT_REDUCTIONS = frozenset({"nanmax", "nanmin"})
+
+
 def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> None:
     """Refuse an ``out=`` numpy cannot use as an index buffer -- before charging.
 
@@ -3146,12 +3166,20 @@ def _counted_reduction(
         # plain sibling. Charging it anyway was a flat 2x over-bill on
         # int/bool (1.25x on the variance family).
         #
+        # ``nanmax``/``nanmin`` never reach ``_replace_nan`` on the path
+        # flopscope drives and carry no input-sized pass at any dtype -- see
+        # ``_NAN_PASS_EXEMPT_REDUCTIONS``.
+        #
         # ``symmetry`` is passed for the same reason every other pass in
         # these ops passes it: the scan runs over the stored orbits, not
         # over the dense numel. Omitting it charged full numel for this one
         # pass while every sibling pass stayed orbit-mapped -- up to 19x on
         # a rank-4 symmetric tensor.
-        if op_name.startswith("nan") and a.dtype.kind in "fc":
+        if (
+            op_name.startswith("nan")
+            and op_name not in _NAN_PASS_EXEMPT_REDUCTIONS
+            and a.dtype.kind in "fc"
+        ):
             cost += pointwise_cost(a.shape, symmetry=symmetry)
         if extra_output:
             # Pre-compute extra cost from output shape without running numpy yet
