@@ -44,12 +44,28 @@ def multi_dot_cost(shapes: Sequence[Sequence[int]]) -> int:
     Each binary matmul step (m x k) @ (k x n) is delegated to
     ``matmul_cost(m, k, n)`` (= 2*m*k*n - m*n), matching ``fnp.matmul`` and
     ``matrix_power_cost`` (issue #69 precedent).
+
+    A two-array call with a 0-d operand is priced separately, below, rather
+    than through the chain model: ``np.linalg.multi_dot`` of exactly two
+    arrays delegates straight to ``np.dot``, and a 0-d operand there is a
+    scalar multiply with no axis to contract -- not a case the ``dims``
+    chain (which assumes every operand contributes one dimension) can
+    represent. Three-or-more arrays with a 0-d operand are NOT
+    special-cased: real ``np.linalg.multi_dot`` itself refuses that case
+    (``LinAlgError``), so this module refusing it too -- via the same
+    ``IndexError`` the ``dims`` line below already raised -- is correct;
+    only the concrete exception type differs, which this library does not
+    guarantee.
     """
+    from flopscope._flops import analytical_pointwise_cost as pointwise_cost
     from flopscope._flops import matmul_cost
 
     n = len(shapes)
     if n < 2:
         return 0
+    if n == 2 and (not shapes[0] or not shapes[1]):
+        other_shape = shapes[1] if not shapes[0] else shapes[0]
+        return pointwise_cost(tuple(other_shape))
     promoted = list(shapes)
     if promoted and len(promoted[0]) == 1:
         promoted[0] = (1, promoted[0][0])  # leading vector -> row
