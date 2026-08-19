@@ -5227,7 +5227,16 @@ def dot(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     # on BOTH sides of the letter budget -- see `_validate_contracted_extents`.
     a_axis = a.ndim - 1 if a.ndim else None
     b_axis = (0 if b.ndim == 1 else b.ndim - 2) if b.ndim else None
-    if a.ndim == 2 and b.ndim == 2:
+    if a.ndim == 0 or b.ndim == 0:
+        # numpy treats a 0-d operand as a scalar multiply: there is no axis
+        # on that side to contract, so neither operand's axes are paired --
+        # the other operand's own shape survives untouched into the output.
+        # `_contraction_subscripts` already supports "no axes" (an empty
+        # tuple never reaches the `% ndim` normalisation that divides by a
+        # 0-d operand's rank), so this reuses it rather than adding a new
+        # formula.
+        subs = _contraction_subscripts(a.ndim, b.ndim, (), ())
+    elif a.ndim == 2 and b.ndim == 2:
         subs = "ij,jk->ik"
     elif a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
@@ -5330,7 +5339,11 @@ def inner(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     # validated before it is priced on both sides of the letter budget.
     a_axis = a.ndim - 1 if a.ndim else None
     b_axis = b.ndim - 1 if b.ndim else None
-    if a.ndim == 1 and b.ndim == 1:
+    if a.ndim == 0 or b.ndim == 0:
+        # Same 0-d carve-out as `dot`: no axis to contract on that side, so
+        # neither operand's axes are paired -- see the comment there.
+        subs = _contraction_subscripts(a.ndim, b.ndim, (), ())
+    elif a.ndim == 1 and b.ndim == 1:
         subs = "i,i->"
     elif a.ndim == 2 and b.ndim == 2:
         subs = "ij,kj->ik"
