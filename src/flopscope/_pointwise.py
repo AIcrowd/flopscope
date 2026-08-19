@@ -4403,6 +4403,17 @@ def nanpercentile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # Mirror numpy's own bounds and message, above the deduct, so an
+    # out-of-range q is refused before any billing -- same
+    # reject-before-billing pattern as out= above and svd's invalid k. An
+    # empty q has no min/max and is never out of range. Stripped to a plain
+    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
+    # calling its own .min()/.max() here would double-bill the check.
+    q_plain = _to_base_ndarray(q_arr)
+    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 100):
+        raise ValueError("Percentiles must be in the range [0, 100]")
+
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
@@ -4411,7 +4422,6 @@ def nanpercentile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
     # quantile independently, so the per-output cost scales with the number
     # of quantiles requested, not just the reduced axis length; a weights=
@@ -4501,6 +4511,17 @@ def nanquantile(
         a = _np.asarray(a)
     sym = _symmetry_of(a)
 
+    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
+    # Mirror numpy's own bounds and message, above the deduct, so an
+    # out-of-range q is refused before any billing -- same
+    # reject-before-billing pattern as out= above and svd's invalid k. An
+    # empty q has no min/max and is never out of range. Stripped to a plain
+    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
+    # calling its own .min()/.max() here would double-bill the check.
+    q_plain = _to_base_ndarray(q_arr)
+    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 1):
+        raise ValueError("Quantiles must be in the range [0, 1]")
+
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
         axis_dim = _math.prod(a.shape) if a.shape else 1
@@ -4509,7 +4530,6 @@ def nanquantile(
     else:
         axis_dim = _math.prod(a.shape[ax] for ax in axis)
 
-    q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
     # numpy prepends q.shape to the output and computes each requested
     # quantile independently, so the per-output cost scales with the number
     # of quantiles requested, not just the reduced axis length; a weights=
