@@ -3135,12 +3135,24 @@ def _counted_reduction(
         )
         _prepare_symmetric_out(out, new_symmetry)
         cost = reduction_cost(a.shape, axis, symmetry=symmetry) * cost_multiplier
-        # A nan-prefixed reduction tests every input element for NaN before
-        # reducing -- one extra full pass its plain sibling does not run. The
-        # model charges every other value test (count_nonzero, 1-arg where,
-        # isclose), so charge this one too, at the input rate.
-        if op_name.startswith("nan"):
-            cost += pointwise_cost(a.shape)
+        # A nan-prefixed reduction tests every INEXACT input element for NaN
+        # before reducing -- one extra full pass its plain sibling does not
+        # run. The model charges every other value test (count_nonzero,
+        # 1-arg where, isclose), so charge this one too, at the input rate.
+        #
+        # The dtype gate is numpy's own: ``_replace_nan`` returns
+        # ``mask = None`` for any non-inexact dtype, so an integer or bool
+        # input runs NO isnan pass at all and must bill exactly like its
+        # plain sibling. Charging it anyway was a flat 2x over-bill on
+        # int/bool (1.25x on the variance family).
+        #
+        # ``symmetry`` is passed for the same reason every other pass in
+        # these ops passes it: the scan runs over the stored orbits, not
+        # over the dense numel. Omitting it charged full numel for this one
+        # pass while every sibling pass stayed orbit-mapped -- up to 19x on
+        # a rank-4 symmetric tensor.
+        if op_name.startswith("nan") and a.dtype.kind in "fc":
+            cost += pointwise_cost(a.shape, symmetry=symmetry)
         if extra_output:
             # Pre-compute extra cost from output shape without running numpy yet
             if axis is None:
@@ -3876,12 +3888,24 @@ def _counted_mean(np_func, op_name: str):
             op_factor=1,
             extra_ops=num_orbits,  # one divide per output orbit
         ).total
-        # A nan-prefixed reduction tests every input element for NaN before
-        # reducing -- one extra full pass its plain sibling does not run. The
-        # model charges every other value test (count_nonzero, 1-arg where,
-        # isclose), so charge this one too, at the input rate.
-        if op_name.startswith("nan"):
-            cost += pointwise_cost(tuple(a.shape))
+        # A nan-prefixed reduction tests every INEXACT input element for NaN
+        # before reducing -- one extra full pass its plain sibling does not
+        # run. The model charges every other value test (count_nonzero,
+        # 1-arg where, isclose), so charge this one too, at the input rate.
+        #
+        # The dtype gate is numpy's own: ``_replace_nan`` returns
+        # ``mask = None`` for any non-inexact dtype, so an integer or bool
+        # input runs NO isnan pass at all and must bill exactly like its
+        # plain sibling. Charging it anyway was a flat 2x over-bill on
+        # int/bool (1.25x on the variance family).
+        #
+        # ``symmetry`` is passed for the same reason every other pass in
+        # these ops passes it: the scan runs over the stored orbits, not
+        # over the dense numel. Omitting it charged full numel for this one
+        # pass while every sibling pass stayed orbit-mapped -- up to 19x on
+        # a rank-4 symmetric tensor.
+        if op_name.startswith("nan") and a.dtype.kind in "fc":
+            cost += pointwise_cost(tuple(a.shape), symmetry=symmetry)
 
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -3978,12 +4002,24 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         symmetry = _symmetry_of(a)
         keepdims = bool(keepdims)
         cost = _variance_family_cost(a, axis, symmetry, with_sqrt=with_sqrt)
-        # A nan-prefixed reduction tests every input element for NaN before
-        # reducing -- one extra full pass its plain sibling does not run. The
-        # model charges every other value test (count_nonzero, 1-arg where,
-        # isclose), so charge this one too, at the input rate.
-        if op_name.startswith("nan"):
-            cost += pointwise_cost(tuple(a.shape))
+        # A nan-prefixed reduction tests every INEXACT input element for NaN
+        # before reducing -- one extra full pass its plain sibling does not
+        # run. The model charges every other value test (count_nonzero,
+        # 1-arg where, isclose), so charge this one too, at the input rate.
+        #
+        # The dtype gate is numpy's own: ``_replace_nan`` returns
+        # ``mask = None`` for any non-inexact dtype, so an integer or bool
+        # input runs NO isnan pass at all and must bill exactly like its
+        # plain sibling. Charging it anyway was a flat 2x over-bill on
+        # int/bool (1.25x on the variance family).
+        #
+        # ``symmetry`` is passed for the same reason every other pass in
+        # these ops passes it: the scan runs over the stored orbits, not
+        # over the dense numel. Omitting it charged full numel for this one
+        # pass while every sibling pass stayed orbit-mapped -- up to 19x on
+        # a rank-4 symmetric tensor.
+        if op_name.startswith("nan") and a.dtype.kind in "fc":
+            cost += pointwise_cost(tuple(a.shape), symmetry=symmetry)
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
             if symmetry is not None
@@ -4385,8 +4421,14 @@ def nanmedian(
     # nanmedian tests every input element for NaN before partitioning -- one
     # extra full pass median does not run. The model charges every other
     # value test (count_nonzero, 1-arg where, isclose), so charge this one
-    # too, at the input rate.
-    cost += pointwise_cost(tuple(a.shape))
+    # too, at the input rate, over the stored orbits like every other pass
+    # in this op.
+    #
+    # Charged UNCONDITIONALLY, unlike the factory-built nan reductions: this
+    # op does not route through numpy's ``_replace_nan`` (which skips the
+    # scan for a non-inexact dtype) but through ``_remove_nan_1d``, which
+    # calls ``np.isnan`` whatever the dtype.
+    cost += pointwise_cost(tuple(a.shape), sym)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -4477,11 +4519,17 @@ def nanpercentile(
             axis_dim, q_count, weighted=weighted
         ),
     )
-    # nanpercentile tests every input element for NaN before partitioning --
-    # one extra full pass percentile does not run. The model charges every
-    # other value test (count_nonzero, 1-arg where, isclose), so charge this
-    # one too, at the input rate.
-    cost += pointwise_cost(tuple(a.shape))
+    # nanpercentile tests every input element for NaN before partitioning -- one
+    # extra full pass percentile does not run. The model charges every other
+    # value test (count_nonzero, 1-arg where, isclose), so charge this one
+    # too, at the input rate, over the stored orbits like every other pass
+    # in this op.
+    #
+    # Charged UNCONDITIONALLY, unlike the factory-built nan reductions: this
+    # op does not route through numpy's ``_replace_nan`` (which skips the
+    # scan for a non-inexact dtype) but through ``_remove_nan_1d``, which
+    # calls ``np.isnan`` whatever the dtype.
+    cost += pointwise_cost(tuple(a.shape), sym)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -4580,11 +4628,17 @@ def nanquantile(
             axis_dim, q_count, weighted=weighted
         ),
     )
-    # nanquantile tests every input element for NaN before partitioning --
-    # one extra full pass quantile does not run. The model charges every
-    # other value test (count_nonzero, 1-arg where, isclose), so charge this
-    # one too, at the input rate.
-    cost += pointwise_cost(tuple(a.shape))
+    # nanquantile tests every input element for NaN before partitioning -- one
+    # extra full pass quantile does not run. The model charges every other
+    # value test (count_nonzero, 1-arg where, isclose), so charge this one
+    # too, at the input rate, over the stored orbits like every other pass
+    # in this op.
+    #
+    # Charged UNCONDITIONALLY, unlike the factory-built nan reductions: this
+    # op does not route through numpy's ``_replace_nan`` (which skips the
+    # scan for a non-inexact dtype) but through ``_remove_nan_1d``, which
+    # calls ``np.isnan`` whatever the dtype.
+    cost += pointwise_cost(tuple(a.shape), sym)
 
     out_sym = (
         reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)

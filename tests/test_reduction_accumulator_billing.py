@@ -30,10 +30,12 @@ N = 32
 # reduction over axis 0 of an (N, N) array touches numel - M elements
 REDUCE_COST = N * N - N  # 992
 MEAN_COST = REDUCE_COST + N  # 1024: one divide per output orbit
-# #177.4: every nan* reduction also runs a full numel(input) isnan pass its
-# plain sibling does not, billed at the same accumulator rate as the rest of
-# the reduction (rate 2.0 here, for the int64 accumulator int32 input picks).
-NAN_PASS_COST = N * N * 2  # 2048
+# #177.4: a nan* reduction also runs a full numel(input) isnan pass its plain
+# sibling does not -- but ONLY for an inexact dtype. numpy's `_replace_nan`
+# returns no mask for a non-inexact dtype, so on the int32 inputs this module
+# uses throughout there is no isnan pass at all and every nan* form below
+# bills exactly what its plain sibling bills. The surcharge itself is pinned
+# on float/complex input in tests/test_nan_reduction_pass_cost.py.
 
 
 def _billed(fn) -> int:
@@ -105,8 +107,6 @@ def test_narrower_out_does_not_discount_integer_reduction(name):
     fn = getattr(fnp, name)
     bare = _billed(lambda: fn(a, axis=0))
     expected = REDUCE_COST * 2  # int64 accumulator -> rate 2.0
-    if name.startswith("nan"):
-        expected += NAN_PASS_COST
     assert bare == expected
     assert _billed(lambda: fn(a, axis=0, out=dst)) == bare
 
@@ -118,8 +118,6 @@ def test_narrower_out_does_not_discount_integer_scan(name):
     fn = getattr(fnp, name)
     bare = _billed(lambda: fn(a, axis=0))
     expected = REDUCE_COST * 2
-    if name.startswith("nan"):
-        expected += NAN_PASS_COST
     assert bare == expected
     assert _billed(lambda: fn(a, axis=0, out=dst)) == bare
 
@@ -132,8 +130,6 @@ def test_narrower_out_does_not_discount_integer_mean(name):
     fn = getattr(fnp, name)
     bare = _billed(lambda: fn(a, axis=0))
     expected = MEAN_COST * 2  # float64 compute -> rate 2.0
-    if name.startswith("nan"):
-        expected += NAN_PASS_COST
     assert bare == expected
     assert _billed(lambda: fn(a, axis=0, out=dst)) == bare
 

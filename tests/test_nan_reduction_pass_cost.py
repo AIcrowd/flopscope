@@ -4,6 +4,20 @@ Each nan-prefixed reduction tests every element for NaN before reducing -- work
 its plain sibling does not do. The cost model charges every other value test
 (count_nonzero, 1-arg where, isclose), so these must be charged too.
 
+Two limits on that surcharge are pinned here as well, because charging it
+where numpy does not run the pass is an over-bill just as real as the
+under-bill above:
+
+* **dtype.** The eleven factory-built ops route through numpy's
+  ``_replace_nan``, which returns ``mask = None`` for any NON-INEXACT dtype --
+  an integer or bool input runs no isnan pass at all, so it must bill exactly
+  like its plain sibling. The three hand-written ops (``nanmedian``,
+  ``nanpercentile``, ``nanquantile``) instead route through ``_remove_nan_1d``,
+  which calls ``np.isnan`` unconditionally, so they are charged for every
+  dtype.
+* **symmetry.** The pass runs over the STORED orbits of a symmetric operand,
+  not over its dense ``numel``, exactly like every other pass in these ops.
+
 Beyond the eleven factory-built ops (`_counted_reduction`, `_counted_mean`,
 `_counted_variance`), `nanmedian`, `nanpercentile`, and `nanquantile` are
 hand-written functions in `_pointwise.py` with the identical defect -- they
@@ -114,3 +128,121 @@ def test_plain_reductions_are_unchanged():
     y = fnp.array(np.ones(2000, dtype=np.float64))
     # A plain reduction's cost still scales with its own element count only.
     assert _billed(lambda: fnp.sum(y)) > _billed(lambda: fnp.sum(x))
+
+
+# ---------------------------------------------------------------------------
+# The surcharge's dtype limit
+# ---------------------------------------------------------------------------
+
+#: The eleven ops built by the three reduction FACTORIES. numpy's
+#: ``_replace_nan`` skips the isnan pass entirely for these when the input is
+#: not inexact, so the surcharge must not apply to an integer or bool operand.
+_FACTORY_PAIRS = [
+    ("nansum", "sum"),
+    ("nanprod", "prod"),
+    ("nanmean", "mean"),
+    ("nanvar", "var"),
+    ("nanstd", "std"),
+    ("nanmax", "max"),
+    ("nanmin", "min"),
+    ("nanargmax", "argmax"),
+    ("nanargmin", "argmin"),
+    ("nancumsum", "cumsum"),
+    ("nancumprod", "cumprod"),
+]
+
+#: The three HAND-WRITTEN ops. ``_remove_nan_1d`` calls ``np.isnan``
+#: unconditionally, so their surcharge is dtype-independent.
+_HANDWRITTEN = [("nanmedian", "median", ()), ("nanpercentile", "percentile", (50,))]
+
+
+@pytest.mark.parametrize("nan_name, plain_name", _FACTORY_PAIRS)
+@pytest.mark.parametrize("dtype", [np.int32, np.int64, np.uint8, np.bool_])
+def test_non_inexact_input_bills_exactly_like_the_plain_sibling(
+    nan_name, plain_name, dtype
+):
+    """No isnan pass runs for an integer/bool operand, so none may be charged.
+
+    Measured through the real client before this gate: every one of these
+    billed exactly 2.00x its plain sibling (1.25x for nanstd/nanvar) -- an
+    over-bill the batch introduced on inputs that had been priced correctly.
+    """
+    x = fnp.array(np.ones(10_000, dtype=dtype))
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    assert _billed(lambda: nan_op(x)) == _billed(lambda: plain_op(x))
+
+
+@pytest.mark.parametrize("nan_name, plain_name, extra", _HANDWRITTEN)
+@pytest.mark.parametrize("dtype", [np.int32, np.float64])
+def test_handwritten_nan_ops_charge_the_pass_for_every_dtype(
+    nan_name, plain_name, extra, dtype
+):
+    """``_remove_nan_1d`` runs ``np.isnan`` whatever the dtype, so the
+    surcharge here is unconditional -- the factory gate must not reach it."""
+    x = fnp.array(np.ones(10_000, dtype=dtype))
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    assert _billed(lambda: nan_op(x, *extra)) > _billed(lambda: plain_op(x, *extra))
+
+
+# ---------------------------------------------------------------------------
+# The surcharge's symmetry limit
+# ---------------------------------------------------------------------------
+
+
+def _pointwise_reference(operand) -> int:
+    """What one orbit-mapped pointwise pass over *operand* costs.
+
+    ``abs`` is a plain one-per-element op that already honours symmetry, so
+    its bill is the surcharge's correct value by construction -- no formula is
+    restated here.
+    """
+    return _billed(lambda: fnp.abs(operand))
+
+
+@pytest.mark.parametrize(
+    "nan_name, plain_name, extra",
+    [
+        ("nansum", "sum", ()),
+        ("nanmean", "mean", ()),
+        ("nanvar", "var", ()),
+        ("nanmax", "max", ()),
+        ("nanmedian", "median", ()),
+        ("nanpercentile", "percentile", (50,)),
+        ("nanquantile", "quantile", (0.5,)),
+    ],
+)
+def test_surcharge_is_orbit_mapped_on_a_symmetric_operand(nan_name, plain_name, extra):
+    """The isnan pass reads the stored orbits, not the dense numel.
+
+    Every other pass in these ops is orbit-mapped (the sibling weighted-average
+    multiply pass passes ``symmetry`` for exactly this reason), so charging
+    this one at full ``numel`` silently erased the symmetry discount --
+    measured at 320000 instead of 17710 on a rank-4 symmetric (20,)*4 operand,
+    and 7200 instead of 3660 for ``nanmedian`` on a symmetric 60x60.
+    """
+    group = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.budget(10**15, quiet=True):
+        operand = fnp.random.symmetric((60, 60), group)
+    nan_op = getattr(fnp, nan_name)
+    plain_op = getattr(fnp, plain_name)
+    surcharge = _billed(lambda: nan_op(operand, *extra)) - _billed(
+        lambda: plain_op(operand, *extra)
+    )
+    assert surcharge == _pointwise_reference(operand)
+
+
+def test_symmetric_surcharge_is_strictly_below_the_dense_one():
+    """A symmetric operand must not pay a dense operand's isnan pass."""
+    group = flops.SymmetryGroup.symmetric(axes=(0, 1))
+    with flops.budget(10**15, quiet=True):
+        symmetric = fnp.random.symmetric((60, 60), group)
+    dense = fnp.array(np.arange(3600, dtype=np.float64).reshape(60, 60))
+    sym_surcharge = _billed(lambda: fnp.nansum(symmetric)) - _billed(
+        lambda: fnp.sum(symmetric)
+    )
+    dense_surcharge = _billed(lambda: fnp.nansum(dense)) - _billed(
+        lambda: fnp.sum(dense)
+    )
+    assert 0 < sym_surcharge < dense_surcharge

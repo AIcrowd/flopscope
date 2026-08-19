@@ -1000,10 +1000,17 @@ Ops that do more than one accumulation pass carry the extra passes in
 `flop_cost` (never in the weight column): the variance family makes four
 passes (mean-sum, centre, square, variance-sum), `ptp` makes two (max + min)
 plus the per-output subtract, and `mean`/`average` add the per-output divide.
-Every `nan*` variant in this family — including `nanmedian`, `nanpercentile`,
-and `nanquantile` — adds a further `numel(input)` on top of its plain
-sibling's formula, for the `isnan` test pass the `nan*` form runs before
-reducing that its plain sibling does not. The pass is folded into the same
+A `nan*` variant adds a further `numel(input)` on top of its plain sibling's
+formula, for the `isnan` test pass the `nan*` form runs before reducing that
+its plain sibling does not — **but only where NumPy actually runs that pass**.
+The eleven factory-built `nan*` reductions go through NumPy's `_replace_nan`,
+which returns no mask for a non-inexact dtype, so an **integer or bool input
+runs no `isnan` pass and bills exactly like its plain sibling**; only
+float/complex input carries the surcharge. `nanmedian`, `nanpercentile`, and
+`nanquantile` instead go through `_remove_nan_1d`, which calls `np.isnan`
+whatever the dtype, so those three carry it for every dtype. Like every other
+pass in these ops, the surcharge is **orbit-mapped**: on a symmetric operand it
+counts unique elements, not dense `numel`. The pass is folded into the same
 `flop_cost` as the rest of the reduction, so it is charged as one additional
 pass over the input priced at the op's own rate/factor — not a separate flat
 rate: it inherits the host op's complex factor (e.g. 6.0 on `nanprod`) and
@@ -1013,14 +1020,14 @@ passes under one op-level factor.
 
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
-| `sum`, `prod`, `max`, `min`, `any`, `all`, `nansum`, `nanmax`, `nanmin`, `nanprod` | numel(input) − numel(output) (+numel(input) for the `nan*` forms) | 1.0 | DECLARED reduction skeleton (one add or compare per consumed element) |
-| `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) (+numel(input) for the `nan*` forms) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
+| `sum`, `prod`, `max`, `min`, `any`, `all`, `nansum`, `nanmax`, `nanmin`, `nanprod` | numel(input) − numel(output) (+numel(input) for the `nan*` forms on float/complex input only) | 1.0 | DECLARED reduction skeleton (one add or compare per consumed element) |
+| `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) (+numel(input) for the `nan*` forms on float/complex input only) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
 | `mean`, `average` (unweighted) | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides |
 | `average(weights=)` | `3·numel − M`, M = num output slices (1 for full reduction) | 1.0 | DERIVED: a·w multiply pass (numel) + a·w sum (numel−M) + weight sum (numel−M) + M divides |
-| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass ⇒ ≈ 5 × numel(input) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
+| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass on float/complex input only ⇒ ≈ 5 × numel(input) there, ≈ 4 × on integer/bool | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
-| `median`, `nanmedian` | axis length per output slice (+numel(input) for `nanmedian`) | 1.0 | DECLARED; partition (introselect) per output |
-| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` (+numel(input) for the `nan*` forms) | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
+| `median`, `nanmedian` | axis length per output slice (+numel(input) for `nanmedian`, every dtype) | 1.0 | DECLARED; partition (introselect) per output |
+| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` (+numel(input) for the `nan*` forms, every dtype) | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
 | `nanmean` | 2 × numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides + the `nan*` isnan pass (numel) |
@@ -1097,7 +1104,7 @@ build on the same helper.
 | Op | flop_cost | basis |
 |---|---|---|
 | `linalg.matrix_power` | `(⌊log₂ k⌋ + popcount(k) − 1) × matmul_cost(n, n, n)` | repeated squaring |
-| `linalg.multi_dot` | sum of optimal-chain matmul costs; each step `2mkn − mn` | optimal chain order |
+| `linalg.multi_dot` | sum of optimal-chain matmul costs, each step `2mkn − mn`; the two-array form with a 0-d operand instead bills `numel(other)`, the scalar multiply NumPy performs there | optimal chain order |
 
 **Complex dtypes**: the contraction family is billed **exactly**, not with a flat factor.
 The engine expands each call's `flop_cost` into `6·(multiplies) + 2·(adds)` from the same
@@ -1202,7 +1209,7 @@ delegation or the op-specific factor applies instead.)
 | `linalg.pinv` | `6ab² + 20b³ + min(m,n) + n·min(m,n) + matmul\_cost(n, min(m,n), m)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: thin SVD (with vectors) + threshold + diagonal scale + reconstruction matmul | `_solvers.py:pinv_cost` |
 | `linalg.lstsq` | `6ab² + 20b³ + matmul\_cost(k,m,c) + k·c + matmul\_cost(n,k,c)`, `k=min(m,n)`, `c=#rhs cols` | DERIVED: thin SVD (with vectors) + U^T b + divide by s + reconstruction | `_solvers.py:lstsq_cost` |
 | `linalg.cross` | `3 × numel(output)` (delegates to `fnp.cross`) | DERIVED | `_aliases.py` |
-| `linalg.multi_dot` | optimal chain matmul cost; each step uses `matmul_cost(m,k,n)` = `2mkn − mn` | DERIVED | `_compound.py:multi_dot_cost` |
+| `linalg.multi_dot` | optimal chain matmul cost, each step `matmul_cost(m,k,n)` = `2mkn − mn`; two arrays with a 0-d operand: `numel(other)` (NumPy delegates that form to `dot`, a scalar multiply) | DERIVED | `_compound.py:multi_dot_cost` |
 | `linalg.outer`, `linalg.tensordot`, `linalg.vecdot`, `linalg.matmul` | delegates to `fnp.*` (inherits the bare op's cost *and* complex factor — see the complex-dtype note above) | DERIVED | `_compound.py`, `_aliases.py` |
 | `linalg.diagonal`, `linalg.matrix_transpose` | 0 (view) | DECLARED free | `_aliases.py` |
 
