@@ -74,6 +74,17 @@ _PY_TYPE_TO_WIRE: dict[type, str] = {
 _MISSING_DTYPE_ATTR = object()
 _MSGPACK_EXT_TYPE = vars(msgpack).get("ExtType")
 
+# Bound at import for the `_encode_arg` fast path. These must NOT be the bare
+# builtin names: those resolve through `builtins` at call time, so participant
+# code doing `builtins.float = dict` would redirect `type(arg) is float` onto
+# dicts and let one skip the `_is_safe_wire_key` guard in the mapping branch.
+# Capturing them here pins the fast path to the real types.
+_FLOAT = float
+_INT = int
+_STR = str
+_BOOL = bool
+_NONE_TYPE = type(None)
+
 _SAFE_WIRE_KEY_TYPES = (type(None), bool, int, float, str, bytes, memoryview)
 
 
@@ -877,6 +888,12 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         encoded_kwargs = {k: _encode_arg(v) for k, v in kwargs.items()}
         from flopscope import _describe_unserializable
 
+        # Must stay ahead of the pack, not deferred into the handler below:
+        # msgpack's packer consults `__class__`, which participant code can
+        # define as a property, so a hostile object reaching the packer executes
+        # it inside our dispatch. This walk decides everything from `type()` and
+        # refuses such an object without running its hooks. See _make_proxy in
+        # __init__ for the same gate on the function-dispatch path.
         bad = _describe_unserializable(encoded_args, encoded_kwargs)
         if bad:
             from flopscope.errors import RemoteSerializationError
@@ -1544,6 +1561,42 @@ def _encode_arg(arg):
     Note: RemoteScalar must be checked *before* RemoteArray because the
     RemoteArray metaclass considers it array-like.
     """
+    # Exact-type fast path for the leaves that encode to themselves.
+    #
+    # This function recurses to every leaf, so its per-leaf cost is multiplied
+    # by a participant-chosen element count: a literal list of 2,000,000 floats
+    # pays it 2,000,000 times. Without this the *commonest* leaf took the
+    # *longest* route — a plain float matched none of the checks below, so it
+    # paid 12 `_has_proxy_base` calls (an `__mro__` fetch and a generator scan
+    # each) and then `_resolve_dtype_wire_name`, whose two
+    # `inspect.getattr_static` calls walk the MRO in pure Python, only to hand
+    # the float back unchanged. Every type listed here reaches `return arg` by
+    # the path below, so this is a pure no-op.
+    #
+    # `type(arg) is float` is one pointer comparison and, unlike `isinstance`,
+    # cannot be spoofed: `__class__` is a lie participant code can tell, the
+    # type slot is not. A subclass — including one whose `__class__` returns
+    # `float` — has a different `type()` and falls through to be normalised.
+    #
+    # Keep this a chain of `is` against the import-time constants. Two rewrites
+    # that look equivalent are not, and both are pinned by tests:
+    #   * `type(arg) in {float, ...}` / `_TABLE.get(type(arg))` consult
+    #     `__eq__`/`__hash__` on the metaclass, which participant code controls,
+    #     so a hostile metaclass reaches the fast path and smuggles an arbitrary
+    #     object through unencoded.
+    #   * the bare builtin names resolve through `builtins` at call time, so
+    #     `builtins.float = dict` redirects the check onto dicts and skips the
+    #     `_is_safe_wire_key` guard below.
+    arg_type = type(arg)
+    if (
+        arg_type is _FLOAT
+        or arg_type is _INT
+        or arg_type is _STR
+        or arg_type is _BOOL
+        or arg_type is _NONE_TYPE
+    ):
+        return arg
+
     # Check RemoteScalar first (it passes RemoteArray's metaclass check).
     if _has_proxy_base(arg, RemoteScalar):
         return _proxy_slot_value(arg, RemoteScalar, "_value")
