@@ -1188,7 +1188,11 @@ def _assert_billed_rate_covers_compute_dtype(op: str, call: Callable[[], Any]) -
             f"SKIPPED with the width-independence reason"
         )
     billed_rate = rate_for(np.dtype(rec.resolved_dtype))
-    floor = 1.0  # every probe input here is int32 (rate 1.0)
+    # This helper is shared by the int32 sweep (test_billed_rate_covers_
+    # compute_dtype) and the bool sweep (..._bool) below -- the probe
+    # operand's own rate is 1.0 either way (int32 and bool both resolve to
+    # rate 1.0), so the floor starts there for both callers.
+    floor = 1.0
     result_rates = [rate_for(dt) for dt in _result_dtypes(result)]
     if op not in INDEX_OUTPUT_OPS and result_rates:
         floor = max(floor, max(result_rates))

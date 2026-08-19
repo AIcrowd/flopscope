@@ -37,21 +37,23 @@ def test_angle_bool_bills_above_float32():
     assert _billed(lambda: fnp.angle(b)) > _billed(lambda: fnp.angle(f32))
 
 
-@pytest.mark.parametrize(
-    "dtype, twin",
-    [
-        (np.float32, np.float32),
-        (np.float64, np.float64),
-        (np.complex64, np.complex64),
-        (np.complex128, np.complex128),
-    ],
-)
-def test_angle_float_and_complex_widths_are_preserved(dtype, twin):
-    """The fix must not move float/complex inputs: only bool floors at f64."""
+def test_angle_float_and_complex_widths_are_preserved():
+    """The fix must not move float/complex inputs: only bool floors at f64.
+
+    Each narrow width must bill strictly LESS than its wider sibling. The
+    previous form of this test paired every dtype with itself
+    (float32/float32, complex64/complex64, ...), so the equality it asserted
+    held unconditionally -- it passed whether or not angle's bool-only
+    override ever widened to also floor float32/complex64 at
+    float64/complex128. This form fails in exactly that case.
+    """
     n = 1000
-    x = fnp.array(np.ones(n, dtype=dtype))
-    y = fnp.array(np.ones(n, dtype=twin))
-    assert _billed(lambda: fnp.angle(x)) == _billed(lambda: fnp.angle(y))
+    f32 = fnp.array(np.ones(n, dtype=np.float32))
+    f64 = fnp.array(np.ones(n, dtype=np.float64))
+    c64 = fnp.array(np.ones(n, dtype=np.complex64))
+    c128 = fnp.array(np.ones(n, dtype=np.complex128))
+    assert _billed(lambda: fnp.angle(f32)) < _billed(lambda: fnp.angle(f64))
+    assert _billed(lambda: fnp.angle(c64)) < _billed(lambda: fnp.angle(c128))
 
 
 @pytest.mark.parametrize(
