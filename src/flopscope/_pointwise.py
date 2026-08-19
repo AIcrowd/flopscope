@@ -965,26 +965,42 @@ def _counted_unary(np_func, op_name: str):
         # dtype= is excluded: it names the output of a value-testing loop,
         # which still reads full-width operands -- bill the operands.
         explicit_dtype = kwargs.get("dtype")
+        # What a destination buffer contributes, kept SEPARATE from the
+        # operand resolution below. Folding it in first let a narrow out=
+        # pull the resolved dtype down before the compute-dtype mapping ran
+        # (float16 out= on angle(bool_) resolved float16, whose kind is no
+        # longer "b", so the float64 override never fired and the call
+        # billed half price). The compute dtype numpy selects is a function
+        # of the OPERANDS alone; a destination can only ever widen the bill
+        # on top of it, never shrink it -- see cost-model.md's "out= alone
+        # never shrinks the loop".
+        store_dtypes: tuple = ()
         if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
-            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
+            operand_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
-            billing_dtypes = (x.dtype,)
+            operand_dtypes = (x.dtype,)
             if isinstance(out, _np.ndarray):
-                billing_dtypes += store_billing_dtypes(out)
+                store_dtypes = store_billing_dtypes(out)
+        compute_dtype = None
         if op_name in _UNARY_FLOAT_LOOP_OPS:
-            resolved = resolve_billing_dtype(billing_dtypes)
+            resolved = resolve_billing_dtype(operand_dtypes)
             if resolved is not None:
-                mapped = unary_float_loop_dtype(resolved)
+                compute_dtype = unary_float_loop_dtype(resolved)
                 # angle(bool_) computes float64, not the float16 the
                 # itemsize-based mapping predicts -- see the comment above
                 # _UNARY_FLOAT_LOOP_OPS.
                 if op_name == "angle" and resolved.kind == "b":
-                    mapped = _np.dtype(_np.float64)
-                billing_dtypes = (mapped,)
+                    compute_dtype = _np.dtype(_np.float64)
         elif op_name in _UNARY_FLOAT64_MIN_OPS:
-            resolved = resolve_billing_dtype(billing_dtypes)
+            resolved = resolve_billing_dtype(operand_dtypes)
             if resolved is not None:
-                billing_dtypes = (integer_to_float64_min_dtype(resolved),)
+                compute_dtype = integer_to_float64_min_dtype(resolved)
+        if compute_dtype is not None:
+            operand_dtypes = (compute_dtype,)
+        # The store dtype stays in the tuple rather than being resolved away:
+        # ``deduct`` keys its non-numeric refusal on these entries, and a
+        # genuinely wider destination must still reach the rate.
+        billing_dtypes = operand_dtypes + store_dtypes
         with budget.deduct(
             op_name,
             flop_cost=cost,
