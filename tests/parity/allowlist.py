@@ -4382,12 +4382,14 @@ ENTRIES: tuple[Entry, ...] = (
         reason=(
             "`fnp.where(M, V[0], 0.0)` promotes to a different dtype on each backend"
             " (see the accompanying `dtype` entry), which changes the billed FLOP"
-            " count for the same call: in-process resolves the genuine `float32`"
-            " scalar under NEP 50 weak promotion (24 FLOPs), while the client"
-            " resolves the dtype-stripped value it actually received, two weak"
-            " Python floats with no strong operand present, which NumPy promotes to"
-            " `float64` (48 FLOPs). Both backends bill correctly for the value each"
-            " one actually computed with."
+            " count for the same call. In-process, `V[0]` is a genuine `float32`"
+            " scalar, which under NEP 50 is STRONG: it keeps its own dtype, and the"
+            " weak Python float `0.0` yields to it, so the call resolves `float32`"
+            " (24 FLOPs). The client receives the same operand dtype-stripped to a"
+            " plain Python float, leaving two weak floats and no strong operand at"
+            " all, which NumPy resolves at the default `float64` (48 FLOPs). Both"
+            " backends bill correctly for the value each one actually computed with;"
+            " the divergence is the dtype the wire drops, not the promotion rule."
         ),
         issue="INTERNAL-P2-family-1",
     ),
