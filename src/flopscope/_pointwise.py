@@ -4227,6 +4227,26 @@ def _quantile_dense_cost(axis_dim: int, q_count: int, *, weighted: bool) -> int:
     return n * _builtins.min(k, 1 + 4 * log_min) + 4 * k
 
 
+def _validate_q_range(q_arr: _np.ndarray, hi: int, message: str) -> None:
+    """Refuse an out-of-range q before any cost computation or billing.
+
+    Shared by percentile/quantile/nanpercentile/nanquantile: mirrors numpy's
+    own bounds (``[0, hi]`` -- 100 for the percentile family, 1 for the
+    quantile family) and numpy's own message, so the refusal is
+    indistinguishable from numpy's. An empty q has no min/max and is never
+    out of range (numpy accepts an empty q, returning an empty result).
+    ``q_arr`` is stripped to a plain ndarray first: an fnp-built q is itself
+    a metered FlopscopeArray, and calling its own .min()/.max() here would
+    double-bill the check. Every caller must invoke this as the first
+    q-touching statement, above axis_dim, above the cost computation, and
+    above budget.deduct -- the same "refused form costs nothing" guarantee
+    _normalize_out already gives out= at every call site above.
+    """
+    q_plain = _to_base_ndarray(q_arr)
+    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > hi):
+        raise ValueError(message)
+
+
 @_counted_wrapper
 def median(
     a: ArrayLike,
@@ -4404,15 +4424,10 @@ def nanpercentile(
     sym = _symmetry_of(a)
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    # Mirror numpy's own bounds and message, above the deduct, so an
-    # out-of-range q is refused before any billing -- same
-    # reject-before-billing pattern as out= above and svd's invalid k. An
-    # empty q has no min/max and is never out of range. Stripped to a plain
-    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
-    # calling its own .min()/.max() here would double-bill the check.
-    q_plain = _to_base_ndarray(q_arr)
-    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 100):
-        raise ValueError("Percentiles must be in the range [0, 100]")
+    # Above axis_dim, the cost computation, and the deduct, so a refused
+    # form costs nothing -- same reject-before-billing pattern as out=
+    # above and svd's invalid k.
+    _validate_q_range(q_arr, 100, "Percentiles must be in the range [0, 100]")
 
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
@@ -4512,15 +4527,10 @@ def nanquantile(
     sym = _symmetry_of(a)
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    # Mirror numpy's own bounds and message, above the deduct, so an
-    # out-of-range q is refused before any billing -- same
-    # reject-before-billing pattern as out= above and svd's invalid k. An
-    # empty q has no min/max and is never out of range. Stripped to a plain
-    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
-    # calling its own .min()/.max() here would double-bill the check.
-    q_plain = _to_base_ndarray(q_arr)
-    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 1):
-        raise ValueError("Quantiles must be in the range [0, 1]")
+    # Above axis_dim, the cost computation, and the deduct, so a refused
+    # form costs nothing -- same reject-before-billing pattern as out=
+    # above and svd's invalid k.
+    _validate_q_range(q_arr, 1, "Quantiles must be in the range [0, 1]")
 
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
@@ -4613,15 +4623,10 @@ def percentile(
     sym = _symmetry_of(a)
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    # Mirror numpy's own bounds and message, above the deduct, so an
-    # out-of-range q is refused before any billing -- same
-    # reject-before-billing pattern as out= above and svd's invalid k. An
-    # empty q has no min/max and is never out of range. Stripped to a plain
-    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
-    # calling its own .min()/.max() here would double-bill the check.
-    q_plain = _to_base_ndarray(q_arr)
-    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 100):
-        raise ValueError("Percentiles must be in the range [0, 100]")
+    # Above axis_dim, the cost computation, and the deduct, so a refused
+    # form costs nothing -- same reject-before-billing pattern as out=
+    # above and svd's invalid k.
+    _validate_q_range(q_arr, 100, "Percentiles must be in the range [0, 100]")
 
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:
@@ -4708,15 +4713,10 @@ def quantile(
     sym = _symmetry_of(a)
 
     q_arr = q if isinstance(q, _np.ndarray) else _np.asarray(q)
-    # Mirror numpy's own bounds and message, above the deduct, so an
-    # out-of-range q is refused before any billing -- same
-    # reject-before-billing pattern as out= above and svd's invalid k. An
-    # empty q has no min/max and is never out of range. Stripped to a plain
-    # ndarray first: an fnp-built q is itself a metered FlopscopeArray, and
-    # calling its own .min()/.max() here would double-bill the check.
-    q_plain = _to_base_ndarray(q_arr)
-    if q_plain.size and (q_plain.min() < 0 or q_plain.max() > 1):
-        raise ValueError("Quantiles must be in the range [0, 1]")
+    # Above axis_dim, the cost computation, and the deduct, so a refused
+    # form costs nothing -- same reject-before-billing pattern as out=
+    # above and svd's invalid k.
+    _validate_q_range(q_arr, 1, "Quantiles must be in the range [0, 1]")
 
     # Reduced axis length (n), fed into _quantile_dense_cost below.
     if axis is None:

@@ -63,3 +63,31 @@ def test_array_q_with_one_bad_entry_is_refused_free(func):
     """An array q containing an out-of-range entry is refused, and costs 0."""
     x = fnp.array(np.arange(100, dtype=np.float64))
     assert _charged_on_refusal(lambda: func(x, [50, 150])) == 0
+
+
+@pytest.mark.parametrize("boundary_q", [0, 100])
+@pytest.mark.parametrize(
+    "func", [fnp.percentile, fnp.nanpercentile], ids=lambda f: f.__name__
+)
+def test_percentile_inclusive_boundary_is_accepted_and_billed(func, boundary_q):
+    """q=0 and q=100 are the inclusive edges of a valid percentile, not
+    refusals. Pins the other half of the range-check property: a future
+    `>` -> `>=` (or `<` -> `<=`) typo in the guard would wrongly refuse
+    these and escape the refusal-only tests above."""
+    x = fnp.array(np.arange(100, dtype=np.float64))
+    with flops.budget(10**15, quiet=True) as b:
+        func(x, boundary_q)
+        assert b.flops_used > 0
+
+
+@pytest.mark.parametrize("boundary_q", [0.0, 1.0])
+@pytest.mark.parametrize(
+    "func", [fnp.quantile, fnp.nanquantile], ids=lambda f: f.__name__
+)
+def test_quantile_inclusive_boundary_is_accepted_and_billed(func, boundary_q):
+    """q=0 and q=1 are the inclusive edges of a valid quantile, not
+    refusals. Same boundary-typo guard as the percentile-family test above."""
+    x = fnp.array(np.arange(100, dtype=np.float64))
+    with flops.budget(10**15, quiet=True) as b:
+        func(x, boundary_q)
+        assert b.flops_used > 0
