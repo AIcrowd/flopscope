@@ -997,19 +997,25 @@ passes (mean-sum, centre, square, variance-sum), `ptp` makes two (max + min)
 plus the per-output subtract, and `mean`/`average` add the per-output divide.
 Every `nan*` variant in this family — including `nanmedian`, `nanpercentile`,
 and `nanquantile` — adds a further `numel(input)` on top of its plain
-sibling's formula, billed at the input's own rate, for the `isnan` test pass
-the `nan*` form runs before reducing that its plain sibling does not.
+sibling's formula, for the `isnan` test pass the `nan*` form runs before
+reducing that its plain sibling does not. The pass is folded into the same
+`flop_cost` as the rest of the reduction, so it is charged as one additional
+pass over the input priced at the op's own rate/factor — not a separate flat
+rate: it inherits the host op's complex factor (e.g. 6.0 on `nanprod`) and
+its resolved accumulator dtype (e.g. the widened int64 rate on an int32
+input), the same way the variance family and `ptp` already blend multiple
+passes under one op-level factor.
 
 | Op | flop_cost | weight | basis |
 |---|---|---|---|
-| `sum`, `prod`, `max`, `min`, `any`, `all`, `nansum`, `nanmax`, `nanmin`, `nanprod` | numel(input) − numel(output) | 1.0 | DECLARED reduction skeleton (one add or compare per consumed element) |
-| `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
+| `sum`, `prod`, `max`, `min`, `any`, `all`, `nansum`, `nanmax`, `nanmin`, `nanprod` | numel(input) − numel(output) (+numel(input) for the `nan*` forms) | 1.0 | DECLARED reduction skeleton (one add or compare per consumed element) |
+| `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) (+numel(input) for the `nan*` forms) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
 | `mean`, `average` (unweighted) | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides |
 | `average(weights=)` | `3·numel − M`, M = num output slices (1 for full reduction) | 1.0 | DERIVED: a·w multiply pass (numel) + a·w sum (numel−M) + weight sum (numel−M) + M divides |
-| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
+| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass ⇒ ≈ 5 × numel(input) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
-| `median`, `nanmedian` | axis length per output slice | 1.0 | DECLARED; partition (introselect) per output |
-| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
+| `median`, `nanmedian` | axis length per output slice (+numel(input) for `nanmedian`) | 1.0 | DECLARED; partition (introselect) per output |
+| `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` (+numel(input) for the `nan*` forms) | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
 | `ptp` | 2 × numel(input) − numel(output) | 1.0 | DERIVED: max pass + min pass + M subtracts (2·(numel−M)+M) |
 | `count_nonzero` | numel(input) | 1.0 | DECLARED comparison scan (every element tested regardless of axis) |
 | `nanmean` | 2 × numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides + the `nan*` isnan pass (numel) |
