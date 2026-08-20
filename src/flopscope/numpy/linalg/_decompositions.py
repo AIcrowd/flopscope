@@ -43,7 +43,7 @@ def cholesky_cost(n: int) -> int:
 def cholesky(a: ArrayLike, /, *, upper: bool = False) -> FlopscopeArray:
     """Cholesky decomposition with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -57,7 +57,7 @@ def cholesky(a: ArrayLike, /, *, upper: bool = False) -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.cholesky, _to_base_ndarray(a), upper=upper)
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -96,7 +96,7 @@ def qr(
       ``ValueError: ... inhomogeneous shape``)
     """
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     m, n = a.shape[-2], a.shape[-1]
@@ -112,7 +112,7 @@ def qr(
         result = _call_numpy(_np.linalg.qr, _to_base_ndarray(a), mode=mode)  # type: ignore[reportCallIssue]
     if mode in ("reduced", "complete"):
         q, r = result  # type: ignore[reportGeneralTypeIssues]
-        if inputs_were_whest:
+        if inputs_were_tracked:
             return QRResult(_asflopscope(q), _asflopscope(r))  # type: ignore[reportReturnType]
         return QRResult(q, r)  # type: ignore[reportReturnType]
     if mode == "raw":
@@ -120,10 +120,10 @@ def qr(
         # shapes — preserve the tuple structure rather than collapsing to
         # a single array via ``_asflopscope``.
         h, tau = result  # type: ignore[reportGeneralTypeIssues]
-        if inputs_were_whest:
+        if inputs_were_tracked:
             return _asflopscope(h), _asflopscope(tau)  # type: ignore[reportReturnType]
         return h, tau  # type: ignore[reportReturnType]
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportArgumentType]
     return result  # type: ignore[reportReturnType]
 
@@ -162,7 +162,7 @@ def eig_cost(n: int) -> int:
 def eig(a: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]:
     """Eigendecomposition with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -176,7 +176,7 @@ def eig(a: ArrayLike) -> tuple[FlopscopeArray, FlopscopeArray]:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eig, _to_base_ndarray(a))
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return EigResult(  # type: ignore[reportReturnType]
             _asflopscope(result.eigenvalues), _asflopscope(result.eigenvectors)
         )
@@ -213,7 +213,7 @@ def eigh_cost(n: int) -> int:
 def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[FlopscopeArray, FlopscopeArray]:
     """Symmetric eigendecomposition with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -227,7 +227,7 @@ def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[FlopscopeArray, FlopscopeArray]
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return EighResult(  # type: ignore[reportReturnType]
             _asflopscope(result.eigenvalues), _asflopscope(result.eigenvectors)
         )
@@ -266,7 +266,7 @@ def eigvals_cost(n: int) -> int:
 def eigvals(a: ArrayLike) -> FlopscopeArray:
     """Eigenvalues (nonsymmetric) with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -280,7 +280,7 @@ def eigvals(a: ArrayLike) -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvals, _to_base_ndarray(a))
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -318,7 +318,7 @@ def eigvalsh_cost(n: int) -> int:
 def eigvalsh(a: ArrayLike, UPLO: str = "L") -> FlopscopeArray:
     """Eigenvalues (symmetric) with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -332,7 +332,7 @@ def eigvalsh(a: ArrayLike, UPLO: str = "L") -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.eigvalsh, _to_base_ndarray(a), UPLO=UPLO)  # type: ignore[reportCallIssue]
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -361,7 +361,7 @@ def svdvals_cost(m: int, n: int, k: int | None = None) -> int:
 def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
     """Singular values with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     m, n = x.shape[-2], x.shape[-1]
@@ -381,7 +381,7 @@ def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
         result = _call_numpy(_np.linalg.svdvals, _to_base_ndarray(x))
     if k < min(m, n):
         result = result[..., :k]
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 

@@ -100,7 +100,7 @@ def multi_dot(
     # symmetry check, and what gets returned -- and above the deduct,
     # so a refused form costs nothing.
     out = _normalize_out(out, "linalg.multi_dot")
-    inputs_were_whest = any(isinstance(a, FlopscopeArray) for a in arrays)
+    inputs_were_tracked = any(isinstance(a, FlopscopeArray) for a in arrays)
     arrays = [a if isinstance(a, _np.ndarray) else _np.asarray(a) for a in arrays]
     shapes = [arr.shape for arr in arrays]
     cost = multi_dot_cost(shapes)
@@ -119,7 +119,7 @@ def multi_dot(
         )
     if out is not None:
         return out  # type: ignore[reportReturnType]
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -168,7 +168,7 @@ def matrix_power_cost(n: int, k: int) -> int:
 def matrix_power(a: ArrayLike, n: int) -> FlopscopeArray:
     """Matrix power with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     size = a.shape[-1]
@@ -186,7 +186,7 @@ def matrix_power(a: ArrayLike, n: int) -> FlopscopeArray:
         dtypes=power_dtypes,
     ):
         result = _call_numpy(_np.linalg.matrix_power, _to_base_ndarray(a), n)
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 

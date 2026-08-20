@@ -64,12 +64,12 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
     a plain-ndarray ``b`` is applied by the module-wide
     ``wrap_module_returns`` pass at the foot of ``flopscope/numpy/linalg/
     __init__.py``, not here, so this function object on its own still returns
-    a plain ndarray for a plain ``b``. ``b_was_whest`` below is therefore only
+    a plain ndarray for a plain ``b``. ``b_was_tracked`` below is therefore only
     the difference between wrapping here and wrapping there; both land on
     ``_asflopscope``.
     """
     budget = require_budget()
-    b_was_whest = isinstance(b, FlopscopeArray)
+    b_was_tracked = isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
@@ -87,7 +87,7 @@ def solve(a: ArrayLike, b: ArrayLike) -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype, b.dtype),
     ):
         result = _call_numpy(_np.linalg.solve, _to_base_ndarray(a), _to_base_ndarray(b))
-    if b_was_whest:
+    if b_was_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -131,7 +131,7 @@ def inv_cost(n: int, symmetric: bool = False) -> int:
 def inv(a: ArrayLike) -> FlopscopeArray:
     """Matrix inverse with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -157,7 +157,7 @@ def inv(a: ArrayLike) -> FlopscopeArray:
             result = SymmetricTensor(_np.asarray(result), symmetry=input_symmetry)
         except SymmetryError:
             pass
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -238,7 +238,7 @@ def lstsq(
     returns -- it is not an array, and the grader delivers it by value.
     """
     budget = require_budget()
-    b_was_whest = isinstance(b, FlopscopeArray)
+    b_was_tracked = isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     m, n = a.shape[-2], a.shape[-1]
@@ -263,7 +263,7 @@ def lstsq(
         result = _call_numpy(
             _np.linalg.lstsq, _to_base_ndarray(a), _to_base_ndarray(b), rcond=rcond
         )  # type: ignore[reportCallIssue]
-    if b_was_whest:
+    if b_was_tracked:
         return tuple(  # type: ignore[reportReturnType]
             _asflopscope(r) if isinstance(r, _np.ndarray) else r for r in result
         )
@@ -328,7 +328,7 @@ def pinv(
 ) -> FlopscopeArray:
     """Pseudoinverse with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     m, n = a.shape[-2], a.shape[-1]
@@ -347,7 +347,7 @@ def pinv(
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.pinv, _to_base_ndarray(a), **kwargs)
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -396,7 +396,7 @@ def tensorsolve_cost(a_shape: tuple) -> int:
 def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
     """Tensor solve with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray) or isinstance(b, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray) or isinstance(b, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     b_arr = _np.asarray(b)
@@ -418,7 +418,7 @@ def tensorsolve(a: ArrayLike, b: ArrayLike, axes: Any = None) -> FlopscopeArray:
             _to_base_ndarray(b),  # type: ignore[arg-type]
             axes=axes,
         )
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -462,7 +462,7 @@ def tensorinv_cost(a_shape: tuple, ind: int = 2) -> int:
 def tensorinv(a: ArrayLike, ind: int = 2) -> FlopscopeArray:
     """Tensor inverse with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     cost = tensorinv_cost(a.shape, ind=ind)
@@ -474,7 +474,7 @@ def tensorinv(a: ArrayLike, ind: int = 2) -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.tensorinv, _to_base_ndarray(a), ind=ind)
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
