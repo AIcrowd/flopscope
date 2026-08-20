@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- Six ops that answer with a boolean but compute in a promoted float dtype
+  billed their raw integer operand, undercharging by exactly 2x wherever the
+  promoted loop rates 2.0 and the operand's own dtype rates 1.0. `signbit`
+  publishes no integer loop at all (`np.signbit.types` is
+  `['e->?', 'f->?', 'd->?', 'g->?']`), so an integer operand is promoted to
+  the same-size float loop before the sign test runs — `int32`/`uint32`
+  compute in `float64`; `isneginf`/`isposinf` are
+  `logical_and(isinf(x), signbit(x))` and inherit that promotion exactly.
+  `isclose`/`allclose` promote harder and for a different reason: NumPy's
+  `isclose` casts its reference operand with `result_type(y, 1.)` before
+  running `|x−y| <= atol + rtol·|y|`, unconditionally (an explicit
+  `rtol=0, atol=0` promotes just the same), so EVERY integer and boolean
+  width computes in `float64`. `is_symmetric` and `as_symmetric` (and the
+  `SymmetricTensor` constructor, which shares as_symmetric's charge) bill
+  `k·(7n − 1)` — allclose's own cost formula, once per non-identity
+  generator — because the work they do is
+  `np.allclose(array, array.transpose(perm))`; they inherit allclose's
+  `float64` floor with it.
+
+  Measured on 1000 elements (a 32x32 matrix for the symmetry pair) under the
+  shipped weights, every affected cell moves by exactly 2.00x and nothing
+  else moves: `signbit`/`isneginf`/`isposinf` 1000 → 2000 at `int32` and
+  `uint32` only (`bool`/`int8`/`int16` promote to `float16`/`float32`, which
+  rate 1.0, so they are unchanged); `isclose` 6000 → 12000, `allclose`
+  6999 → 13998 and `is_symmetric`/`as_symmetric` 7167 → 14334 at `bool`,
+  `int8`, `int16`, `int32` and `uint32`. `int64`, `uint64`, `float32` and
+  `float64` operands are unchanged throughout — they already billed the
+  dtype the work runs at. This raises what the grader charges for calls that
+  already ran, so it requires re-evaluation.
+
+  The weights are untouched; only the dtype rate follows the promotion.
+
+### Fixed
+
+- The compute-dtype conformance sweep floored a billed rate at the rate of
+  NumPy's RESULT dtypes. For a predicate that result is `bool`, which rates
+  1.0 — the lowest rate any dtype resolves to — so the floor was not a
+  relaxed oracle for the whole predicate family, it was a switched-off one,
+  and every underbill above passed it. Ops returning a PYTHON bool
+  (`allclose`, `array_equal`, `is_symmetric`) contributed no result dtype at
+  all, leaving the floor on its 1.0 default. The sweep now adds a
+  COMPUTE-LOOP floor for every bool-result probe: the widest loop-input
+  dtype NumPy itself resolves while running the same call, observed by
+  replaying it on plain NumPy against an operand that records each
+  resolution — never through flopscope, so the oracle cannot inherit the
+  promotion model it audits. An accounting test discovers the bool-result
+  probes by running them, so a newly charged predicate op fails until its
+  replay exists instead of quietly inheriting the 1.0 floor.
+
 ## v0.11.0 (2026-08-17)
 
 ### BREAKING CHANGE

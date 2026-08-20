@@ -637,6 +637,8 @@ computation actually happens, not the input's label:
 | unary float-only ufuncs (`exp`, `sin`, `sqrt`, …) | the same-size float (`int8`/`uint8`/`bool` → `float16`; `int16`/`uint16` → `float32`; `int32`/`int64`/`uint32`/`uint64` → `float64`) — `angle` is the one exception, flooring `bool` alone at `float64` (see below) | unchanged |
 | binary float-only ufuncs except division (`arctan2`, `hypot`, `logaddexp`, …) | NumPy-selected float loop (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) | unchanged — this replaces the old blanket-float64 rule for narrow integers |
 | `divide` / `true_divide` | integer pairs resolve to `float64` | unchanged |
+| predicate ufunc family (`signbit`, and the `logical_and(isinf(x), signbit(x))` composites `isneginf`/`isposinf`) | the same-size float, exactly as the unary float-only row above (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) — NumPy publishes no integer `signbit` loop, so an integer operand is promoted before the sign test runs | unchanged |
+| tolerance checks (`isclose`, `allclose`, and the symmetry validators `is_symmetric`/`as_symmetric`, whose billed `k·(7n−1)` *is* an `allclose`) | `float64`, whatever the integer's own width — NumPy's `isclose` casts its reference operand with `result_type(y, 1.)` before comparing, unconditionally (an explicit `rtol=0, atol=0` promotes just the same) | unchanged — `float16` and `float32` keep their own loop |
 | `float_power` | NumPy's selected loop has a `float64` real minimum | `float64` real minimum — unchanged in effect |
 | FFT family | `complex128` (no size-mapping — even `int8` runs the `complex128` path) | `float16`/`float32` → `complex64`; `float64` → `complex128` |
 | LAPACK-backed `linalg.*` | `float64` | unchanged — single-precision drivers stay single |
@@ -656,6 +658,15 @@ while `int32`/`int64` bill the `2.0` float64 rate (**32000**).
 `bool` is a documented exception: on a 1000-element input, `angle(bool_data)` bills the
 `float64` rate (**32000**) while `angle(int8_data)` and `sin(bool_data)` both bill the
 `float16` rate (**16000**).
+
+The two predicate rows are the reason this table is keyed on what a kernel **computes
+in**, never on what it returns. Every op in them answers `bool`, so an output-derived
+rule would price them all at the baseline rate: on a 1000-element input,
+`signbit(int32_data)` bills the `float64` rate (**2000**), the same as
+`signbit(float64_data)`, while `signbit(int16_data)` bills the `float32` rate (**1000**)
+— and `isclose(int8_a, int8_b)` bills the `float64` rate (**12000**) because the
+tolerance core runs there, even though `isclose(float16_a, float16_b)` bills **6000**.
+The weights are untouched; only the dtype rate follows the promotion.
 
 For a worked binary example, `hypot(int8, int8)` selects a float16 loop and
 `hypot(int16, int16)` selects a float32 loop; both bill the baseline dtype rate `1.0`.

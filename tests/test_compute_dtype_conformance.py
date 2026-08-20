@@ -1469,3 +1469,290 @@ def test_sort_complex_does_not_overbill_narrow_ints():
     with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
         fnp.sort_complex(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
         assert b.op_log[-1].resolved_dtype == "complex64", b.op_log[-1]
+
+
+# ---------------------------------------------------------------------------
+# The floor that replaces the result-dtype floor for BOOL-RESULT ops.
+#
+# _assert_billed_rate_covers_compute_dtype floors the billed rate at
+# max(1.0, rates of numpy's RESULT dtypes). A predicate returns bool, bool
+# rates 1.0, and no resolvable dtype rates below 1.0 -- so for the whole
+# predicate family that floor is not a relaxed oracle, it is a switched-off
+# one, the same defect INDEX_OUTPUT_OPS had. It let signbit(int32) bill rate
+# 1.0 for years while numpy ran the float64 loop, and let isclose/allclose
+# bill every integer width at half of what their tolerance core costs.
+# Ops that return a PYTHON bool (allclose, array_equal, is_symmetric) are
+# blind for the same reason and one step worse: they contribute no result
+# dtype at all, so the floor never rises off its 1.0 default.
+#
+# The replacement is a COMPUTE-LOOP floor: the widest loop-input dtype numpy
+# itself resolves while running the same call. It is measured by replaying
+# the call on PLAIN numpy against an operand that records each resolution --
+# never through flopscope, so the oracle cannot inherit the promotion model
+# it is meant to audit.
+# ---------------------------------------------------------------------------
+
+
+class _LoopTracer(np.ndarray):
+    """ndarray that records the loop dtypes numpy resolves for every ufunc.
+
+    Records the INPUT slots of the resolved loop, which is the whole point:
+    a predicate's output slot is bool however wide its inputs are, so an
+    output-derived oracle can never see the promotion.
+    """
+
+    _seen: list[np.dtype[Any]] = []
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        raw = [
+            np.asarray(i).view(np.ndarray) if isinstance(i, np.ndarray) else i
+            for i in inputs
+        ]
+        # NEP 50: a Python scalar operand is WEAK, so it must reach
+        # result_type as a value, not as np.asarray(0).dtype -- the latter
+        # reads int64 and would report a phantom int64 loop for
+        # ``int32_array != 0``, which numpy really runs at int32. Composites
+        # like isreal and isin compare against Python scalars constantly, so
+        # getting this wrong turns the floor into noise.
+        try:
+            promoted = np.result_type(
+                *(np.asarray(r).dtype if isinstance(r, np.ndarray) else r for r in raw)
+            )
+        except TypeError:
+            promoted = None  # non-numeric operands: no rate to floor at
+        if promoted is not None:
+            try:
+                resolved = ufunc.resolve_dtypes(
+                    (promoted,) * ufunc.nin + (None,) * ufunc.nout
+                )
+            except TypeError:
+                pass  # loop genuinely undefined for these operands
+            else:
+                _LoopTracer._seen.extend(resolved[: ufunc.nin])
+        out = kwargs.pop("out", None)
+        if out is not None:
+            slots = out if isinstance(out, tuple) else (out,)
+            kwargs["out"] = tuple(
+                np.asarray(o).view(np.ndarray) if isinstance(o, np.ndarray) else o
+                for o in slots
+            )
+        return getattr(ufunc, method)(*raw, **kwargs)
+
+
+def _traced_loop_dtypes(replay: Callable[[], Any]) -> list[np.dtype[Any]]:
+    """Loop-input dtypes numpy resolves while ``replay`` runs on plain numpy."""
+    _LoopTracer._seen = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        replay()
+    return _LoopTracer._seen
+
+
+# Tracer views of the shared probe fixtures. Same buffers, same dtypes as the
+# arrays PROBES feeds flopscope, so billed side and traced side see one input.
+TV = V.view(_LoopTracer)
+TV3 = V3.view(_LoopTracer)
+TSYM = np.asarray(_SYMMETRIZED).view(_LoopTracer)
+
+
+def _t_unary(name: str) -> Callable[[], Any]:
+    return lambda: getattr(np, name)(TV)
+
+
+def _t_binary(name: str) -> Callable[[], Any]:
+    return lambda: getattr(np, name)(TV, TV)
+
+
+# op -> the same call, spelled against plain numpy on tracer operands. Mirrors
+# each op's PROBES entry argument-for-argument; test_bool_result_probe_
+# accounting fails if the two tables ever drift apart.
+BOOL_RESULT_REPLAYS: dict[str, Callable[[], Any]] = {
+    "all": lambda: np.all(TV),
+    "any": lambda: np.any(TV),
+    "allclose": lambda: np.allclose(TV, TV),
+    "array_equal": lambda: np.array_equal(TV, TV),
+    "array_equiv": lambda: np.array_equiv(TV, TV),
+    # in1d is numpy's deprecated spelling of isin and shares its kernel; the
+    # probe for each passes (V, V3).
+    "in1d": lambda: np.isin(TV, TV3),
+    "isin": lambda: np.isin(TV, TV3),
+    "isclose": lambda: np.isclose(TV, TV),
+    # is_symmetric has no numpy spelling: its billed k*(7n-1) IS the allclose
+    # against each generator's transpose that _check_generators runs.
+    "is_symmetric": lambda: np.allclose(TSYM, TSYM.T),
+    **{
+        name: _t_unary(name)
+        for name in (
+            "iscomplex",
+            "isfinite",
+            "isinf",
+            "isnan",
+            "isneginf",
+            "isposinf",
+            "isreal",
+            "logical_not",
+            "signbit",
+        )
+    },
+    **{
+        name: _t_binary(name)
+        for name in (
+            "equal",
+            "greater",
+            "greater_equal",
+            "less",
+            "less_equal",
+            "logical_and",
+            "logical_or",
+            "logical_xor",
+            "not_equal",
+        )
+    },
+}
+
+
+def _is_bool_result(result: Any) -> bool:
+    """True when the probe's result carries no width information at all."""
+    if isinstance(result, bool):
+        return True
+    dtypes = _result_dtypes(result)
+    return bool(dtypes) and all(dt == np.dtype(np.bool_) for dt in dtypes)
+
+
+def _bool_result_probes() -> set[str]:
+    """Ops whose int32 probe returns bool -- the result-dtype floor's blind set."""
+    found = set()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for op, call in PROBES.items():
+            with f.BudgetContext(flop_budget=10**18, quiet=True):
+                try:
+                    result = call()
+                except (UnsupportedFunctionError, Exception):
+                    continue
+            if _is_bool_result(result):
+                found.add(op)
+    return found
+
+
+def test_bool_result_probe_accounting():
+    """Every bool-result probe needs a compute-loop replay, and no more.
+
+    Discovered by running the probes, not from a hand-kept list: a newly
+    charged predicate op joins PROBES and immediately fails here until its
+    replay exists, instead of quietly inheriting the 1.0 floor.
+    """
+    blind = _bool_result_probes()
+    assert set(BOOL_RESULT_REPLAYS) == blind, (
+        "bool-result probes with no compute-loop replay (they are floored at "
+        f"1.0 and assert nothing): {sorted(blind - set(BOOL_RESULT_REPLAYS))}; "
+        f"stale replays: {sorted(set(BOOL_RESULT_REPLAYS) - blind)}"
+    )
+
+
+# Ops whose work the tracer cannot observe, each with the reason. A trace can
+# come back empty for three different causes, and only the first means the op
+# does no arithmetic -- so they are listed by name rather than inferred from
+# an empty trace, which would hand a free pass to any replay that silently
+# stopped exercising its kernel.
+#
+# For all of these the floor falls back to 1.0. That costs nothing today:
+# every one of them compares at its operands' own promoted width (the int32
+# probe rates 1.0 anyway), and none reaches a float loop. What it does mean is
+# that this oracle is a ufunc-loop oracle -- it cannot audit a kernel numpy
+# runs in C.
+NO_UFUNC_KERNEL: dict[str, str] = {
+    "iscomplex": (
+        "numpy short-circuits a non-complex input to zeros(shape, bool); no "
+        "arithmetic runs at all"
+    ),
+    "array_equal": (
+        "numpy calls asarray (not asanyarray) before ==, which strips the "
+        "tracer subclass; the comparison itself runs at the promoted operand "
+        "width"
+    ),
+    "array_equiv": "same asarray strip as array_equal",
+    "in1d": (
+        "the sort/searchsorted path does its comparisons inside C, with no "
+        "ufunc to resolve"
+    ),
+    "isin": "same sort/searchsorted path as in1d",
+}
+
+
+def _compute_loop_floor(op: str) -> tuple[float, list[np.dtype[Any]]]:
+    load_weights()
+    traced = _traced_loop_dtypes(BOOL_RESULT_REPLAYS[op])
+    if op in NO_UFUNC_KERNEL:
+        return 1.0, traced
+    assert traced, (
+        f"the replay for {op!r} resolved no ufunc loop at all, so its floor "
+        "would be vacuous -- either fix the replay so it exercises the same "
+        "kernel the probe does, or add the op to NO_UFUNC_KERNEL with the "
+        "reason its work cannot be traced"
+    )
+    return max(rate_for(dt) for dt in traced), traced
+
+
+@pytest.mark.parametrize("op", sorted(NO_UFUNC_KERNEL))
+def test_untraceable_exemptions_still_hold(op: str):
+    """An op exempted as untraceable must still be untraceable.
+
+    If numpy starts resolving a ufunc loop for one of these, the exemption
+    becomes a silent 1.0 floor over observable work -- this fails first.
+    """
+    traced = _traced_loop_dtypes(BOOL_RESULT_REPLAYS[op])
+    assert not traced, (
+        f"{op!r} is exempted from the compute-loop floor ({NO_UFUNC_KERNEL[op]}) "
+        f"but now resolves loops on {sorted({str(d) for d in traced})} -- drop "
+        "the exemption and let it be floored like the rest"
+    )
+
+
+def test_compute_loop_floor_is_falsifiable():
+    """At least one replay must floor above the minimum rate any dtype carries.
+
+    The guard on the guard, matching test_index_output_floor_is_falsifiable.
+    If every traced floor were 1.0 the per-op assertion below could not fail
+    for any op, which is exactly the state the result-dtype floor was in.
+    """
+    load_weights()
+    min_rate = min(rate_for(np.dtype(name)) for name in NARROW_DTYPES)
+    above = {
+        op: floor
+        for op in BOOL_RESULT_REPLAYS
+        if (floor := _compute_loop_floor(op)[0]) > min_rate
+    }
+    assert above, (
+        "no bool-result replay resolves a loop rating above the minimum rate "
+        f"({min_rate}), so the compute-loop floor asserts nothing"
+    )
+
+
+@pytest.mark.parametrize("op", sorted(BOOL_RESULT_REPLAYS))
+def test_bool_result_ops_bill_the_compute_loop_dtype(op: str):
+    """A bool-result op must bill the dtype numpy computes IN, not the bool
+    it returns. This is the assertion the result-dtype floor cannot make."""
+    load_weights()
+    floor, traced = _compute_loop_floor(op)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with f.BudgetContext(flop_budget=10**18, quiet=True) as b:
+            try:
+                PROBES[op]()
+            except UnsupportedFunctionError as e:
+                pytest.skip(f"probe op unavailable on this numpy: {e}")
+            records = [r for r in b.op_log if r.op_name == op]
+    assert records, f"probe for {op!r} did not log an op record under that name"
+    rec = records[-1]
+    assert rec.resolved_dtype is not None, (
+        f"{op!r} bills dtype-neutrally; if that is by design move it to "
+        "SKIPPED with the width-independence reason"
+    )
+    billed_rate = rate_for(np.dtype(rec.resolved_dtype))
+    assert billed_rate >= floor, (
+        f"{op!r} billed dtype {rec.resolved_dtype} (rate {billed_rate}) but "
+        f"numpy ran loops on {sorted({str(d) for d in traced})} "
+        f"(needs rate >= {floor}): the bool result says nothing about the "
+        "width the work is actually done at"
+    )
