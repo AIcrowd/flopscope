@@ -6,6 +6,7 @@ import pytest
 
 import flopscope as f
 import flopscope.numpy as fnp
+from flopscope._pointwise import _control_input_slots
 from flopscope._weights import get_dtype_rate, get_weight, load_weights
 
 
@@ -270,9 +271,17 @@ def test_explicit_narrow_dtype_bills_wider_out_for_direct_and_outer(name):
     ((np.int8, np.float16), (np.int16, np.float32)),
 )
 @pytest.mark.parametrize("out_dtype", (None, np.float64))
-def test_explicit_dtype_keeps_asymmetric_ldexp_input_slot(
+def test_explicit_dtype_prices_the_forced_ldexp_mantissa_loop(
     left_dtype, explicit_dtype, out_dtype
 ):
+    """``dtype=`` selects the mantissa loop; the int64 exponent still isn't priced.
+
+    The forced loop is ``float16,int64->float16`` (or its float32 sibling), so
+    the compute price is the forced float width -- not the exponent's, which
+    steers the arithmetic without being arithmetic. ``out=float64`` remains a
+    separate participant and still raises the bill under the
+    widest-participating-buffer doctrine.
+    """
     load_weights()
     left = np.arange(1, 9, dtype=left_dtype)
     right = np.arange(8, dtype=np.int64)
@@ -301,9 +310,11 @@ def test_explicit_dtype_keeps_asymmetric_ldexp_input_slot(
                 ),
             )
 
-    expected_logged_dtype = "int64" if out_dtype is None else "float64"
+    expected_logged_dtype = np.dtype(
+        explicit_dtype if out_dtype is None else out_dtype
+    ).name
     expected_result_dtype = explicit_dtype if out_dtype is None else out_dtype
-    expected_bill = 64 * get_weight("ldexp") * get_dtype_rate("int64")
+    expected_bill = 64 * get_weight("ldexp") * get_dtype_rate(expected_logged_dtype)
     assert np.array_equal(direct, outer)
     assert direct_bill == outer_bill == expected_bill
     assert direct_dtype == outer_dtype == expected_logged_dtype
@@ -845,10 +856,13 @@ def test_direct_dtype_resolution_precedes_operand_shape_snapshot():
         (np.int8, np.int8, np.float16),
         (np.int8, np.int32, np.float16),
         (np.int16, np.int32, np.float32),
-        (np.int8, np.int64, np.int64),
+        # The exponent's width is not the mantissa's: an int64 exponent runs
+        # the same ``el->e`` mantissa loop an int8 one does, so it prices the
+        # same. It used to resolve int64 through the promoted input floor.
+        (np.int8, np.int64, np.float16),
     ),
 )
-def test_ldexp_asymmetric_loop_and_input_floor(
+def test_ldexp_int_mantissa_bills_the_size_mapped_float_loop(
     left_dtype, right_dtype, expected_billing_dtype
 ):
     load_weights()
@@ -874,31 +888,12 @@ def test_ldexp_asymmetric_loop_and_input_floor(
     assert direct_dtype == outer_dtype == expected_dtype
 
 
-def test_ldexp_float32_int32_promoted_input_floor_matches_outer():
-    load_weights()
-    mantissas = np.arange(1, 9, dtype=np.float32)
-    exponents = np.arange(8, dtype=np.int32)
-
-    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
-        direct, direct_bill, direct_dtype = _delta(
-            ctx,
-            lambda: fnp.ldexp(
-                fnp.asarray(mantissas[:, None]), fnp.asarray(exponents[None, :])
-            ),
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            outer, outer_bill, outer_dtype = _delta(
-                ctx,
-                lambda: np.ldexp.outer(fnp.asarray(mantissas), fnp.asarray(exponents)),
-            )
-
-    expected_bill = 64 * get_weight("ldexp") * get_dtype_rate("float64")
-    assert np.array_equal(direct, outer)
-    assert direct_bill == expected_bill
-    assert direct_dtype == "float64"
-    assert outer_bill == expected_bill
-    assert outer_dtype == "float64"
+# ``test_ldexp_float32_int32_promoted_input_floor_matches_outer`` stood here.
+# It pinned the promoted input floor (``result_type(float32, int32)`` ->
+# float64) that issue #192 identified as an overcharge, so its expectation was
+# the defect itself. The direct/outer parity it also covered is asserted for
+# that exact dtype pair, among others, by
+# ``test_ldexp_bills_the_mantissa_loop_not_the_exponent_width`` below.
 
 
 @pytest.mark.parametrize(
@@ -945,3 +940,170 @@ def test_direct_hypot_matches_two_row_reduce(dtype, expected_loop):
     assert np.array_equal(direct, reduced, equal_nan=True)
     assert direct_bill == reduced_bill == expected_bill
     assert direct_dtype == reduced_dtype == expected_dtype
+
+
+# ---------------------------------------------------------------------------
+# ldexp's exponent operand is a control parameter, not an arithmetic one.
+#
+# numpy's ldexp loop table is ``fi->f`` / ``di->d`` / ``el->e`` / ... -- the
+# second slot names the EXPONENT, and numpy deliberately declines to promote
+# the mantissa to match it. Billing that slot charged a float32 mantissa at the
+# float64 rate whenever the exponent array was 32 bits or wider, which is a
+# category error rather than a rate error: same mantissa work, same float32
+# output, same values, twice the price. See issue #192 item 4.
+# ---------------------------------------------------------------------------
+
+# (mantissa dtype, exponent dtype) -> dtype numpy actually computes the
+# mantissa work in. Every entry is the OUTPUT slot of numpy's resolved loop,
+# which is what ``ufunc.at`` has always billed for this family.
+_LDEXP_COMPUTE_DTYPE = (
+    (np.float32, np.int8, "float32"),
+    (np.float32, np.int16, "float32"),
+    (np.float32, np.int32, "float32"),
+    (np.float32, np.int64, "float32"),
+    (np.float32, np.uint32, "float32"),
+    (np.float16, np.int32, "float16"),
+    (np.float16, np.int64, "float16"),
+    (np.float64, np.int8, "float64"),
+    (np.float64, np.int64, "float64"),
+    # Integer mantissas keep the size-mapped float promotion numpy applies to
+    # the rest of the float-loop family (int8 -> float16, int16 -> float32,
+    # int32 -> float64), and the exponent still must not move it.
+    (np.int8, np.int64, "float16"),
+    (np.int16, np.int64, "float32"),
+    (np.uint16, np.int64, "float32"),
+    (np.int32, np.int64, "float64"),
+)
+
+
+@pytest.mark.parametrize(
+    ("mantissa_dtype", "exponent_dtype", "expected_dtype"), _LDEXP_COMPUTE_DTYPE
+)
+def test_ldexp_bills_the_mantissa_loop_not_the_exponent_width(
+    mantissa_dtype, exponent_dtype, expected_dtype
+):
+    load_weights()
+    mantissas = np.arange(1, 9).astype(mantissa_dtype)
+    exponents = np.arange(8).astype(exponent_dtype)
+    # The dtype numpy really computes in, asked of numpy rather than asserted.
+    assert np.ldexp(mantissas, exponents).dtype == np.dtype(expected_dtype)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        direct, direct_bill, direct_dtype = _delta(
+            ctx,
+            lambda: fnp.ldexp(
+                fnp.asarray(mantissas[:, None]), fnp.asarray(exponents[None, :])
+            ),
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            outer, outer_bill, outer_dtype = _delta(
+                ctx,
+                lambda: np.ldexp.outer(fnp.asarray(mantissas), fnp.asarray(exponents)),
+            )
+
+    expected_bill = 64 * get_weight("ldexp") * get_dtype_rate(expected_dtype)
+    assert np.array_equal(direct, outer)
+    assert direct_dtype == outer_dtype == expected_dtype
+    assert direct_bill == outer_bill == expected_bill
+
+
+@pytest.mark.parametrize("exponent_dtype", (np.int8, np.int32, np.int64))
+def test_ldexp_exponent_width_never_changes_the_bill(exponent_dtype):
+    """A wider exponent is the same mantissa loop, so it is the same price."""
+    load_weights()
+    mantissas = np.arange(1, 9, dtype=np.float32)
+    narrow = np.arange(8, dtype=np.int8)
+    wide = np.arange(8).astype(exponent_dtype)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        _, narrow_bill, _ = _delta(
+            ctx, lambda: fnp.ldexp(fnp.asarray(mantissas), fnp.asarray(narrow))
+        )
+        _, wide_bill, _ = _delta(
+            ctx, lambda: fnp.ldexp(fnp.asarray(mantissas), fnp.asarray(wide))
+        )
+
+    assert narrow_bill == wide_bill
+
+
+def test_ldexp_direct_matches_ufunc_at_which_already_billed_the_loop():
+    """``ufunc.at`` has always priced ldexp on the resolved output slot.
+
+    It bills ``float32`` for an int64 exponent while the direct spelling billed
+    ``float64`` -- the same call at two prices depending on spelling. Pin them
+    together so the two paths cannot drift apart again.
+    """
+    load_weights()
+    mantissas = np.arange(1, 9, dtype=np.float32)
+    exponents = np.arange(8, dtype=np.int64)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        _, direct_bill, direct_dtype = _delta(
+            ctx, lambda: fnp.ldexp(fnp.asarray(mantissas), fnp.asarray(exponents))
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            _, at_bill, at_dtype = _delta(
+                ctx,
+                lambda: np.ldexp.at(
+                    fnp.asarray(mantissas), np.arange(8), fnp.asarray(exponents)
+                ),
+            )
+
+    assert direct_dtype == at_dtype == "float32"
+    assert direct_bill == at_bill
+
+
+def test_control_input_slots_selects_only_the_ldexp_exponent():
+    """The control-slot rule is derived from numpy's loop table, so sweep it.
+
+    A hardcoded ``{"ldexp"}`` would silently keep pricing a future ufunc with
+    the same shape, and would silently mis-price ldexp if numpy ever promoted
+    its exponent. Asserting over the live namespace instead means the rule is
+    re-derived on every numpy in the support matrix.
+
+    Both halves matter. Selecting ldexp's exponent is the fix; selecting
+    NOTHING else is what keeps the rule from discounting a genuinely
+    arithmetic operand -- ``divide``'s ``mq->m``/``md->m`` and ``multiply``'s
+    ``qm->m`` are heterogeneous loops too, and comparisons carry ``qQ->?``.
+    """
+    selected = {
+        name: _control_input_slots(obj)
+        for name, obj in vars(np).items()
+        if isinstance(obj, np.ufunc) and _control_input_slots(obj)
+    }
+    assert selected == {"ldexp": (1,)}
+
+    # And the slot it selects really is an unpromoted integer one: every
+    # ldexp loop pairs an inexact mantissa with an integral exponent.
+    for signature in np.ldexp.types:
+        inputs, _, outputs = signature.partition("->")
+        assert inputs[0] in "efdgFDG"
+        assert inputs[1] in "?bBhHiIlLqQ"
+        assert outputs[0] == inputs[0]
+
+
+@pytest.mark.parametrize(
+    "name", ("add", "multiply", "divide", "true_divide", "subtract", "equal", "less")
+)
+def test_heterogeneous_loops_that_are_still_arithmetic_keep_both_operands(name):
+    """Sibling ufuncs with mixed-code loops must NOT lose an operand's rate.
+
+    ``result_type(int64, float32)`` is float64 and these ops really do compute
+    there, so the promoted input floor still has to reach the deduct site.
+    """
+    load_weights()
+    left = np.arange(1, 9, dtype=np.int64)
+    right = np.arange(1, 9, dtype=np.float32)
+    np_func = getattr(np, name)
+
+    with f.BudgetContext(flop_budget=10**18, quiet=True) as ctx:
+        _, _, resolved = _delta(
+            ctx, lambda: getattr(fnp, name)(fnp.asarray(left), fnp.asarray(right))
+        )
+
+    assert resolved is not None, f"{name} billed dtype-neutrally"
+    assert get_dtype_rate(resolved) >= get_dtype_rate(
+        np.result_type(np_func(left, right).dtype, np.float64).name
+    )
