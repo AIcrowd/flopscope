@@ -195,10 +195,10 @@ def test_client_subprocess_has_a_deadline(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_budget_summary_release_wheels(tmp_path: Path) -> None:
-    raw_dist = os.environ.get("WHEST_RELEASE_DIST_DIR")
+    raw_dist = os.environ.get("FLOPSCOPE_RELEASE_DIST_DIR")
     if not raw_dist:
         pytest.skip(
-            "WHEST_RELEASE_DIST_DIR is required for wheel contract verification"
+            "FLOPSCOPE_RELEASE_DIST_DIR is required for wheel contract verification"
         )
 
     dist = Path(raw_dist).resolve()

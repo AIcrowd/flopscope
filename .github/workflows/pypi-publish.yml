@@ -69,7 +69,7 @@ jobs:
         run: uv sync --extra dev --extra server
       - name: Test exact workflow-built wheels
         env:
-          WHEST_RELEASE_DIST_DIR: ${{ github.workspace }}/release-dist
+          FLOPSCOPE_RELEASE_DIST_DIR: ${{ github.workspace }}/release-dist
         run: uv run --with packaging pytest tests/test_release_contract.py -v
 
   publish-pypi:

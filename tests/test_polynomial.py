@@ -248,7 +248,7 @@ def test_polyfit_no_budget():
 def test_polyfit_flopscope_array_inputs():
     # Regression: tracked FlopscopeArray inputs (the eval's normal path) must be
     # stripped before numpy.polyfit, which internally uses ops that reject the
-    # subclass. Previously raised RuntimeError "WhestArray reached numpy.polyfit".
+    # subclass. Previously raised RuntimeError "FlopscopeArray reached numpy.polyfit".
     import flopscope.numpy as fnp
 
     xs = [0.0, 1.0, 2.0, 3.0, 4.0]

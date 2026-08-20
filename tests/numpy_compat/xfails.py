@@ -314,14 +314,14 @@ XFAIL_PATTERNS: dict[str, str] = {
     ),
     # test_shuffle_masked: numpy.ma's masked-array shuffle calls umath.equal
     # internally (numpy/ma/core.py), which auto-routes through fnp.equal on the
-    # WhestArray subclass and diverges from numpy's stock masked shuffle (the
+    # FlopscopeArray subclass and diverges from numpy's stock masked shuffle (the
     # test hard-codes a count: ACTUAL 19 vs DESIRED 13). Same SUBCLASS_RETURN
     # root cause as test_shuffle above; pre-existing flopscope/numpy divergence
     # surfaced only when the gated numpy-compat job runs. Not matched by the
     # test_shuffle pattern (it has no trailing wildcard), so listed explicitly.
     "*TestRandomDist::test_shuffle_masked": (
         "SUBCLASS_RETURN: numpy.ma masked shuffle's internal umath.equal routes "
-        "through fnp.equal on the WhestArray subclass; same root cause as "
+        "through fnp.equal on the FlopscopeArray subclass; same root cause as "
         "test_shuffle"
     ),
     # NOTE: test_polyval, test_out_scalar, and test_choice_return_shape
@@ -571,7 +571,7 @@ XFAIL_PATTERNS: dict[str, str] = {
     # patching (i.e. after this PR). Unrelated to issue-70.
     "TestMoveaxis::test_array_likes": NEEDS_TRIAGE,
     # TestUfunc::test_sum and test_ufunc_at_scalar_value_fastpath[value0/1]
-    # hit the PR #102 WhestArray-boundary tripwire ("WhestArray reached
+    # hit the PR #102 FlopscopeArray-boundary tripwire ("FlopscopeArray reached
     # numpy.copyto from inside an fnp wrapper — missing _to_base_ndarray()
     # strip"). The tripwire flags a real missing strip in flopscope wrappers,
     # but those wrappers are unrelated to the issue-70 fix and the tripwire

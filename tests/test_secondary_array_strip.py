@@ -1,6 +1,6 @@
 """A FlopscopeArray passed as a *secondary* array argument must be stripped.
 
-Regression tests for the fail-closed ``RuntimeError`` (WhestArray reached
+Regression tests for the fail-closed ``RuntimeError`` (FlopscopeArray reached
 numpy.<func> from inside an fnp wrapper) raised when a wrapper strips its
 primary operand but forwards a secondary array argument -- ``weights=``,
 ``q=``, ``sorter=``, ``fweights=``, ``aweights=``, ``p=``, ``out=`` -- to
