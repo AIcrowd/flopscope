@@ -21,6 +21,7 @@ from test_dtype_cost import _billed_with_production_rates
 
 import flopscope as flops
 import flopscope.numpy as fnp
+from flopscope._weights import get_dtype_rate, get_weight, load_weights
 
 
 def billed(fn):
@@ -1078,3 +1079,38 @@ def test_outer_2d_operand_bills_same_as_1d_twin():
     assert billed(lambda: fnp.outer(m2x3, v4)) == 6 * 4 * 2  # 48
     assert billed(lambda: fnp.outer(v6, v4)) == 6 * 4 * 2  # 48 (identical)
     assert billed(lambda: fnp.outer(m2x3, v4)) == billed(lambda: fnp.outer(v6, v4))
+
+
+# ---------------------------------------------------------------------------
+# Issue #192 item 4: ldexp's exponent operand is a control parameter, not an
+# arithmetic one. numpy's fi->f / el->e loops keep the mantissa's precision
+# whatever the exponent's width, so an int32-or-wider exponent must not lift
+# the call to the float64 rate. Production-rate pins for the repriced cells.
+# ---------------------------------------------------------------------------
+
+
+def test_ldexp_exponent_width_does_not_lift_the_production_rate():
+    """A float32 mantissa bills the float32 rate at every exponent width.
+
+    Pre-fix, int32/int64/uint32 exponents billed 2x this (the float64 rate),
+    for the same loop producing the same float32 values.
+    """
+    load_weights()
+    weight = get_weight("ldexp")
+    mantissas = np.ones(N, dtype=np.float32)
+    expected = int(N * get_dtype_rate("float32") * weight)
+
+    for exponent_dtype in ("int8", "int16", "int32", "int64", "uint16", "uint32"):
+        exponents = np.ones(N, dtype=exponent_dtype)
+        assert (
+            billed(
+                lambda e=exponents: fnp.ldexp(fnp.asarray(mantissas), fnp.asarray(e))
+            )
+            == expected
+        ), f"float32 mantissa repriced by a {exponent_dtype} exponent"
+
+    # A float64 mantissa still bills the float64 rate -- unchanged by the fix.
+    wide = np.ones(N, dtype=np.float64)
+    assert billed(
+        lambda: fnp.ldexp(fnp.asarray(wide), fnp.asarray(np.ones(N, "int32")))
+    ) == int(N * get_dtype_rate("float64") * weight)

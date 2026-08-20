@@ -645,7 +645,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_binary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Return x1 * 2**x2 element-wise. Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "Return x1 * 2**x2 element-wise. Complex-illegal: numpy raises TypeError on complex input. x2 is a CONTROL operand, not an arithmetic one, and does not price the call: numpy ships ei->e/fi->f/di->d (and their int64 variants) so a wide exponent never drags the mantissa up a precision tier, and ldexp(float32, int64) therefore bills at the float32 rate, exactly what ldexp(float32, int8) bills. Billed on the mantissa loop numpy resolves -- which for an INTEGER mantissa is the same size-mapped float promotion the rest of the float-loop family takes (int8 -> float16, int16 -> float32, int32 -> float64). An out= destination is still a separate participant and can widen the bill.",
     },
     "heaviside": {
         "category": "counted_binary",
