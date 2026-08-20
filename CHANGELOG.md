@@ -1,28 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Billing impact
-
-- **billing**: `ldexp` was priced on the width of its EXPONENT operand, which
-  is not an arithmetic operand. NumPy ships `ei->e` / `fi->f` / `di->d` (and
-  their int64 variants) so a wide exponent never drags the mantissa up a
-  precision tier — `ldexp(float32, int32)` runs `fi->f`, computes float32, and
-  returns float32 — but both the promoted input floor
-  (`result_type(float32, int32)` is float64) and the collapse over the full
-  loop signature (an int64 exponent slot rates 2.0 on its own) charged it at
-  the float64 rate. `ldexp` now bills the mantissa loop NumPy actually
-  resolves, matching what `ufunc.at` has always billed for it. Membership is
-  derived from the running NumPy's loop table, not hard-coded; swept across
-  NumPy's entire ufunc namespace the rule selects exactly one slot, `ldexp`'s
-  exponent, so no other operation changes price. Affects the direct spelling,
-  `ufunc.outer`, and the explicit `dtype=`/`signature=` forms. 16 of the 84
-  mantissa × exponent dtype pairs change and **every one halves** — a narrow
-  mantissa (bool, int8/16, uint8/16, float16, float32) with an int32 (float
-  mantissas), int64, or uint32 exponent drops from the float64 rate to its own;
-  nothing bills more than before. An `out=` destination remains a separate
-  participant and can still widen the bill. Fixes item 4 of #192.
-
 ## v0.11.0 (2026-08-17)
 
 ### BREAKING CHANGE
