@@ -2488,7 +2488,7 @@ def _counted_ufunc_reduce_generic(
 ):
     """Cost-tracked fallback for ``ufunc.reduce`` of arbitrary binary ufuncs.
 
-    Used for ufuncs not in :class:`FlopscopeArray._REDUCE_TO_WHEST` (e.g.
+    Used for ufuncs not in :class:`FlopscopeArray._REDUCE_TO_FLOPSCOPE` (e.g.
     ``subtract``, ``logical_xor``, ``bitwise_or``). Cost equals
     :func:`reduction_cost` (numel of input, or the symmetry-aware
     unique count); output symmetry follows
@@ -2607,7 +2607,7 @@ def _counted_ufunc_reduce_generic(
 def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     """Cost-tracked fallback for ``ufunc.accumulate`` of arbitrary binary ufuncs.
 
-    Used for ufuncs not in :class:`FlopscopeArray._ACCUMULATE_TO_WHEST`.
+    Used for ufuncs not in :class:`FlopscopeArray._ACCUMULATE_TO_FLOPSCOPE`.
     Cost equals :func:`reduction_cost` (cumulative ops touch every
     element). Output shape matches input shape, but accumulation along
     ``axis`` breaks any permutation symmetry that includes that axis.
@@ -5630,7 +5630,7 @@ def _einsum_routed_binary(
     # fill is dropped quietly, which keeps a scratch arena usable.
     if out is not None:
         _prepare_symmetric_out(out, output_symmetry)
-    inputs_were_whest = isinstance(a, _np.ndarray) and (
+    inputs_were_tracked = isinstance(a, _np.ndarray) and (
         type(a) is not _np.ndarray or type(b) is not _np.ndarray
     )
     billing_dtypes = (a.dtype, b.dtype)
@@ -5696,7 +5696,7 @@ def _einsum_routed_binary(
     # exactly the line ``_wrap_metered_result`` draws. A complex128 scalar is
     # the documented exception: it packs as a handle, so it stays a residual
     # #193 gap here rather than a case this change closes.
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return _asflopscope(result)
     return _wrap_metered_result(result)
 

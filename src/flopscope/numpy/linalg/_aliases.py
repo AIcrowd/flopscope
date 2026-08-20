@@ -37,7 +37,9 @@ def cross(x1: ArrayLike, x2: ArrayLike, /, *, axis: int = -1) -> FlopscopeArray:
     from flopscope._validation import require_budget
 
     budget = require_budget()
-    inputs_were_whest = isinstance(x1, FlopscopeArray) or isinstance(x2, FlopscopeArray)
+    inputs_were_tracked = isinstance(x1, FlopscopeArray) or isinstance(
+        x2, FlopscopeArray
+    )
     x1_arr = _np.asarray(x1)
     x2_arr = _np.asarray(x2)
     out_shape = _np.broadcast_shapes(x1_arr.shape, x2_arr.shape)
@@ -54,7 +56,7 @@ def cross(x1: ArrayLike, x2: ArrayLike, /, *, axis: int = -1) -> FlopscopeArray:
         result = _call_numpy(
             _np.linalg.cross, _to_base_ndarray(x1), _to_base_ndarray(x2), axis=axis
         )  # type: ignore[reportCallIssue]
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 

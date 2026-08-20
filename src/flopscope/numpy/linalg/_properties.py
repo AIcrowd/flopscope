@@ -46,7 +46,7 @@ def trace_cost(n: int) -> int:
 def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeArray:
     """Matrix trace with FLOP counting (numpy 2.0 linalg.trace signature)."""
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     n = min(x.shape[-2], x.shape[-1])
@@ -78,7 +78,7 @@ def trace(x: ArrayLike, /, *, offset: int = 0, dtype: Any = None) -> FlopscopeAr
         result = _call_numpy(
             _np.linalg.trace, _to_base_ndarray(x), offset=offset, dtype=dtype
         )
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -112,7 +112,7 @@ def det_cost(n: int, symmetric: bool = False) -> int:
 def det(a: ArrayLike) -> FlopscopeArray:
     """Determinant with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -129,7 +129,7 @@ def det(a: ArrayLike) -> FlopscopeArray:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.det, _to_base_ndarray(a))
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -165,7 +165,7 @@ def slogdet_cost(n: int, symmetric: bool = False) -> int:
 def slogdet(a: ArrayLike) -> SlogdetResult:
     """Sign and log-determinant with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     n = a.shape[-1]
@@ -184,7 +184,7 @@ def slogdet(a: ArrayLike) -> SlogdetResult:
         dtypes=linalg_billing_dtypes(a.dtype),
     ):
         result = _call_numpy(_np.linalg.slogdet, _to_base_ndarray(a))
-    if inputs_were_whest:
+    if inputs_were_tracked:
         return SlogdetResult(
             _asflopscope(result.sign)
             if isinstance(result.sign, _np.ndarray)
@@ -267,7 +267,7 @@ def norm(
     remaining (non-reduced) dimensions is a separate group.
     """
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     # Compute effective shape for FLOP cost, guarding against invalid axis.
@@ -306,7 +306,7 @@ def norm(
         result = _call_numpy(
             _np.linalg.norm, _to_base_ndarray(x), ord=ord, axis=axis, keepdims=keepdims
         )
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -368,7 +368,7 @@ def vector_norm(
     remaining (non-reduced) dimensions is a separate group.
     """
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     if axis is not None:
@@ -397,7 +397,7 @@ def vector_norm(
             axis=axis,
             keepdims=keepdims,
         )
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -455,7 +455,7 @@ def matrix_norm(
     Zero-dim inputs cost 0 FLOPs.
     """
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     cost = (
@@ -473,7 +473,7 @@ def matrix_norm(
         result = _call_numpy(
             _np.linalg.matrix_norm, _to_base_ndarray(x), ord=ord, keepdims=keepdims
         )  # type: ignore[reportCallIssue]
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -505,7 +505,7 @@ def cond_cost(m: int, n: int, p=None) -> int:
 def cond(x: ArrayLike, p: Any = None) -> FlopscopeArray:
     """Condition number with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(x, FlopscopeArray)
+    inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     m, n = x.shape[-2], x.shape[-1]
@@ -541,7 +541,7 @@ def cond(x: ArrayLike, p: Any = None) -> FlopscopeArray:
                 result = _call_numpy(_np.float64, _np.nan)
         else:
             result = _call_numpy(_np.linalg.cond, _to_base_ndarray(x), p=p)
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 
@@ -571,7 +571,7 @@ def matrix_rank(
 ) -> FlopscopeArray | int:
     """Matrix rank with FLOP counting."""
     budget = require_budget()
-    inputs_were_whest = isinstance(A, FlopscopeArray)
+    inputs_were_tracked = isinstance(A, FlopscopeArray)
     if not isinstance(A, _np.ndarray):
         A = _np.asarray(A)
     if A.ndim < 2:
@@ -595,7 +595,7 @@ def matrix_rank(
         dtypes=linalg_billing_dtypes(A.dtype),
     ):
         result = _call_numpy(_np.linalg.matrix_rank, _to_base_ndarray(A), **kwargs)
-    if isinstance(result, _np.ndarray) and inputs_were_whest:
+    if isinstance(result, _np.ndarray) and inputs_were_tracked:
         return _asflopscope(result)  # type: ignore[reportReturnType]
     return result  # type: ignore[reportReturnType]
 

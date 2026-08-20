@@ -76,7 +76,7 @@ def svd(
         S : ndarray
     """
     budget = require_budget()
-    inputs_were_whest = isinstance(a, FlopscopeArray)
+    inputs_were_tracked = isinstance(a, FlopscopeArray)
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if a.ndim < 2:
@@ -123,10 +123,10 @@ def svd(
             maybe_check_nan_inf(S, "linalg.svd")
 
     if compute_uv:
-        if inputs_were_whest:
+        if inputs_were_tracked:
             return SVDResult(_asflopscope(U), _asflopscope(S), _asflopscope(Vt))  # type: ignore[reportPossiblyUnbound]
         return SVDResult(U, S, Vt)  # type: ignore[reportPossiblyUnbound]
     else:
-        if inputs_were_whest:
+        if inputs_were_tracked:
             return _asflopscope(S)  # type: ignore[reportReturnType]
         return S  # type: ignore[reportReturnType]

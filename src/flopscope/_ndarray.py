@@ -208,7 +208,7 @@ class FlopscopeArray(_np.ndarray):
 
     # ----- numpy ufunc protocol (NEP 13) -----
 
-    _REDUCE_TO_WHEST = {
+    _REDUCE_TO_FLOPSCOPE = {
         "add": "sum",
         "multiply": "prod",
         "maximum": "max",
@@ -216,7 +216,7 @@ class FlopscopeArray(_np.ndarray):
         "logical_and": "all",
         "logical_or": "any",
     }
-    _ACCUMULATE_TO_WHEST = {
+    _ACCUMULATE_TO_FLOPSCOPE = {
         "add": "cumsum",
         "multiply": "cumprod",
     }
@@ -239,7 +239,7 @@ class FlopscopeArray(_np.ndarray):
         which knows how to handle per-slot stripping and identity.
 
         ``reduce`` / ``accumulate`` first try the optimized routing in
-        :attr:`_REDUCE_TO_WHEST` / :attr:`_ACCUMULATE_TO_WHEST`; on a
+        :attr:`_REDUCE_TO_FLOPSCOPE` / :attr:`_ACCUMULATE_TO_FLOPSCOPE`; on a
         miss (e.g. ``np.subtract.reduce``) they fall back to a generic
         path in :mod:`flopscope._pointwise` that strips, charges
         :func:`reduction_cost`, and routes back through the raw
@@ -251,16 +251,18 @@ class FlopscopeArray(_np.ndarray):
 
         if _called_from_wrapper():
             raise RuntimeError(
-                f"WhestArray reached numpy.{ufunc.__name__} from inside an fnp "
-                f"wrapper — missing _to_base_ndarray() strip. Check the "
-                f"calling fnp wrapper and add a strip before the numpy call."
+                f"FlopscopeArray reached numpy.{ufunc.__name__} from inside a "
+                f"flopscope wrapper. This is a bug in flopscope, not in your "
+                f"code — please report it with the call that triggered it. "
+                f"(Internal: the wrapper is missing a _to_base_ndarray() strip "
+                f"before the numpy call.)"
             )
 
         # Emit one-time auto-route warning (de-duped per call site).
         import warnings as _warnings
 
         _warnings.warn(
-            f"np.{ufunc.__name__}(WhestArray) auto-routed to fnp.{ufunc.__name__}; "
+            f"np.{ufunc.__name__}(FlopscopeArray) auto-routed to fnp.{ufunc.__name__}; "
             f"call fnp.{ufunc.__name__} directly to avoid this warning.",
             UserWarning,
             stacklevel=2,
@@ -269,26 +271,26 @@ class FlopscopeArray(_np.ndarray):
         me = _me()
 
         np_target_name = None  # used to drive _filter_to_np_signature below
-        whest_fn = None
+        flopscope_fn = None
         if method == "__call__":
-            whest_fn = getattr(me, ufunc.__name__, None)
+            flopscope_fn = getattr(me, ufunc.__name__, None)
             np_target_name = ufunc.__name__
         elif method == "reduce":
-            target = self._REDUCE_TO_WHEST.get(ufunc.__name__)
+            target = self._REDUCE_TO_FLOPSCOPE.get(ufunc.__name__)
             if target is not None:
-                whest_fn = getattr(me, target, None)
+                flopscope_fn = getattr(me, target, None)
                 np_target_name = target
                 # NumPy's ufunc.reduce defaults to axis=0; flopscope's me.sum etc.
                 # default to axis=None (full reduction). Force NumPy default.
                 kwargs.setdefault("axis", 0)
         elif method == "accumulate":
-            target = self._ACCUMULATE_TO_WHEST.get(ufunc.__name__)
+            target = self._ACCUMULATE_TO_FLOPSCOPE.get(ufunc.__name__)
             if target is not None:
-                whest_fn = getattr(me, target, None)
+                flopscope_fn = getattr(me, target, None)
                 np_target_name = target
                 kwargs.setdefault("axis", 0)
 
-        if whest_fn is not None:
+        if flopscope_fn is not None:
             # Optimized routing-table path: forward to the dedicated
             # ``fnp.*`` wrapper.
             #
@@ -306,7 +308,7 @@ class FlopscopeArray(_np.ndarray):
                 kwargs = _filter_to_np_signature(
                     getattr(_np, np_target_name, None), kwargs
                 )
-            return whest_fn(*inputs, **kwargs)
+            return flopscope_fn(*inputs, **kwargs)
 
         # Generic ufunc-method paths for ops without a dedicated flopscope
         # equivalent. Lazy-imported to avoid the _ndarray ↔ _pointwise
@@ -607,7 +609,7 @@ class FlopscopeArray(_np.ndarray):
           np.ndim, np.size) is exempt — these are safe even inside a wrapper
           and must not trigger the tripwire.
 
-        - **Top-level call (depth == 0):** A user wrote ``np.<func>(whest)``
+        - **Top-level call (depth == 0):** A user wrote ``np.<func>(tracked_array)``
           directly. PASSTHROUGH set is checked first for zero-FLOP queries.
           Otherwise we route through the allowlist to ``fnp.<func>`` AND emit
           a ``UserWarning`` so the user knows to call ``fnp.<func>`` directly.
@@ -626,9 +628,11 @@ class FlopscopeArray(_np.ndarray):
 
         if _called_from_wrapper():
             raise RuntimeError(
-                f"WhestArray reached numpy.{func.__name__} from inside an fnp "
-                f"wrapper — missing _to_base_ndarray() strip. Check the "
-                f"calling fnp wrapper and add a strip before the numpy call."
+                f"FlopscopeArray reached numpy.{func.__name__} from inside a "
+                f"flopscope wrapper. This is a bug in flopscope, not in your "
+                f"code — please report it with the call that triggered it. "
+                f"(Internal: the wrapper is missing a _to_base_ndarray() strip "
+                f"before the numpy call.)"
             )
 
         dispatch = self._get_array_function_dispatch()
@@ -639,7 +643,7 @@ class FlopscopeArray(_np.ndarray):
         import warnings as _warnings
 
         _warnings.warn(
-            f"np.{func.__name__}(WhestArray) auto-routed to fnp.{func.__name__}; "
+            f"np.{func.__name__}(FlopscopeArray) auto-routed to fnp.{func.__name__}; "
             f"call fnp.{func.__name__} directly to avoid this warning.",
             UserWarning,
             stacklevel=2,
