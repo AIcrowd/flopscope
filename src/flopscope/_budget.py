@@ -1268,8 +1268,9 @@ def _called_from_wrapper() -> bool:
     """True iff a `_counted_wrapper.wrapped` frame appears in the call stack.
 
     Used by `FlopscopeArray.__array_function__` and `__array_ufunc__` to
-    distinguish "user wrote np.<f>(whest) at top level" (depth=0, auto-route
-    with warning) from "an fnp wrapper forgot to strip and leaked WhestArray
+    distinguish "user wrote np.<f>(tracked_array) at top level" (depth=0, auto-route
+    with warning) from "a flopscope wrapper forgot to strip and leaked a
+    FlopscopeArray
     into raw numpy" (depth>0, raise loudly).
 
     Implementation: walks `frame.f_back` chain and compares `f.f_code is
