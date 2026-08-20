@@ -200,3 +200,63 @@ def test_generator_choice_p_matches_plain_billing():
         result = fnp.random.default_rng(0).choice(pool, size=5, p=p)
     assert bc.flops_used > 0
     assert np.asarray(result).shape == (5,)
+
+
+# ---------------------------------------------------------------------------
+# tile: reps= (a shape-like secondary argument, in _array_ops)
+#
+# The sweep that fixed the cases above covered _pointwise, _sorting_ops and
+# random; _array_ops was not in it, so ``tile`` still forwarded a wrapped
+# ``reps`` and tripped the same fail-closed RuntimeError. Reported as item 3
+# of #192, where it was the one remaining op of eight probed.
+# ---------------------------------------------------------------------------
+_REPS_NP = np.array([2, 3])
+_REPS_FA = fnp.asarray(_REPS_NP)
+
+
+def test_tile_reps_flopscopearray():
+    base = np.arange(6, dtype=np.float64).reshape(2, 3)
+    plain_flops, plain = _billed(lambda: fnp.tile(base, _REPS_NP))
+    fa_flops, fa = _billed(lambda: fnp.tile(base, _REPS_FA))
+    assert fa_flops == plain_flops
+    np.testing.assert_array_equal(np.asarray(fa), np.asarray(plain))
+
+
+def test_tile_reps_flopscopearray_scalar_form():
+    """A 0-d/1-element tracked ``reps`` is the spelling closest to the int form."""
+    base = np.arange(4, dtype=np.float64)
+    plain_flops, plain = _billed(lambda: fnp.tile(base, np.array(3)))
+    fa_flops, fa = _billed(lambda: fnp.tile(base, fnp.asarray(np.array(3))))
+    assert fa_flops == plain_flops
+    np.testing.assert_array_equal(np.asarray(fa), np.asarray(plain))
+
+
+def test_tile_tracked_operand_and_tracked_reps():
+    """Both arguments tracked -- the form a participant writes naturally."""
+    base = fnp.asarray(np.arange(6, dtype=np.float64).reshape(2, 3))
+    plain_flops, plain = _billed(lambda: fnp.tile(base, _REPS_NP))
+    fa_flops, fa = _billed(lambda: fnp.tile(base, _REPS_FA))
+    assert fa_flops == plain_flops
+    np.testing.assert_array_equal(np.asarray(fa), np.asarray(plain))
+
+
+def test_tile_reps_sequence_containing_a_tracked_entry():
+    """A tracked entry INSIDE the reps sequence, which the scalar strip misses."""
+    base = np.arange(6, dtype=np.float64).reshape(2, 3)
+    plain_flops, plain = _billed(lambda: fnp.tile(base, [2, 3]))
+    # numpy accepts a heterogeneous reps sequence at runtime; its ArrayLike
+    # alias cannot spell one, so the checker is told here rather than the
+    # case being weakened into something a participant would not write.
+    mixed = [fnp.asarray(np.array(2)), 3]
+    fa_flops, fa = _billed(lambda: fnp.tile(base, mixed))  # pyright: ignore[reportArgumentType]
+    assert fa_flops == plain_flops
+    np.testing.assert_array_equal(np.asarray(fa), np.asarray(plain))
+
+
+def test_tile_int_reps_is_unaffected():
+    """The plain int spelling must keep working and cost the same."""
+    base = np.arange(4, dtype=np.float64)
+    int_flops, int_res = _billed(lambda: fnp.tile(base, 3))
+    arr_flops, arr_res = _billed(lambda: fnp.tile(base, np.array(3)))
+    assert int_flops == arr_flops
+    np.testing.assert_array_equal(np.asarray(int_res), np.asarray(arr_res))

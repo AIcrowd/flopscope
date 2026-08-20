@@ -1054,18 +1054,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P5-family-10",
     ),
     Entry(
-        case_id="grid/tile::*",
-        dimension="exc_type",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client reaches the server for `tile` and a real server-side failure"
-            " is surfaced to the client as a generic `FlopscopeServerError`, losing the"
-            " concrete exception type numpy raises in-process (which varies with the"
-            " grid pattern's argument shape)."
-        ),
-        issue="INTERNAL-P5-family-10",
-    ),
-    Entry(
         case_id="grid/trapezoid::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,
