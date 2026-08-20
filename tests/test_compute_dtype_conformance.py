@@ -1619,20 +1619,29 @@ def _is_bool_result(result: Any) -> bool:
     return bool(dtypes) and all(dt == np.dtype(np.bool_) for dt in dtypes)
 
 
-def _bool_result_probes() -> set[str]:
-    """Ops whose int32 probe returns bool -- the result-dtype floor's blind set."""
-    found = set()
+def _bool_result_probes() -> tuple[set[str], set[str]]:
+    """(bool-result probes, probes the RUNNING numpy does not expose).
+
+    Only ``UnsupportedFunctionError`` is caught, matching the int32 sweep: it
+    is the documented degradation for a version-gated op, and nothing else.
+    A blanket ``except Exception`` here would drop a probe that broke for a
+    real reason out of the blind set, which reads as "no replay needed" --
+    the exact silence this accounting test exists to prevent.
+    """
+    found: set[str] = set()
+    unavailable: set[str] = set()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for op, call in PROBES.items():
             with f.BudgetContext(flop_budget=10**18, quiet=True):
                 try:
                     result = call()
-                except (UnsupportedFunctionError, Exception):
+                except UnsupportedFunctionError:
+                    unavailable.add(op)
                     continue
             if _is_bool_result(result):
                 found.add(op)
-    return found
+    return found, unavailable
 
 
 def test_bool_result_probe_accounting():
@@ -1642,11 +1651,17 @@ def test_bool_result_probe_accounting():
     charged predicate op joins PROBES and immediately fails here until its
     replay exists, instead of quietly inheriting the 1.0 floor.
     """
-    blind = _bool_result_probes()
-    assert set(BOOL_RESULT_REPLAYS) == blind, (
+    blind, unavailable = _bool_result_probes()
+    missing = sorted(blind - set(BOOL_RESULT_REPLAYS))
+    # A replay for an op the RUNNING numpy does not expose is not stale. The
+    # matrix cells that do expose it still sweep it, so the entry has to
+    # survive the cells that don't -- numpy removed `in1d` in 2.4, and its
+    # probe degrades to UnsupportedFunctionError there while 2.0-2.3 keep
+    # sweeping it for real.
+    stale = sorted(set(BOOL_RESULT_REPLAYS) - blind - unavailable)
+    assert not missing and not stale, (
         "bool-result probes with no compute-loop replay (they are floored at "
-        f"1.0 and assert nothing): {sorted(blind - set(BOOL_RESULT_REPLAYS))}; "
-        f"stale replays: {sorted(set(BOOL_RESULT_REPLAYS) - blind)}"
+        f"1.0 and assert nothing): {missing}; stale replays: {stale}"
     )
 
 
