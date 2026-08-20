@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Changed
+
+- **No billed amount changes.** A ufunc-backed unary op now takes its compute
+  dtype from the loop NumPy resolves for the operand, the way
+  `_counted_binary` always has, instead of from a hand-maintained frozenset of
+  "float-only" op names. That asymmetry is why the binary float-only family
+  (`copysign`, `heaviside`, `nextafter`, `hypot`, `logaddexp`) never needed an
+  entry while the unary side undercharged whenever a name was missing —
+  `angle`'s bool case, then `signbit`/`isneginf`/`isposinf`, each found as an
+  undercharge in production rather than by a test. The name sets shrink from
+  42 entries to 5, and what remains is only the composites (`angle`, `i0`,
+  `sinc`, `isneginf`, `isposinf`, plus `fix` before NumPy 2.1) — Python
+  functions built on other ufuncs, which publish no loop to resolve.
+
+  Measured across 11,648 cells (64 unary ops x 14 dtypes x 13 call shapes:
+  plain, five `out=` dtypes, seven `dtype=` dtypes): **0 cells change what is
+  billed, and 0 change whether the call is refused**. Four cells change the
+  `resolved_dtype` recorded in the op log, all in the same direction —
+  `square`/`conj`/`conjugate`/`reciprocal` on a `bool` operand now record
+  `int8`, which is the loop NumPy actually runs and the dtype it actually
+  returns (it publishes no bool loop for them). `bool` and `int8` carry the
+  same rate on the shipped table, so no amount moves; the recorded dtype now
+  names a loop that exists.
+
+
 ### Billing impact
 
 - Six ops that answer with a boolean but compute in a promoted float dtype

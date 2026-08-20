@@ -3294,7 +3294,7 @@
       "numpy_ref": "np.in1d",
       "slug": "in1d",
       "status": "supported",
-      "summary": "",
+      "summary": "Test whether each element of a 1-D array is also present in a second array.",
       "weight": 1.0
     },
     {
@@ -9552,7 +9552,7 @@
       "numpy_ref": "np.result_type",
       "slug": "result_type",
       "status": "supported",
-      "summary": "Returns the type that results from applying the NumPy :ref:`type promotion <arrays.promotion>` rules to the arguments.",
+      "summary": "Returns the type that results from applying the NumPy type promotion rules to the arguments.",
       "weight": 0.0
     },
     {

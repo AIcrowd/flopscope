@@ -675,6 +675,13 @@ computation actually happens, not the input's label:
 | mean-shaped composites (`average`, `median`, `gradient`, `percentile`, `nanmedian`, `nanpercentile`, …) | `float64`, regardless of the integer's own width (no size-mapping, unlike the unary-ufunc row above) | unchanged |
 | always-float64 composites (`polyfit`, `polyint`, …) | `float64` | `float64` — forced even from `float32` |
 
+The unary rows report the same thing. A ufunc-backed unary op is priced on the loop
+NumPy resolves for its operand, read from NumPy's own loop table at call time -- there
+is no per-op list of "float-only" names to keep in step with new NumPy releases. The
+few unary entries flopscope still names are the COMPOSITES (`angle`, `i0`, `sinc`,
+`isneginf`, `isposinf`, and `fix` before NumPy 2.1), which publish no loop to resolve
+because they are Python functions built on other ufuncs.
+
 The binary ufunc rows above report NumPy loop-table results, not operation-name floors
 imposed by flopscope. In particular, `float_power`'s narrowest real and complex
 signatures are `dd->d` and `DD->D`, respectively, so `complex64` promotes to
