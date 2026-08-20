@@ -235,50 +235,7 @@ def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> No
 # runs numpy's genuine integer loop, and the widest loop the pair resolves is
 # signbit's, traced at every scalar width. What kept all three out of this
 # set is what they RETURN (bool), not what they COMPUTE IN (float).
-_UNARY_FLOAT_LOOP_OPS = frozenset(
-    {
-        "acos",
-        "acosh",
-        "angle",
-        "arccos",
-        "arccosh",
-        "arcsin",
-        "arcsinh",
-        "arctan",
-        "arctanh",
-        "asin",
-        "asinh",
-        "atan",
-        "atanh",
-        "cbrt",
-        "cos",
-        "cosh",
-        "deg2rad",
-        "degrees",
-        "exp",
-        "exp2",
-        "expm1",
-        "fabs",
-        "frexp",
-        "isneginf",
-        "isposinf",
-        "log",
-        "log1p",
-        "log2",
-        "log10",
-        "modf",
-        "rad2deg",
-        "radians",
-        "rint",
-        "signbit",
-        "sin",
-        "sinh",
-        "spacing",
-        "sqrt",
-        "tan",
-        "tanh",
-    }
-)
+_UNARY_FLOAT_LOOP_OPS = frozenset({"angle", "isneginf", "isposinf"})
 # numpy < 2.1 has no integer loops for ceil/floor/trunc (nor fix, their
 # composite): integer input is promoted and computed in the size-mapped float
 # loop (int8 -> float16, ..., int32 -> float64), exactly like sin. numpy 2.1
@@ -287,12 +244,7 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
 # tracks what this backend actually computes.
 _UNARY_FLOAT_LOOP_OPS |= frozenset(
     op_name
-    for op_name, fn in (
-        ("ceil", _np.ceil),
-        ("floor", _np.floor),
-        ("trunc", _np.trunc),
-        ("fix", _np.fix),
-    )
+    for op_name, fn in (("fix", _np.fix),)
     if fn(_np.ones(1, dtype=_np.int32)).dtype.kind == "f"
 )
 # Unary ops with NO size-mapped integer loop: numpy always computes them in
@@ -1189,14 +1141,84 @@ def _counted_unary(np_func, op_name: str):
         # on top of it, never shrink it -- see cost-model.md's "out= alone
         # never shrinks the loop".
         store_dtypes: tuple = ()
-        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
+        if not bills_operand:
+            assert explicit_dtype is not None
             operand_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
             operand_dtypes = (x.dtype,)
             if isinstance(out, _np.ndarray):
                 store_dtypes = store_billing_dtypes(out)
         compute_dtype = None
-        if op_name in _UNARY_FLOAT_LOOP_OPS:
+        # A loop numpy does not have is a refusal, not a price. Ask before the
+        # deduct so it costs nothing, the same doctrine as the ``out=`` guards
+        # at the top of this wrapper and as percentile's ``q`` check (#241):
+        # ``invert(float32)`` and ``sign(bool_)`` used to bill ``numel`` in
+        # full and then raise, because the only guard was numpy's own dispatch
+        # inside the deduct block.
+        #
+        # The answer is also the PRICE. numpy's resolved signature names the
+        # dtype the loop really reads, so a ufunc-backed op needs no entry in
+        # the name sets below -- the same rule ``_counted_binary`` has always
+        # used, and the reason its float-only family (copysign, heaviside,
+        # nextafter, hypot, logaddexp) has never needed one. A hand-kept set
+        # can only be as complete as the last person to edit it: it missed
+        # ``angle``'s bool case, then ``signbit``/``isneginf``/``isposinf``,
+        # each found as an undercharge in production rather than here.
+        #
+        # Restricted to the UNCONSTRAINED form. ``dtype=`` and
+        # ``signature=``/``sig=`` name a loop explicitly, and this wrapper
+        # forwards them untouched; reconstructing numpy's constraint semantics
+        # here to pre-judge them would risk refusing a form numpy accepts,
+        # which is the one failure mode worse than the overcharge being fixed.
+        # Those forms keep billing the dtype the caller named, as before.
+        # ``bills_operand`` is the SAME predicate that chose operand_dtypes
+        # above, deliberately sharing one expression: a bool ``dtype=`` names
+        # the output of a value-testing loop, so the wrapper ignores it and
+        # bills the operand -- which means the operand's loop still has to be
+        # resolved. Gating this on ``explicit_dtype is None`` alone reopened
+        # signbit's undercharge through the ``dtype=bool`` door, billing
+        # ``signbit(int32, dtype=bool)`` at int32 while numpy read float64.
+        #
+        # The REFUSAL stays gated on the stricter ``explicit_dtype is None``.
+        # A caller who named a dtype gets numpy's own error from the real
+        # call, exactly as before; pre-judging that form here could refuse
+        # something numpy accepts, the one failure mode worse than the
+        # overcharge this resolution fixes.
+        if is_ufunc and bills_operand and "signature" not in kwargs:
+            if "sig" not in kwargs:
+                try:
+                    loop_dtypes: tuple = _ufunc_loop_signature(
+                        np_func,
+                        x.dtype,
+                        casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
+                        strict=True,
+                    )
+                except (TypeError, ValueError) as loop_error:
+                    if explicit_dtype is None:
+                        _refuse_unsupported_loop(op_name, (x.dtype,), loop_error)
+                        raise  # unreachable; _refuse_unsupported_loop raises
+                    loop_dtypes = ()
+                # ``_rate_bearing_loop_dtypes`` drops control-input slots.
+                # No unary ufunc has one today (``ldexp``'s exponent is the
+                # only such slot in numpy's namespace and it is binary), so
+                # this is forward insurance, not a filter that fires -- it is
+                # used anyway so the unary and binary collapses cannot drift.
+                if loop_dtypes:
+                    compute_dtype = heavier_billing_dtype(
+                        *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
+                    )
+                    # The operand floor: a resolved loop can be NARROWER than
+                    # the operand (``abs(complex128) -> d``), and a narrower
+                    # loop must not discount the wider value it reads. Read
+                    # from the operands ALONE -- a destination is folded in
+                    # after the mapping, never before it (#243).
+                    input_floor = resolve_billing_dtype(operand_dtypes)
+                    if input_floor is not None:
+                        compute_dtype = heavier_billing_dtype(
+                            compute_dtype, input_floor
+                        )
+        elif op_name in _UNARY_FLOAT_LOOP_OPS:
             resolved = resolve_billing_dtype(operand_dtypes)
             if resolved is not None:
                 compute_dtype = unary_float_loop_dtype(resolved)
@@ -1211,35 +1233,6 @@ def _counted_unary(np_func, op_name: str):
                 compute_dtype = integer_to_float64_min_dtype(resolved)
         if compute_dtype is not None:
             operand_dtypes = (compute_dtype,)
-        # A loop numpy does not have is a refusal, not a price. Ask before the
-        # deduct so it costs nothing, the same doctrine as the ``out=`` guards
-        # at the top of this wrapper and as percentile's ``q`` check (#241):
-        # ``invert(float32)`` and ``sign(bool_)`` used to bill ``numel`` in
-        # full and then raise, because the only guard was numpy's own dispatch
-        # inside the deduct block. Unlike the binary path this wrapper never
-        # resolves the loop otherwise, so the question has to be asked here.
-        #
-        # Restricted to the UNCONSTRAINED form. ``dtype=`` and
-        # ``signature=``/``sig=`` name a loop explicitly, and this wrapper
-        # forwards them untouched; reconstructing numpy's constraint semantics
-        # here to pre-judge them would risk refusing a form numpy accepts,
-        # which is the one failure mode worse than the overcharge being fixed.
-        if (
-            is_ufunc
-            and explicit_dtype is None
-            and "signature" not in kwargs
-            and "sig" not in kwargs
-        ):
-            try:
-                _ufunc_loop_signature(
-                    np_func,
-                    x.dtype,
-                    casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
-                    strict=True,
-                )
-            except (TypeError, ValueError) as loop_error:
-                _refuse_unsupported_loop(op_name, (x.dtype,), loop_error)
-                raise  # unreachable; _refuse_unsupported_loop always raises
         # The store dtype stays in the tuple rather than being resolved away:
         # ``deduct`` keys its non-numeric refusal on these entries, and a
         # genuinely wider destination must still reach the rate.
@@ -1436,7 +1429,10 @@ def _counted_unary_multi(np_func, op_name: str):
         # dtype= is excluded: it names the output of a value-testing loop,
         # which still reads full-width operands -- bill the operands.
         explicit_dtype = kwargs.get("dtype")
-        if explicit_dtype is not None and _np.dtype(explicit_dtype).kind != "b":
+        store_dtypes: tuple = ()
+        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
+        if not bills_operand:
+            assert explicit_dtype is not None
             billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
         else:
             billing_dtypes = (x.dtype,)
@@ -1444,16 +1440,37 @@ def _counted_unary_multi(np_func, op_name: str):
             # have allocated for that slot: ``frexp``'s exponent is int32 by
             # signature, not because anything asked for 32-bit integer
             # arithmetic, so naming it must not promote the resolution.
-            billing_dtypes += multi_store_billing_dtypes(
+            store_dtypes = multi_store_billing_dtypes(
                 out, natural_output_dtypes(np_func, x.dtype)
             )
-        if op_name in _UNARY_FLOAT_LOOP_OPS:
-            resolved = resolve_billing_dtype(billing_dtypes)
-            if resolved is not None:
-                mapped = unary_float_loop_dtype(resolved)
-                if op_name == "frexp":
-                    mapped = heavier_billing_dtype(mapped, _np.dtype(_np.int32))
-                billing_dtypes = (mapped,)
+            billing_dtypes += store_dtypes
+        # Same rule as the single-output wrapper: numpy's resolved signature
+        # names the loop, so neither ``modf`` nor ``frexp`` needs a name-set
+        # entry. Collapsing the whole signature also subsumes the hardcoded
+        # ``heavier(mapped, int32)`` this used to apply for ``frexp`` -- that
+        # int32 was the exponent OUTPUT slot, which the resolved signature
+        # reports directly instead of naming a width in source. A caller's
+        # ``out=`` for that slot is still measured against the natural
+        # destination above, so naming it cannot promote the resolution.
+        if bills_operand and "signature" not in kwargs and "sig" not in kwargs:
+            loop_dtypes = _ufunc_loop_signature(
+                np_func,
+                x.dtype,
+                casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
+            )
+            mapped = heavier_billing_dtype(
+                *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
+            )
+            # Operands ONLY. The destination is appended below as its own
+            # entry, never folded into this floor: ``heavier`` does not widen
+            # on a rate tie, so folding a float32 ``out=`` into a float16 loop
+            # resolved DOWN to float16 -- the narrowing #243 closed for the
+            # single-output wrapper -- and it hid a complex128 destination
+            # from the refusal ``deduct`` keys on these entries.
+            input_floor = resolve_billing_dtype((x.dtype,))
+            if input_floor is not None:
+                mapped = heavier_billing_dtype(mapped, input_floor)
+            billing_dtypes = (mapped,) + store_dtypes
         with budget.deduct(
             op_name,
             flop_cost=cost,
