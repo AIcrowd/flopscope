@@ -31,8 +31,9 @@
   6999 → 13998 and `is_symmetric`/`as_symmetric` 7167 → 14334 at `bool`,
   `int8`, `int16`, `int32` and `uint32`. `int64`, `uint64`, `float32` and
   `float64` operands are unchanged throughout — they already billed the
-  dtype the work runs at. This raises what the grader charges for calls that
-  already ran, so it requires re-evaluation.
+  dtype the work runs at. This raises what the grader charges, but ships in a
+  new version opening a new phase, so no submission is re-evaluated against
+  it: nothing already scored is repriced.
 
   The weights are untouched; only the dtype rate follows the promotion.
 
