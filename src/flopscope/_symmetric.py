@@ -7,6 +7,7 @@ import sys as _sys
 import numpy as np
 
 from flopscope._budget import _counted_wrapper
+from flopscope._dtype_billing import integer_to_float64_min_dtype
 from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
 from flopscope._symmetry_utils import (
@@ -60,6 +61,21 @@ def validate_symmetry(
                 if not np.allclose(data, transposed, atol=1e-6, rtol=1e-5):
                     max_dev = float(np.max(np.abs(data - transposed)))
                     raise SymmetryError(axes=group, max_deviation=max_dev)
+
+
+def _validation_compute_dtype(dtype: np.dtype) -> np.dtype:
+    """Compute dtype of a symmetry check: the tolerance comparison's own width.
+
+    Both billed validation sites charge ``k * (7n - 1)`` -- allclose's cost
+    formula, once per non-identity generator -- because the work they do is
+    ``np.allclose(array, array.transpose(perm))``. numpy's allclose casts its
+    reference operand to ``result_type(y, 1.)`` before comparing, so an
+    integer or bool array is compared in float64 however narrow it is. Billing
+    the array's own dtype charged bool and int8..uint32 half of what the
+    comparison costs. The result dtype cannot catch this: is_symmetric returns
+    a Python bool, and as_symmetric returns a tensor of the operand dtype.
+    """
+    return integer_to_float64_min_dtype(np.dtype(dtype))
 
 
 def _nonidentity_generator_count(group) -> int:
@@ -250,7 +266,7 @@ def _validate_and_charge_symmetry(
         flop_cost=cost,
         subscripts=None,
         shapes=(array.shape,),
-        dtypes=(array.dtype,),
+        dtypes=(_validation_compute_dtype(array.dtype),),
     ):
         validate_symmetry_groups(array, [group])
 
@@ -322,7 +338,7 @@ def is_symmetric(
         flop_cost=cost,
         subscripts=None,
         shapes=(array.shape,),
-        dtypes=(array.dtype,),
+        dtypes=(_validation_compute_dtype(array.dtype),),
     ):
         return _check_generators(array, group, atol=atol, rtol=rtol)
 

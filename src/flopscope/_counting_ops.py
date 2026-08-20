@@ -19,8 +19,10 @@ from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
     heavier_billing_dtype,
+    integer_to_float64_min_dtype,
     mean_compute_dtype,
     reduction_billing_dtype,
+    resolve_billing_dtype,
     sum_accumulator_dtype,
 )
 from flopscope._flops import _ceil_log2
@@ -135,12 +137,20 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
         numel *= d
     # 6 FLOPs/elem tolerance core (sub + 2*abs + mul + add + cmp) + (numel-1) all-reduce
     cost = _builtins.max(7 * numel - 1, 1)
+    # allclose IS isclose plus an all-reduce, so it inherits isclose's
+    # unconditional ``result_type(y, 1.)`` cast: integer and bool operands
+    # run the tolerance core in float64. Same mapping, same reason -- see the
+    # comment at ``_pointwise.isclose``.
+    billing_dtypes: tuple = (a.dtype, b.dtype)
+    resolved = resolve_billing_dtype(billing_dtypes)
+    if resolved is not None:
+        billing_dtypes = (integer_to_float64_min_dtype(resolved),)
     with budget.deduct(
         "allclose",
         flop_cost=cost,
         subscripts=None,
         shapes=(a.shape, b.shape),
-        dtypes=(a.dtype, b.dtype),
+        dtypes=billing_dtypes,
     ):
         result = _call_numpy(_np.allclose, a, b, **kwargs)
     return result  # type: ignore[return-value]

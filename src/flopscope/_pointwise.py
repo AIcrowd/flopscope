@@ -178,9 +178,16 @@ def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> No
 # Float-only ufuncs: numpy has no integer loops for these, so integer/bool
 # inputs promote to a float compute dtype (same-size float for unary ops,
 # float64 for binary ops). Billing the raw input dtype would undercharge the
-# actual arithmetic width. Membership is derived from numpy loop resolution
-# (an op belongs iff an int32 input yields a float result); the compute-dtype
-# conformance sweep enforces it stays complete.
+# actual arithmetic width. Membership is derived from numpy loop resolution:
+# an op belongs iff ``resolve_dtypes`` reports a float dtype in the op's
+# INPUT slot for an int32 operand. That is phrased about the input slot, not
+# the result, because the earlier "iff an int32 input yields a float RESULT"
+# wording let the whole predicate family slip the set: a predicate always
+# returns bool no matter how wide it computes in (``signbit``'s only loops
+# are ``e->?``/``f->?``/``d->?``/``g->?`` -- every one of them READS a
+# float). The compute-dtype conformance sweep enforces it stays complete,
+# and its compute-loop floor now falsifies the bool-result case that the
+# result-dtype floor could not.
 #
 # Includes NumPy 2.x array-API spelling aliases (acos/acosh/asin/asinh/
 # atan/atanh/atan2 -- literally the same ufunc object as arccos/arccosh/
@@ -217,6 +224,17 @@ def _refuse_non_index_destination(op_name: str, out: object, axis: object) -> No
 # multi-output ufuncs with the identical same-size float loop for their
 # primary output; ``frexp``'s exponent output is handled separately, see
 # ``_counted_unary_multi``).
+#
+# Also includes the predicate trio ``signbit``/``isneginf``/``isposinf``.
+# ``signbit`` is a plain member of the family: float-only loops and the same
+# size-mapped promotion (int8 -> float16, int16 -> float32, int32/int64 ->
+# float64), bool included -- it maps to float16 with none of angle's NEP 50
+# anomaly. ``isneginf``/``isposinf`` are not ufuncs but composites, numpy
+# spelling them ``logical_and(isinf(x), signbit(x))`` and its ``~signbit``
+# variant, so they inherit signbit's promotion exactly: the ``isinf`` half
+# runs numpy's genuine integer loop, and the widest loop the pair resolves is
+# signbit's, traced at every scalar width. What kept all three out of this
+# set is what they RETURN (bool), not what they COMPUTE IN (float).
 _UNARY_FLOAT_LOOP_OPS = frozenset(
     {
         "acos",
@@ -242,6 +260,8 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
         "expm1",
         "fabs",
         "frexp",
+        "isneginf",
+        "isposinf",
         "log",
         "log1p",
         "log2",
@@ -250,6 +270,7 @@ _UNARY_FLOAT_LOOP_OPS = frozenset(
         "rad2deg",
         "radians",
         "rint",
+        "signbit",
         "sin",
         "sinh",
         "spacing",
@@ -3926,7 +3947,21 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
     )
     # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
     cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
-    billing_dtypes = (billing_operand(a, a_arr), billing_operand(b, b_arr))
+    billing_dtypes: tuple = (billing_operand(a, a_arr), billing_operand(b, b_arr))
+    # numpy's isclose casts its reference operand -- ``dt = result_type(y, 1.)``
+    # -- before running ``|x-y| <= atol + rtol*|y|``, so an integer or bool
+    # operand computes in float64 whatever the tolerances are (an explicit
+    # ``rtol=0, atol=0`` promotes just the same: the cast is unconditional,
+    # not tolerance-driven). integer_to_float64_min_dtype is that exact rule,
+    # and applying it to the RESOLVED pair rather than to each operand keeps
+    # the mixed cases right: float16-vs-int32 resolves float64 (what the
+    # promoted subtraction really runs), int8-vs-float16 stays float16.
+    # Billing the raw operands charged bool/int8..uint32 half of what the
+    # tolerance core actually costs -- invisible to a result-dtype oracle,
+    # since isclose returns bool.
+    resolved = resolve_billing_dtype(billing_dtypes)
+    if resolved is not None:
+        billing_dtypes = (integer_to_float64_min_dtype(resolved),)
     with budget.deduct(
         "isclose",
         flop_cost=cost,
