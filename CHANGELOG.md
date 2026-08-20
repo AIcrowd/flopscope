@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed
+
+- `fnp.tile` refused a tracked `reps`: a `FlopscopeArray` in that slot reached
+  numpy's dispatch still wrapped and tripped the fail-closed
+  "reached numpy.tile from inside an fnp wrapper" `RuntimeError`, which is a
+  maintainer-facing message and not a `FlopscopeError` a caller can catch. The
+  sweep that fixed the other wrappers with secondary array arguments (#237)
+  covered `_pointwise`, `_sorting_ops` and random, but not `_array_ops`. A
+  tracked `reps` — including one nested inside the sequence — is now stripped
+  like every other secondary array argument, and bills exactly what the plain
+  `ndarray` form bills. `tile`'s `reps` annotation widens from
+  `int | Sequence[int]` to `int | ArrayLike`, matching numpy and the
+  neighbouring `repeat`. Reported as item 3 of #192.
+
+
 ### Changed
 
 - **No billed amount changes.** A ufunc-backed unary op now takes its compute

@@ -1192,10 +1192,18 @@ attach_docstring(
 
 
 @_counted_wrapper
-def tile(A: ArrayLike, reps: int | Sequence[int]) -> FlopscopeArray:
+def tile(A: ArrayLike, reps: int | ArrayLike) -> FlopscopeArray:
     """Construct array by repeating. Cost: numel(output)."""
     budget = require_budget()
     a_arr = _np.asarray(A)
+    # ``reps`` is a secondary argument that reaches numpy's __array_function__
+    # dispatch alongside the operand, so a tracked one has to be stripped too
+    # or numpy routes the call back into this wrapper and the fail-closed
+    # guard fires. The sweep that fixed the other wrappers with secondary
+    # array arguments covered _pointwise, _sorting_ops and random; this module
+    # was not in it. ``_tree`` rather than the scalar strip: reps is commonly a
+    # sequence, and a tracked entry can sit INSIDE it (``[fa_two, 3]``).
+    reps = _to_base_ndarray_tree(reps)
     in_group = A.symmetry if isinstance(A, SymmetricTensor) else None
     with budget.deduct_after(
         "tile", subscripts=None, shapes=(), dtypes=(a_arr.dtype,)
