@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- Messages a participant can actually see no longer name `WhestArray`, the
+  pre-rename class that is not in the public API and cannot be looked up: the
+  fail-closed `RuntimeError` on both the `__array_ufunc__` and
+  `__array_function__` paths, and the auto-route `UserWarning` on each. The
+  `RuntimeError`'s wording is also corrected for its reader — it told the
+  caller to "check the calling fnp wrapper and add a strip", an instruction to
+  edit a wrapper they did not write, for a condition that is by definition a
+  bug in flopscope. It now says that plainly, asks for a report, and keeps the
+  maintainer detail in a trailing parenthetical. A guard walks every string
+  literal in the package with `ast` — docstrings included — and fails on the
+  predecessor brand, so it cannot return through a string no import or type
+  checker touches. Internal identifiers are renamed to match, and the
+  wheel-contract env var becomes `FLOPSCOPE_RELEASE_DIST_DIR`.
+
+
+### Fixed
+
 - `fnp.tile` refused a tracked `reps`: a `FlopscopeArray` in that slot reached
   numpy's dispatch still wrapped and tripped the fail-closed
   "reached numpy.tile from inside an fnp wrapper" `RuntimeError`, which is a
