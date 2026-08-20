@@ -472,11 +472,27 @@ site. Ordinary operands promote with `np.result_type`; Python scalars follow Num
 NEP 50 weak promotion, so `f32_array * 2.0` stays float32 (the scalar does not up-promote
 the array). Single-output binary pointwise ufuncs — and their `ufunc.outer` spellings —
 derive their compute price from NumPy's complete resolved loop signature, including every
-input and output slot. That complete signature also determines whether the registry's
-complex-arithmetic factor applies. The promoted operands provide an input-rate floor: it
-can raise only `dtype_rate`, and does not invent complex arithmetic when NumPy resolves a
-non-complex numeric loop (for example, a predicate's boolean output). `out=` then joins
-as a separate participant under the widest-participating-buffer doctrine.
+arithmetic input slot and every output slot. That complete signature also determines
+whether the registry's complex-arithmetic factor applies. The promoted operands provide an
+input-rate floor: it can raise only `dtype_rate`, and does not invent complex arithmetic
+when NumPy resolves a non-complex numeric loop (for example, a predicate's boolean
+output). `out=` then joins as a separate participant under the
+widest-participating-buffer doctrine.
+
+**A control operand is not an arithmetic operand.** One ufunc slot in NumPy's table names
+a number that *steers* the arithmetic instead of being arithmetic, and it prices neither
+the loop nor the floor. `ldexp(x1, x2)` computes `x1 * 2**x2`: `x2` is the exponent, and
+NumPy ships `ei->e` / `fi->f` / `di->d` (and their `l` variants) precisely so a wide
+exponent does not drag the mantissa up a precision tier. `ldexp(f32, int32_array)`
+resolves `fi->f`, computes `float32`, and bills at the float32 rate (`1000` for a
+1,000-element call) — identical to `ldexp(f32, int8_array)`, because it is identical
+mantissa work producing identical values. Membership is derived from the running NumPy's
+loop table rather than a hard-coded list (a slot qualifies iff NumPy has a loop producing
+an inexact result from an integral value there, and no loop accepting an inexact value
+there); swept across NumPy's entire ufunc namespace that predicate selects exactly one
+slot, `ldexp`'s exponent. This is the input-side mirror of the price-neutral `frexp`
+exponent *output* described below, and of what `ufunc.at` has always billed for this
+family.
 
 Worked consequences:
 
@@ -485,9 +501,10 @@ Worked consequences:
   float64 matmul. There is no discount for feeding narrow-looking operands.
 - **For these binary spellings, `dtype=` and `signature=` select computation, while
   `out=` prices materialization.** An explicit `dtype=` constrains NumPy's output DType;
-  billing still resolves every input and output slot of the resulting loop. For example,
-  `ldexp(int8, int64, dtype=float16)` runs the `float16,int64->float16` loop and therefore
-  bills at the int64 rate. For symmetric loops,
+  billing still resolves every arithmetic input slot and output slot of the resulting
+  loop. For example, `ldexp(int8, int64, dtype=float16)` runs the
+  `float16,int64->float16` loop and therefore bills at the float16 rate — the forced
+  mantissa width, not the exponent's. For symmetric loops,
   `multiply(f64, f64, dtype=float32)` casts both operands on read and runs the float32
   loop, so a 1000-element call bills at the float32 rate (`1000`), not at the operands'
   float64 rate. A forced `signature=` (or its `sig=` alias) likewise prices the exact
