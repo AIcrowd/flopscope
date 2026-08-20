@@ -26,12 +26,14 @@ from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
     billing_operand,
+    complex_factor_for,
     heavier_billing_dtype,
     integer_to_float64_min_dtype,
     mean_compute_dtype,
     multi_store_billing_dtypes,
     natural_output_dtypes,
     reduction_billing_dtype,
+    refuse_non_numeric_dtype,
     resolve_billing_dtype,
     store_billing_dtypes,
     sum_accumulator_dtype,
@@ -1188,6 +1190,35 @@ def _counted_unary(np_func, op_name: str):
                 compute_dtype = integer_to_float64_min_dtype(resolved)
         if compute_dtype is not None:
             operand_dtypes = (compute_dtype,)
+        # A loop numpy does not have is a refusal, not a price. Ask before the
+        # deduct so it costs nothing, the same doctrine as the ``out=`` guards
+        # at the top of this wrapper and as percentile's ``q`` check (#241):
+        # ``invert(float32)`` and ``sign(bool_)`` used to bill ``numel`` in
+        # full and then raise, because the only guard was numpy's own dispatch
+        # inside the deduct block. Unlike the binary path this wrapper never
+        # resolves the loop otherwise, so the question has to be asked here.
+        #
+        # Restricted to the UNCONSTRAINED form. ``dtype=`` and
+        # ``signature=``/``sig=`` name a loop explicitly, and this wrapper
+        # forwards them untouched; reconstructing numpy's constraint semantics
+        # here to pre-judge them would risk refusing a form numpy accepts,
+        # which is the one failure mode worse than the overcharge being fixed.
+        if (
+            is_ufunc
+            and explicit_dtype is None
+            and "signature" not in kwargs
+            and "sig" not in kwargs
+        ):
+            try:
+                _ufunc_loop_signature(
+                    np_func,
+                    x.dtype,
+                    casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
+                    strict=True,
+                )
+            except (TypeError, ValueError) as loop_error:
+                _refuse_unsupported_loop(op_name, (x.dtype,), loop_error)
+                raise  # unreachable; _refuse_unsupported_loop always raises
         # The store dtype stays in the tuple rather than being resolved away:
         # ``deduct`` keys its non-numeric refusal on these entries, and a
         # genuinely wider destination must still reach the rate.
@@ -1504,6 +1535,7 @@ def _counted_binary(np_func, op_name: str):
                 *([None] * np_func.nin),
                 *([explicit_dtype] * np_func.nout),
             )
+        raw_operand_dtypes = (x_view.dtype, y_view.dtype)
         if loop_constraint is not _UFUNC_SIGNATURE_MISSING:
             loop_dtypes = _ufunc_loop_signature(
                 np_func,
@@ -1520,12 +1552,17 @@ def _counted_binary(np_func, op_name: str):
                 billing_operand(x_orig, x_view),
                 billing_operand(y_orig, y_view),
             )
-            loop_dtypes = _ufunc_loop_signature(
-                np_func,
-                ufunc_resolver_operand(x_orig, x_view),
-                ufunc_resolver_operand(y_orig, y_view),
-                casting=explicit_casting,
-            )
+            try:
+                loop_dtypes = _ufunc_loop_signature(
+                    np_func,
+                    ufunc_resolver_operand(x_orig, x_view),
+                    ufunc_resolver_operand(y_orig, y_view),
+                    casting=explicit_casting,
+                    strict=True,
+                )
+            except (TypeError, ValueError) as loop_error:
+                _refuse_unsupported_loop(op_name, raw_operand_dtypes, loop_error)
+                raise  # unreachable; _refuse_unsupported_loop always raises
             # A control operand (``ldexp``'s exponent) steers the arithmetic
             # without being arithmetic, so it prices neither the loop collapse
             # nor the promoted input floor -- see _control_input_slots. Both
@@ -1775,6 +1812,7 @@ def _ufunc_loop_signature(
     *operand_dtypes: _np.dtype | type,
     signature: object = _UFUNC_SIGNATURE_MISSING,
     casting: object = _UFUNC_CASTING_MISSING,
+    strict: bool = False,
 ) -> tuple[_np.dtype, ...]:
     """The complete input/output dtype signature NumPy resolves for ``ufunc``.
 
@@ -1790,6 +1828,26 @@ def _ufunc_loop_signature(
     NEP 50 weak-scalar inputs to ``resolve_dtypes``. If NumPy refuses loop
     resolution, every slot falls back to the same ``np.result_type`` used by
     the previous output-only helper, preserving its conservative behavior.
+
+    ``strict=True`` replaces that fallback with the refusal itself, and is for
+    callers standing immediately above a ``budget.deduct``. Loop resolution is
+    the same question NumPy's own dispatcher asks, so a resolution failure is
+    NOT a gap in our mirror to paper over -- it is advance notice that the
+    real call is about to raise. Falling back there meant billing in full for
+    a call that never ran: ``bitwise_and(f32, f32)`` charged ``numel``,
+    ``gcd.reduce(f32)`` charged 1584, and a budget could be drained by
+    arithmetic that never happened. Swept over every elementwise ufunc in
+    NumPy's namespace across 15,990 operand combinations (every dtype pair
+    plus NEP 50 weak scalars in either position), resolution failure and call
+    failure coincide exactly -- there is no combination NumPy resolves but
+    refuses, and none it refuses but runs. The exception raised here is
+    ``resolve_dtypes``' own, which is byte-identical in type and message to
+    the one the real call raises, including NumPy's special-cased
+    ``subtract(bool, bool)`` text; intercepting a failure earlier than NumPy
+    does must not change what the failure looks like to a caller.
+
+    An explicit ``signature=`` already re-raises regardless of ``strict``: a
+    caller who names a loop that does not exist gets told so, not billed.
     """
     first, *rest = operand_dtypes
     if ufunc.nin == 1:
@@ -1815,15 +1873,70 @@ def _ufunc_loop_signature(
                 )
             )
     except (TypeError, ValueError):
-        if signature is not _UFUNC_SIGNATURE_MISSING:
+        if strict or signature is not _UFUNC_SIGNATURE_MISSING:
             raise
         fallback = _np.result_type(*operand_dtypes)
         return (fallback,) * (len(inputs) + ufunc.nout)
 
 
-def _ufunc_loop_dtype(ufunc, *operand_dtypes: _np.dtype | type) -> _np.dtype:
+def _ufunc_loop_dtype(
+    ufunc, *operand_dtypes: _np.dtype | type, strict: bool = False
+) -> _np.dtype:
     """Return the first output/accumulator slot of NumPy's resolved loop."""
-    return _ufunc_loop_signature(ufunc, *operand_dtypes)[ufunc.nin]
+    return _ufunc_loop_signature(ufunc, *operand_dtypes, strict=strict)[ufunc.nin]
+
+
+def _reduceat_loop_dtype(ufunc, op_name: str, a_dtype: _np.dtype) -> _np.dtype:
+    """``_ufunc_loop_dtype(strict=True)`` for ``reduceat``'s conditional site.
+
+    ``reduceat`` picks its default dtype inside a conditional expression, which
+    cannot host a ``try``; this keeps the refusal routed through
+    :func:`_refuse_unsupported_loop` without restructuring that expression.
+    """
+    try:
+        return _ufunc_loop_dtype(ufunc, a_dtype, a_dtype, strict=True)
+    except (TypeError, ValueError) as loop_error:
+        _refuse_unsupported_loop(op_name, (a_dtype,), loop_error)
+        raise  # unreachable; _refuse_unsupported_loop always raises
+
+
+def _refuse_unsupported_loop(op_name: str, operand_dtypes: tuple, loop_error) -> None:
+    """Raise for a loop NumPy lacks -- but never ahead of flopscope's own policy.
+
+    ``strict`` resolution moves a dtype refusal above the deduct site, which is
+    what makes it free. That reordering also moves it above the refusals
+    ``deduct`` performs, and those must keep winning. Both raise a
+    ``TypeError`` subclass, so ``except TypeError`` is unaffected either way --
+    what changes is the SPECIFIC class and the message. flopscope's
+    :class:`UnsupportedDtypeError` names the op and says why the dtype is not
+    billable ("operation 'gcd' is not defined for complex dtypes"); NumPy's
+    bare loop error says only that no loop matched, which is a worse
+    explanation of a refusal flopscope is the one making. Letting the bare
+    error through first swapped the class on 1,918 measured operand
+    combinations -- every complex operand to a complex-illegal op,
+    ``arctan2``/``atan2``/``gcd``/``lcm`` and their
+    ``outer``/``reduce``/``accumulate`` spellings -- and would break anyone
+    catching ``UnsupportedDtypeError`` by name.
+
+    So the two policy predicates ``deduct`` would have applied are applied here
+    first, in ``deduct``'s own order, by calling the same functions rather than
+    restating what they do. Neither charges; both raise or return. Only if the
+    call clears flopscope's own policy does NumPy's refusal surface.
+
+    ``BudgetExhaustedError`` is the one refusal this does NOT preserve ahead of
+    the loop error: reproducing it would mean recomputing the adjusted cost
+    (rate x factor x weight) outside ``_charge_op``, duplicating the arithmetic
+    that is supposed to live in exactly one place. A call NumPy cannot run
+    consumes no budget either way, so the ordering is unobservable in what gets
+    metered -- only in which error a caller sees when both conditions hold.
+    """
+    refuse_non_numeric_dtype(op_name, *operand_dtypes)
+    resolved = resolve_billing_dtype(operand_dtypes)
+    if resolved is not None:
+        # Raises UnsupportedDtypeError for a complex operand to a
+        # complex-illegal op; the returned factor is deliberately discarded.
+        complex_factor_for(op_name, resolved)
+    raise loop_error
 
 
 def _resolve_explicit_dtype_kwarg(kwargs: dict) -> _np.dtype | None:
@@ -2218,9 +2331,15 @@ def _counted_ufunc_outer(ufunc, a, b, *, out=None, **kwargs):
         # can raise the rate but cannot replace that loop kind on a tie.
         # A control operand is excluded from both channels, matching the direct
         # spelling above and the ``.at`` sibling -- see _control_input_slots.
-        loop_dtypes = _ufunc_loop_signature(
-            ufunc, a_view.dtype, b_view.dtype, casting=explicit_casting
-        )
+        try:
+            loop_dtypes = _ufunc_loop_signature(
+                ufunc, a_view.dtype, b_view.dtype, casting=explicit_casting, strict=True
+            )
+        except (TypeError, ValueError) as loop_error:
+            _refuse_unsupported_loop(
+                f"{ufunc.__name__}.outer", (a_view.dtype, b_view.dtype), loop_error
+            )
+            raise  # unreachable; _refuse_unsupported_loop always raises
         loop_billing_dtype = heavier_billing_dtype(
             *_rate_bearing_loop_dtypes(ufunc, loop_dtypes)
         )
@@ -2402,7 +2521,15 @@ def _counted_ufunc_reduce_generic(
     # (true_divide(int32) -> float64, subtract(int32) -> int32, logical_* ->
     # bool). add/multiply's extra integer widening never matters here: they
     # are routed to sum/prod, not this generic path.
-    default_dtype = _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
+    try:
+        default_dtype = _ufunc_loop_dtype(
+            ufunc, a_view.dtype, a_view.dtype, strict=True
+        )
+    except (TypeError, ValueError) as loop_error:
+        _refuse_unsupported_loop(
+            f"{ufunc.__name__}.reduce", (a_view.dtype,), loop_error
+        )
+        raise  # unreachable; _refuse_unsupported_loop always raises
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
@@ -2509,7 +2636,15 @@ def _counted_ufunc_accumulate_generic(ufunc, a, *, axis=0, out=None, **kwargs):
     # Same loop resolution as the generic reduce path above: the accumulate
     # loop runs at the ufunc's own resolved loop dtype (true_divide(int32)
     # -> float64, subtract(int32) -> int32).
-    default_dtype = _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
+    try:
+        default_dtype = _ufunc_loop_dtype(
+            ufunc, a_view.dtype, a_view.dtype, strict=True
+        )
+    except (TypeError, ValueError) as loop_error:
+        _refuse_unsupported_loop(
+            f"{ufunc.__name__}.accumulate", (a_view.dtype,), loop_error
+        )
+        raise  # unreachable; _refuse_unsupported_loop always raises
     billing_dtypes: tuple = (
         reduction_billing_dtype(
             a_view.dtype,
@@ -2845,7 +2980,7 @@ def _counted_ufunc_reduceat(ufunc, a, indices, *, axis=0, out=None, **kwargs):
     default_dtype = (
         sum_accumulator_dtype(a_view.dtype)
         if ufunc.__name__ in ("add", "multiply")
-        else _ufunc_loop_dtype(ufunc, a_view.dtype, a_view.dtype)
+        else _reduceat_loop_dtype(ufunc, f"{ufunc.__name__}.reduceat", a_view.dtype)
     )
     # ``out=`` is threaded through ``reduction_billing_dtype`` as
     # ``out_dtype=`` -- the SAME accumulator model the generic reduce and

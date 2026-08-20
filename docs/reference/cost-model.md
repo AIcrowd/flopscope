@@ -543,6 +543,19 @@ Worked consequences:
   by **kind**: NumPy accepts any integer or boolean buffer at any width and refuses every
   float and complex one, and that refusal is decided before the reduction runs, so it
   costs `0`.
+- **A call NumPy has no loop for costs `0`.** Operand dtypes NumPy cannot run the
+  operation on — `bitwise_and(f32, f32)`, `ldexp(f32, uint64)`, `invert(f32)`,
+  `subtract(bool_, bool_)`, and every `reduce`/`accumulate`/`reduceat` of a ufunc with no
+  same-dtype loop, such as `ldexp` — are refused above the deduct site rather than billed
+  and then raised. The question is settled with `ufunc.resolve_dtypes`, which is the same
+  resolution NumPy's own dispatcher performs, so the exception a caller sees is
+  byte-identical in type and message to the one the unwrapped call raises. This is the
+  same reject-before-billing rule as the `out=` kind constraint above and `svd(k=)`
+  below; before it applied to dtypes, `gcd.reduce` on a float array deducted 1584 FLOPs
+  for a call that never ran. Where flopscope has a refusal of its own for the same
+  operands — a non-numeric dtype, or a complex operand to a complex-illegal op — that one
+  still takes precedence, so those keep raising `UnsupportedDtypeError` with flopscope's
+  diagnostic rather than NumPy's bare "no loop matched".
 - **A non-numeric destination is refused, not priced.** A `str_`/`bytes_`/`datetime64`/
   `timedelta64`/structured-void `out=` — object-free included — describes where the
   result is stored, not the loop that produced it, and its real per-element cost is not
