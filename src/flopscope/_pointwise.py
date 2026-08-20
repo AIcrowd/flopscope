@@ -400,6 +400,15 @@ def _drop_control_slots(ufunc, loop_dtypes: tuple, values: tuple) -> tuple:
     through the fallback, where it is still propagated to ``deduct`` and
     refused by name. Dropping a slot must never be able to drop a dtype
     ``refuse_non_numeric_dtype`` was going to reject.
+
+    That refusal has TWO independent defences, not one, and the kind check
+    here is the second of them. The first is numpy itself: it declines to
+    resolve a non-numeric operand into the exponent slot at EVERY casting
+    level -- ``safe``, ``same_kind`` and ``unsafe`` alike -- so such a call
+    cannot reach the droppable branch to begin with. The kind check is what
+    holds if that ever stops being true, which is why it is written as a
+    positive test for integral rather than a negative test for the kinds
+    known to be forbidden today.
     """
     control = _control_input_slots(ufunc)
     # ``<=`` not ``<``: the output slot at index ``nin`` is read below.
@@ -1482,9 +1491,13 @@ def _counted_binary(np_func, op_name: str):
 
         cost = pointwise_cost(output_shape, symmetry=out_symmetry)
         # dtype= constrains the output DType, while signature=/sig= can
-        # constrain any loop slot. Resolve the complete constrained signature
-        # so asymmetric participants (ldexp's integer exponent) and forced
-        # complex loops remain visible to both the rate and factor models.
+        # constrain any loop slot. Resolve the COMPLETE constrained signature
+        # so a forced complex loop stays visible to both the rate and factor
+        # models. The two models then read it differently, and deliberately:
+        # the factor model gets the unfiltered tuple, while the rate model
+        # sees it through _rate_bearing_loop_dtypes, which drops a control
+        # input (ldexp's integer exponent). A forced ``signature='fl->f'``
+        # still runs a float32 mantissa loop, so it prices like one.
         loop_constraint = explicit_signature
         if loop_constraint is _UFUNC_SIGNATURE_MISSING and explicit_dtype is not None:
             loop_constraint = (
