@@ -138,7 +138,8 @@ dev = [
 
 # Local-development override: resolve flopscope-server from the in-tree
 # subdirectory rather than PyPI. The published wheel metadata only contains
-# the `Requires-Dist: flopscope-server==0.3.0` from [optional-dependencies];
-# this [tool.uv.sources] block is uv-specific and never lands in any wheel.
+# the `Requires-Dist: flopscope-server==<version>` pin from
+# [optional-dependencies], at whatever version is being released; this
+# [tool.uv.sources] block is uv-specific and never lands in any wheel.
 [tool.uv.sources]
 flopscope-server = { path = "flopscope-server", editable = true }
