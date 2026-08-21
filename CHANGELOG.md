@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Performance
+
+- **No billed amount changes.** A warm `einsum` whose operands carry symmetry,
+  or whose operand positions alias the same array, no longer re-runs a full
+  `opt_einsum` path search and oracle group enumeration on every call. The
+  symmetry-aware rebuild that populates per-step `input_groups` /
+  `output_group` / `inner_group` fired on every call and discarded the
+  `path_info` the path cache had just returned, so the path cache reported a
+  100% hit rate while the work it caches was redone regardless. The rebuild is
+  a pure function of the path-cache key — it contracts dummy operands
+  materialized from `shapes` alone — so it is now memoized on exactly that
+  key. Measured at 64x64 with a verified 100% cache-hit rate: `x @ x` 242 ->
+  68 us/call, a `zeros((n, n))` operand 269 -> 72 us/call, bringing both to
+  within ~10% of the dense call instead of 3.7-4.1x it. The wall time removed
+  was billed to `flopscope_overhead_time_s`, which the cost model requires to
+  stay bounded. Reaches every entry point that routes through einsum,
+  including `matmul` and `@`. Per-step symmetry groups and billed FLOPs are
+  unchanged. Rescoped from #26.
+
+
 ### Fixed
 
 - Messages a participant can actually see no longer name `WhestArray`, the

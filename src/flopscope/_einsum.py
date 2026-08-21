@@ -80,10 +80,73 @@ def _make_path_cache(maxsize):
 _path_cache = _make_path_cache(4096)
 
 
+def _make_rebuild_cache(maxsize):
+    """Create a new lru_cache-wrapped symmetry-aware path rebuild.
+
+    Keyed identically to ``_path_cache``.  The rebuild contracts dummy operands
+    materialized from ``shapes``, so its result depends on nothing outside the
+    key.  ``optimizer_label`` is the caller's ``effective_optimize`` when that
+    is a string and ``None`` otherwise, which reproduces the original label
+    branch exactly (``optimize=False`` must still fall through to the upstream
+    ``_path_type``).
+    """
+
+    @functools.lru_cache(maxsize=maxsize)
+    def _rebuild(
+        canonical_subscripts,
+        shapes,
+        norm_optimize,
+        per_op_symmetries,
+        identity_pattern,
+        optimizer_label,
+    ):
+        import opt_einsum as _oe
+
+        from flopscope._opt_einsum._contract import build_path_info as _bpi
+
+        # Build dummy operands with the correct shapes, then alias positions
+        # listed in the same identity-group to share object identity — this
+        # is the signal the oracle uses to fire Source-B (identical-operand
+        # swap) and Source-C (coordinated axis relabel) generators.
+        dummy_ops: list = [_np.empty(sh) for sh in shapes]
+        if identity_pattern is not None:
+            for group in identity_pattern:
+                canonical = dummy_ops[group[0]]
+                for pos in group[1:]:
+                    dummy_ops[pos] = canonical
+
+        if isinstance(norm_optimize, tuple):
+            norm_optimize = list(norm_optimize)
+        upstream_path, upstream_info = _oe.contract_path(
+            canonical_subscripts,
+            *dummy_ops,
+            optimize=norm_optimize,  # type: ignore[arg-type]
+        )
+        # Carry the optimizer label through the rebuild so the renderer's
+        # "Optimizer:" pill stays populated.
+        if optimizer_label is None:
+            optimizer_label = getattr(upstream_info, "_path_type", "") or ""
+        return _bpi(
+            upstream_path,
+            upstream_info,
+            size_dict=upstream_info.size_dict,
+            optimizer_used=optimizer_label,
+            per_op_symmetries=per_op_symmetries,
+            identity_pattern=identity_pattern,
+        )
+
+    return _rebuild
+
+
+_rebuild_cache = _make_rebuild_cache(4096)
+
+
 def _rebuild_einsum_cache():
-    """Rebuild the path cache with the current configured maxsize."""
-    global _path_cache
-    _path_cache = _make_path_cache(int(get_setting("einsum_path_cache_size")))  # type: ignore[arg-type]
+    """Rebuild the path caches with the current configured maxsize."""
+    global _path_cache, _rebuild_cache
+    _size = int(get_setting("einsum_path_cache_size"))  # type: ignore[arg-type]
+    _path_cache = _make_path_cache(_size)
+    _rebuild_cache = _make_rebuild_cache(_size)
 
 
 def clear_einsum_cache():
@@ -109,6 +172,7 @@ def clear_einsum_cache():
     >>> fnp.clear_einsum_cache()
     """
     _path_cache.cache_clear()
+    _rebuild_cache.cache_clear()
 
 
 def einsum_cache_info():
@@ -411,52 +475,23 @@ def _get_path_info(
     # Source-B (identical-operand swap), and Source-C (coordinated relabel)
     # π-generators never reach the renderer.
     #
-    # _path_cache returns a shared cached object that must not be mutated;
-    # build_path_info returns a fresh PathInfo each time.  The rebuild is
-    # skipped when there's no symmetry signal at all (the common case) to
-    # keep the fast path.
+    # The rebuild is skipped when there's no symmetry signal at all (the common
+    # case) to keep the fast path.  When it does fire it is memoized on exactly
+    # the _path_cache key, because it is a pure function of those components:
+    # the dummy operands it contracts are reconstructed from ``shapes`` alone.
+    # Without the memo a warm symmetric or aliased contraction re-ran a full
+    # opt_einsum path search plus oracle group enumeration on *every* call.
     _has_identity_alias = bool(identity_pattern) and any(
         len(group) > 1 for group in identity_pattern
     )
     if any(s is not None for s in per_op_symmetries) or _has_identity_alias:
-        import numpy as _np_tmp
-        import opt_einsum as _oe
-
-        from flopscope._opt_einsum._contract import build_path_info as _bpi
-
-        # Build dummy operands with the correct shapes, then alias positions
-        # listed in the same identity-group to share object identity — this
-        # is the signal the oracle uses to fire Source-B (identical-operand
-        # swap) and Source-C (coordinated axis relabel) generators.
-        _dummy_ops: list = [_np_tmp.empty(sh) for sh in shapes]
-        if identity_pattern is not None:
-            for group in identity_pattern:
-                canonical = _dummy_ops[group[0]]
-                for pos in group[1:]:
-                    _dummy_ops[pos] = canonical
-
-        _norm_optimize = _normalize_optimize(effective_optimize)
-        if isinstance(_norm_optimize, tuple):
-            _norm_optimize = list(_norm_optimize)
-        _upstream_path, _upstream_info = _oe.contract_path(
+        path_info = _rebuild_cache(
             canonical_subscripts,
-            *_dummy_ops,
-            optimize=_norm_optimize,  # type: ignore[arg-type]
-        )
-        # Carry the optimizer label through the rebuild so the renderer's
-        # "Optimizer:" pill stays populated.  effective_optimize is whatever
-        # was actually used for path search; coerce to a string label.
-        if isinstance(effective_optimize, str):
-            _optimizer_label = effective_optimize
-        else:
-            _optimizer_label = getattr(_upstream_info, "_path_type", "") or ""
-        path_info = _bpi(
-            _upstream_path,
-            _upstream_info,
-            size_dict=_upstream_info.size_dict,
-            optimizer_used=_optimizer_label,
-            per_op_symmetries=per_op_symmetries,
-            identity_pattern=identity_pattern,
+            shapes,
+            _normalize_optimize(effective_optimize),
+            syms_key,
+            identity_pattern,
+            effective_optimize if isinstance(effective_optimize, str) else None,
         )
 
     return canonical_subscripts, input_parts, output_subscript, shapes, path_info

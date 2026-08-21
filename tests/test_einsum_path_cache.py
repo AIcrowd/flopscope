@@ -193,3 +193,92 @@ def test_public_api_cache_info():
     assert hasattr(info, "misses")
     assert hasattr(info, "maxsize")
     assert hasattr(info, "currsize")
+
+
+def _count_upstream_path_searches(monkeypatch):
+    """Install a counter on the upstream contract_path used by the rebuild."""
+    import opt_einsum
+
+    calls: list[str] = []
+    real = opt_einsum.contract_path
+
+    def counting(*args, **kwargs):
+        calls.append(args[0] if args else "")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(opt_einsum, "contract_path", counting)
+    return calls
+
+
+def test_repeated_aliased_einsum_does_not_research_path(monkeypatch):
+    """A warm (a, a) contraction must not re-run path search on every call."""
+    clear_einsum_cache()
+    A = numpy.random.randn(8, 8)
+    calls = _count_upstream_path_searches(monkeypatch)
+    with BudgetContext(flop_budget=10**9):
+        einsum("ij,jk->ik", A, A)  # warm
+        calls.clear()
+        for _ in range(5):
+            einsum("ij,jk->ik", A, A)
+    assert calls == []
+
+
+def test_repeated_symmetric_einsum_does_not_research_path(monkeypatch):
+    """A warm symmetric contraction must not re-run path search on every call."""
+    clear_einsum_cache()
+    data = numpy.random.randn(8, 8)
+    S = SymmetricTensor(
+        (data + data.T) / 2, symmetry=SymmetryGroup.symmetric(axes=(0, 1))
+    )
+    B = numpy.random.randn(8, 8)
+    calls = _count_upstream_path_searches(monkeypatch)
+    with BudgetContext(flop_budget=10**9):
+        einsum("ij,jk->ik", S, B)  # warm
+        calls.clear()
+        for _ in range(5):
+            einsum("ij,jk->ik", S, B)
+    assert calls == []
+
+
+def test_symmetric_rebuild_still_populates_step_groups():
+    """Memoizing the rebuild must not cost the renderer its per-step groups."""
+    clear_einsum_cache()
+    data = numpy.random.randn(6, 6)
+    S = SymmetricTensor(
+        (data + data.T) / 2, symmetry=SymmetryGroup.symmetric(axes=(0, 1))
+    )
+    B = numpy.random.randn(6, 6)
+    with BudgetContext(flop_budget=10**12):
+        _, info = einsum_path("ij,jk->ik", S, B)
+    groups = info.steps[0].input_groups
+    assert any(g is not None for g in groups), (
+        f"symmetry never reached the step: {groups}"
+    )
+
+
+def test_rebuild_memo_distinguishes_symmetric_from_dense():
+    """The rebuild memo must not serve a dense entry for a symmetric operand."""
+    clear_einsum_cache()
+    data = numpy.random.randn(6, 6)
+    sym = (data + data.T) / 2
+    S = SymmetricTensor(sym, symmetry=SymmetryGroup.symmetric(axes=(0, 1)))
+    B = numpy.random.randn(6, 6)
+    with BudgetContext(flop_budget=10**12):
+        # Warm the dense entry first, same subscripts and shapes.
+        _, dense_info = einsum_path("ij,jk->ik", sym, B)
+        _, sym_info = einsum_path("ij,jk->ik", S, B)
+    assert all(g is None for g in dense_info.steps[0].input_groups)
+    assert any(g is not None for g in sym_info.steps[0].input_groups)
+
+
+def test_rebuild_memo_distinguishes_aliased_from_distinct():
+    """The rebuild memo must not serve a distinct-operand entry for (a, a)."""
+    clear_einsum_cache()
+    A = numpy.random.randn(6, 6)
+    B = numpy.random.randn(6, 6)
+    with BudgetContext(flop_budget=10**12):
+        _, distinct_info = einsum_path("ij,jk->ik", A, B)
+        _, aliased_info = einsum_path("ij,jk->ik", A, A)
+    assert distinct_info.steps[0].output_group is None
+    # The aliased path must go through the rebuild, not reuse the distinct entry.
+    assert aliased_info is not distinct_info
