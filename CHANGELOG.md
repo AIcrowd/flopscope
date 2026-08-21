@@ -1,135 +1,166 @@
 # Changelog
 
-## Unreleased
+## v0.12.0 (2026-08-21)
 
-### Performance
+### Billing impact
 
-- **No billed amount changes.** A warm `einsum` whose operands carry symmetry,
-  or whose operand positions alias the same array, no longer re-runs a full
-  `opt_einsum` path search and oracle group enumeration on every call. The
-  symmetry-aware rebuild that populates per-step `input_groups` /
-  `output_group` / `inner_group` fired on every call and discarded the
-  `path_info` the path cache had just returned, so the path cache reported a
-  100% hit rate while the work it caches was redone regardless. The rebuild is
-  a pure function of the path-cache key — it contracts dummy operands
-  materialized from `shapes` alone — so it is now memoized on exactly that
-  key. Measured at 64x64 with a verified 100% cache-hit rate: `x @ x` 242 ->
-  68 us/call, a `zeros((n, n))` operand 269 -> 72 us/call, bringing both to
-  within ~10% of the dense call instead of 3.7-4.1x it. The wall time removed
-  was billed to `flopscope_overhead_time_s`, which the cost model requires to
-  stay bounded. Reaches every entry point that routes through einsum,
-  including `matmul` and `@`. Per-step symmetry groups and billed FLOPs are
-  unchanged. Rescoped from #26.
+This release corrects prices that did not match what the operations actually
+compute. Several raise what some calls cost and several lower them, so
+estimators that lean on the affected operations will see their totals move.
 
+**It ships as a new version opening a new phase, so no submission is
+re-evaluated against it: nothing already scored is repriced.**
+
+Costs more:
+
+- **`nan`-prefixed reductions cost more on float and complex input.** Each one
+  scans its input for NaN before reducing — a full extra pass its plain sibling
+  does not run — and that pass was not charged, so `nansum` cost exactly what
+  `sum` cost. It is now charged as one additional pass over the input. The pass
+  is charged only where NumPy actually performs it: **integer and boolean input
+  is exempt** (NumPy skips the scan entirely), **`nanmax` and `nanmin` are
+  exempt** (they test the reduced output rather than the input), and for a
+  symmetric operand the pass is priced over the orbit like every other pass in
+  the same operation. Twelve operations are affected on float and complex input,
+  typically by one input-sized pass.
+
+- **`angle` on a boolean input costs twice what it did.** NumPy computes it in
+  float64; it had been billed at the float16 rate, which was half price. Integer
+  inputs are unaffected — NumPy genuinely computes `angle(int8)` in float16 and
+  `angle(int16)` in float32, and those rates were already correct.
+
+- **A narrow `out=` no longer lowers a unary operation's price.** The
+  compute-dtype rule was applied after the destination dtype had been folded in,
+  so passing a narrow `out=` could shift the resolved dtype off the operand's own
+  and halve the charge on `angle` with a boolean input and on `i0`/`sinc` with
+  narrow integer inputs. A destination can now only ever widen. One consequence
+  is worth naming: a `complex64` destination on `angle` or `sinc` with a narrow
+  integer input now costs what an `int32` operand already cost, which is an
+  increase — and note NumPy's own `angle`, `i0` and `sinc` accept no `out=`
+  argument at all.
+
+- **Six operations that answer with a boolean but compute in a promoted float
+  dtype** were billed at their operand's own width. `signbit` publishes no
+  integer loop, so an integer operand is promoted to the same-size float loop
+  before the sign test runs, and `isneginf`/`isposinf` inherit that promotion.
+  `isclose` and `allclose` promote harder: NumPy casts the reference operand
+  with `result_type(y, 1.)` unconditionally, so every integer and boolean width
+  computes in float64. `is_symmetric` and `as_symmetric` bill allclose's own
+  cost formula because the work they do is an `allclose` against each
+  generator's transpose, and they follow the same rule. Measured on 1000
+  elements under the shipped weights, every affected cell moves by exactly
+  2.00x and nothing else moves; `int64`, `uint64`, `float32` and `float64`
+  operands are unchanged throughout.
+
+- **`fill_diagonal(wrap=True)`, multi-output ufuncs, `einsum` path search, and
+  `SymmetricTensor` construction** are also repriced in this release; see the
+  entries below.
+
+Costs less:
+
+- **`where` and `insert` cost less when mixed with a Python scalar.** A Python
+  scalar was widened to 64-bit before the billing dtype was resolved, so
+  `where(mask, float32_array, 0.0)` was billed at the float64 rate. Python
+  scalars now follow NumPy's NEP 50 weak promotion, as the cost model documents,
+  so a narrow array stays at its own rate. Passing a NumPy scalar is unchanged —
+  a NumPy scalar is strong under NEP 50 and still widens.
+
+- **A refused `percentile` or `quantile` now costs nothing.** An out-of-range or
+  NaN `q` raises, as it always did, but the cost was being deducted before the
+  refusal and never returned. Covers `percentile`, `quantile`, `nanpercentile`
+  and `nanquantile`.
+
+- **`dot`, `inner` and two-array `multi_dot` accept a 0-d operand.** NumPy treats
+
+- **`ldexp` is priced on its mantissa loop.** Its second operand is an exponent,
+  not a value to compute with, so promoting on it was a category error rather
+  than a rate error: a wide exponent never drags the mantissa up a precision
+  tier. 16 of the 84 resolvable mantissa x exponent dtype pairs change and every
+  one halves. Membership is derived from the running NumPy's loop table, and
+  across NumPy 2.0 through 2.4 it selects exactly one slot in the entire ufunc
+  namespace, so no other operation changes price.
+
+- **A dtype combination NumPy cannot run now costs nothing.** It was billed in
+  full and then raised, because the only guard was NumPy's own dispatch, which
+  runs inside the deduct block. `bitwise_and(f32, f32)`, `invert(f32)` and
+  `gcd.reduce` on a float array all charged before refusing.
+
+Earlier in the window: contraction and `trace`/`cross` spelling differences,
+`reduceat`'s `out=` resolution, and `gradient`'s per-axis cost were corrected so
+that equivalent spellings of the same computation cost the same.
+
+### No billed amount changes
+
+- **A unary ufunc's compute dtype now comes from the loop NumPy resolves**, the
+  way the binary path always has, instead of a hand-maintained set of
+  "float-only" op names — the asymmetry behind `angle`'s bool case and the six
+  operations above. The name sets shrink from 42 entries to 5, and what remains
+  is only the composites, which publish no loop to resolve. Measured across
+  11,648 cells (64 unary ops x 14 dtypes x 13 call shapes): no cell changes what
+  is billed and no cell changes whether the call is refused.
+
+- **A warm `einsum` whose operands carry symmetry** no longer redoes a full
+  `contract_path` and oracle-group rebuild on every call.
+
+- **The client no longer charges every payload leaf twice on dispatch.** This
+  raises the local, in-process estimate toward what the grader was already
+  charging; the wire output is byte-identical.
+
+- **`fnp.tile` accepts a tracked `reps`.** It previously reached NumPy's
+  dispatch still wrapped and tripped a fail-closed `RuntimeError`. A tracked
+  `reps` bills exactly what the plain `ndarray` form bills — this turns a crash
+  into a correctly-priced call rather than repricing one that already worked.
 
 ### Fixed
 
 - Messages a participant can actually see no longer name `WhestArray`, the
-  pre-rename class that is not in the public API and cannot be looked up: the
-  fail-closed `RuntimeError` on both the `__array_ufunc__` and
-  `__array_function__` paths, and the auto-route `UserWarning` on each. The
-  `RuntimeError`'s wording is also corrected for its reader — it told the
-  caller to "check the calling fnp wrapper and add a strip", an instruction to
-  edit a wrapper they did not write, for a condition that is by definition a
-  bug in flopscope. It now says that plainly, asks for a report, and keeps the
-  maintainer detail in a trailing parenthetical. A guard walks every string
-  literal in the package with `ast` — docstrings included — and fails on the
-  predecessor brand, so it cannot return through a string no import or type
-  checker touches. Internal identifiers are renamed to match, and the
-  wheel-contract env var becomes `FLOPSCOPE_RELEASE_DIST_DIR`.
+  pre-rename class that is not in the public API. The fail-closed
+  `RuntimeError`'s wording is corrected for its reader too: it told the caller
+  to go and edit a wrapper they did not write, for a condition that is by
+  definition a bug in flopscope.
 
+- The compute-dtype conformance sweep floored the billed rate at the rate of
+  NumPy's *result* dtypes. For a predicate that result is `bool`, the lowest
+  rate any dtype carries, so the assertion was switched off for the whole
+  family. It now also applies a compute-loop floor: the widest loop-input dtype
+  NumPy resolves while running the same call.
 
-### Fixed
+### Fix
 
-- `fnp.tile` refused a tracked `reps`: a `FlopscopeArray` in that slot reached
-  numpy's dispatch still wrapped and tripped the fail-closed
-  "reached numpy.tile from inside an fnp wrapper" `RuntimeError`, which is a
-  maintainer-facing message and not a `FlopscopeError` a caller can catch. The
-  sweep that fixed the other wrappers with secondary array arguments (#237)
-  covered `_pointwise`, `_sorting_ops` and random, but not `_array_ops`. A
-  tracked `reps` — including one nested inside the sequence — is now stripped
-  like every other secondary array argument, and bills exactly what the plain
-  `ndarray` form bills. `tile`'s `reps` annotation widens from
-  `int | Sequence[int]` to `int | ArrayLike`, matching numpy and the
-  neighbouring `repeat`. Reported as item 3 of #192.
+- **errors**: stop naming the predecessor brand in messages participants see (#250)
+- **wrappers**: strip a tracked reps before handing tile to numpy (#249)
+- **billing**: resolve a unary ufunc's compute dtype from numpy's loop (#248)
+- **billing**: charge the float loop six bool-returning ops compute in (#247)
+- **billing**: price ldexp on its mantissa loop, and stop charging for calls NumPy refuses (#245)
+- **billing**: close the out= dtype bypass, NaN q leak, and nan* pass mis-modelling (#243)
+- **billing**: price dot, inner and two-array multi_dot with a 0-d operand (#242)
+- **billing**: refuse an out-of-range percentile/quantile q before charging (#241)
+- **billing**: bill angle at the float64 numpy computes for bool input (#240)
+- **billing**: charge the NaN test pass that nan-prefixed reductions run (#239)
+- **billing**: apply NEP 50 weak promotion to where and insert operands (#238)
+- **wrappers**: strip FlopscopeArray secondary array args before the numpy call (#237)
+- **accumulation**: build symmetric cost proxy without validating its scratch buffer (#234)
+- **billing**: bill gradient for the axes axis= selects, at its honest per-element cost (#232)
+- **billing**: bill trace/cross identically across numpy and numpy.linalg spellings (#230)
+- **billing**: resolve reduceat out= dtype by max-by-rate like reduce/accumulate (#231)
+- **billing**: bill every output of a multi-output ufunc (#229)
+- **docs**: justify divmod/modf/frexp 2x by reference-algorithm rule, not write-metering
+- **billing**: bill every output of a multi-output ufunc
+- **billing**: bill fill_diagonal for the cells wrap actually writes (#226)
+- **docs**: state fill_diagonal wrap cost as ceil(m*n/(n+1)), not numel(a)
+- **billing**: bill fill_diagonal for the cells wrap actually writes
+- **billing**: dispatch the demonstrated fail-open ops and pin coverage (#225)
+- **billing**: validate and charge for a SymmetricTensor tag at construction (#228)
+- **billing**: validate and charge for a SymmetricTensor tag at construction
+- **billing**: meter einsum path search by gating optimize= at large operand counts (#227)
+- **billing**: invert einsum optimize= gate to an allowlist, not a denylist
+- **billing**: meter einsum path search by downgrading exhaustive optimize= at large k
+- **billing**: dispatch the demonstrated fail-open ops and pin coverage
 
+### Perf
 
-### Changed
-
-- **No billed amount changes.** A ufunc-backed unary op now takes its compute
-  dtype from the loop NumPy resolves for the operand, the way
-  `_counted_binary` always has, instead of from a hand-maintained frozenset of
-  "float-only" op names. That asymmetry is why the binary float-only family
-  (`copysign`, `heaviside`, `nextafter`, `hypot`, `logaddexp`) never needed an
-  entry while the unary side undercharged whenever a name was missing —
-  `angle`'s bool case, then `signbit`/`isneginf`/`isposinf`, each found as an
-  undercharge in production rather than by a test. The name sets shrink from
-  42 entries to 5, and what remains is only the composites (`angle`, `i0`,
-  `sinc`, `isneginf`, `isposinf`, plus `fix` before NumPy 2.1) — Python
-  functions built on other ufuncs, which publish no loop to resolve.
-
-  Measured across 11,648 cells (64 unary ops x 14 dtypes x 13 call shapes:
-  plain, five `out=` dtypes, seven `dtype=` dtypes): **0 cells change what is
-  billed, and 0 change whether the call is refused**. Four cells change the
-  `resolved_dtype` recorded in the op log, all in the same direction —
-  `square`/`conj`/`conjugate`/`reciprocal` on a `bool` operand now record
-  `int8`, which is the loop NumPy actually runs and the dtype it actually
-  returns (it publishes no bool loop for them). `bool` and `int8` carry the
-  same rate on the shipped table, so no amount moves; the recorded dtype now
-  names a loop that exists.
-
-
-### Billing impact
-
-- Six ops that answer with a boolean but compute in a promoted float dtype
-  billed their raw integer operand, undercharging by exactly 2x wherever the
-  promoted loop rates 2.0 and the operand's own dtype rates 1.0. `signbit`
-  publishes no integer loop at all (`np.signbit.types` is
-  `['e->?', 'f->?', 'd->?', 'g->?']`), so an integer operand is promoted to
-  the same-size float loop before the sign test runs — `int32`/`uint32`
-  compute in `float64`; `isneginf`/`isposinf` are
-  `logical_and(isinf(x), signbit(x))` and inherit that promotion exactly.
-  `isclose`/`allclose` promote harder and for a different reason: NumPy's
-  `isclose` casts its reference operand with `result_type(y, 1.)` before
-  running `|x−y| <= atol + rtol·|y|`, unconditionally (an explicit
-  `rtol=0, atol=0` promotes just the same), so EVERY integer and boolean
-  width computes in `float64`. `is_symmetric` and `as_symmetric` (and the
-  `SymmetricTensor` constructor, which shares as_symmetric's charge) bill
-  `k·(7n − 1)` — allclose's own cost formula, once per non-identity
-  generator — because the work they do is
-  `np.allclose(array, array.transpose(perm))`; they inherit allclose's
-  `float64` floor with it.
-
-  Measured on 1000 elements (a 32x32 matrix for the symmetry pair) under the
-  shipped weights, every affected cell moves by exactly 2.00x and nothing
-  else moves: `signbit`/`isneginf`/`isposinf` 1000 → 2000 at `int32` and
-  `uint32` only (`bool`/`int8`/`int16` promote to `float16`/`float32`, which
-  rate 1.0, so they are unchanged); `isclose` 6000 → 12000, `allclose`
-  6999 → 13998 and `is_symmetric`/`as_symmetric` 7167 → 14334 at `bool`,
-  `int8`, `int16`, `int32` and `uint32`. `int64`, `uint64`, `float32` and
-  `float64` operands are unchanged throughout — they already billed the
-  dtype the work runs at. This raises what the grader charges, but ships in a
-  new version opening a new phase, so no submission is re-evaluated against
-  it: nothing already scored is repriced.
-
-  The weights are untouched; only the dtype rate follows the promotion.
-
-### Fixed
-
-- The compute-dtype conformance sweep floored a billed rate at the rate of
-  NumPy's RESULT dtypes. For a predicate that result is `bool`, which rates
-  1.0 — the lowest rate any dtype resolves to — so the floor was not a
-  relaxed oracle for the whole predicate family, it was a switched-off one,
-  and every underbill above passed it. Ops returning a PYTHON bool
-  (`allclose`, `array_equal`, `is_symmetric`) contributed no result dtype at
-  all, leaving the floor on its 1.0 default. The sweep now adds a
-  COMPUTE-LOOP floor for every bool-result probe: the widest loop-input
-  dtype NumPy itself resolves while running the same call, observed by
-  replaying it on plain NumPy against an operand that records each
-  resolution — never through flopscope, so the oracle cannot inherit the
-  promotion model it audits. An accounting test discovers the bool-result
-  probes by running them, so a newly charged predicate op fails until its
-  replay exists instead of quietly inheriting the 1.0 floor.
+- **einsum**: memoize the symmetry-aware path rebuild instead of redoing it per call (#251)
+- **client**: stop charging every payload leaf twice on dispatch (#244)
 
 ## v0.11.0 (2026-08-17)
 

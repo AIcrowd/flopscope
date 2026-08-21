@@ -59,7 +59,7 @@ make check-sync-versions && make check-lock
 # 7. Commit everything as the bump commit, then tag it (annotated, like
 #    every existing release tag).
 git add -A
-git commit -m "bump: version <old> → <new>"
+git commit -m "chore(release): bump version <old> to <new>"
 git tag -a v<new> -m "v<new>"
 
 # 8. Push the commit + tag. Tag push triggers the PyPI publish workflow.
