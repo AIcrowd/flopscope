@@ -1,6 +1,6 @@
 [project]
 name = "flopscope"
-version = "0.11.0"
+version = "0.12.0"
 description = "NumPy-compatible math primitives with FLOP counting for the Mechanistic Estimation Challenge"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-server = ["flopscope-server==0.11.0"]
+server = ["flopscope-server==0.12.0"]
 dev = [
     "commitizen>=4.0",
     "gitlint>=0.19",
@@ -45,6 +45,12 @@ packages = ["src/flopscope", "benchmarks"]
 name = "cz_conventional_commits"
 version_provider = "pep621"
 tag_format = "v$version"
+# Conventional-commit prefix for the bump commit. cz's default is
+# "bump: version $current_version → $new_version", and `bump` is not one of
+# the types .gitlint accepts -- which never surfaced while bumps went
+# straight to main, because `gitlint --commits origin/main..HEAD` has
+# nothing to check there. Cutting a release through a PR exposed it.
+bump_message = "chore(release): bump version $current_version to $new_version"
 update_changelog_on_bump = true
 major_version_zero = true
 changelog_incremental = true
