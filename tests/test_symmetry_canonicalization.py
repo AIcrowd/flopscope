@@ -459,6 +459,88 @@ class TestOrbitMapCache:
         with pytest.raises(ValueError):
             mapping[0] = 3
 
+    def test_writeable_flag_cannot_be_re_enabled(self):
+        """Read-only is not enough on its own.
+
+        NumPy lets a caller flip ``writeable`` back on for an array that owns
+        its data, so handing out the cached array itself would leave the map
+        editable in place -- and a doctored map mis-canonicalizes every later
+        call for that shape and group, which is the whole fix undone quietly.
+        Callers get a view, whose base refuses the flag.
+        """
+        from flopscope._canonical_symmetry import canonical_map
+
+        mapping = canonical_map((8, 8), SymmetryGroup.symmetric(axes=(0, 1)))
+        assert not mapping.flags.owndata
+        with pytest.raises(ValueError):
+            mapping.flags.writeable = True
+
+    def test_clear_cache_drains_the_orbit_maps(self):
+        """The public aggregate must reach this cache; entries are array-sized."""
+        from flopscope._canonical_symmetry import canonical_map
+
+        canonical_map((9, 9), SymmetryGroup.symmetric(axes=(0, 1)))
+        assert _canonical_map_cached.cache_info().currsize > 0
+        flops.clear_cache()
+        assert _canonical_map_cached.cache_info().currsize == 0
+
+
+class TestSignedZero:
+    """``-0.0 == 0.0``, but ``copysign`` tells them apart.
+
+    A sign bit in a position the cost model prices as redundant is
+    information, so equality alone is too generous a test for "already
+    exact": the buffer has to go down the copying path.
+    """
+
+    def test_signed_zero_is_not_treated_as_already_invariant(self):
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        mixed = np.array([[1.0, 0.0], [-0.0, 2.0]])
+        assert np.array_equal(mixed, mixed.T)  # `==` cannot see it
+        assert not is_exactly_invariant(mixed, group)
+
+    def test_tagging_removes_the_sign_bit_from_the_orbit(self):
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        with _budget():
+            tagged = flops.as_symmetric(
+                np.array([[1.0, 0.0], [-0.0, 2.0]]), symmetry=group
+            )
+        signs = np.signbit(np.asarray(tagged))
+        assert np.array_equal(signs, signs.T), (
+            "sign bit survived in a position priced as redundant"
+        )
+
+    def test_copysign_cannot_read_an_asymmetry_back_out(self):
+        """The end-to-end route: the recovered signs must be symmetric."""
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        rng = np.random.default_rng(101)
+        base = np.zeros((8, 8))
+        # Scatter negative zeros asymmetrically through the buffer.
+        mask = rng.random((8, 8)) < 0.5
+        base[mask] = -0.0
+        with _budget():
+            tagged = flops.as_symmetric(base, symmetry=group)
+            recovered = fnp.copysign(np.ones((8, 8)), tagged)
+        values = np.asarray(recovered)
+        assert np.array_equal(values, values.T)
+
+    def test_complex_signed_zero_is_caught_on_both_components(self):
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        mixed = np.array([[1 + 0j, complex(0.0, 0.0)], [complex(-0.0, -0.0), 2 + 0j]])
+        assert np.array_equal(mixed, mixed.T)
+        assert not is_exactly_invariant(mixed, group)
+
+    def test_ordinary_symmetric_data_still_short_circuits(self):
+        """The check must not have become so strict that nothing passes."""
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        rng = np.random.default_rng(103)
+        base = rng.standard_normal((16, 16))
+        exact = (base + base.T) / 2
+        assert is_exactly_invariant(exact, group)
+        with _budget():
+            tagged = flops.as_symmetric(exact, symmetry=group)
+        assert np.shares_memory(np.asarray(tagged), exact)
+
 
 # ---------------------------------------------------------------------------
 # Cost of the boundary

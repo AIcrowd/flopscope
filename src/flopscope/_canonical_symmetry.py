@@ -97,8 +97,14 @@ def _canonical_map_cached(shape: tuple[int, ...], fingerprint: tuple) -> np.ndar
 
 
 def canonical_map(shape: tuple[int, ...], group: SymmetryGroup) -> np.ndarray:
-    """Cached orbit map for ``(shape, group action)``."""
-    return _canonical_map_cached(tuple(shape), _generator_fingerprint(group))
+    """Cached orbit map for ``(shape, group action)``.
+
+    Returns a view rather than the cached array itself. NumPy lets a caller
+    re-enable the writeable flag on an array that owns its data, but not on
+    one whose base is read-only, and a map mutated in place would silently
+    mis-canonicalize every later call for the same shape and group.
+    """
+    return _canonical_map_cached(tuple(shape), _generator_fingerprint(group)).view()
 
 
 def is_exactly_invariant(array: np.ndarray, group: SymmetryGroup) -> bool:
@@ -108,18 +114,37 @@ def is_exactly_invariant(array: np.ndarray, group: SymmetryGroup) -> bool:
     by each generator is fixed by every element. This is the tolerance-free
     twin of the ``allclose`` check validation runs -- equality, not closeness,
     is precisely the property the tag is read as asserting.
+
+    Answering this with ``==`` alone would be too generous by exactly one
+    value: ``-0.0 == 0.0`` is true, yet the two differ in a bit that
+    ``copysign`` reads straight back out. A sign bit sitting in a position the
+    cost model prices as redundant is information like any other, so zeros
+    that disagree in sign count as a difference here and send the buffer down
+    the copying path.
     """
     array = np.asarray(array)
     axes = _resolved_axes(group)
     ndim = array.ndim
+    signed = array.dtype.kind in "fc"
     for gen in group.generators:
         if gen.is_identity:
             continue
         perm = list(range(ndim))
         for i in range(group.degree):
             perm[axes[i]] = axes[gen.array_form[i]]
-        if not np.array_equal(array, array.transpose(perm)):
+        transposed = array.transpose(perm)
+        if not np.array_equal(array, transposed):
             return False
+        if signed:
+            if not np.array_equal(
+                np.signbit(array.real), np.signbit(transposed.real)
+            ) or (
+                array.dtype.kind == "c"
+                and not np.array_equal(
+                    np.signbit(array.imag), np.signbit(transposed.imag)
+                )
+            ):
+                return False
     return True
 
 

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Billing impact
+
+One change here raises prices. **`full` and `full_like` with a non-scalar
+`fill_value` no longer carry an inferred symmetry tag**, so operations on their
+results are priced as the dense arrays they are — measured at `+50%` on
+`fnp.sin` and `+55%` on `fnp.einsum("ij,ij->")` for a `(3, 3)` result built from
+a length-3 fill. Values are unchanged, and a scalar `fill_value` is unaffected.
+Estimators that build arrays by broadcasting a vector through `full_like` will
+see their totals move.
+
+**It ships as a new version opening a new phase, so no submission is
+re-evaluated against it: nothing already scored is repriced.**
+
 ### Symmetry
 
 - **A symmetry tag now matches the buffer it is attached to.** `as_symmetric`
