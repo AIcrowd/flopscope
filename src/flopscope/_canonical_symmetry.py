@@ -9,10 +9,22 @@ ordinary pointwise op -- recovering independent values in positions the cost
 model has already priced as redundant.
 
 This module closes that gap at the trust boundary. Once tolerant validation
-accepts a buffer, one representative per orbit is copied over the whole orbit,
-so the tag certifies *exact* invariance rather than approximate agreement. The
-hidden values are destroyed before the tag is minted, which is what makes every
-downstream symmetry discount honest without re-checking anything.
+accepts a buffer, one representative per orbit is copied over the whole orbit.
+The hidden values are destroyed before the tag is minted, which is what makes
+the downstream symmetry discount honest without re-checking anything.
+
+The scope is worth stating exactly, because it is narrower than "a tag always
+means exact invariance". What this module guarantees is a property of the
+*ingress* points -- ``as_symmetric`` and the public ``SymmetricTensor``
+constructor, the two places a caller hands over a buffer the library has never
+inspected. Symmetry that propagates algebraically through later operations is
+trusted on the mathematics, not re-established here, and float arithmetic makes
+that a genuinely weaker claim: the Reynolds projection sums each orbit in a
+fixed element order, so its own output is typically invariant only to about an
+ulp, and a symmetric matmul is the same. Those tags are sound for accounting --
+the residue is rounding, not information a caller placed there -- but code that
+needs a buffer to be invariant *to the bit* must either come through an ingress
+point or ask :func:`is_exactly_invariant`.
 
 The orbit map depends only on ``(shape, axes, generator action)`` -- never on
 buffer contents -- so it is built once per distinct action and cached. Building
@@ -65,8 +77,7 @@ def _generator_images(shape: tuple[int, ...], axes, degree, gen_forms):
     return images
 
 
-@functools.lru_cache(maxsize=256)
-def _canonical_map_cached(shape: tuple[int, ...], fingerprint: tuple) -> np.ndarray:
+def _build_canonical_map(shape: tuple[int, ...], fingerprint: tuple) -> np.ndarray:
     """``map[i]`` = smallest C-order flat index in ``i``'s orbit.
 
     Min-label propagation over the generator action: each round pushes every
@@ -96,6 +107,76 @@ def _canonical_map_cached(shape: tuple[int, ...], fingerprint: tuple) -> np.ndar
     return labels
 
 
+#: Ceiling on the memory the orbit-map cache may hold, in bytes.
+#: An entry is one index per tensor element, so unlike flopscope's other LRUs
+#: -- whose entries are small cost records -- entries here scale with the
+#: tensors they describe: 8 MB for a 1024x1024 map, 34 MB at 2048x2048. A
+#: plain entry count would therefore bound the number of maps while leaving
+#: the footprint unbounded, and every distinct shape a caller asks about mints
+#: a new one. 256 MB keeps the working set of a realistic estimator resident
+#: while refusing to grow without limit.
+_CANONICAL_MAP_CACHE_BYTES = 256 * 1024 * 1024
+
+
+class _OrbitMapCache:
+    """LRU over orbit maps, bounded by total bytes rather than entry count.
+
+    Mirrors enough of ``functools.lru_cache``'s surface (``cache_info``,
+    ``cache_clear``) to be used and inspected the same way.
+    """
+
+    __slots__ = ("_entries", "_max_bytes", "_bytes", "_hits", "_misses")
+
+    def __init__(self, max_bytes: int) -> None:
+        self._entries: dict[tuple, np.ndarray] = {}
+        self._max_bytes = max_bytes
+        self._bytes = 0
+        self._hits = 0
+        self._misses = 0
+
+    def get(self, shape: tuple[int, ...], fingerprint: tuple) -> np.ndarray:
+        key = (shape, fingerprint)
+        cached = self._entries.pop(key, None)
+        if cached is not None:
+            self._entries[key] = cached  # refresh recency
+            self._hits += 1
+            return cached
+
+        self._misses += 1
+        mapping = _build_canonical_map(shape, fingerprint)
+        # A single map larger than the whole budget is served but not kept,
+        # so one outsized request cannot evict everything and still not fit.
+        if mapping.nbytes <= self._max_bytes:
+            self._entries[key] = mapping
+            self._bytes += mapping.nbytes
+            # dicts iterate in insertion order and `get` reinserts on a hit,
+            # so the first key is the least recently used.
+            while self._bytes > self._max_bytes:
+                evicted = self._entries.pop(next(iter(self._entries)))
+                self._bytes -= evicted.nbytes
+        return mapping
+
+    def cache_info(self):
+        return functools._CacheInfo(  # type: ignore[attr-defined]
+            self._hits, self._misses, self._max_bytes, len(self._entries)
+        )
+
+    def cache_clear(self) -> None:
+        self._entries.clear()
+        self._bytes = 0
+        self._hits = 0
+        self._misses = 0
+
+    @property
+    def nbytes(self) -> int:
+        return self._bytes
+
+
+#: Process-wide orbit-map cache. Named for the lookup it performs so that
+#: ``cache_info()``/``cache_clear()`` read the same as flopscope's other LRUs.
+_canonical_map_cached = _OrbitMapCache(_CANONICAL_MAP_CACHE_BYTES)
+
+
 def canonical_map(shape: tuple[int, ...], group: SymmetryGroup) -> np.ndarray:
     """Cached orbit map for ``(shape, group action)``.
 
@@ -104,7 +185,7 @@ def canonical_map(shape: tuple[int, ...], group: SymmetryGroup) -> np.ndarray:
     one whose base is read-only, and a map mutated in place would silently
     mis-canonicalize every later call for the same shape and group.
     """
-    return _canonical_map_cached(tuple(shape), _generator_fingerprint(group)).view()
+    return _canonical_map_cached.get(tuple(shape), _generator_fingerprint(group)).view()
 
 
 def is_exactly_invariant(array: np.ndarray, group: SymmetryGroup) -> bool:

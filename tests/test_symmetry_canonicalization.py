@@ -189,6 +189,35 @@ class TestToleranceGapIsClosed:
             {wrap_with_trusted_symmetry.__code__}
         )
 
+    def test_the_trusted_wrapper_does_attach_without_checking(self):
+        """Stated outright rather than left for someone to discover.
+
+        This is the one route that still tags a buffer nobody looked at, and
+        the reason it survives is that ``_build_symmetric_proxy`` and
+        ``matrix_transpose`` genuinely need it. It is a private import, absent
+        from the op registry and from both public namespaces, so it is not
+        reachable from a submission -- but it is reachable in-process, and a
+        test that quietly omitted it would read as though nothing were open.
+        Closing it needs a capability the caller cannot forge, which is a
+        larger change than this one.
+        """
+        from flopscope._symmetry_utils import wrap_with_trusted_symmetry
+
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        asymmetric = np.random.default_rng(5).random((6, 6))
+        with _budget() as budget:
+            tagged = wrap_with_trusted_symmetry(asymmetric, group)
+        assert tagged.symmetry is not None
+        assert budget.flops_used == 0
+        assert not is_exactly_invariant(np.asarray(tagged), group)
+
+        # It is not reachable by name from either public namespace.
+        assert not hasattr(flops, "wrap_with_trusted_symmetry")
+        assert not hasattr(fnp, "wrap_with_trusted_symmetry")
+        from flopscope._registry import REGISTRY
+
+        assert "wrap_with_trusted_symmetry" not in REGISTRY
+
     def test_matrix_transpose_stays_free(self):
         """The registered-free transform must not start paying to keep its tag."""
         group = SymmetryGroup.symmetric(axes=(0, 1))
@@ -340,6 +369,30 @@ class TestAsSymmetricBilling:
             flops.as_symmetric(raw, symmetry=group)
         np.testing.assert_array_equal(raw, before)
 
+    def test_inexact_input_detaches_from_the_caller_buffer(self):
+        """The consequence of copy-on-inexact, stated so it is not a surprise.
+
+        A tag built from data that only passed the tolerant check is a copy,
+        so writing through it -- via ``out=`` -- no longer reaches the array
+        the caller handed in. This is the price of the tag being true, and it
+        applies only to inexact input; the exact case keeps its alias, which
+        the neighbouring test pins.
+        """
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        rng = np.random.default_rng(53)
+        destination = rng.standard_normal((8, 8)) * SCALE
+        assert np.allclose(destination, destination.T, atol=1e-6, rtol=1e-5)
+        assert not is_exactly_invariant(destination, group)
+        original = destination.copy()
+
+        with _budget():
+            tagged = flops.as_symmetric(destination, symmetry=group)
+            source = flops.as_symmetric(np.ones((8, 8)), symmetry=group)
+            fnp.exp(source, out=tagged)
+
+        assert not np.shares_memory(np.asarray(tagged), destination)
+        np.testing.assert_array_equal(destination, original)
+
     def test_exactly_symmetric_input_is_not_copied(self):
         """The honest case keeps its zero-copy view, and its memory layout."""
         group = SymmetryGroup.symmetric(axes=(0, 1))
@@ -483,6 +536,65 @@ class TestOrbitMapCache:
         assert _canonical_map_cached.cache_info().currsize > 0
         flops.clear_cache()
         assert _canonical_map_cached.cache_info().currsize == 0
+
+    def test_cache_is_bounded_by_bytes_not_entry_count(self):
+        """Entries scale with the tensors they describe, so a count is no bound.
+
+        ``symmetrize(mode="canonical-copy")`` is a registered op, so a caller
+        can mint a map for any shape it likes. Bounding entries rather than
+        bytes would cap the number of maps while leaving the footprint free to
+        grow with the shapes requested.
+        """
+        from flopscope._canonical_symmetry import (
+            _CANONICAL_MAP_CACHE_BYTES,
+            canonical_map,
+        )
+
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        flops.clear_cache()
+        for side in range(600, 640):
+            canonical_map((side, side), group)
+        assert _canonical_map_cached.nbytes <= _CANONICAL_MAP_CACHE_BYTES
+        flops.clear_cache()
+
+    def test_a_map_larger_than_the_whole_budget_is_served_but_not_kept(self):
+        """One outsized request must not evict everything and still not fit."""
+        from flopscope._canonical_symmetry import (
+            _CANONICAL_MAP_CACHE_BYTES,
+            _generator_fingerprint,
+            _OrbitMapCache,
+        )
+
+        tiny = _OrbitMapCache(max_bytes=8)  # smaller than any real map
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        mapping = tiny.get((4, 4), _generator_fingerprint(group))
+        assert mapping.nbytes > 8
+        assert tiny.cache_info().currsize == 0
+        assert tiny.nbytes == 0
+        # And the served map is still correct.
+        assert np.array_equal(
+            mapping, canonical_copy(np.arange(16.0).reshape(4, 4), group).ravel()
+        )
+        assert _CANONICAL_MAP_CACHE_BYTES > 0
+
+    def test_eviction_does_not_change_results(self):
+        """A map rebuilt after eviction must equal the one that was dropped."""
+        from flopscope._canonical_symmetry import _generator_fingerprint, _OrbitMapCache
+
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        fingerprint = _generator_fingerprint(group)
+        reference = np.array(
+            _OrbitMapCache(max_bytes=10**9).get((6, 6), fingerprint), copy=True
+        )
+
+        cache = _OrbitMapCache(max_bytes=400)  # room for roughly one map
+        first = np.array(cache.get((6, 6), fingerprint), copy=True)
+        for side in (7, 8, 9):
+            cache.get((side, side), fingerprint)  # force eviction
+        rebuilt = cache.get((6, 6), fingerprint)
+
+        assert np.array_equal(first, reference)
+        assert np.array_equal(rebuilt, reference)
 
 
 class TestSignedZero:
