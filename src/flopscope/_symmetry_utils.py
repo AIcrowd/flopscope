@@ -692,7 +692,16 @@ def reduce_group(
 
 
 def wrap_with_symmetry(data, symmetry: SymmetryGroup | None):
-    """Wrap ndarray-like data with symmetry metadata when a group is present."""
+    """Attach a symmetry claim to data whose contents have NOT been checked.
+
+    This is the untrusted spelling: it verifies only that the group's axes
+    fit the array's rank, then hands the buffer to the validating
+    constructor, which checks the contents and bills for doing so. Nothing
+    in this package calls it -- internal transforms use
+    :func:`wrap_with_derived_symmetry` -- so a caller reaching it is making
+    a fresh claim about data the library has never inspected, and pays the
+    same price as :func:`flopscope.as_symmetric` for the privilege.
+    """
     array = np.asarray(data)
     if symmetry is None:
         return array
@@ -703,12 +712,18 @@ def wrap_with_symmetry(data, symmetry: SymmetryGroup | None):
 
 
 def wrap_with_trusted_symmetry(data, symmetry: SymmetryGroup | None):
-    """Wrap data with already-proven symmetry metadata without re-validating.
+    """Attach symmetry metadata without validating or charging.
 
-    This helper is for internal call sites only, where the symmetry was
-    generated or revalidated by trusted constructor logic. Avoiding the
-    redundant validation call keeps constructor hot paths fast while leaving
-    public/user-facing symmetry paths fully validated.
+    The single trusted attachment point in the package: this function's code
+    object is the one ``SymmetricTensor.__new__`` recognizes, so trust is
+    anchored to something a caller cannot fabricate (a copy of this function
+    defined elsewhere gets a different code object and is not trusted). The
+    two wrappers below route through it rather than constructing directly,
+    which is what lets them inherit that trust without widening it.
+
+    Only call this where the symmetry is already established: derived by an
+    algebraic transform of an already-tagged tensor, or correct by
+    construction. It never looks at the buffer.
     """
     array = np.asarray(data)
     if symmetry is None:
@@ -716,6 +731,22 @@ def wrap_with_trusted_symmetry(data, symmetry: SymmetryGroup | None):
     from flopscope._symmetric import SymmetricTensor
 
     return SymmetricTensor(array, symmetry=symmetry)
+
+
+def wrap_with_derived_symmetry(data, symmetry: SymmetryGroup | None):
+    """Attach symmetry carried over from an already-tagged input.
+
+    For array transforms -- reshape, transpose, split, concatenate and the
+    rest -- whose output symmetry a ``_symmetry_transport`` helper computed
+    from the input's own validated group. The claim is inherited rather than
+    fresh, so it is not re-checked or re-billed; the structural check below
+    only confirms the transported group still fits the new rank.
+    """
+    array = np.asarray(data)
+    if symmetry is None:
+        return array
+    validate_symmetry_group(symmetry, ndim=array.ndim)
+    return wrap_with_trusted_symmetry(array, symmetry)
 
 
 def wrap_with_inferred_symmetry(data, symmetry: SymmetryGroup | None):
@@ -730,8 +761,6 @@ def wrap_with_inferred_symmetry(data, symmetry: SymmetryGroup | None):
     array = np.asarray(data)
     if symmetry is None:
         return array
-    from flopscope._symmetric import SymmetricTensor
-
-    obj = SymmetricTensor(array, symmetry=symmetry)
+    obj = wrap_with_trusted_symmetry(array, symmetry)
     obj._symmetry_inferred = True
     return obj

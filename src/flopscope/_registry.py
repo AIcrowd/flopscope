@@ -2381,7 +2381,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope",
         "complex_factor": 2.0,
-        "notes": "Reynolds projection onto a permutation group's invariant subspace. Cost: (|G|+1)*numel (|G| transposed adds + scaling pass; transpose/zeros free; validation uncounted).",
+        "notes": "Symmetrize onto a permutation group's invariant subspace. Cost depends on mode: mode='reynolds-projection' (default) is (|G|+1)*numel (|G| transposed adds + scaling pass; transpose/zeros free; validation uncounted); mode='canonical-copy' is numel (one write per element, copying each orbit's lexicographically-first entry over the orbit; orbit map built from generators and cached, never enumerates |G|; no validation pass, exact by construction). Reynolds upcasts to result_type(input, float64); canonical-copy preserves the input dtype.",
     },
     "as_symmetric": {
         "category": "counted_custom",

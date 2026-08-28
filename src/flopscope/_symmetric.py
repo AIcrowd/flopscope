@@ -7,6 +7,7 @@ import sys as _sys
 import numpy as np
 
 from flopscope._budget import _counted_wrapper
+from flopscope._canonical_symmetry import canonical_copy, canonicalize
 from flopscope._dtype_billing import integer_to_float64_min_dtype
 from flopscope._ndarray import FlopscopeArray, _asplainflopscope
 from flopscope._perm_group import SymmetryGroup
@@ -19,12 +20,15 @@ from flopscope._symmetry_utils import (
     remap_group_axes,
     restrict_group_to_axes,
     validate_symmetry_group,
-    wrap_with_symmetry,
     wrap_with_trusted_symmetry,
 )
 from flopscope._validation import require_budget
 from flopscope._write_epoch import epoch_of
-from flopscope.errors import SymmetryError
+from flopscope.errors import (
+    _SYMMETRY_DOCS_PATH,
+    SymmetryError,
+    _docs_url,
+)
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -83,6 +87,46 @@ def _nonidentity_generator_count(group) -> int:
     return sum(1 for gen in group.generators if not gen.is_identity)
 
 
+#: Symmetrization strategies accepted by :func:`symmetrize`'s ``mode``.
+_SYMMETRIZE_MODES = frozenset({"reynolds-projection", "canonical-copy"})
+
+
+def _require_enumerable_for_reynolds(group) -> None:
+    """Refuse a Reynolds projection over a group that cannot be enumerated.
+
+    Every other consumer of the enumeration budget can degrade to a dense
+    cost and carry on, because for them the group is only an accounting
+    detail. Reynolds averaging is the one place where enumerating the group
+    IS the computation, so there is nothing to degrade to -- and the
+    ``canonical-copy`` mode, which reads the generators alone, is the way
+    through.
+    """
+    from flopscope._config import get_setting
+    from flopscope._perm_group import _DiminoBudgetExceeded
+
+    budget = int(get_setting("dimino_budget"))  # type: ignore[arg-type]
+    try:
+        order = group.order()
+    except _DiminoBudgetExceeded as exc:
+        seen, budget = exc.seen_count, exc.budget
+    else:
+        if order <= budget:
+            return
+        seen = order
+    raise ValueError(
+        f"symmetrize(mode='reynolds-projection') averages over every element "
+        f"of this symmetry group, and enumerating it exceeded dimino_budget "
+        f"({seen} > {budget}). Use mode='canonical-copy', which reads the "
+        f"group's generators alone and never enumerates it, billing "
+        f"numel(data) instead of (|G| + 1) * numel(data). It gives a "
+        f"different result, not a cheaper route to the same one: each orbit "
+        f"keeps its lexicographically first entry instead of averaging the "
+        f"orbit. (flops.configure(dimino_budget=...) raises the limit for "
+        f"in-process runs only.) "
+        f"See: {_docs_url(_SYMMETRY_DOCS_PATH)}"
+    ) from None
+
+
 def _project_core(array, group):
     """Raw Reynolds projection. UNCOUNTED. Returns an ndarray.
 
@@ -123,20 +167,32 @@ def symmetrize(
     data: np.ndarray,
     *,
     symmetry,
+    mode: str = "reynolds-projection",
 ) -> SymmetricTensor:
-    """Project an array onto the invariant subspace of a permutation group.
+    """Make an array invariant under a permutation group.
 
-    This applies Reynolds symmetrization:
+    Two modes, differing in whether the discarded entries get a vote.
+    ``"reynolds-projection"`` (the default) averages each orbit:
 
     ``R_G(T) = (1 / |G|) * sum_{g in G} g · T``
+
+    ``"canonical-copy"`` instead keeps one entry per orbit -- the one at the
+    lexicographically smallest index -- and copies it over the rest. Every
+    other value in the orbit is discarded rather than mixed in, which is what
+    makes it the right choice when the input is not trusted: nothing a caller
+    hid in the redundant positions can reach the result. It is also the
+    cheaper of the two, being one copy pass rather than ``|G|`` transposed
+    adds, and it never enumerates the group.
 
     Parameters
     ----------
     data : array_like
-        Input array to project.
+        Input array to symmetrize.
     symmetry : SymmetryGroup
         Symmetry group to average over. If ``symmetry.axes`` is ``None``, axes are
         interpreted as ``tuple(range(symmetry.degree))``.
+    mode : {"reynolds-projection", "canonical-copy"}, optional
+        Which symmetrization to apply. Defaults to ``"reynolds-projection"``.
 
     Returns
     -------
@@ -151,8 +207,8 @@ def symmetrize(
 
     Notes
     -----
-    ``symmetrize`` performs exact Reynolds averaging internally, billing
-    ``(|G| + 1) * numel(data)`` FLOPs:
+    ``"reynolds-projection"`` performs exact Reynolds averaging internally,
+    billing ``(|G| + 1) * numel(data)`` FLOPs:
 
     - ``|G|`` transposed add passes over ``numel`` elements
     - one final scaling pass (divide by ``|G|``)
@@ -160,6 +216,19 @@ def symmetrize(
     Internal validation runs but is NOT billed (decision D1).
 
     where ``|G|`` is the group order and ``numel = data.size``.
+
+    ``"canonical-copy"`` bills ``numel(data)`` -- one write per output
+    element, the same rate as every other materializing copy (``copy``,
+    ``take``, ``repeat``). It needs no validation pass because its output is
+    invariant by construction, and it never enumerates ``|G|``: the orbit map
+    is built from the group's generators and cached per
+    ``(shape, group action)``.
+
+    The two modes also differ in dtype. Averaging must divide, so
+    ``"reynolds-projection"`` accumulates in
+    ``result_type(data, float64)`` -- a ``float32`` input comes back
+    ``float64``. ``"canonical-copy"`` only moves values, so it preserves the
+    input dtype exactly, including integer, boolean and complex types.
 
     The canonical pattern for generating random data with symmetry is:
 
@@ -174,26 +243,55 @@ def symmetrize(
     >>> S.is_symmetric((0, 1))
     True
     """
+    if mode not in _SYMMETRIZE_MODES:
+        raise ValueError(
+            f"unknown symmetrize mode {mode!r}; "
+            f"expected one of {', '.join(map(repr, sorted(_SYMMETRIZE_MODES)))}"
+        )
     array = np.asarray(data)
     group = _resolve_symmetry_argument(array, symmetry=symmetry)
     assert group is not None  # required=True raises if symmetry is None
     validate_symmetry_group(group, ndim=array.ndim, shape=array.shape)
     n = array.size
-    cost = max((group.order() + 1) * n, 1)
+    if mode == "canonical-copy":
+        # One write per output element -- the rate every other materializing
+        # copy pays (copy/take/repeat). Deliberately does NOT consult
+        # group.order(): enumerating the group is the cost this mode exists
+        # to avoid, and the orbit map only ever needs the generators.
+        cost = max(n, 1)
+        # A gather moves values without computing any, so the output dtype is
+        # the input's -- no float64 sentinel, unlike the averaging branch.
+        dtypes = (array.dtype,)
+    else:
+        # Averaging visits every group element, so a group too large to
+        # enumerate cannot be projected at all. Refuse here, above the
+        # deduct, so a call that cannot finish is not charged for trying:
+        # for a group whose order is known in closed form the cost is
+        # computable, and without this check the caller would be billed the
+        # full Reynolds price and only then hit the enumeration limit.
+        _require_enumerable_for_reynolds(group)
+        cost = max((group.order() + 1) * n, 1)
+        # _project_core always accumulates in np.result_type(array, float64) --
+        # the "/ group.order()" scaling pass needs float precision even from
+        # float32 input (verified: symmetrize(float32).dtype == float64,
+        # symmetrize(complex64).dtype == complex128) -- so the float64 sentinel
+        # must join the resolve rather than replace it (result_type preserves
+        # kind: result_type(complex64, float64) == complex128).
+        dtypes = (array.dtype, np.dtype(np.float64))
     budget = require_budget()
-    # _project_core always accumulates in np.result_type(array, float64) --
-    # the "/ group.order()" scaling pass needs float precision even from
-    # float32 input (verified: symmetrize(float32).dtype == float64,
-    # symmetrize(complex64).dtype == complex128) -- so the float64 sentinel
-    # must join the resolve rather than replace it (result_type preserves
-    # kind: result_type(complex64, float64) == complex128).
     with budget.deduct(
         "symmetrize",
         flop_cost=cost,
         subscripts=None,
         shapes=(array.shape,),
-        dtypes=(array.dtype, np.dtype(np.float64)),
+        dtypes=dtypes,
     ):
+        if mode == "canonical-copy":
+            # Exactly invariant by construction, so unlike the averaging
+            # branch there is no residual rounding to validate away.
+            return SymmetricTensor._construct_trusted(
+                canonical_copy(array, group), symmetry=group
+            )
         projected = _project_core(array, group)
         # D1: internal validation runs but is NOT billed — build the tensor
         # directly rather than calling the (later-counted) as_symmetric.
@@ -658,33 +756,28 @@ def _wrap_tensor_result(data: np.ndarray, symmetry: SymmetryGroup | None):
     return SymmetricTensor._construct_trusted(data, symmetry=symmetry)
 
 
-# `wrap_with_symmetry`/`wrap_with_trusted_symmetry` (flopscope._symmetry_utils)
-# are the trusted attachment path used ~30 times across _array_ops.py for
-# symmetry DERIVED by an array transform (reshape/ravel/squeeze/split/...)
-# rather than a fresh, caller-supplied claim, so this constructor treats
-# either one, called directly, as trusted by code-object identity.
+# Trust is anchored to ONE code object: `wrap_with_trusted_symmetry`
+# (flopscope._symmetry_utils). A caller cannot fabricate it -- a copy of that
+# function defined elsewhere compiles to a different code object, because
+# `co_filename` participates in equality -- which is why trust is keyed on
+# identity here rather than on an argument the caller could set.
 #
-# KNOWN GAP (not closed by this fix): `wrap_with_symmetry` is an ordinary
-# importable function -- `flopscope._symmetry_utils.wrap_with_symmetry` --
-# and its own check is structural only (do the group's axes fit `ndim`); it
-# never inspects buffer contents. Code that imports it directly and calls
-# `wrap_with_symmetry(asymmetric_data, fake_claim)` gets the exact same free,
-# unvalidated tag this whole fix exists to close, just one function call
-# away from the constructor. Pinned as an expected failure in
-# `tests/test_symmetric_tensor_new_validation.py::test_wrap_with_symmetry_does_not_mint_an_unvalidated_tag`.
-# Not remotely reachable: `wrap_with_symmetry` is absent from the server's op
-# REGISTRY and is not exported on `flopscope` or `flopscope.numpy`, so this
-# gap requires importing a private module directly -- consistent with this
-# task's in-process-only, not-a-launch-blocker scope. Closing it properly
-# needs either a capability token threaded through all ~34 internal call
-# sites of `wrap_with_symmetry`/`wrap_with_trusted_symmetry`
-# (_symmetry_utils.py + _array_ops.py) or a content check added inside
-# `wrap_with_symmetry` itself -- deliberately NOT attempted here: repricing
-# those 34 already-relied-upon call sites in a launch window is a larger risk
-# than the (unreachable) hole they'd close.
-_TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset(
-    {wrap_with_symmetry.__code__, wrap_with_trusted_symmetry.__code__}
-)
+# The package's 39 internal attachment sites all reach it: the 27 array
+# transforms in _array_ops.py go through `wrap_with_derived_symmetry`, the
+# constant fills through `wrap_with_inferred_symmetry`, and both delegate to
+# the trusted wrapper rather than constructing directly, so they inherit
+# that trust without widening the set. `wrap_with_symmetry` is deliberately
+# NOT in here: nothing internal calls it, so a caller reaching it is making
+# a fresh claim about unexamined data and routes through the validating,
+# charging constructor like any other untrusted ingress.
+#
+# The set still exists for exactly one site: `_build_symmetric_proxy`
+# (_accumulation/_cost.py), which tags an uninitialized `np.empty` scratch
+# buffer that the cost model only ever reads for shape and symmetry. It is
+# the sole in-package caller that can run outside a `@_counted_wrapper`
+# frame, so it is the only thing keeping this mechanism alive -- worth
+# knowing before anyone deletes it as dead weight.
+_TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset({wrap_with_trusted_symmetry.__code__})
 
 
 class SymmetricTensor(FlopscopeArray):
@@ -705,47 +798,31 @@ class SymmetricTensor(FlopscopeArray):
         *,
         symmetry: SymmetryGroup,
     ) -> SymmetricTensor:
-        # WHAT THIS CLOSES: a tag is a billing claim about buffer CONTENTS.
-        # Minting one here without validating granted the 1/|G| discount over
-        # arbitrary data, bypassing the validate-and-charge path
-        # `as_symmetric` already goes through. This now routes a BARE,
-        # TOP-LEVEL `SymmetricTensor(data, symmetry=...)` call through that
-        # SAME validator (rather than a second one that could disagree), so
-        # that specific call shape pays -- and is checked -- exactly like
-        # `as_symmetric`, and raises the identical `SymmetryError` for a
-        # false claim.
+        # A tag is a billing claim about buffer CONTENTS, so a bare,
+        # top-level `SymmetricTensor(data, symmetry=...)` is checked and
+        # charged exactly like `as_symmetric` -- same validator, same price,
+        # same `SymmetryError` on a false claim -- and then canonicalized, so
+        # the tag it mints asserts no more than the data supports.
         #
-        # WHAT THIS DOES NOT CLOSE (two known, in-process-only, not-remotely-
-        # reachable gaps -- see `tests/test_symmetric_tensor_new_validation.py`
-        # for pinned `xfail` repros of both):
-        #   1. Calling `flopscope._symmetry_utils.wrap_with_symmetry` (or
-        #      `wrap_with_trusted_symmetry`) directly: they are trusted by
-        #      code-object identity below, and neither checks buffer
-        #      contents. See the comment on `_TRUSTED_SYMMETRY_WRAPPER_CODES`
-        #      just above this class for why that trust is not removed here.
-        #   2. Constructing from inside a participant callback that a
-        #      counted host op invokes (e.g. `fnp.apply_along_axis`,
-        #      `fnp.piecewise`): `_called_from_wrapper` walks the ENTIRE
-        #      call stack for any `@_counted_wrapper` frame, so it cannot
-        #      distinguish "genuinely inside the host op's own internal
-        #      code" from "arbitrary caller-supplied code the host op
-        #      happens to have called," and trusts both.
-        # Skip validation only when called from INSIDE another flopscope
-        # op's `@_counted_wrapper`-decorated frame: many call sites
-        # elsewhere in this package (pointwise, einsum, solvers,
-        # random.symmetric, accumulation -- all outside this file) tag a
-        # result whose symmetry they have already established mathematically
-        # (e.g. exp() of a symmetric input actually is symmetric; a cost-
-        # estimation proxy over uninitialized memory needs the metadata, not
-        # a real check -- see `_accumulation/_cost.py`'s
-        # `_build_symmetric_proxy`, which documents exactly this bypass).
-        # `_called_from_wrapper` (shared with `FlopscopeArray`'s protocol
-        # dispatch, in flopscope._budget) detects that nesting; it is False
-        # for ordinary top-level construction, which is this defect's
-        # exploit path, so that path still always validates and pays. The
-        # immediate-caller check below covers the sibling case one level
-        # up: `wrap_with_symmetry`/`wrap_with_trusted_symmetry` themselves
-        # calling this constructor directly, not nested inside a wrapper.
+        # Validation is skipped on two trusted routes. First, an immediate
+        # caller of `wrap_with_trusted_symmetry`, the package's single
+        # trusted attachment point (see `_TRUSTED_SYMMETRY_WRAPPER_CODES`
+        # above). Second, construction from inside another flopscope op's
+        # `@_counted_wrapper` frame: many sites in this package (pointwise,
+        # einsum, solvers, random.symmetric, accumulation) tag a result whose
+        # symmetry they have already established mathematically -- exp() of a
+        # symmetric input really is symmetric -- and a cost-estimation proxy
+        # over uninitialized memory needs the metadata rather than a real
+        # check (see `_accumulation/_cost.py`'s `_build_symmetric_proxy`).
+        #
+        # KNOWN GAP (pinned as an expected failure in
+        # `tests/test_symmetric_tensor_new_validation.py`): `_called_from_wrapper`
+        # walks the ENTIRE call stack for a `@_counted_wrapper` frame, so a
+        # tensor constructed inside a participant callback that a counted host
+        # op invokes (`fnp.apply_along_axis`, `fnp.piecewise`) inherits the
+        # host's trust. Closing it needs the walk to stop at the callback
+        # boundary rather than pass through it. Not reachable on the graded
+        # backend, where those ops refuse a callback over the wire.
         from flopscope._budget import _called_from_wrapper
 
         array = np.asarray(input_array)
@@ -755,6 +832,11 @@ class SymmetricTensor(FlopscopeArray):
         )
         if not trusted:
             _validate_and_charge_symmetry(array, symmetry, op_name="as_symmetric")
+            # Same trust boundary as `as_symmetric`, so the same rule: the
+            # tolerant check authorizes a tag the cost model reads as exact,
+            # and canonicalizing here is what makes those two agree. Honest
+            # data is returned untouched, so this stays a view.
+            array = canonicalize(array, symmetry)
         obj = array.view(cls)
         obj._symmetry = symmetry
         obj._symmetry_inferred = False
@@ -1048,7 +1130,18 @@ def as_symmetric(
     assert group is not None  # required=True raises if symmetry is None
     array = np.asarray(data)
     _validate_and_charge_symmetry(array, group, op_name="as_symmetric")
+    # Validation is tolerant, but the tag it authorizes is read as exact: the
+    # cost model prices every orbit position after the first as redundant and
+    # never re-reads the buffer. Copy one representative across each orbit so
+    # that reading is true. Values that differed only within tolerance do not
+    # survive, which is what stops a caller from scaling an asymmetric tensor
+    # under atol, collecting the tag, and scaling back up with the independent
+    # values -- and their discount -- intact. Data that is already exactly
+    # invariant is passed through untouched, so the honest case keeps this
+    # function's zero-copy view semantics.
+    array = canonicalize(array, group)
     # Already validated and charged above -- construct via the trusted,
     # non-revalidating path so this doesn't pay (or re-check) twice through
-    # SymmetricTensor's public, validating constructor.
+    # SymmetricTensor's public, validating constructor. The canonical copy is
+    # exactly invariant by construction, so there is nothing left to re-check.
     return SymmetricTensor._construct_trusted(array, symmetry=group)

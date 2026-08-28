@@ -663,6 +663,8 @@ def symmetric(
     shape: int | Sequence[int],
     symmetry: SymmetryGroup,
     distribution: str | Callable[..., Any] = "randn",
+    *,
+    mode: str = "reynolds-projection",
     **distribution_kwargs: Any,
 ) -> FlopscopeArray:
     """Sample random data and project it to a symmetry group.
@@ -681,6 +683,12 @@ def symmetric(
         - ``size=shape``
 
         and returns an array.
+    mode : {"reynolds-projection", "canonical-copy"}, optional
+        How the sample is made invariant, with the same meaning as
+        :func:`flopscope.symmetrize`'s ``mode``. The default averages each
+        orbit; ``"canonical-copy"`` keeps one entry per orbit instead, reads
+        the group's generators alone, and so remains available for groups too
+        large to enumerate.
     **distribution_kwargs
         Extra keyword arguments forwarded to the distribution function.
 
@@ -692,7 +700,10 @@ def symmetric(
     Raises
     ------
     ValueError
-        If ``shape`` is not an integer or a tuple/list of integers.
+        If ``shape`` is not an integer or a tuple/list of integers, if
+        ``mode`` is not one of the two accepted values, or if
+        ``mode="reynolds-projection"`` is asked to average over a group too
+        large to enumerate within ``dimino_budget``.
     TypeError
         If ``distribution`` is neither a NumPy random distribution name nor a
         callable.
@@ -788,10 +799,32 @@ def symmetric(
             "distribution must be a numpy random function name or a callable"
         )
 
+    from flopscope._symmetric import (
+        _SYMMETRIZE_MODES,
+        SymmetricTensor,
+        _project_core,
+        _require_enumerable_for_reynolds,
+        validate_symmetry_groups,
+    )
+
+    if mode not in _SYMMETRIZE_MODES:
+        raise ValueError(
+            f"unknown symmetric mode {mode!r}; "
+            f"expected one of {', '.join(map(repr, sorted(_SYMMETRIZE_MODES)))}"
+        )
+
     budget = require_budget()
-    G = _builtins.max(symmetry.order(), 1)
-    # sample numel + projection core ((|G|+1)*numel) == sample + symmetrize
-    cost = _builtins.max(sample_size + (G + 1) * sample_size, 1)
+    if mode == "canonical-copy":
+        # sample numel + one copy pass, matching
+        # symmetrize(mode="canonical-copy")'s numel rate.
+        cost = _builtins.max(sample_size + sample_size, 1)
+    else:
+        # Refuse above the deduct so a projection that cannot finish is not
+        # billed for trying; mirrors symmetrize's own guard.
+        _require_enumerable_for_reynolds(symmetry)
+        G = _builtins.max(symmetry.order(), 1)
+        # sample numel + projection core ((|G|+1)*numel) == sample + symmetrize
+        cost = _builtins.max(sample_size + (G + 1) * sample_size, 1)
     # `sample` is usually drawn from a named real-only numpy distribution,
     # but `distribution` may be an arbitrary caller callable that returns
     # complex data; the registry's complex_factor="illegal" here is only
@@ -804,12 +837,12 @@ def symmetric(
         shapes=(shape_tuple,),
         dtypes=(),
     ):
-        from flopscope._symmetric import (
-            SymmetricTensor,
-            _project_core,
-            validate_symmetry_groups,
-        )
+        if mode == "canonical-copy":
+            from flopscope._canonical_symmetry import canonical_copy
 
+            # Exactly invariant by construction, so no validation pass.
+            # canonical_copy does its own np.asarray.
+            return SymmetricTensor(canonical_copy(sample, symmetry), symmetry=symmetry)
         projected = _project_core(sample, symmetry)  # _project_core does np.asarray
         validate_symmetry_groups(projected, [symmetry])  # uncounted safety check
         return SymmetricTensor(projected, symmetry=symmetry)
