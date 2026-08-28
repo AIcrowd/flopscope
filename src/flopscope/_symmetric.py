@@ -1109,7 +1109,12 @@ def as_symmetric(
     Returns
     -------
     SymmetricTensor
-        View of ``data`` carrying validated symmetry metadata.
+        ``data`` carrying validated symmetry metadata, exactly invariant
+        under ``symmetry``. Data that is already exactly invariant is
+        wrapped as a view; data that satisfied the check only within the
+        tolerance is copied first, with each orbit taking the value at its
+        lexicographically smallest index, so the metadata describes the
+        buffer it is attached to. ``data`` itself is never modified.
 
     Raises
     ------
