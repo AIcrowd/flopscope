@@ -3391,7 +3391,12 @@ def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
             reason="matrix_transpose: rank too low for sym",
         )
     if out_group is not None:
-        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
+        # The trusted wrapper by name, because this function is the one
+        # symmetry-propagating transform without a @_counted_wrapper frame
+        # to inherit the exemption from (see the note above). Routing it
+        # through the ordinary derived helper would validate and charge, and
+        # this operation is registered as free.
+        return wrap_with_trusted_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 

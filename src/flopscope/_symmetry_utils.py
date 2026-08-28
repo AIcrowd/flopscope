@@ -741,26 +741,41 @@ def wrap_with_derived_symmetry(data, symmetry: SymmetryGroup | None):
     from the input's own validated group. The claim is inherited rather than
     fresh, so it is not re-checked or re-billed; the structural check below
     only confirms the transported group still fits the new rank.
+
+    Constructs directly rather than delegating to
+    :func:`wrap_with_trusted_symmetry`, which matters: this function's own
+    code object is NOT trusted, so the transforms get their exemption from
+    running inside a counted op rather than from calling this helper. Imported
+    and called on its own, from outside any flopscope op, it validates and
+    charges like any other fresh claim.
     """
     array = np.asarray(data)
     if symmetry is None:
         return array
     validate_symmetry_group(symmetry, ndim=array.ndim)
-    return wrap_with_trusted_symmetry(array, symmetry)
+    from flopscope._symmetric import SymmetricTensor
+
+    return SymmetricTensor(array, symmetry=symmetry)
 
 
 def wrap_with_inferred_symmetry(data, symmetry: SymmetryGroup | None):
     """Wrap data with auto-inferred symmetry metadata.
 
-    Identical to :func:`wrap_with_trusted_symmetry` except the resulting
+    Identical to :func:`wrap_with_derived_symmetry` except the resulting
     array carries ``_symmetry_inferred = True``. Read by
     ``_prepare_symmetric_out`` to decide whether a non-symmetric ``out=``
     write should silently downgrade the target (inferred) or raise
     (explicit). Internal call sites only — never expose to user code.
+
+    Constructs directly for the same reason as the helper above: the
+    constant-fill sites that use it run inside counted ops, so an imported
+    direct call earns no exemption.
     """
     array = np.asarray(data)
     if symmetry is None:
         return array
-    obj = wrap_with_trusted_symmetry(array, symmetry)
+    from flopscope._symmetric import SymmetricTensor
+
+    obj = SymmetricTensor(array, symmetry=symmetry)
     obj._symmetry_inferred = True
     return obj

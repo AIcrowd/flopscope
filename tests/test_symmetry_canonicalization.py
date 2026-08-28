@@ -150,14 +150,55 @@ class TestToleranceGapIsClosed:
             )
         _assert_exactly_invariant(tagged, group)
 
-    def test_untrusted_wrapper_cannot_mint_a_free_tag(self):
-        """The importable wrapper is checked and charged like any other claim."""
-        from flopscope._symmetry_utils import wrap_with_symmetry
+    @pytest.mark.parametrize(
+        "wrapper_name",
+        [
+            "wrap_with_symmetry",
+            "wrap_with_derived_symmetry",
+            "wrap_with_inferred_symmetry",
+        ],
+    )
+    def test_importable_wrappers_cannot_mint_a_free_tag(self, wrapper_name):
+        """Only one wrapper is trusted, and these are not it.
 
+        Each of these is exempt from validation when it runs inside a counted
+        op, which is where the package uses them. Called directly, from
+        outside any flopscope op, they must be checked and charged -- so none
+        of them is a way around the constructor for anyone who imports it.
+        """
+        import flopscope._symmetry_utils as symmetry_utils
+
+        wrapper = getattr(symmetry_utils, wrapper_name)
         group = SymmetryGroup.symmetric(axes=(0, 1))
         asymmetric = np.random.default_rng(3).random((6, 6))
         with _budget(), pytest.raises(flops.SymmetryError):
-            wrap_with_symmetry(asymmetric, group)
+            wrapper(asymmetric, group)
+
+    def test_the_one_trusted_wrapper_is_still_only_reachable_by_import(self):
+        """``wrap_with_trusted_symmetry`` stays trusted, and is the only one.
+
+        Two internal sites cannot inherit a counted frame and so genuinely
+        need it. Pinned here so that list stays short and deliberate: this is
+        the single remaining route to an unchecked tag, and it should not grow
+        a fourth member by accident.
+        """
+        from flopscope._symmetric import _TRUSTED_SYMMETRY_WRAPPER_CODES
+        from flopscope._symmetry_utils import wrap_with_trusted_symmetry
+
+        assert _TRUSTED_SYMMETRY_WRAPPER_CODES == frozenset(
+            {wrap_with_trusted_symmetry.__code__}
+        )
+
+    def test_matrix_transpose_stays_free(self):
+        """The registered-free transform must not start paying to keep its tag."""
+        group = SymmetryGroup.symmetric(axes=(0, 1))
+        base = np.random.default_rng(7).standard_normal((16, 16))
+        with _budget() as budget:
+            tagged = flops.as_symmetric((base + base.T) / 2, symmetry=group)
+            before = budget.flops_used
+            transposed = fnp.matrix_transpose(tagged)
+            assert budget.flops_used == before
+        assert transposed.symmetry is not None
 
 
 # ---------------------------------------------------------------------------

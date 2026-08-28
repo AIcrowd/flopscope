@@ -762,21 +762,23 @@ def _wrap_tensor_result(data: np.ndarray, symmetry: SymmetryGroup | None):
 # `co_filename` participates in equality -- which is why trust is keyed on
 # identity here rather than on an argument the caller could set.
 #
-# The package's 39 internal attachment sites all reach it: the 27 array
-# transforms in _array_ops.py go through `wrap_with_derived_symmetry`, the
-# constant fills through `wrap_with_inferred_symmetry`, and both delegate to
-# the trusted wrapper rather than constructing directly, so they inherit
-# that trust without widening the set. `wrap_with_symmetry` is deliberately
-# NOT in here: nothing internal calls it, so a caller reaching it is making
-# a fresh claim about unexamined data and routes through the validating,
-# charging constructor like any other untrusted ingress.
+# The sibling wrappers -- `wrap_with_symmetry`, `wrap_with_derived_symmetry`,
+# `wrap_with_inferred_symmetry` -- are deliberately NOT in here, and each
+# constructs directly rather than delegating, so none of them can lend its
+# caller this trust. The array transforms and constant fills that use them
+# are exempt because they run inside a `@_counted_wrapper` frame, which
+# `_called_from_wrapper` sees; imported and called on their own, from outside
+# any flopscope op, they validate and charge like any other fresh claim.
+# Delegating instead would hand every importer of those names a free tag,
+# which is the hole this arrangement exists to keep shut.
 #
-# The set still exists for exactly one site: `_build_symmetric_proxy`
+# Two sites hold the trusted wrapper's remaining justification, both unable
+# to inherit a counted frame: `_build_symmetric_proxy`
 # (_accumulation/_cost.py), which tags an uninitialized `np.empty` scratch
-# buffer that the cost model only ever reads for shape and symmetry. It is
-# the sole in-package caller that can run outside a `@_counted_wrapper`
-# frame, so it is the only thing keeping this mechanism alive -- worth
-# knowing before anyone deletes it as dead weight.
+# buffer the cost model only ever reads for shape and symmetry, and
+# `matrix_transpose` (_array_ops.py), a registered-free operation that
+# carries no `@_counted_wrapper` of its own. Worth knowing before anyone
+# deletes this mechanism as dead weight.
 _TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset({wrap_with_trusted_symmetry.__code__})
 
 
