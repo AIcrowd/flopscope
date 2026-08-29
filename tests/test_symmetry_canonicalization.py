@@ -27,6 +27,7 @@ from flopscope._canonical_symmetry import (
     is_exactly_invariant,
 )
 from flopscope._perm_group import SymmetryGroup, _Permutation
+from flopscope._symmetric import SymmetricTensor
 
 BUDGET = 10**14
 
@@ -238,6 +239,7 @@ class TestToleranceGapIsClosed:
             before = budget.flops_used
             transposed = fnp.matrix_transpose(tagged)
             assert budget.flops_used == before
+        assert isinstance(transposed, SymmetricTensor)
         assert transposed.symmetry is not None
 
 
@@ -695,7 +697,9 @@ class TestTrustedPropagationStaysCheap:
         base = np.random.default_rng(41).standard_normal((6, 6))
         with _budget():
             tagged = flops.as_symmetric((base + base.T) / 2, symmetry=group)
-            assert fnp.exp(tagged).symmetry is not None
+            propagated = fnp.exp(tagged)
+        assert isinstance(propagated, SymmetricTensor)
+        assert propagated.symmetry is not None
 
 
 # ---------------------------------------------------------------------------
@@ -773,7 +777,8 @@ class TestNonScalarFillIsNotSymmetric:
     def test_full_like_with_array_fill_carries_no_tag(self):
         with _budget():
             template = fnp.zeros((3, 3))
-            assert template.symmetry is not None  # constant fill: genuinely symmetric
+            # A constant fill is genuinely symmetric, so the template is tagged.
+            assert isinstance(template, SymmetricTensor)
             result = fnp.full_like(template, np.array([1.0, 2.0, 3.0]))
         assert getattr(result, "symmetry", None) is None
 
@@ -795,6 +800,6 @@ class TestNonScalarFillIsNotSymmetric:
         with _budget():
             full = fnp.full((4, 4), value)
             full_like = fnp.full_like(fnp.zeros((4, 4)), value)
-        assert full.symmetry is not None
-        assert full_like.symmetry is not None
+        assert isinstance(full, SymmetricTensor)
+        assert isinstance(full_like, SymmetricTensor)
         _assert_exactly_invariant(full, full.symmetry)
