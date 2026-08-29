@@ -80,12 +80,16 @@ Costs more:
   scans its input for NaN before reducing — a full extra pass its plain sibling
   does not run — and that pass was not charged, so `nansum` cost exactly what
   `sum` cost. It is now charged as one additional pass over the input. The pass
-  is charged only where NumPy actually performs it: **integer and boolean input
-  is exempt** (NumPy skips the scan entirely), **`nanmax` and `nanmin` are
-  exempt** (they test the reduced output rather than the input), and for a
-  symmetric operand the pass is priced over the orbit like every other pass in
-  the same operation. Twelve operations are affected on float and complex input,
-  typically by one input-sized pass.
+  is charged only where NumPy actually performs it: for the reductions built on
+  NumPy's `_replace_nan`, **integer and boolean input is exempt** (NumPy skips
+  the scan entirely); **`nanmax` and `nanmin` are exempt** (they test the reduced
+  output rather than the input); and for a symmetric operand the pass is priced
+  over the orbit like every other pass in the same operation. **`nanmedian`,
+  `nanpercentile` and `nanquantile` are the exception to the dtype exemption**:
+  they route through `_remove_nan_1d`, which calls `np.isnan` whatever the dtype,
+  so they charge the extra pass at *every* dtype — on 100 elements, `nanmedian`
+  costs 400 against `median`'s 200 for `int32` as well as for float. Twelve
+  operations are affected, typically by one input-sized pass.
 
 - **`angle` on a boolean input costs twice what it did.** NumPy computes it in
   float64; it had been billed at the float16 rate, which was half price. Integer
@@ -134,6 +138,11 @@ Costs less:
   and `nanquantile`.
 
 - **`dot`, `inner` and two-array `multi_dot` accept a 0-d operand.** NumPy treats
+  it as a scalar multiply, but flopscope raised from inside its own cost helper
+  before reaching NumPy at all. All three now price the 0-d case as that scalar
+  multiply. A 0-d operand inside a three-or-more-array `multi_dot` chain still
+  raises. This turns a wrongly-refused call into a priced one rather than making
+  anything cheaper, so it sits in this section only for want of a better one.
 
 - **`ldexp` is priced on its mantissa loop.** Its second operand is an exponent,
   not a value to compute with, so promoting on it was a category error rather
