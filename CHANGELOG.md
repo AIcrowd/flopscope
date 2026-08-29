@@ -4,13 +4,18 @@
 
 ### Billing impact
 
-One change here raises prices. **`full` and `full_like` with a non-scalar
-`fill_value` no longer carry an inferred symmetry tag**, so operations on their
-results are priced as the dense arrays they are — measured at `+50%` on
-`fnp.sin` and `+55%` on `fnp.einsum("ij,ij->")` for a `(3, 3)` result built from
-a length-3 fill. Values are unchanged, and a scalar `fill_value` is unaffected.
-Estimators that build arrays by broadcasting a vector through `full_like` will
-see their totals move.
+One change here raises prices, in one narrow case. **`full` and `full_like`
+with a non-scalar `fill_value` no longer carry an inferred symmetry tag**, so
+operations on their results are priced as the dense arrays they are — measured
+at `+50%` on `fnp.sin` and `+55%` on `fnp.einsum("ij,ij->")` for a `(3, 3)`
+result built from a length-3 fill.
+
+The rise reaches only calls that were being given a tag the data did not
+support: a non-scalar fill into a shape with two or more equal-length axes.
+A non-scalar fill into any other shape was never tagged and is unchanged
+(a `(3, 4)` result still costs 384 on `fnp.sin`, a `(5,)` result still 160),
+and a scalar `fill_value` keeps its tag and its price at every shape. Values
+are unchanged throughout.
 
 **It ships as a new version opening a new phase, so no submission is
 re-evaluated against it: nothing already scored is repriced.**

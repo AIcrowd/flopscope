@@ -779,6 +779,15 @@ def _wrap_tensor_result(data: np.ndarray, symmetry: SymmetryGroup | None):
 # `matrix_transpose` (_array_ops.py), a registered-free operation that
 # carries no `@_counted_wrapper` of its own. Worth knowing before anyone
 # deletes this mechanism as dead weight.
+#
+# What this does NOT do is stop in-process code from minting a tag. It cannot:
+# `arr.view(SymmetricTensor)` followed by an attribute assignment needs no
+# helper from this package at all, and monkeypatching the validator works too.
+# Narrowing the trust set is about keeping the package's own attachment sites
+# honest and few, not about defending against a caller who already has the
+# module. The boundary that holds is the wire -- the server dispatches
+# registered ops only, and none of these names is registered -- which is the
+# boundary `as_symmetric`'s canonicalization exists to serve.
 _TRUSTED_SYMMETRY_WRAPPER_CODES = frozenset({wrap_with_trusted_symmetry.__code__})
 
 

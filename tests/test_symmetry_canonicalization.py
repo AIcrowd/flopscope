@@ -174,14 +174,8 @@ class TestToleranceGapIsClosed:
         with _budget(), pytest.raises(flops.SymmetryError):
             wrapper(asymmetric, group)
 
-    def test_the_one_trusted_wrapper_is_still_only_reachable_by_import(self):
-        """``wrap_with_trusted_symmetry`` stays trusted, and is the only one.
-
-        Two internal sites cannot inherit a counted frame and so genuinely
-        need it. Pinned here so that list stays short and deliberate: this is
-        the single remaining route to an unchecked tag, and it should not grow
-        a fourth member by accident.
-        """
+    def test_trust_is_anchored_to_one_code_object(self):
+        """The exemption belongs to one function, not to a growing list."""
         from flopscope._symmetric import _TRUSTED_SYMMETRY_WRAPPER_CODES
         from flopscope._symmetry_utils import wrap_with_trusted_symmetry
 
@@ -189,34 +183,51 @@ class TestToleranceGapIsClosed:
             {wrap_with_trusted_symmetry.__code__}
         )
 
-    def test_the_trusted_wrapper_does_attach_without_checking(self):
-        """Stated outright rather than left for someone to discover.
+    def test_in_process_code_can_always_mint_a_tag_and_that_is_not_the_boundary(self):
+        """Where the boundary actually is, written down so it is not mistaken.
 
-        This is the one route that still tags a buffer nobody looked at, and
-        the reason it survives is that ``_build_symmetric_proxy`` and
-        ``matrix_transpose`` genuinely need it. It is a private import, absent
-        from the op registry and from both public namespaces, so it is not
-        reachable from a submission -- but it is reachable in-process, and a
-        test that quietly omitted it would read as though nothing were open.
-        Closing it needs a capability the caller cannot forge, which is a
-        larger change than this one.
+        Code running in this process can attach a symmetry tag to anything it
+        likes, and no arrangement of private helpers changes that. The route
+        below uses only public NumPy and the class object -- no flopscope
+        helper is involved -- so hardening ``wrap_with_trusted_symmetry`` or
+        ``_construct_trusted`` would close two doors in a wall that does not
+        surround anything. Monkeypatching the validator works equally well.
+
+        The boundary that does hold is the wire: a submission runs against a
+        server that dispatches registered operations only, and none of the
+        names used here is registered. That is what the canonicalization at
+        ``as_symmetric`` protects -- a claim arriving over that wire -- and it
+        is why these routes are documented rather than chased.
         """
+        from flopscope._registry import REGISTRY
+        from flopscope._symmetric import SymmetricTensor
         from flopscope._symmetry_utils import wrap_with_trusted_symmetry
 
         group = SymmetryGroup.symmetric(axes=(0, 1))
         asymmetric = np.random.default_rng(5).random((6, 6))
-        with _budget() as budget:
-            tagged = wrap_with_trusted_symmetry(asymmetric, group)
-        assert tagged.symmetry is not None
-        assert budget.flops_used == 0
-        assert not is_exactly_invariant(np.asarray(tagged), group)
 
-        # It is not reachable by name from either public namespace.
+        # Needs nothing from flopscope but the class itself.
+        forged = asymmetric.view(SymmetricTensor)
+        forged._symmetry = group
+        assert forged.symmetry is not None
+        assert not is_exactly_invariant(np.asarray(forged), group)
+
+        # The two private helpers are no different in kind, and no worse.
+        with _budget() as budget:
+            wrap_with_trusted_symmetry(asymmetric, group)
+            SymmetricTensor._construct_trusted(asymmetric, symmetry=group)
+        assert budget.flops_used == 0
+
+        # None of it crosses the wire.
+        for name in (
+            "SymmetricTensor",
+            "wrap_with_trusted_symmetry",
+            "wrap_with_derived_symmetry",
+            "view",
+        ):
+            assert name not in REGISTRY
         assert not hasattr(flops, "wrap_with_trusted_symmetry")
         assert not hasattr(fnp, "wrap_with_trusted_symmetry")
-        from flopscope._registry import REGISTRY
-
-        assert "wrap_with_trusted_symmetry" not in REGISTRY
 
     def test_matrix_transpose_stays_free(self):
         """The registered-free transform must not start paying to keep its tag."""
