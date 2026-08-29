@@ -187,9 +187,12 @@ This helper is ideal for docs, tests, and experiments:
   projection and validation behavior is identical.
 - approximate costs (meaningful estimate), for the default
   ``mode="reynolds-projection"``:
-  - `fnp.random.symmetric`: ``C_dist(n) + |G| * n + n`` + validation
-  - `flops.symmetrize`: ``|G| * n + n`` + validation  
-    with ``n`` total elements and ``|G|`` group order.
+  - `fnp.random.symmetric`: ``C_dist(n) + |G| * n + n``
+  - `flops.symmetrize`: ``|G| * n + n``  
+    with ``n`` total elements and ``|G|`` group order. The internal validation
+    pass is not billed. Reynolds averaging always accumulates in float64, so
+    ``flops.symmetrize`` is charged at the float64 rate whatever the input
+    dtype; ``mode="canonical-copy"`` keeps the input's own rate.
 - in exact arithmetic it projects onto the invariant subspace, and in practice
   `flops.as_symmetric()` validates the result with its usual validation tolerances
 
