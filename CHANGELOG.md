@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.12.1 (2026-08-29)
 
 ### Billing impact
 
@@ -58,6 +58,10 @@ repriced by this change.
   `wrap_with_trusted_symmetry` alone, so `wrap_with_symmetry` — which nothing
   internal calls — is validated and charged like any other caller-supplied
   claim.
+
+### Fix
+
+- **symmetry**: make a symmetry tag match the buffer it is attached to (#253)
 
 ## v0.12.0 (2026-08-21)
 
