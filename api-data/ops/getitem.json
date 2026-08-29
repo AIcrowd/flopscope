@@ -1,0 +1,516 @@
+{
+  "detail_href": "/docs/api/numpy/getitem/",
+  "detail_json_href": "/api-data/ops/getitem.json",
+  "docs": {
+    "sections": [
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Index the array. Basic indexing is free; advanced indexing bills."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Basic indexing -- every part of "
+              },
+              {
+                "kind": "code",
+                "text": "key"
+              },
+              {
+                "kind": "text",
+                "text": " is an "
+              },
+              {
+                "kind": "code",
+                "text": "int"
+              },
+              {
+                "kind": "text",
+                "text": " (Python or numpy\nscalar), "
+              },
+              {
+                "kind": "code",
+                "text": "slice"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.newaxis.html",
+                "href": "",
+                "kind": "link",
+                "target": "newaxis",
+                "text": "flops.newaxis"
+              },
+              {
+                "kind": "text",
+                "text": " ("
+              },
+              {
+                "kind": "code",
+                "text": "None"
+              },
+              {
+                "kind": "text",
+                "text": "), "
+              },
+              {
+                "kind": "code",
+                "text": "Ellipsis"
+              },
+              {
+                "kind": "text",
+                "text": ", or a tuple\nof those -- returns a view, matching NumPy's zero-copy semantics: 0 FLOPs."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Advanced indexing materializes a gathered copy and is billed under\n"
+              },
+              {
+                "kind": "code",
+                "text": "\"getitem\""
+              },
+              {
+                "kind": "text",
+                "text": ": 4 FLOPs per gathered output element (matching "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/take/",
+                "kind": "link",
+                "target": "take",
+                "text": "take"
+              },
+              {
+                "kind": "text",
+                "text": "),\nplus one scan FLOP per boolean-mask element (matching "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/compress/",
+                "kind": "link",
+                "target": "compress",
+                "text": "compress"
+              },
+              {
+                "kind": "text",
+                "text": "). A\npart triggers advanced indexing when it is any of:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "items": [
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "a "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "bool"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " / "
+                      },
+                      {
+                        "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.bool_.html",
+                        "href": "",
+                        "kind": "link",
+                        "target": "bool_",
+                        "text": "flops.bool_"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " "
+                      },
+                      {
+                        "kind": "strong",
+                        "text": "scalar"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " -- numpy routes a bare boolean\nscalar through the advanced-index copy path (prepending a length-1 /\nlength-0 axis), a genuine copy though it is not an "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "ndarray"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ";"
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              },
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "strong",
+                        "text": "any other part that coerces to an integer- or boolean-dtype array"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "\n-- an "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "ndarray"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " (or "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "FlopscopeArray"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ") of any "
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/ndim/",
+                        "kind": "link",
+                        "target": "ndim",
+                        "text": "ndim"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " including\n0-d, a "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "list"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "tuple"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "range"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "array.array"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ",\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "memoryview"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", or any future array-like sequence/buffer. This\nmatches numpy's own rule (any array-like integer/bool index gathers a\ncopy) rather than an enumerated type list, so it cannot silently miss\na sequence kind: the part is classified by "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "flops.asarray(part).dtype"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ",\nand only its "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "dtype"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "/"
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/size/",
+                        "kind": "link",
+                        "target": "size",
+                        "text": "size"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " are read -- the original "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "key"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is\nwhat actually indexes, so a single-use generator part is never\nconsumed."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              }
+            ],
+            "ordered": false,
+            "type": "list"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "This is about a "
+              },
+              {
+                "kind": "emphasis",
+                "text": "part"
+              },
+              {
+                "kind": "text",
+                "text": " -- an already-decomposed element of "
+              },
+              {
+                "kind": "code",
+                "text": "parts"
+              },
+              {
+                "kind": "text",
+                "text": " --\nnot the top-level "
+              },
+              {
+                "kind": "code",
+                "text": "key"
+              },
+              {
+                "kind": "text",
+                "text": ": "
+              },
+              {
+                "kind": "code",
+                "text": "m[1:3, ::2]"
+              },
+              {
+                "kind": "text",
+                "text": " has "
+              },
+              {
+                "kind": "code",
+                "text": "key"
+              },
+              {
+                "kind": "text",
+                "text": " as a tuple, but\nthat tuple is the multi-axis split itself ("
+              },
+              {
+                "kind": "code",
+                "text": "parts = key"
+              },
+              {
+                "kind": "text",
+                "text": "), and its\nparts are slices, so it stays basic. Likewise "
+              },
+              {
+                "kind": "code",
+                "text": "v[(0, 2, 4)]"
+              },
+              {
+                "kind": "text",
+                "text": " on a 1-D\n"
+              },
+              {
+                "kind": "code",
+                "text": "v"
+              },
+              {
+                "kind": "text",
+                "text": " has "
+              },
+              {
+                "kind": "code",
+                "text": "key"
+              },
+              {
+                "kind": "text",
+                "text": " as the 3-tuple; splitting it into parts "
+              },
+              {
+                "kind": "code",
+                "text": "0, 2, 4"
+              },
+              {
+                "kind": "text",
+                "text": "\nyields three "
+              },
+              {
+                "kind": "emphasis",
+                "text": "int"
+              },
+              {
+                "kind": "text",
+                "text": " parts -- basic, and numpy raises its own \"too many\nindices\" error since none of them consumes as an array. A tuple only\ngathers when it survives the top-level split as one part, e.g.\n"
+              },
+              {
+                "kind": "code",
+                "text": "v[(0, 2, 4),]"
+              },
+              {
+                "kind": "text",
+                "text": " (a 1-tuple "
+              },
+              {
+                "kind": "emphasis",
+                "text": "containing"
+              },
+              {
+                "kind": "text",
+                "text": " the 3-tuple) or\n"
+              },
+              {
+                "kind": "code",
+                "text": "m[tuple_a, tuple_b]"
+              },
+              {
+                "kind": "text",
+                "text": " (each axis's index happens to be a tuple)."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "A numpy/Python "
+              },
+              {
+                "kind": "emphasis",
+                "text": "integer scalar"
+              },
+              {
+                "kind": "text",
+                "text": " stays basic (a view) -- only integer\n"
+              },
+              {
+                "kind": "emphasis",
+                "text": "arrays"
+              },
+              {
+                "kind": "text",
+                "text": " (or a sequence/buffer coerced to one) gather. A part numpy\ncannot turn into an integer/bool array -- an object array (kind "
+              },
+              {
+                "kind": "code",
+                "text": "O"
+              },
+              {
+                "kind": "text",
+                "text": ",\ne.g. a generator), a string/bytes field selector ("
+              },
+              {
+                "kind": "code",
+                "text": "U"
+              },
+              {
+                "kind": "text",
+                "text": "/"
+              },
+              {
+                "kind": "code",
+                "text": "S"
+              },
+              {
+                "kind": "text",
+                "text": "), a\nfloat/complex array, or a ragged sequence "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/asarray/",
+                "kind": "link",
+                "target": "asarray",
+                "text": "flops.asarray"
+              },
+              {
+                "kind": "text",
+                "text": " rejects --\nfalls through to "
+              },
+              {
+                "kind": "code",
+                "text": "super().__getitem__"
+              },
+              {
+                "kind": "text",
+                "text": " unbilled, so numpy handles or\nraises on it exactly as usual. "
+              },
+              {
+                "kind": "code",
+                "text": "mask_elems"
+              },
+              {
+                "kind": "text",
+                "text": " counts boolean elements\nonly: a bool scalar contributes 1, a bool array contributes its size;\ninteger operands add nothing beyond the gather."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Extended Summary"
+      }
+    ]
+  },
+  "op": {
+    "category": "counted_custom",
+    "cost_formula": "per-operation",
+    "cost_formula_latex": "varies",
+    "flopscope_ref": "fnp.getitem",
+    "module": "numpy",
+    "name": "getitem",
+    "notes": "Array indexing. Basic slicing: free (view). Fancy indexing: 4*numel(output); boolean masks add numel(mask).",
+    "numpy_ref": "np.getitem",
+    "signature": "arr[key]",
+    "status": "supported",
+    "summary": "Index the array. Basic indexing is free; advanced indexing bills.",
+    "weight": 1.0
+  },
+  "schema_version": 1,
+  "slug": "getitem",
+  "source": {
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_ndarray.py#L835",
+    "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.getitem.html"
+  }
+}

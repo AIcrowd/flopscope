@@ -1,0 +1,3 @@
+:HL["/flopscope/_next/static/chunks/0wxjc8uvojuqy.css","style"]
+:HL["/flopscope/_next/static/chunks/0wcbj9rh55bf7.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"/_not-found","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"Sv5rT_9l8TDSod8g-2h8W"}

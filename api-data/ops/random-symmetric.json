@@ -1,0 +1,929 @@
+{
+  "detail_href": "/docs/api/numpy/random/symmetric/",
+  "detail_json_href": "/api-data/ops/random-symmetric.json",
+  "docs": {
+    "sections": [
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Sample random data and project it to a symmetry group."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Shape of the sampled array."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "int or tuple of int",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Shape of the sampled array."
+                  }
+                ],
+                "name": "shape",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Symmetry group used for Reynolds averaging."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryGroup",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Symmetry group used for Reynolds averaging."
+                  }
+                ],
+                "name": "symmetry",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Name of a "
+                      },
+                      {
+                        "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.random.html",
+                        "href": "",
+                        "kind": "link",
+                        "target": "random",
+                        "text": "flops.random"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " distribution function (for example\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "\"randn\""
+                      },
+                      {
+                        "kind": "text",
+                        "text": " or "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "\"normal\""
+                      },
+                      {
+                        "kind": "text",
+                        "text": "), or a callable that accepts either:"
+                      }
+                    ],
+                    "type": "paragraph"
+                  },
+                  {
+                    "items": [
+                      {
+                        "blocks": [
+                          {
+                            "inline": [
+                              {
+                                "kind": "code",
+                                "text": "(*shape, **kwargs)"
+                              }
+                            ],
+                            "type": "paragraph"
+                          }
+                        ]
+                      },
+                      {
+                        "blocks": [
+                          {
+                            "inline": [
+                              {
+                                "kind": "code",
+                                "text": "size=shape"
+                              }
+                            ],
+                            "type": "paragraph"
+                          }
+                        ]
+                      }
+                    ],
+                    "ordered": false,
+                    "type": "list"
+                  },
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "and returns an array."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "str or callable, default ``\"randn\"``",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Name of a "
+                  },
+                  {
+                    "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.random.html",
+                    "href": "",
+                    "kind": "link",
+                    "target": "random",
+                    "text": "flops.random"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " distribution function (for example\n"
+                  },
+                  {
+                    "kind": "code",
+                    "text": "\"randn\""
+                  },
+                  {
+                    "kind": "text",
+                    "text": " or "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "\"normal\""
+                  },
+                  {
+                    "kind": "text",
+                    "text": "), or a callable that accepts either:"
+                  }
+                ],
+                "name": "distribution",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "How the sample is made invariant, with the same meaning as\n"
+                      },
+                      {
+                        "display_text": "flopscope.symmetrize",
+                        "explicit_title": false,
+                        "external_url": "",
+                        "href": "/docs/api/numpy/symmetrize/",
+                        "kind": "role_reference",
+                        "original_target": "flopscope.symmetrize",
+                        "role": "func",
+                        "suppress_link": false,
+                        "target": "symmetrize",
+                        "unresolved": false
+                      },
+                      {
+                        "kind": "text",
+                        "text": "'s "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "mode"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ". The default averages each\norbit; "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "\"canonical-copy\""
+                      },
+                      {
+                        "kind": "text",
+                        "text": " keeps one entry per orbit instead, reads\nthe group's generators alone, and so remains available for groups too\nlarge to enumerate."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "{\"reynolds-projection\", \"canonical-copy\"}, optional",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "How the sample is made invariant, with the same meaning as\n"
+                  },
+                  {
+                    "display_text": "flopscope.symmetrize",
+                    "explicit_title": false,
+                    "external_url": "",
+                    "href": "/docs/api/numpy/symmetrize/",
+                    "kind": "role_reference",
+                    "original_target": "flopscope.symmetrize",
+                    "role": "func",
+                    "suppress_link": false,
+                    "target": "symmetrize",
+                    "unresolved": false
+                  },
+                  {
+                    "kind": "text",
+                    "text": "'s "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "mode"
+                  },
+                  {
+                    "kind": "text",
+                    "text": ". The default averages each\norbit; "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "\"canonical-copy\""
+                  },
+                  {
+                    "kind": "text",
+                    "text": " keeps one entry per orbit instead, reads\nthe group's generators alone, and so remains available for groups too\nlarge to enumerate."
+                  }
+                ],
+                "name": "mode",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Extra keyword arguments forwarded to the distribution function."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Extra keyword arguments forwarded to the distribution function."
+                  }
+                ],
+                "name": "**distribution_kwargs",
+                "type": "field_list"
+              }
+            ],
+            "title": "Parameters",
+            "type": "field_list"
+          }
+        ],
+        "title": "Parameters"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "The symmetrized sample wrapped with "
+                      },
+                      {
+                        "display_text": "flops.as_symmetric",
+                        "explicit_title": false,
+                        "external_url": "",
+                        "href": "/docs/api/numpy/as-symmetric/",
+                        "kind": "role_reference",
+                        "original_target": "flops.as_symmetric",
+                        "role": "func",
+                        "suppress_link": false,
+                        "target": "as_symmetric",
+                        "unresolved": false
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetricTensor",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "The symmetrized sample wrapped with "
+                  },
+                  {
+                    "display_text": "flops.as_symmetric",
+                    "explicit_title": false,
+                    "external_url": "",
+                    "href": "/docs/api/numpy/as-symmetric/",
+                    "kind": "role_reference",
+                    "original_target": "flops.as_symmetric",
+                    "role": "func",
+                    "suppress_link": false,
+                    "target": "as_symmetric",
+                    "unresolved": false
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Returns",
+            "type": "field_list"
+          }
+        ],
+        "title": "Returns"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If "
+                      },
+                      {
+                        "external_url": "",
+                        "href": "/docs/api/numpy/shape/",
+                        "kind": "link",
+                        "target": "shape",
+                        "text": "shape"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is not an integer or a tuple/list of integers, if\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "mode"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is not one of the two accepted values, or if\n"
+                      },
+                      {
+                        "kind": "code",
+                        "text": "mode=\"reynolds-projection\""
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is asked to average over a group too\nlarge to enumerate within "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "dimino_budget"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "ValueError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If "
+                  },
+                  {
+                    "external_url": "",
+                    "href": "/docs/api/numpy/shape/",
+                    "kind": "link",
+                    "target": "shape",
+                    "text": "shape"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is not an integer or a tuple/list of integers, if\n"
+                  },
+                  {
+                    "kind": "code",
+                    "text": "mode"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is not one of the two accepted values, or if\n"
+                  },
+                  {
+                    "kind": "code",
+                    "text": "mode=\"reynolds-projection\""
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is asked to average over a group too\nlarge to enumerate within "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "dimino_budget"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "distribution"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is neither a NumPy random distribution name nor a\ncallable."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "TypeError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "distribution"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is neither a NumPy random distribution name nor a\ncallable."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "distribution"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is a string that is not present in NumPy random."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "AttributeError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "distribution"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is a string that is not present in NumPy random."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If projected output does not satisfy the requested symmetry constraints."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If projected output does not satisfy the requested symmetry constraints."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Raises",
+            "type": "field_list"
+          }
+        ],
+        "title": "Raises"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "This is equivalent to "
+              },
+              {
+                "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.symmetrize(sampled_data, symmetry=symmetry).html",
+                "href": "",
+                "kind": "link",
+                "target": "symmetrize(sampled_data, symmetry=symmetry)",
+                "text": "flops.symmetrize(sampled_data, symmetry=symmetry)"
+              },
+              {
+                "kind": "text",
+                "text": " where\n"
+              },
+              {
+                "kind": "code",
+                "text": "sampled_data"
+              },
+              {
+                "kind": "text",
+                "text": " is drawn from "
+              },
+              {
+                "kind": "code",
+                "text": "distribution"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "The implementation currently:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "items": [
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Samples raw values from the selected distribution."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              },
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Applies "
+                      },
+                      {
+                        "display_text": "flops.symmetrize",
+                        "explicit_title": false,
+                        "external_url": "",
+                        "href": "/docs/api/numpy/symmetrize/",
+                        "kind": "role_reference",
+                        "original_target": "flops.symmetrize",
+                        "role": "func",
+                        "suppress_link": false,
+                        "target": "symmetrize",
+                        "unresolved": false
+                      },
+                      {
+                        "kind": "text",
+                        "text": " to project into the symmetry-invariant\nsubspace."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              }
+            ],
+            "ordered": true,
+            "type": "list"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Estimated FLOP cost is approximately:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "C_dist(n_elem) + |G| * n_elem + n_elem"
+              },
+              {
+                "kind": "text",
+                "text": " (+ validation),"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "where "
+              },
+              {
+                "kind": "code",
+                "text": "n_elem"
+              },
+              {
+                "kind": "text",
+                "text": " is the sampled array size, "
+              },
+              {
+                "kind": "code",
+                "text": "|G|"
+              },
+              {
+                "kind": "text",
+                "text": " is the group order, and\n"
+              },
+              {
+                "kind": "code",
+                "text": "C_dist(n_elem)"
+              },
+              {
+                "kind": "text",
+                "text": " is the cost of the chosen sampling distribution.\nThe default "
+              },
+              {
+                "kind": "code",
+                "text": "distribution='randn'"
+              },
+              {
+                "kind": "text",
+                "text": " corresponds to "
+              },
+              {
+                "kind": "code",
+                "text": "C_dist(n_elem)\u2248n_elem"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "For existing data, use "
+              },
+              {
+                "display_text": "flops.symmetrize",
+                "explicit_title": false,
+                "external_url": "",
+                "href": "/docs/api/numpy/symmetrize/",
+                "kind": "role_reference",
+                "original_target": "flops.symmetrize",
+                "role": "func",
+                "suppress_link": false,
+                "target": "symmetrize",
+                "unresolved": false
+              },
+              {
+                "kind": "text",
+                "text": " directly."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Notes"
+      },
+      {
+        "blocks": [
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope as flops"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S = fnp.random.symmetric((4, 4), flops.SymmetryGroup.symmetric(axes=(0, 1)))"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S.is_symmetric((0, 1))"
+              },
+              {
+                "kind": "output",
+                "text": "True"
+              }
+            ],
+            "type": "doctest_block"
+          },
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S = fnp.random.symmetric("
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "(3, 3, 3),"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "flops.SymmetryGroup.cyclic(axes=(0, 1, 2)),"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "distribution=\"normal\","
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "loc=0.0,"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "scale=1.0,"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": ")"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S.is_symmetric((0, 1, 2))"
+              },
+              {
+                "kind": "output",
+                "text": "True"
+              }
+            ],
+            "type": "doctest_block"
+          },
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope as flops"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "def shifted_uniform(shape, **kwargs):"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "return flops.random.uniform(*shape, **kwargs)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S = fnp.random.symmetric("
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "(2, 2),"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "flops.SymmetryGroup.symmetric(axes=(0, 1)),"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": "distribution=shifted_uniform,"
+              },
+              {
+                "kind": "input",
+                "prompt": "...",
+                "text": ")"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S.is_symmetric((0, 1))"
+              },
+              {
+                "kind": "output",
+                "text": "True"
+              }
+            ],
+            "type": "doctest_block"
+          }
+        ],
+        "title": "Examples"
+      }
+    ]
+  },
+  "op": {
+    "category": "counted_custom",
+    "cost_formula": "per-operation",
+    "cost_formula_latex": "varies",
+    "flopscope_ref": "fnp.random.symmetric",
+    "module": "numpy.random",
+    "name": "random.symmetric",
+    "notes": "Sample + Reynolds-project to a symmetry group. Cost: (|G|+2)*numel (sample numel + projection (|G|+1)*numel).",
+    "numpy_ref": "np.random.symmetric",
+    "signature": "fnp.random.symmetric(shape: 'int | Sequence[int]', symmetry: 'SymmetryGroup', distribution: 'str | Callable[..., Any]' = 'randn', *, mode: 'str' = 'reynolds-projection', **distribution_kwargs: 'Any') -> 'FlopscopeArray'",
+    "status": "supported",
+    "summary": "Sample random data and project it to a symmetry group.",
+    "weight": 1.0
+  },
+  "schema_version": 1,
+  "slug": "random-symmetric",
+  "source": {
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L661",
+    "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.symmetric.html"
+  }
+}
