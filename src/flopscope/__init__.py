@@ -159,14 +159,22 @@ def reduction_cache_info():
 
 
 def clear_cache() -> None:
-    """Clear all flopscope LRU caches (einsum + reduction).
+    """Clear all flopscope LRU caches (einsum, reduction, symmetry orbit maps).
 
     Convenience aggregate over :func:`einsum_clear_caches` and
-    :func:`reduction_clear_cache`. Use the per-domain variants if you
-    only need to invalidate one cache.
+    :func:`reduction_clear_cache`, plus the symmetry orbit-map cache. Use the
+    per-domain variants if you only need to invalidate one cache.
+
+    The orbit-map cache is the one worth clearing for memory rather than
+    correctness: each entry holds one index per element of a distinct
+    ``(shape, group action)``, so it grows with the tensors it has been asked
+    about rather than with the number of operations.
     """
+    from flopscope._canonical_symmetry import clear_canonical_map_cache
+
     einsum_clear_caches()
     reduction_clear_cache()
+    clear_canonical_map_cache()
 
 
 def remote_unsupported_ops() -> frozenset[str]:

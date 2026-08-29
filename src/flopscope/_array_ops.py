@@ -46,8 +46,8 @@ from flopscope._symmetric import SymmetricTensor
 from flopscope._symmetry_utils import (
     broadcast_group,
     validate_symmetry_group,
+    wrap_with_derived_symmetry,
     wrap_with_inferred_symmetry,
-    wrap_with_symmetry,
     wrap_with_trusted_symmetry,
 )
 from flopscope._validation import _normalize_out, require_budget
@@ -257,11 +257,17 @@ def full(
     _fill_probe_dtype = _np.asarray(fill_value).dtype
     refuse_non_numeric_dtype("full", _fill_probe_dtype)
     _billing_dtype = _np.dtype(dtype) if dtype is not None else _fill_probe_dtype
+    # The shape-derived group below says "every orbit holds one repeated
+    # value", which is true of a constant fill and false the moment
+    # fill_value broadcasts distinct values across the result. Decided here,
+    # outside the deduct, since it reads only the argument.
+    constant_fill = _np.ndim(fill_value) == 0
     with budget.deduct(
         "full", flop_cost=cost, subscripts=None, shapes=(), dtypes=(_billing_dtype,)
     ):
         result = _call_numpy(_np.full, shape, fill_value, dtype=dtype, **kwargs)
-        result = _wrap_constant_fill(result)
+        if constant_fill:
+            result = _wrap_constant_fill(result)
     return result
 
 
@@ -502,12 +508,20 @@ def full_like(
         result = _call_numpy(
             _np.full_like, _to_base_ndarray(a), fill_value, dtype=dtype, **kwargs
         )
+    # full_like overwrites every element, so the template's symmetry says
+    # nothing about the result -- what carries the claim is the fill. A
+    # scalar fill leaves every orbit constant; a broadcast array fill writes
+    # distinct values into positions the tag would call redundant, so neither
+    # the propagated nor the shape-inferred group survives it.
+    constant_fill = _np.ndim(fill_value) == 0
     propagated_symmetry = None
-    if isinstance(a, SymmetricTensor):
+    if constant_fill and isinstance(a, SymmetricTensor):
         propagated_symmetry = _compatible_symmetry_for_shape(a.symmetry, result.shape)
     if propagated_symmetry is not None:
         return wrap_with_trusted_symmetry(result, propagated_symmetry)  # type: ignore[return-value]
-    inferred_symmetry = _infer_constant_shape_symmetry(result.shape)
+    inferred_symmetry = (
+        _infer_constant_shape_symmetry(result.shape) if constant_fill else None
+    )
     if inferred_symmetry is None:
         if isinstance(a, SymmetricTensor):
             return _np.array(result, copy=False, subok=False)  # type: ignore[return-value]
@@ -617,7 +631,7 @@ def reshape(a: ArrayLike, /, *args: Any, **kwargs: Any) -> FlopscopeArray:
             reason="reshape merges or splits axes inside the symmetric block",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -642,7 +656,7 @@ def transpose(
     out_group = _st.transport_transpose(in_group, ndim=a_arr.ndim, axes=axes)
     # transpose never genuinely drops (axis perm always preserves S_n etc.).
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -666,7 +680,7 @@ def swapaxes(a: ArrayLike, axis1: int, axis2: int) -> FlopscopeArray:
         axis2=axis2,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -694,7 +708,7 @@ def moveaxis(
         destination=destination,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -763,7 +777,7 @@ def concatenate(
         # keep writing to.
         return out  # type: ignore[return-value]
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -812,7 +826,7 @@ def stack(
     if out is not None:
         return out  # type: ignore[return-value]
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -850,7 +864,7 @@ def vstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
             reason="vstack breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -888,7 +902,7 @@ def hstack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
             reason="hstack breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -930,7 +944,7 @@ def split(
             axis=axis,
         )
     if out_group is not None:
-        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+        return [wrap_with_derived_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
     return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
@@ -961,7 +975,7 @@ def hsplit(
             reason="hsplit breaks block symmetry",
         )
     if out_group is not None:
-        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+        return [wrap_with_derived_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
     return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
@@ -997,7 +1011,7 @@ def vsplit(
     ):
         raw_pieces = _call_numpy(_np.vsplit, ary_arr, indices_or_sections)
     if out_group is not None:
-        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+        return [wrap_with_derived_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
     return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
@@ -1028,7 +1042,7 @@ def squeeze(
             reason="squeeze removes an axis inside the symmetric block",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1051,7 +1065,7 @@ def expand_dims(a: ArrayLike, axis) -> FlopscopeArray:
         axis=axis,
     )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1090,7 +1104,7 @@ def ravel(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
             reason="ravel collapses to a single axis; block cannot fit",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1120,7 +1134,7 @@ def copy(a: ArrayLike, *args: Any, **kwargs: Any) -> FlopscopeArray:
     ):
         result = _call_numpy(_np.copy, a_arr, *args, **kwargs)
     if isinstance(a, SymmetricTensor):
-        return wrap_with_symmetry(result, a.symmetry)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, a.symmetry)  # type: ignore[return-value]
     return result  # type: ignore[return-value]
 
 
@@ -1226,7 +1240,7 @@ def tile(A: ArrayLike, reps: int | ArrayLike) -> FlopscopeArray:
             reason="tile reps not constant on block orbit",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1259,7 +1273,7 @@ def repeat(
             reason="repeat along a block axis breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1294,7 +1308,7 @@ def flip(
             reason="flip on a proper subset of block axes breaks group action",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1327,7 +1341,7 @@ def roll(
             reason="roll along a block axis breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -1608,7 +1622,7 @@ def broadcast_to(
             reason="broadcast_to expands length-1 block axes",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -2014,7 +2028,7 @@ def atleast_1d(
                 reason="atleast_1d incompatible with block structure",
             )
         if out_group is not None:
-            return wrap_with_symmetry(result, out_group)
+            return wrap_with_derived_symmetry(result, out_group)
         return _asplainflopscope(result)
 
     if len(arys) == 1:
@@ -2050,7 +2064,7 @@ def atleast_2d(
                 reason="atleast_2d incompatible with block structure",
             )
         if out_group is not None:
-            return wrap_with_symmetry(result, out_group)
+            return wrap_with_derived_symmetry(result, out_group)
         return _asplainflopscope(result)
 
     if len(arys) == 1:
@@ -2086,7 +2100,7 @@ def atleast_3d(
                 reason="atleast_3d incompatible with block structure",
             )
         if out_group is not None:
-            return wrap_with_symmetry(result, out_group)
+            return wrap_with_derived_symmetry(result, out_group)
         return _asplainflopscope(result)
 
     if len(arys) == 1:
@@ -2252,7 +2266,7 @@ def broadcast_arrays(*args: ArrayLike, **kwargs: Any) -> tuple[FlopscopeArray, .
             input_shape=array.shape,
             output_shape=output_shape,
         )
-        wrapped.append(wrap_with_symmetry(broadcasted, symmetry))
+        wrapped.append(wrap_with_derived_symmetry(broadcasted, symmetry))
     return tuple(wrapped)
 
 
@@ -2369,7 +2383,7 @@ def column_stack(tup: Sequence[ArrayLike]) -> FlopscopeArray:
             reason="column_stack breaks block symmetry",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        return wrap_with_derived_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 
@@ -2634,7 +2648,7 @@ def dsplit(ary: ArrayLike, *args: Any, **kwargs: Any) -> list[FlopscopeArray]:
     ):
         raw_pieces = _call_numpy(_np.dsplit, ary_arr, *args, **kwargs)
     if out_group is not None:
-        return [wrap_with_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
+        return [wrap_with_derived_symmetry(p, out_group) for p in raw_pieces]  # type: ignore[return-value]
     return [_asplainflopscope(p) for p in raw_pieces]  # type: ignore[return-value]
 
 
@@ -3377,7 +3391,12 @@ def matrix_transpose(x: ArrayLike) -> FlopscopeArray:
             reason="matrix_transpose: rank too low for sym",
         )
     if out_group is not None:
-        return wrap_with_symmetry(result, out_group)  # type: ignore[return-value]
+        # The trusted wrapper by name, because this function is the one
+        # symmetry-propagating transform without a @_counted_wrapper frame
+        # to inherit the exemption from (see the note above). Routing it
+        # through the ordinary derived helper would validate and charge, and
+        # this operation is registered as free.
+        return wrap_with_trusted_symmetry(result, out_group)  # type: ignore[return-value]
     return _asplainflopscope(result)  # type: ignore[return-value]
 
 

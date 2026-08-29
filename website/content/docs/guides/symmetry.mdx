@@ -52,8 +52,18 @@ with flops.BudgetContext(flop_budget=10**6) as budget:
     print(budget.flops_used)
 ```
 
-`flops.as_symmetric()` validates the data first. After that, Flopscope propagates
-symmetry metadata algebraically through many operations. Unary pointwise ops preserve symmetry-aware costs and keep the same exact group, including non-full groups such as `C_k` or `D_k`. Slicing, reductions, and binary pointwise ops can weaken it or remove it entirely.
+`flops.as_symmetric()` validates the data first. Validation uses a tolerance,
+while the tag it grants is read as exact — the cost model prices every position
+in an orbit after the first as redundant and does not read the buffer again — so
+`as_symmetric` makes the two agree before tagging: each orbit takes the value at
+its lexicographically smallest index. Data that is already exactly invariant is
+returned unchanged, so a genuinely symmetric array is tagged without being
+copied; data that passed only within the tolerance is copied first, and the
+values in the discarded positions do not survive. Your own array is never
+modified either way.
+
+After that, Flopscope propagates symmetry metadata algebraically through many
+operations. Unary pointwise ops preserve symmetry-aware costs and keep the same exact group, including non-full groups such as `C_k` or `D_k`. Slicing, reductions, and binary pointwise ops can weaken it or remove it entirely.
 
 ## How to declare symmetry
 
@@ -175,12 +185,31 @@ This helper is ideal for docs, tests, and experiments:
 - prefer `fnp.random.symmetric()` for synthetic data generation
 - `fnp.random.symmetric` internally samples data and calls ``flops.symmetrize`` so the
   projection and validation behavior is identical.
-- approximate costs (meaningful estimate):
+- approximate costs (meaningful estimate), for the default
+  ``mode="reynolds-projection"``:
   - `fnp.random.symmetric`: ``C_dist(n) + |G| * n + n`` + validation
   - `flops.symmetrize`: ``|G| * n + n`` + validation  
     with ``n`` total elements and ``|G|`` group order.
 - in exact arithmetic it projects onto the invariant subspace, and in practice
   `flops.as_symmetric()` validates the result with its usual validation tolerances
+
+Both functions also accept ``mode="canonical-copy"``, which keeps one entry per
+orbit — the one at the lexicographically smallest index — instead of averaging
+the orbit. It replaces the ``|G| * n + n`` projection term with a single ``n``
+copy pass (so ``flops.symmetrize`` costs ``n``, and ``fnp.random.symmetric``
+costs ``C_dist(n) + n``), preserves the input dtype instead of promoting to
+float64, and reads only the group's generators, so it stays available for groups
+too large to enumerate (see below). It is a different result, not a cheaper
+route to the same one: the other entries in each orbit are discarded rather than
+averaged in. Reach for it when you want a tensor that *has* the symmetry, and
+for Reynolds when you want the projection of your data *onto* the invariant
+subspace.
+
+```python
+x = fnp.array([[1.0, 2.0], [9.0, 3.0]])
+flops.symmetrize(x, symmetry=(0, 1))                          # [[1, 5.5], [5.5, 3]]
+flops.symmetrize(x, symmetry=(0, 1), mode="canonical-copy")   # [[1, 2  ], [2,   3]]
+```
 - it keeps examples consistent across symmetry classes
 
 ```python
@@ -534,6 +563,22 @@ high-rank auto-inferred symmetries on degenerate shapes (`(1,)*N` for large `N`)
 trip the cap. The warning fires once per `(op_name, |G|)` pair per process to
 avoid log flooding. Suppress with `flops.configure(symmetry_warnings=False)`,
 which shares the flag with `SymmetryLossWarning`.
+
+`flops.symmetrize` and `fnp.random.symmetric` are the exception to the
+degrade-and-continue behaviour above: for them, enumerating the group *is* the
+computation, so there is no dense cost to fall back to. Above the budget they
+raise `ValueError` rather than warn, and the refused call is not charged. Use
+`mode="canonical-copy"`, which reads the generators alone and never enumerates
+the group:
+
+```python
+big = flops.SymmetryGroup.symmetric(axes=tuple(range(9)))    # |G| = 362,880
+wide = fnp.zeros((2,) * 9)
+with flops.BudgetContext(flop_budget=int(1e9)):
+    flops.symmetrize(wide, symmetry=big)                     # ValueError
+    flops.symmetrize(wide, symmetry=big, mode="canonical-copy")   # fine
+    fnp.random.symmetric((2,) * 9, big, mode="canonical-copy")    # fine
+```
 
 The gate keys on `|G|` rather than degree because `|G|` is the actual driver
 of enumeration cost. A high-degree but small-order group like

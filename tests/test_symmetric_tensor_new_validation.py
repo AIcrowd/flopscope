@@ -54,15 +54,16 @@ def test_genuinely_symmetric_data_still_works():
     assert t.symmetry is not None
 
 
-@pytest.mark.xfail(
-    reason="known in-process bypass: wrap_with_symmetry runs only a structural "
-    "check, and __new__ trusts it by code-object identity. Not remotely "
-    "reachable (absent from REGISTRY and from the flopscope/fnp namespaces). "
-    "Closing it needs a capability token threaded through 34 internal call "
-    "sites, or a content check inside wrap_with_symmetry itself.",
-    strict=True,
-)
 def test_wrap_with_symmetry_does_not_mint_an_unvalidated_tag():
+    """The untrusted wrapper is not a side door around the validating constructor.
+
+    ``wrap_with_symmetry`` used to be trusted by code-object identity, so a
+    direct call attached a tag to unexamined data for free. Trust now belongs
+    to ``wrap_with_trusted_symmetry`` alone, and the package's own transforms
+    reach it through ``wrap_with_derived_symmetry``; nothing internal calls
+    this one. A caller that does is making a fresh claim and is checked and
+    charged for it like any other.
+    """
     from flopscope._symmetry_utils import wrap_with_symmetry
 
     raw = np.random.default_rng(0).random((6, 6))

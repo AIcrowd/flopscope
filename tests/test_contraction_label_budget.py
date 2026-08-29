@@ -810,7 +810,10 @@ def test_untagged_operand_above_budget_still_pays_the_dense_price(
     )
     assert dense == 2 * alpha - m
 
-    tagged = billed(lambda: fn(_sym_ones(a_big, (0, 1)), plain_b))
+    # Built outside billed(...) so only the contraction is measured: tagging
+    # is a validated, charged operation in its own right.
+    sym_a = _sym_ones(a_big, (0, 1))
+    tagged = billed(lambda: fn(sym_a, plain_b))
     assert tagged < dense  # the symmetry genuinely scales this contraction
 
 

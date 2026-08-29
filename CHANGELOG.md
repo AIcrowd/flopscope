@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+One change here raises prices, in one narrow case. **`full` and `full_like`
+with a non-scalar `fill_value` no longer carry an inferred symmetry tag**, so
+operations on their results are priced as the dense arrays they are — measured
+at `+50%` on `fnp.sin` and `+55%` on `fnp.einsum("ij,ij->")` for a `(3, 3)`
+result built from a length-3 fill.
+
+The rise reaches only calls that were being given a tag the data did not
+support: a non-scalar fill into a shape with two or more equal-length axes.
+A non-scalar fill into any other shape was never tagged and is unchanged
+(a `(3, 4)` result still costs 384 on `fnp.sin`, a `(5,)` result still 160),
+and a scalar `fill_value` keeps its tag and its price at every shape. Values
+are unchanged throughout.
+
+**It ships as a new version opening a new phase, so no submission is
+re-evaluated against it: nothing already scored is repriced.**
+
+### Symmetry
+
+- **A symmetry tag now matches the buffer it is attached to.** `as_symmetric`
+  and the public `SymmetricTensor` constructor validate within a tolerance,
+  but the cost model reads the resulting tag as exact. They now copy one
+  representative per orbit before attaching it, so the two agree. Data that is
+  already exactly invariant is passed through unchanged, so the common case
+  keeps its zero-copy view semantics — including its use as an `out=`
+  destination with a caller-chosen layout. Charges are unchanged.
+
+- **`symmetrize` gains `mode=`.** The default, `"reynolds-projection"`, is the
+  existing behaviour and is unchanged in both result and price. The new
+  `"canonical-copy"` keeps each orbit's lexicographically first entry instead
+  of averaging the orbit, bills `numel(data)` — the rate every other
+  materializing copy pays — and preserves the input dtype rather than
+  promoting to float64. It reads only the group's generators, so it stays
+  available for groups too large to enumerate. `fnp.random.symmetric` takes
+  the same argument.
+
+- **Reynolds symmetrization refuses an unenumerable group before charging for
+  it.** `symmetrize` and `fnp.random.symmetric` previously computed the cost
+  of a projection from a closed-form group order, charged it, and only then
+  hit the enumeration limit. They now raise `ValueError` first, naming
+  `mode="canonical-copy"`, and the refused call costs nothing.
+
+- **`full` and `full_like` no longer infer symmetry from shape when
+  `fill_value` is not a scalar.** The inferred group describes a constant
+  fill; a broadcast array fill writes distinct values into positions it would
+  otherwise report as redundant.
+
+- **Symmetry attachment inside the package routes through
+  `wrap_with_derived_symmetry`.** Trust is anchored to
+  `wrap_with_trusted_symmetry` alone, so `wrap_with_symmetry` — which nothing
+  internal calls — is validated and charged like any other caller-supplied
+  claim.
+
 ## v0.12.0 (2026-08-21)
 
 ### Billing impact
