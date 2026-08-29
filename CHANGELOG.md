@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.12.1 (2026-08-29)
 
 ### Billing impact
 
@@ -17,8 +17,11 @@ A non-scalar fill into any other shape was never tagged and is unchanged
 and a scalar `fill_value` keeps its tag and its price at every shape. Values
 are unchanged throughout.
 
-**It ships as a new version opening a new phase, so no submission is
-re-evaluated against it: nothing already scored is repriced.**
+**This one ships inside the current phase rather than opening a new one, so
+the usual "no submission is re-evaluated against it" does not apply on its
+own.** Instead it was measured: no already-scored submission in the current
+phase passes a non-scalar `fill_value` to either function, so none is
+repriced by this change.
 
 ### Symmetry
 
@@ -55,6 +58,10 @@ re-evaluated against it: nothing already scored is repriced.**
   `wrap_with_trusted_symmetry` alone, so `wrap_with_symmetry` — which nothing
   internal calls — is validated and charged like any other caller-supplied
   claim.
+
+### Fix
+
+- **symmetry**: make a symmetry tag match the buffer it is attached to (#253)
 
 ## v0.12.0 (2026-08-21)
 
