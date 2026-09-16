@@ -441,7 +441,7 @@ def test_stats_ppf_composites_packaged_weight_unity():
     # stats._base coerces inputs to float64 (dtype_rate 2.0) before billing;
     # weight stays 1.0, so charged = 2 * (per_elem * n).
     assert cost(lambda: fstats.norm.ppf(x)) == 2 * 83 * 100
-    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 2 * 81 * 100
+    assert cost(lambda: fstats.truncnorm.ppf(x, -1.0, 1.0)) == 2 * 1392 * 100
     assert cost(lambda: fstats.lognorm.ppf(x, 0.5)) == 2 * 106 * 100
 
 
@@ -1607,25 +1607,25 @@ def test_stats_laplace_pdf_composite():
 
 
 def test_stats_truncnorm_pdf_composite():
-    """truncnorm.pdf: z(2)+std_norm_pdf(z)(20)+phi_denom(scalar)+div(1)+bounds(4) = 28/elem, weight 1.0."""
+    """truncnorm.pdf: numerical upper bound 315/elem, weight 1.0."""
     load_weights()
     try:
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 2 * 28 * 1000
+        assert cost(lambda: fstats.truncnorm.pdf(x, -1.0, 1.0)) == 2 * 315 * 1000
     finally:
         reset_weights()
 
 
 def test_stats_truncnorm_cdf_composite():
-    """truncnorm.cdf: z(2)+std_norm_cdf(z)(46)+result(3)+2 where(4) = 51/elem (α=50.6), weight 1.0."""
+    """truncnorm.cdf: numerical upper bound 844/elem, weight 1.0."""
     load_weights()
     try:
         import flopscope.stats as fstats
 
         x = fnp.asarray(np.random.rand(1000) * 0.6 + 0.2)
-        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 2 * 51 * 1000
+        assert cost(lambda: fstats.truncnorm.cdf(x, -1.0, 1.0)) == 2 * 844 * 1000
     finally:
         reset_weights()
 
@@ -1650,8 +1650,8 @@ def test_stats_composite_family_packaged_weight_unity():
     assert cost(lambda: fstats.logistic.cdf(xl)) == 2 * 21 * 100
     assert cost(lambda: fstats.logistic.ppf(q)) == 2 * 28 * 100
     assert cost(lambda: fstats.laplace.pdf(xl)) == 2 * 22 * 100
-    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 2 * 28 * 100
-    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 2 * 51 * 100
+    assert cost(lambda: fstats.truncnorm.pdf(xt, -1.0, 1.0)) == 2 * 315 * 100
+    assert cost(lambda: fstats.truncnorm.cdf(xt, -1.0, 1.0)) == 2 * 844 * 100
 
 
 # ---------------- Task 2: fft freq grids + random samplers ----------------

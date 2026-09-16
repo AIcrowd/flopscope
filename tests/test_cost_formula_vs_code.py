@@ -1125,10 +1125,10 @@ class TestStats:
         )
 
     def test_truncnorm_cdf(self, we):
-        # old: == 100 (cost_per_elem=1, weight=16.0); now: 51*100 (composite, weight 1.0)
+        # Fixed analytical bound includes stable tails; stats weight remains 1.0.
         assert (
             _cost_of(flopscope.stats.truncnorm.cdf, numpy.random.rand(100), -2, 2)
-            == 51 * 100
+            == 844 * 100
         )
 
     def test_scalar_input(self, we):

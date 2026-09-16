@@ -321,9 +321,14 @@ GENERATED_PAGES: dict[str, dict] = {
             | `logistic` | $8n$ | $5n$ | $5n$ |
             | `laplace` | $5n$ | $5n$ | $5n$ |
             | `lognorm` | $15n$ | $25n$ | $45n$ |
-            | `truncnorm` | $30n$ | $30n$ | $50n$ |
+            | `truncnorm` | $315n$ | $844n$ | $1392n$ |
 
             where $n$ = `numel(x)` (or `numel(q)` for ppf).
+            For `truncnorm`, $n$ is `max(numel(broadcast(x, a, b, loc, scale)), 1)`;
+            the displayed constants are numerical upper bounds at weight 1.
+            The packaged float64 dtype rate doubles these base counts. The
+            kernel uses log-domain tails and fixed narrow-interval quadrature;
+            arbitrary extreme finite bounds are not an accuracy guarantee.
 
             ## Examples
 
@@ -633,9 +638,9 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "stats.lognorm.pdf": ("15n", r"$15n$"),
     "stats.lognorm.cdf": ("25n", r"$25n$"),
     "stats.lognorm.ppf": ("45n", r"$45n$"),
-    "stats.truncnorm.pdf": ("30n", r"$30n$"),
-    "stats.truncnorm.cdf": ("30n", r"$30n$"),
-    "stats.truncnorm.ppf": ("50n", r"$50n$"),
+    "stats.truncnorm.pdf": ("315n", r"$315n$"),
+    "stats.truncnorm.cdf": ("844n", r"$844n$"),
+    "stats.truncnorm.ppf": ("1392n", r"$1392n$"),
 }
 
 CATEGORY_COST_LATEX: dict[str, tuple[str, str]] = {

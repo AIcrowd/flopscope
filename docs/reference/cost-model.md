@@ -1494,9 +1494,9 @@ per-element counts below even for a float32 input (e.g. `stats.uniform.pdf` on a
 | `stats.laplace.pdf` | 22 | DERIVED: \|x−loc\|(3) + exp(−z)(17) + /(2·scale)(2); weight 1.0 |
 | `stats.laplace.cdf` | 40 | DERIVED composite: two eager exp branches + arithmetic/select; weight 1.0 |
 | `stats.laplace.ppf` | 51 | DERIVED composite: two eager log branches + edge selects; weight 1.0 |
-| `stats.truncnorm.pdf` | 28 | DERIVED composite: norm.pdf + cdf normalization; weight 1.0 |
-| `stats.truncnorm.cdf` | 51 | DERIVED composite: affine + norm.cdf + boundary selects; weight 1.0 |
-| `stats.truncnorm.ppf` | 81 | DERIVED composite: affine + rational + Newton with erf+exp; weight 1.0 |
+| `stats.truncnorm.pdf` | 315 | DERIVED upper bound: domain/masks 39 + max(narrow 211, log-mass density 276); weight 1.0 |
+| `stats.truncnorm.cdf` | 844 | DERIVED upper bound: domain/masks 44 + max(narrow 374, three log masses and eager tail selection 800); weight 1.0 |
+| `stats.truncnorm.ppf` | 1392 | DERIVED upper bound: domain/masks 49 + max(narrow fixed Newton 1037, log-tail inverse 1343); weight 1.0 |
 | `stats.lognorm.pdf` | 62 | DERIVED composite: log + exp + arithmetic per element; weight 1.0 |
 | `stats.lognorm.cdf` | 70 | DERIVED composite: log + erf rational approx + arithmetic; weight 1.0 |
 | `stats.lognorm.ppf` | 106 | DERIVED composite: ndtri + exp; weight 1.0 |
@@ -1504,6 +1504,12 @@ per-element counts below even for a float32 input (e.g. `stats.uniform.pdf` on a
 | `stats.uniform.cdf` | 4 | DERIVED: sub + div + 2 clip compare/selects; weight 1.0 |
 
 Source: `src/flopscope/stats/`.
+
+Truncated-normal counts are fixed analytical numerical bounds, including the
+fixed four-step inverse and eight-node narrow-interval quadrature. They are
+not average timings or hardware-counter calibrations. See the
+[complete branch derivation and numerical limits](truncnorm-cost.md).
+The existing empty-output minimum of one billed element is retained.
 
 ---
 

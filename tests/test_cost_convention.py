@@ -523,7 +523,7 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     "stats.norm.cdf": (lambda: fst.norm.cdf(_v100), 48 * 100),
     "stats.norm.ppf": (lambda: fst.norm.ppf(_u100), 83 * 100),
     "stats.lognorm.ppf": (lambda: fst.lognorm.ppf(_u100, 0.5), 106 * 100),
-    "stats.truncnorm.ppf": (lambda: fst.truncnorm.ppf(_u100, -2, 2), 81 * 100),
+    "stats.truncnorm.ppf": (lambda: fst.truncnorm.ppf(_u100, -2, 2), 1392 * 100),
     # audit-2 gap fixes (fix/cost-model-gaps):
     "stats.laplace.cdf": (lambda: fst.laplace.cdf(_v100), 40 * 100),
     "stats.laplace.ppf": (lambda: fst.laplace.ppf(_u100), 51 * 100),
@@ -749,7 +749,7 @@ DEFERRED: dict[str, str] = {
     # ---- Stats ops ---------------------------------------------------------
     # All composite kernels, weight 1.0; exact values read from _deduct_and_call() args.
     # Pinned in OP_EXPECTATIONS: norm.pdf=27, norm.cdf=48, norm.ppf=83,
-    #   lognorm.ppf=106, lognorm.pdf=62, lognorm.cdf=70, truncnorm.ppf=81,
+    #   lognorm.ppf=106, lognorm.pdf=62, lognorm.cdf=70, truncnorm.ppf=1392,
     #   laplace.cdf=40, laplace.ppf=51, uniform.cdf=4, cauchy.pdf=6.
     # DEFERRED (not probed individually; formula documented in cost-model.md):
     "stats.uniform.pdf": "composite; 1 FLOP/elem (trivial range-check only); weight 1.0",
@@ -763,8 +763,8 @@ DEFERRED: dict[str, str] = {
     "stats.logistic.cdf": "composite; 21 FLOPs/elem (z+exp+arith); weight 1.0",
     "stats.logistic.ppf": "composite; 28 FLOPs/elem (log+loc/scale+where); weight 1.0",
     "stats.laplace.pdf": "composite; 22 FLOPs/elem (abs+exp+scale); weight 1.0",
-    "stats.truncnorm.pdf": "composite; 28 FLOPs/elem (norm.pdf+cdf-norm); weight 1.0",
-    "stats.truncnorm.cdf": "composite; 51 FLOPs/elem (affine+norm.cdf+selects); weight 1.0",
+    "stats.truncnorm.pdf": "composite; 315 FLOPs/elem numerical upper bound; weight 1.0",
+    "stats.truncnorm.cdf": "composite; 844 FLOPs/elem numerical upper bound; weight 1.0",
     # ---- counted_custom: copy / gather / scatter / structure ops ----------
     "array": "numel(input); plain copy",
     "full": "numel; scalar broadcast",

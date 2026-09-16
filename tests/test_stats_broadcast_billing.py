@@ -48,7 +48,7 @@ class TestBroadcastBilling:
         with BudgetContext(10**9, quiet=True) as ctx:
             result = truncnorm.pdf(x, a=a, b=2.0)
         assert np.asarray(result).shape == (100, 10)
-        assert ctx.flops_used == 28 * 1000
+        assert ctx.flops_used == 315 * 1000
 
 
 # ---------------------------------------------------------------------------
