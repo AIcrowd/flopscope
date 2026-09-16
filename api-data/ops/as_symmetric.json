@@ -1,0 +1,303 @@
+{
+  "detail_href": "/docs/api/numpy/as-symmetric/",
+  "detail_json_href": "/api-data/ops/as_symmetric.json",
+  "docs": {
+    "sections": [
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Wrap "
+              },
+              {
+                "kind": "emphasis",
+                "text": "data"
+              },
+              {
+                "kind": "text",
+                "text": " as a "
+              },
+              {
+                "display_text": "SymmetricTensor",
+                "explicit_title": false,
+                "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.SymmetricTensor.html",
+                "href": "",
+                "kind": "role_reference",
+                "original_target": "SymmetricTensor",
+                "role": "class",
+                "suppress_link": false,
+                "target": "SymmetricTensor",
+                "unresolved": false
+              },
+              {
+                "kind": "text",
+                "text": " after validating symmetry."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "The tensor data."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "flops.ndarray",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "The tensor data."
+                  }
+                ],
+                "name": "data",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Exact symmetry input accepted by "
+                      },
+                      {
+                        "display_text": "normalize_symmetry_input",
+                        "explicit_title": false,
+                        "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.normalize_symmetry_input.html",
+                        "href": "",
+                        "kind": "role_reference",
+                        "original_target": "normalize_symmetry_input",
+                        "role": "func",
+                        "suppress_link": false,
+                        "target": "normalize_symmetry_input",
+                        "unresolved": false
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryGroup or shorthand",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Exact symmetry input accepted by "
+                  },
+                  {
+                    "display_text": "normalize_symmetry_input",
+                    "explicit_title": false,
+                    "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.normalize_symmetry_input.html",
+                    "href": "",
+                    "kind": "role_reference",
+                    "original_target": "normalize_symmetry_input",
+                    "role": "func",
+                    "suppress_link": false,
+                    "target": "normalize_symmetry_input",
+                    "unresolved": false
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "symmetry",
+                "type": "field_list"
+              }
+            ],
+            "title": "Parameters",
+            "type": "field_list"
+          }
+        ],
+        "title": "Parameters"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "code",
+                        "text": "data"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " carrying validated symmetry metadata, exactly invariant\nunder "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "symmetry"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ". Data that is already exactly invariant is\nwrapped as a view; data that satisfied the check only within the\ntolerance is copied first, with each orbit taking the value at its\nlexicographically smallest index, so the metadata describes the\nbuffer it is attached to. "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "data"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " itself is never modified."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetricTensor",
+                "inline": [
+                  {
+                    "kind": "code",
+                    "text": "data"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " carrying validated symmetry metadata, exactly invariant\nunder "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "symmetry"
+                  },
+                  {
+                    "kind": "text",
+                    "text": ". Data that is already exactly invariant is\nwrapped as a view; data that satisfied the check only within the\ntolerance is copied first, with each orbit taking the value at its\nlexicographically smallest index, so the metadata describes the\nbuffer it is attached to. "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "data"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " itself is never modified."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Returns",
+            "type": "field_list"
+          }
+        ],
+        "title": "Returns"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If the data does not satisfy the claimed symmetry."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If the data does not satisfy the claimed symmetry."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Raises",
+            "type": "field_list"
+          }
+        ],
+        "title": "Raises"
+      },
+      {
+        "blocks": [
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope as flops"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": ""
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "matrix = fnp.array([[1.0, 2.0], [2.0, 3.0]])"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "tagged = flops.as_symmetric(matrix, symmetry=(0, 1))"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "tagged.symmetric_axes"
+              },
+              {
+                "kind": "output",
+                "text": "[(0, 1)]"
+              }
+            ],
+            "type": "doctest_block"
+          }
+        ],
+        "title": "Examples"
+      }
+    ]
+  },
+  "op": {
+    "category": "counted_custom",
+    "cost_formula": "per-operation",
+    "cost_formula_latex": "varies",
+    "flopscope_ref": "fnp.as_symmetric",
+    "module": "flopscope",
+    "name": "as_symmetric",
+    "notes": "Validate + tag data as symmetric. Cost: k*(7*numel-1), k=#non-identity generators (one allclose per generator).",
+    "numpy_ref": "np.as_symmetric",
+    "signature": "fnp.as_symmetric(data: 'np.ndarray', *, symmetry) -> 'SymmetricTensor'",
+    "status": "supported",
+    "summary": "Wrap *data* as a :class:`SymmetricTensor` after validating symmetry.",
+    "weight": 1.0
+  },
+  "schema_version": 1,
+  "slug": "as_symmetric",
+  "source": {
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L1105",
+    "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.as_symmetric.html"
+  }
+}

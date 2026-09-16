@@ -1,0 +1,58 @@
+{
+  "detail_href": "/docs/api/numpy/random/sample/",
+  "detail_json_href": "/api-data/ops/random-sample.json",
+  "docs": {
+    "sections": [
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "This is an alias of "
+              },
+              {
+                "kind": "code",
+                "text": "random_sample"
+              },
+              {
+                "kind": "text",
+                "text": ". See "
+              },
+              {
+                "kind": "code",
+                "text": "random_sample"
+              },
+              {
+                "kind": "text",
+                "text": "  for the complete documentation."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Summary"
+      }
+    ]
+  },
+  "op": {
+    "category": "counted_custom",
+    "cost_formula": "per-operation",
+    "cost_formula_latex": "varies",
+    "flopscope_ref": "fnp.random.sample",
+    "module": "numpy.random",
+    "name": "random.sample",
+    "notes": "Sampling; cost = numel(output).",
+    "numpy_ref": "np.random.sample",
+    "signature": "fnp.random.sample(*args, **kwargs)",
+    "status": "supported",
+    "summary": "This is an alias of `random_sample`. See `random_sample`  for the complete documentation.",
+    "weight": 1.0
+  },
+  "schema_version": 1,
+  "slug": "random-sample",
+  "source": {
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/numpy/random/__init__.py#L482",
+    "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.random.sample.html"
+  }
+}
