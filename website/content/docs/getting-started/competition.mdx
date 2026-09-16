@@ -11,6 +11,18 @@ title: "Competition Guide"
 - How to read budget summaries
 - Common competition pitfalls and tips
 
+## Competition eligibility
+
+For Phase 2 of the ARC White-Box Estimation Challenge, the
+[official Rules](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026/challenge_rules)
+govern eligibility and take precedence over library documentation. Staying within
+a metered FLOP budget does not by itself make a submission eligible. Do not pack
+independent values into one machine element to obtain an accounting advantage,
+even if every operation is metered. Choosing a lower-precision dtype or quantizing
+values is not, by itself, this packing technique; all choices still have to satisfy
+the Rules. See [On packing](/docs/understanding/flop-counting-model/#on-packing) for the
+distinction between billing and eligibility.
+
 ## Setting a FLOP budget
 
 Every competition submission runs inside a FLOP budget. Use `BudgetContext` to declare how many FLOPs your code is allowed to spend:
