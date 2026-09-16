@@ -1,8 +1,8 @@
 # Cost model reference
 
 > **Start here.** This is the cost model's conceptual and audit reference. Read it
-> to understand *how* billing works and to satisfy yourself that it is correct and
-> non-gameable — you do **not** need to read every operation. The exhaustive,
+> to understand *how* billing works and audit its accounting safeguards — you do
+> **not** need to read every operation. The exhaustive,
 > generated per-op list (every op with its `cost_formula` and `weight`) lives in
 > [`ops.json`](#exhaustive-per-op-reference) and the website API pages; this doc
 > explains the model by **family rule** so you can reason about a whole class at once.
@@ -59,7 +59,7 @@ read off and audited on its own:
 For a real 32-bit workload `dtype_rate` and `complex_factor` are both `1`, so the bill is
 exactly `int(flop_cost × weight)` and nothing here changes.
 
-The rule that keeps the split honest — and the model non-gameable — is one **separation
+The rule that keeps these factors separate is one **separation
 invariant**: *a shape or algorithm constant never lives in a weight* (anything depending
 on a matrix dimension or loop length belongs in `flop_cost`); *width policy never lives in
 `flop_cost` or `weight`* (it lives in `dtype_rate`); and *complex structure lives in
@@ -304,10 +304,12 @@ meter bills a float64 multiply the same as a float32 multiply, so a participant 
 two independent lower-precision payloads into the two halves of a 64-bit lane (or a narrow
 integer into a wide one) and process both under a single op's charge.
 
-The answer to both is the same, and it is **not** to ban wide or complex dtypes — it is
-to **price them**. `dtype_rate` charges a 64-bit-class op `2×` a 32-bit-class op;
+The meter addresses these cases by pricing width and complex structure.
+`dtype_rate` charges a 64-bit-class op `2×` a 32-bit-class op;
 `complex_factor` charges a complex op the real-operation count it actually expands into.
-Under that pricing neither pack pays off (see [On packing](#on-packing)).
+These prices address the examples below; they do not guarantee that every packing
+strategy is unprofitable or permitted. Competition eligibility is governed separately
+by the official Rules (see [On packing](#on-packing)).
 
 ### The billing unit and rate table
 
@@ -819,35 +821,54 @@ complex128 it is `7936` (that exact total × the 2.0 rate). These values are pin
 
 ### On packing
 
-Packing is **not banned and not judged** — it is priced so it does not pay:
+**Metering does not establish competition eligibility.** For Phase 2 of the
+[ARC White-Box Estimation Challenge](https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026/challenge_rules),
+the official Rules are the source of truth and take precedence over this reference.
+A submission's score benefit must derive from its estimation method. The Sponsor
+may invalidate, re-score, or disqualify submissions whose benefit instead derives
+from how computation is accounted.
 
-- **Complex packing loses.** Two honest real multiplies of 100-element float32 arrays bill
-  `200`; folding the two payloads into one complex64 multiply bills `600` (factor 6) — a
+**Do not pack independent values into one machine element to obtain an accounting
+advantage.** The Rules include the example of packing booleans into a wider integer
+and processing them with bitwise operations. Metering every operation, including
+packing and unpacking, does not make such an accounting advantage permitted.
+
+Choosing a lower-precision dtype or quantizing values is not, by itself, this
+packing technique; those choices still have to satisfy the Rules. The shared
+`1.0` rate for dtypes at or below 32 bits does not grant permission to use packed
+computation. Ask the competition organizers about uncertain techniques.
+
+The following examples describe billing behavior, not permission:
+
+- **Complex packing in this example loses.** Two real multiplies of 100-element
+  float32 arrays bill `200`; folding the two payloads into one complex64 multiply bills `600` (factor 6) — a
   `3×` loss. At matmul scale the packed complex matmul bills `3968` against the `1920` of
   the two honest real matmuls — roughly `2×` worse, and that is before any pack/unpack
   overhead.
-- **Width packing breaks even at best.** Two float32 multiplies bill `2 × 100 = 200`; one
-  float64 multiply carrying both payloads bills `100 × 2.0 = 200` — identical, and that is
+- **32-into-64 packing in this example breaks even at best.** Two float32 multiplies bill
+  `2 × 100 = 200`; one float64 multiply carrying both payloads bills `100 × 2.0 = 200` — identical, and that is
   *before* the arithmetic to pack the lanes in and unpack the results out, which is itself
-  charged. So 32-into-64 packing is break-even-or-losing.
+  charged. This example is break-even-or-losing.
 - **Sub-32-bit lane tricks** (packing several int8 or int16 payloads into a wider lane) can
-  in principle recover a small constant-factor advantage, since everything at or below
-  32-bit shares the `1.0` rate. That gain is bounded and small, is considered in-bounds,
-  and the rate table deliberately does not chase it.
+  produce an accounting advantage, since everything at or below 32-bit shares the
+  `1.0` rate. The meter does not automatically eliminate this advantage; the Phase 2
+  fairness rule above applies even when the gain is small.
 
 Billing follows the loop numpy actually runs, in both directions: an explicit narrow
 `dtype=` — pointwise, or a reduction's accumulator — bills narrow because the arithmetic
 genuinely happens at that width, trading precision for a cheaper bill exactly as
 requested. `out=` alone never narrows a loop, so it cannot be used to buy a narrow bill
-for wide compute. The width-rate and complex-factor pricing above is what makes packing
-a loss or a break-even; there is no separate dtype-request rule needed to close it.
+for wide compute. These dtype-resolution rules explain the charge; they do not
+replace the competition's fairness requirements.
 
 ---
 
 ## Non-exploitability
 
-The cost model meters compute so a participant cannot do expensive real work while
-being billed cheaply. The two threats are **under-count** (an op billed below its
+The cost model includes safeguards against doing expensive work while being billed
+cheaply. These are accounting safeguards, not a guarantee that every possible
+accounting advantage is prevented or permitted; see [On packing](#on-packing).
+The two threats are **under-count** (an op billed below its
 true cost) and **substitution arbitrage** (routing the same work through a
 cheaper-billed but equivalent op). The model defends against both with invariants,
 each backed by a CI-enforced test you can open and read:
@@ -862,8 +883,8 @@ each backed by a CI-enforced test you can open and read:
 | **A symmetry tag matches the buffer it is attached to** | symmetry validation uses a tolerance (`np.allclose`, `atol=1e-6`, `rtol=1e-5`) while the cost model reads the tag as exact — it prices every position in an orbit after the first as a redundant degree of freedom and does not read the buffer again. The two untrusted ingress points, `as_symmetric(data, symmetry=…)` and a *bare, top-level* `SymmetricTensor(data, symmetry=…)`, therefore validate the claim (raising `SymmetryError` on a mismatch, charging `k·(7n − 1)` for a genuine one, `k` = non-identity generators, `n = data.size`) and then canonicalize: each orbit takes the value at its lexicographically smallest index, so values that survived only within the tolerance do not reach the tag. Data already exactly invariant is passed through unchanged, so the charge and the zero-copy view semantics are unaffected; the caller's array is never modified. Symmetry a flopscope op derives *internally* (e.g. `exp` propagating an already-validated operand's tag, or a slice/transpose view) is exempt, since it never carries a fresh caller-supplied claim. **Scope:** this is a property of those two ingress points, not a package-wide invariant — a Reynolds projection sums each orbit in a fixed element order, so its own output is typically invariant only to about an ulp, as is a symmetric matmul. That residue is rounding rather than caller-placed information, so it is sound for accounting; code needing bit-exactness should use an ingress point or `_canonical_symmetry.is_exactly_invariant`. In-process code can attach a tag regardless (`arr.view(SymmetricTensor)` plus an attribute assignment needs nothing from this package), so the boundary that holds is the wire: the server dispatches registered ops only, and none of those names is registered | `tests/test_symmetry_canonicalization.py`; `tests/test_symmetric_tensor_new_validation.py`; `tests/test_symmetric_cost.py` (`k·(7n−1)` rate) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
-| **Complex packing non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
-| **Width packing break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests); `tests/test_unary_out_never_narrows.py` (the unary float-loop family's whole `out=` grid) |
+| **Complex packing example non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
+| **32-into-64 packing example break-even-or-losing** | a 64-bit op bills `2×` a 32-bit op (`dtype_rate`), so packing two 32-bit payloads into one 64-bit lane is break-even before pack/unpack overhead; billing follows the loop numpy actually runs, so an explicit narrow `dtype=` only bills narrow when the compute is genuinely that narrow, and `out=` alone never shrinks the loop | `tests/test_dtype_cost.py` (width-packing tests); `tests/test_unary_out_never_narrows.py` (the unary float-loop family's whole `out=` grid) |
 | **End-to-end billing** | production billing is pinned per weight tier `{0,1,4,16}` (catches a silent weight regression); the retired `8.0` tier is documented as retired rather than silently dropped | `test_production_weight_billing.py` |
 | **No free path-search wall time** | `opt_einsum.contract_path` runs as pure Python inside the counted wrapper, never through `_call_user_code`, so its wall time books to the unbilled `flopscope_overhead_time_s` bucket rather than to backend FLOPs or residual. Once operand count `k ≥ _LARGE_K_THRESHOLD` (8), `optimize=` is resolved through an **allowlist**, not a denylist: only strategies known to run in linear time (`'greedy'`, `'eager'`, `'opportunistic'`, `'random-greedy'`, `'random-greedy-128'`), `False` (no search), and an explicit user-supplied path (a `list`/`tuple` — the order is already decided, so there is no search to bound) pass through verbatim; everything else — every current `opt_einsum` alias for an exhaustive or superlinear search (`'auto'`, `'auto-hq'`, `'optimal'`, `'branch-all'`, `'branch-2'`, `'branch-1'`, `'dp'`, `'dynamic-programming'`), `True`, `None`, a custom `PathOptimizer`, and any future `opt_einsum` string this list doesn't recognize — downgrades to `'greedy'`. The allowlist replaced an earlier denylist that missed the `'dynamic-programming'` alias (the exact same function object as `'dp'`, registered under a second name) plus `'auto-hq'`/`'branch-1'`; a live repro parked 45.75s of free wall time via `optimize='dynamic-programming'` at k=20 before the allowlist closed it | `_resolve_optimize_for_k` in `_einsum.py`; `tests/test_einsum_path_search_billing.py`, `tests/accumulation/test_path_aware_cost.py::test_large_k_auto_fallback_to_greedy` and `::test_large_k_covers_every_opt_einsum_path_alias` (the latter iterates `opt_einsum.paths._PATH_OPTIONS` directly, so a future `opt_einsum` release adding a new exhaustive-search alias fails CI instead of silently reopening the hole) |
 
