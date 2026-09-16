@@ -76,7 +76,8 @@ def _ndtri(p):
     scalar = p.ndim == 0
     p = np.atleast_1d(p)
 
-    out = np.empty_like(p)
+    # NaN matches neither the edge cases nor an approximation region.
+    out = np.full_like(p, np.nan)
 
     # Edge cases
     out[p == 0.0] = -np.inf

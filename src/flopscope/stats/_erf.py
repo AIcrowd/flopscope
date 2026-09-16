@@ -114,7 +114,8 @@ def _erf(x):
     scalar = x.ndim == 0
     x = np.atleast_1d(x)
 
-    out = np.empty_like(x)
+    # NaN matches none of the region masks below, so initialize its result.
+    out = np.full_like(x, np.nan)
     ax = np.abs(x)
     sign = np.sign(x)
 
