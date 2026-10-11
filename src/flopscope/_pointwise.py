@@ -4369,7 +4369,7 @@ def _counted_mean(np_func, op_name: str):
 mean = _counted_mean(_np.mean, "mean")
 
 
-def _variance_family_cost(a, axis, symmetry, *, with_sqrt: bool) -> int:
+def _variance_family_cost(shape, axis, symmetry, *, with_sqrt: bool) -> int:
     """Honest FMA=2 cost: 2 pointwise passes (center, square) + 2 reductions
     (mean-sum, var-sum) + per-output divides (+ sqrt for std) = 4*numel (+M)."""
     from flopscope._accumulation._reduction import (
@@ -4378,17 +4378,33 @@ def _variance_family_cost(a, axis, symmetry, *, with_sqrt: bool) -> int:
         compute_reduction_accumulation_cost,
     )
 
-    axes_summed = _normalize_axis(axis, a.ndim)
-    m = _num_output_orbits(tuple(a.shape), axes_summed, symmetry)
+    shape = tuple(shape)
+    axes_summed = _normalize_axis(axis, len(shape))
+    m = _num_output_orbits(shape, axes_summed, symmetry)
     reduce_cost = compute_reduction_accumulation_cost(
-        input_shape=tuple(a.shape),
+        input_shape=shape,
         axes_summed=axes_summed,
         symmetry=symmetry,
         op_factor=2,
         extra_ops=2 * m,
     ).total
-    cost = 2 * pointwise_cost(tuple(a.shape), symmetry) + reduce_cost
+    cost = 2 * pointwise_cost(shape, symmetry) + reduce_cost
     return cost + m if with_sqrt else cost
+
+
+def _centered_shape(a_shape, mean) -> tuple:
+    """Shape of ``a - mean``, the array every pass of ``var(..., mean=)`` runs over.
+
+    numpy subtracts a caller-supplied ``mean`` from ``a`` as given, so a mean
+    with extra (or longer) dimensions broadcasts the centred array, and the
+    square and the sum run over that larger shape. A mean numpy cannot
+    broadcast keeps ``a.shape``: numpy refuses the call in its own words.
+    """
+    mean_shape = mean.shape if isinstance(mean, _np.ndarray) else _np.shape(mean)
+    try:
+        return tuple(_np.broadcast_shapes(tuple(a_shape), mean_shape))
+    except ValueError:
+        return tuple(a_shape)
 
 
 def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
@@ -4411,7 +4427,21 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
             a = _np.asarray(a)
         symmetry = _symmetry_of(a)
         keepdims = bool(keepdims)
-        cost = _variance_family_cost(a, axis, symmetry, with_sqrt=with_sqrt)
+        cost = _variance_family_cost(a.shape, axis, symmetry, with_sqrt=with_sqrt)
+        # A ``mean=`` that broadcasts ``a`` to a larger shape turns one
+        # variance into a batch of them, all computed over ``a - mean``.
+        # Bill that array, dense: ``a``'s symmetry tag describes ``a``, not
+        # the broadcast result, so it neither discounts the bill nor tags the
+        # output. Only the plain forms: nanvar/nanstd centre ``a`` in place,
+        # and numpy refuses a mean that would enlarge it.
+        mean = kwargs.get("mean")
+        if mean is not None and not op_name.startswith("nan"):
+            centered_shape = _centered_shape(a.shape, mean)
+            if centered_shape != tuple(a.shape):
+                symmetry = None
+                cost = _variance_family_cost(
+                    centered_shape, axis, None, with_sqrt=with_sqrt
+                )
         # A nan-prefixed reduction tests every INEXACT input element for NaN
         # before reducing -- one extra full pass its plain sibling does not
         # run. The model charges every other value test (count_nonzero,
