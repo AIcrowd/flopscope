@@ -1031,6 +1031,15 @@ output element, so the cell count is `numel(broadcast(operands, out, where))`:
 or mask of the operands' own shape changes nothing. `clip` follows the same rule; an op
 without a native `out=` computes over its operand and keeps the operand count.
 
+**A `where=` mask can break an operand's symmetry.** numpy writes only the positions the
+mask selects; the rest keep the previous contents of `out=`, or are left uninitialised
+without it. A mask that skips any position therefore keeps a symmetric operand's
+orbit-count price, and the result its tag, only when the mask is invariant under the
+group and every destination is a tagged buffer (checked against the same group).
+Otherwise the call is priced dense and the result is untagged, as for any other
+operation that breaks the symmetry, and a tagged destination is refused the same way.
+`where=True`, or a mask that selects every position, changes nothing.
+
 **Baseline tier (weight 1.0)**: arithmetic (+, −, ×, ÷, √), rounding
 (ceil, floor, trunc, rint, around/round), sign/abs, logical (not, and, or,
 xor), bitwise (and, or, xor, invert, left_shift, right_shift), comparisons
