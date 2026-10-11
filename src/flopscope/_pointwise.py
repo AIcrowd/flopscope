@@ -1100,6 +1100,52 @@ def _pointwise_symmetry(operands, output_shape):
     return output_symmetry, aligned_groups
 
 
+def _ufunc_write_shape(shape, out, where) -> tuple[int, ...]:
+    """Shape a ufunc call evaluates over: the operands' broadcast ``shape``,
+    widened by an ``out=`` buffer or ``where=`` mask that is larger.
+
+    numpy broadcasts the operands against the destination (and the mask) and
+    runs the loop over every output element, so a destination larger than
+    the operands is computed in full, not once per operand element. Shapes
+    numpy cannot broadcast keep ``shape``: numpy refuses the call in its own
+    words.
+    """
+    shape = tuple(shape)
+    extra = [
+        slot.shape
+        for slot in (out if isinstance(out, tuple) else (out,))
+        if isinstance(slot, _np.ndarray)
+    ]
+    if where is not None and where is not True:
+        extra.append(
+            where.shape if isinstance(where, _np.ndarray) else _np.shape(where)
+        )
+    if not extra:
+        return shape
+    try:
+        return tuple(_np.broadcast_shapes(shape, *extra))
+    except ValueError:
+        return shape
+
+
+def _pointwise_write_cost(shape, symmetry, out, where) -> int:
+    """``pointwise_cost`` over the shape the call writes (``_ufunc_write_shape``).
+
+    When ``out=`` or ``where=`` widens the call, the operands' symmetry is
+    carried into the larger frame with ``broadcast_group``, which prices the
+    call exactly like the same ufunc on the operands broadcast to that shape.
+    """
+    shape = tuple(shape)
+    write_shape = _ufunc_write_shape(shape, out, where)
+    if write_shape == shape:
+        return pointwise_cost(shape, symmetry=symmetry)
+    if symmetry is not None:
+        symmetry = broadcast_group(
+            symmetry, input_shape=shape, output_shape=write_shape
+        )
+    return pointwise_cost(write_shape, symmetry=symmetry)
+
+
 @_counted_wrapper
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
@@ -1124,7 +1170,14 @@ def _counted_unary(np_func, op_name: str):
                 x = _np.asarray(x)
             x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
-        cost = pointwise_cost(x.shape, symmetry=symmetry)
+        # Only a destination numpy itself evaluates into widens the call: an
+        # op without a native out= computes over ``x`` and is copied after.
+        cost = _pointwise_write_cost(
+            x.shape,
+            symmetry,
+            out if supports_out else None,
+            kwargs.get("where") if is_ufunc else None,
+        )
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool
@@ -1422,7 +1475,7 @@ def _counted_unary_multi(np_func, op_name: str):
         # orthogonal to the out= dtype-rate axis (see
         # multi_store_billing_dtypes) -- supplying out= does not multiply
         # this again.
-        cost = nout * pointwise_cost(x.shape, symmetry=symmetry)
+        cost = nout * _pointwise_write_cost(x.shape, symmetry, out, kwargs.get("where"))
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool
@@ -1558,7 +1611,12 @@ def _counted_binary(np_func, op_name: str):
             )
         out_symmetry = _prepare_symmetric_out(out, out_symmetry)
 
-        cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        cost = _pointwise_write_cost(
+            output_shape,
+            out_symmetry,
+            out if supports_out else None,
+            kwargs.get("where"),
+        )
         # dtype= constrains the output DType, while signature=/sig= can
         # constrain any loop slot. Resolve the COMPLETE constrained signature
         # so a forced complex loop stays visible to both the rate and factor
@@ -1770,7 +1828,9 @@ def _counted_binary_multi(np_func, op_name: str):
         # ~1x floor_divide, not ~2x), but flopscope prices the reference
         # algorithm, not this backend's implementation. Independent of the
         # out= dtype-rate axis.
-        cost = nout * pointwise_cost(output_shape, symmetry=out_symmetry)
+        cost = nout * _pointwise_write_cost(
+            output_shape, out_symmetry, out, kwargs.get("where")
+        )
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool
@@ -4211,7 +4271,9 @@ def clip(
     output_shape = _np.broadcast_shapes(*(arr.shape for arr, _ in operand_arrays))
     symmetry, _ = _pointwise_symmetry(operand_arrays, output_shape)
     _prepare_symmetric_out(out, symmetry)
-    cost = _builtins.max(n_bounds, 1) * pointwise_cost(output_shape, symmetry=symmetry)
+    cost = _builtins.max(n_bounds, 1) * _pointwise_write_cost(
+        output_shape, symmetry, out, kwargs.get("where")
+    )
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
@@ -5525,6 +5587,41 @@ def _fallback_contraction_output_symmetry(
         return None
 
 
+def _einsum_output_shape(input_parts, shapes, output_subscript) -> tuple[int, ...]:
+    """Shape of an einsum result: each output label's broadcast extent."""
+    extents: dict[str, list[int]] = {}
+    for part, shape in zip(input_parts, shapes, strict=True):
+        for label, extent in zip(part, shape, strict=True):
+            extents.setdefault(label, []).append(extent)
+    return tuple(
+        _np.broadcast_shapes(*((extent,) for extent in extents[label]))[0]
+        for label in output_subscript
+    )
+
+
+def _out_batch_repeats(natural_shape, out_shape) -> int:
+    """Times a gufunc evaluates its natural result to fill ``out``.
+
+    1 unless ``out`` broadcasts the natural result to a larger shape; a shape
+    numpy would refuse also counts once, so a refused call is not overbilled.
+    """
+    natural_shape, out_shape = tuple(natural_shape), tuple(out_shape)
+    natural = 1
+    for extent in natural_shape:
+        natural *= extent
+    if natural == 0 or out_shape == natural_shape:
+        return 1
+    try:
+        if tuple(_np.broadcast_shapes(natural_shape, out_shape)) != out_shape:
+            return 1
+    except ValueError:
+        return 1
+    written = 1
+    for extent in out_shape:
+        written *= extent
+    return written // natural
+
+
 def _einsum_routed_binary(
     op_name: str,
     np_fn: Any,
@@ -5594,6 +5691,7 @@ def _einsum_routed_binary(
         output_symmetry = info.output_symmetry
         cost = accumulation.total
         accumulation_for_billing = accumulation
+        output_layout = (info.input_parts, info.shapes, info.output_subscript)
     else:
         # Out of subscript letters. Price it arithmetically from the same
         # FMA=2 model; repeated-operand savings are forfeited, which errs
@@ -5624,6 +5722,20 @@ def _einsum_routed_binary(
         # rather than bill a ratio derived from the wrong total. Same
         # reasoning as tensordot's `accumulation_for_billing`.
         accumulation_for_billing = accumulation if cost == accumulation.total else None
+        output_layout = None
+    # A gufunc (matmul, vecdot, matvec, vecmat) broadcasts its loop dimensions
+    # against ``out=`` too: a destination with more (or longer) batch
+    # dimensions than the operands makes numpy run the whole contraction once
+    # per batch element it writes. Non-ufunc ops such as ``dot`` refuse such a
+    # destination. The repeat scales mu and alpha alike, so the complex
+    # override (a ratio) is unaffected.
+    if isinstance(np_fn, _np.ufunc) and isinstance(out, _np.ndarray):
+        natural_shape = (
+            _einsum_output_shape(*output_layout)
+            if output_layout is not None
+            else tuple(fallback_output_shape or ())
+        )
+        cost *= _out_batch_repeats(natural_shape, out.shape)
     # The gate the pointwise factories already apply: a tag the caller paid
     # ``as_symmetric`` to validate is a claim about this buffer, so a result
     # that contradicts it is an error; a tag merely inferred from a constant
