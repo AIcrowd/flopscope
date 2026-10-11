@@ -48,7 +48,10 @@ def svd(
     min(4*m*n*k, economy) — the verified randomized-SVD truncated cost;
     results stay exact (numpy economy SVD, sliced). See cost-model.md.
     Constants confirmed by the 2026-06 evidence audit; see
-    docs/reference/cost-model.md.
+    docs/reference/cost-model.md. With ``hermitian=True`` on a square matrix
+    numpy runs ``eigh`` (``eigvalsh`` for values only) instead of an SVD, and
+    that path is what is billed: see
+    :func:`flopscope.numpy.linalg._decompositions.hermitian_svd_cost`.
 
     Parameters
     ----------
@@ -85,11 +88,15 @@ def svd(
     if k is not None and min(m, n) > 0 and not (1 <= k <= min(m, n)):
         raise ValueError(f"k must satisfy 1 <= k <= min(m, n) = {min(m, n)}, got k={k}")
     batch = _batch_size(a.shape)
-    cost = (
-        svd_cost(m, n, k, with_vectors=compute_uv, full_matrices=full_matrices) * batch
-        if not _has_zero_dim(a.shape)
-        else 0
-    )
+    per_matrix = svd_cost(m, n, k, with_vectors=compute_uv, full_matrices=full_matrices)
+    if hermitian and m == n:
+        # numpy runs eigh / eigvalsh for hermitian=True, not an SVD; a top-k
+        # request still bills the truncated-algorithm cost when that is lower.
+        from flopscope.numpy.linalg._decompositions import hermitian_svd_cost
+
+        path = hermitian_svd_cost(n, with_vectors=compute_uv)
+        per_matrix = min(per_matrix, path) if k is not None and k < n else path
+    cost = per_matrix * batch if not _has_zero_dim(a.shape) else 0
     with budget.deduct(
         "linalg.svd",
         flop_cost=cost,

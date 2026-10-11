@@ -1166,7 +1166,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Singular value decomposition. Cost: $4a^2b+22b^3$ (full U, full_matrices=True and m!=n), $6ab^2+20b^3$ (thin U/V), or $2ab^2+2b^3$ (values-only); a=max(m,n), b=min(m,n). Top-k (1<=k<min(m,n)) bills min(4mnk, economy) (randomized-SVD leading-order cost; see cost-model.md).",
+        "notes": "Singular value decomposition. Cost: $4a^2b+22b^3$ (full U, full_matrices=True and m!=n), $6ab^2+20b^3$ (thin U/V), or $2ab^2+2b^3$ (values-only); a=max(m,n), b=min(m,n). Top-k (1<=k<min(m,n)) bills min(4mnk, economy) (randomized-SVD leading-order cost; see cost-model.md). hermitian=True on a square matrix bills the eigh path numpy runs instead: $9n^3$ ($4n^3/3$ values-only) plus ordering the singular values by magnitude (see hermitian_svd_cost).",
     },
     "linalg.cholesky": {
         "category": "counted_custom",
@@ -1284,7 +1284,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Pseudoinverse. Cost: SVD(with U/V) + min(m,n) + n*min(m,n) + matmul (see pinv_cost).",
+        "notes": "Pseudoinverse. Cost: SVD(with U/V) + min(m,n) + n*min(m,n) + matmul (see pinv_cost); with hermitian=True the SVD term is the eigh path numpy runs (see hermitian_svd_cost).",
     },
     "linalg.qr": {
         "category": "counted_custom",
@@ -2847,7 +2847,7 @@ REGISTRY: dict[str, dict] = {
         "complex_factor": "illegal",
         "module": "numpy.random",
         "cost_formula": "multivariate_normal",
-        "notes": "Composite cost: 26*d^3 (SVD of the dxd covariance, numpy default method='svd') + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
+        "notes": "Composite cost: the covariance factorization method= names, 26*d^3 for method='svd' (the default), 9*d^3 for 'eigh', d^3/3 for 'cholesky', + 2*N*d^2 (affine transform) + 16*N*d (N*d standard-normal draws at transcendental tier); weight 1.0.",
     },
     "random.Generator.negative_binomial": {
         "category": "counted_random_method",
