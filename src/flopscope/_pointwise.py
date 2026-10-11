@@ -94,6 +94,20 @@ _INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
     }
 )
 
+# Cumulative scans: the result has the input's shape. Only the scanned axis
+# loses its symmetry partners; every other axis keeps its position, so the
+# output tag must be derived with ``keepdims=True``.
+_CUMULATIVE_REDUCTIONS = frozenset(
+    {
+        "cumsum",
+        "cumprod",
+        "cumulative_sum",
+        "cumulative_prod",
+        "nancumsum",
+        "nancumprod",
+    }
+)
+
 # Reductions whose result is an INDEX rather than a value. numpy fixes their
 # output dtype at ``np.intp`` regardless of the input's precision, and
 # constrains ``out=`` by KIND rather than by width: any integer or boolean
@@ -3516,8 +3530,13 @@ def _counted_reduction(
         if op_name in _INDEX_RETURNING_REDUCTIONS:
             _refuse_non_index_destination(op_name, out, axis)
 
+        # A cumulative scan keeps every axis (it takes no keepdims): treating
+        # the scanned axis as removed renumbered the surviving group one axis
+        # to the left, tagging axes whose values are not symmetric (#279).
+        # ``ufunc.accumulate`` derives its tag the same way.
+        tag_keepdims = True if op_name in _CUMULATIVE_REDUCTIONS else keepdims
         new_symmetry = (
-            reduce_group(symmetry, ndim=len(a.shape), axis=axis, keepdims=keepdims)
+            reduce_group(symmetry, ndim=len(a.shape), axis=axis, keepdims=tag_keepdims)
             if symmetry is not None
             else None
         )
