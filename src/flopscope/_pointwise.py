@@ -3957,14 +3957,32 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
     # and break float32 vs Python-float comparisons).
     a_arr = a if isinstance(a, _np.ndarray) else _np.asarray(a)
     b_arr = b if isinstance(b, _np.ndarray) else _np.asarray(b)
-    output_shape = _np.broadcast_shapes(a_arr.shape, b_arr.shape)
+    # rtol= and atol= are operands of the tolerance core as well: numpy
+    # broadcasts them against a and b, so an array tolerance can enlarge the
+    # result, break the operands' symmetry and widen the arithmetic.
+    tolerances = [
+        (v, v if isinstance(v, _np.ndarray) else _np.asarray(v))
+        for k, v in kwargs.items()
+        if k in ("rtol", "atol")
+    ]
+    output_shape = _np.broadcast_shapes(
+        a_arr.shape, b_arr.shape, *(arr.shape for _, arr in tolerances)
+    )
     out_symmetry, _ = _pointwise_symmetry(
-        ((a_arr, _symmetry_of(a_arr)), (b_arr, _symmetry_of(b_arr))),
+        (
+            (a_arr, _symmetry_of(a_arr)),
+            (b_arr, _symmetry_of(b_arr)),
+            *((arr, _symmetry_of(arr)) for _, arr in tolerances),
+        ),
         output_shape,
     )
     # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
     cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
-    billing_dtypes: tuple = (billing_operand(a, a_arr), billing_operand(b, b_arr))
+    billing_dtypes: tuple = (
+        billing_operand(a, a_arr),
+        billing_operand(b, b_arr),
+        *(billing_operand(v, arr) for v, arr in tolerances),
+    )
     # numpy's isclose casts its reference operand -- ``dt = result_type(y, 1.)``
     # -- before running ``|x-y| <= atol + rtol*|y|``, so an integer or bool
     # operand computes in float64 whatever the tolerances are (an explicit
@@ -3987,7 +4005,10 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
         dtypes=billing_dtypes,
     ):
         result = _call_numpy(
-            _np.isclose, _to_base_ndarray(a), _to_base_ndarray(b), **kwargs
+            _np.isclose,
+            _to_base_ndarray(a),
+            _to_base_ndarray(b),
+            **{k: _to_base_ndarray(v) for k, v in kwargs.items()},
         )
     if a_is_scalar and b_is_scalar and _np.ndim(result) == 0:
         return bool(result)
