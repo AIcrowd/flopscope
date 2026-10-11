@@ -467,8 +467,9 @@ def test_histogram_array_bins_dtype_is_billed():
     # a future change to the int-bins path can't silently drift:
     # 100 elems * ceil(log2(10))=4 = 400 base cost, at the int64-floored
     # rate 2.0 (counts are always platform-default-int) and weight 4.0
-    # (access tier, see cost-model repricing) = 3200.
-    assert _cost(lambda: fnp.histogram(d, bins=10)) == 3200
+    # (access tier, see cost-model repricing) = 3200, plus the 11 float32
+    # edges charged as linspace (2 per edge at rate 1.0) = 22.
+    assert _cost(lambda: fnp.histogram(d, bins=10)) == 3200 + 2 * 11
 
 
 def test_histogram2d_histogramdd_array_bins_dtype_is_billed():

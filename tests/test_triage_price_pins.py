@@ -81,9 +81,10 @@ def test_set_and_histogram_family_bills_4x():
     # dtypes tuple (mean_compute_dtype(a.dtype), platform-int); result_type
     # (float32, int64) == float64, so it always resolves at rate 2.0
     # regardless of the input's own dtype. Expected is 4(weight) x 2(rate) x
-    # formula, not just 4x the formula.
+    # formula, not just 4x the formula. The 17 float32 edges are charged as
+    # linspace on top: 2 per edge at weight 1.0 and rate 1.0.
     assert (
-        billed(lambda: fnp.histogram(fnp.asarray(a), bins=16)) == 8 * N * 4
+        billed(lambda: fnp.histogram(fnp.asarray(a), bins=16)) == 8 * N * 4 + 2 * 17
     )  # ceil(log2(16)) == 4
     # histogram2d/histogramdd always append an explicit float64 sentinel to
     # their billing dtypes too (counts are always float64) -- same x2 rate.
@@ -93,7 +94,11 @@ def test_set_and_histogram_family_bills_4x():
     assert billed(lambda: fnp.histogramdd(fnp.asarray(a), bins=16)) == 8 * N * 4
     # histogram_bin_edges has no int64/float64 sentinel; float32 input stays
     # float32 (mean_compute_dtype is a no-op for float dtypes) -> rate 1.0.
-    assert billed(lambda: fnp.histogram_bin_edges(fnp.asarray(a), bins=16)) == 4 * N
+    # The 17 edges are charged as linspace on top, as for histogram above.
+    assert (
+        billed(lambda: fnp.histogram_bin_edges(fnp.asarray(a), bins=16))
+        == 4 * N + 2 * 17
+    )
     assert (
         billed(lambda: fnp.digitize(fnp.asarray(a), fnp.asarray(np.sort(b)[:16])))
         == 4 * N * 4

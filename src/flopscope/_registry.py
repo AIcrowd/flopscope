@@ -2102,7 +2102,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Binning; cost = n*ceil(log2(bins)).",
+        "notes": "Binning; cost = n*ceil(log2(bins)), plus the bins + 1 edges of an int or string bins billed as linspace and, with density=True, the per-bin diff/divide/sum/divide.",
     },
     "histogram2d": {
         "category": "counted_custom",
@@ -2120,7 +2120,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Bin edge computation; cost = numel(a).",
+        "notes": "Bin edge computation; cost = numel(a), plus the bins + 1 edges of an int or string bins billed as linspace.",
     },
     "bincount": {
         "category": "counted_custom",
