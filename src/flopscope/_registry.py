@@ -3570,7 +3570,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "flopscope._polynomial",
         "complex_factor": 4.0,
-        "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
+        "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2), where m is the size of the broadcast output (p.shape[1:] against x.shape; x.size for 1-D p).",
     },
     # counted_custom — window functions
     "bartlett": {
