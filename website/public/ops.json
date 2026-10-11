@@ -4277,7 +4277,7 @@
       "free": false,
       "module": "numpy.linalg",
       "name": "linalg.matrix_rank",
-      "notes": "Matrix rank. Cost: values-only SVD + min(m,n).",
+      "notes": "Matrix rank. Cost: values-only SVD + min(m,n) per (matrix, tolerance) pair (an array tol/rtol broadcasts against the batch).",
       "numpy_ref": "np.linalg.matrix_rank",
       "slug": "linalg-matrix_rank",
       "status": "supported",
