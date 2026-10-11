@@ -22,6 +22,7 @@ from flopscope._budget import (
     _call_numpy_with_python_callbacks,
     _counted_wrapper,
 )
+from flopscope._canonical_symmetry import is_exactly_invariant
 from flopscope._config import get_setting as _get_setting
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
@@ -1146,6 +1147,40 @@ def _pointwise_write_cost(shape, symmetry, out, where) -> int:
     return pointwise_cost(write_shape, symmetry=symmetry)
 
 
+def _where_mask_symmetry(symmetry, shape, out, where):
+    """``symmetry``, or ``None`` when a ``where=`` mask breaks it.
+
+    numpy writes only the positions ``where`` selects. The others keep the
+    previous contents of ``out=``, or are left uninitialised without it, so a
+    mask that skips any position leaves the result symmetric only when the
+    mask is invariant under the group and every destination is a tagged
+    buffer (``_prepare_symmetric_out`` checks its contents against the same
+    group). Otherwise the call is priced and its result left untagged like any
+    other operation that breaks the symmetry. A mask that selects every
+    position of the operands' shape changes nothing, and neither does one
+    numpy cannot broadcast: numpy refuses the call in its own words.
+    """
+    if symmetry is None or where is None or where is True:
+        return symmetry
+    shape = tuple(shape)
+    write_shape = _ufunc_write_shape(shape, out, where)
+    try:
+        mask = _np.broadcast_to(_np.asarray(where), write_shape)
+    except ValueError:
+        return symmetry
+    if write_shape == shape and mask.all():
+        return symmetry
+    slots = out if isinstance(out, tuple) else (out,)
+    if not _builtins.all(isinstance(slot, SymmetricTensor) for slot in slots):
+        return None
+    group = symmetry
+    if write_shape != shape:
+        group = broadcast_group(symmetry, input_shape=shape, output_shape=write_shape)
+    if group is None or not is_exactly_invariant(mask, group):
+        return None
+    return symmetry
+
+
 @_counted_wrapper
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
@@ -1169,6 +1204,9 @@ def _counted_unary(np_func, op_name: str):
             if not isinstance(x, _np.ndarray):
                 x = _np.asarray(x)
             x_fwd = x
+        symmetry = _where_mask_symmetry(
+            symmetry, x.shape, out, kwargs.get("where") if is_ufunc else None
+        )
         symmetry = _prepare_symmetric_out(out, symmetry)
         # Only a destination numpy itself evaluates into widens the call: an
         # op without a native out= computes over ``x`` and is copied after.
@@ -1461,6 +1499,7 @@ def _counted_unary_multi(np_func, op_name: str):
         out = _normalize_out(out, op_name, nout=nout)
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
+        symmetry = _where_mask_symmetry(symmetry, x.shape, out, kwargs.get("where"))
         # A multi-output ufunc is priced as nout independent applications of
         # the reference algorithm (modf's fractional AND integral part;
         # frexp's mantissa AND exponent count as two one-output-unary
@@ -1609,7 +1648,14 @@ def _counted_binary(np_func, op_name: str):
                 ((x_view, x_sym), (y_view, y_sym)),
                 output_shape,
             )
-        out_symmetry = _prepare_symmetric_out(out, out_symmetry)
+        masked_symmetry = _where_mask_symmetry(
+            out_symmetry, output_shape, out, kwargs.get("where")
+        )
+        if masked_symmetry is None and out_symmetry is not None:
+            # The mask broke the symmetry, not the operands, so the loss
+            # warnings below would name the wrong cause.
+            aligned_inputs = []
+        out_symmetry = _prepare_symmetric_out(out, masked_symmetry)
 
         cost = _pointwise_write_cost(
             output_shape,
@@ -1819,6 +1865,14 @@ def _counted_binary_multi(np_func, op_name: str):
                 ((x, x_sym), (y, y_sym)),
                 output_shape,
             )
+        masked_symmetry = _where_mask_symmetry(
+            out_symmetry, output_shape, out, kwargs.get("where")
+        )
+        if masked_symmetry is None and out_symmetry is not None:
+            # The mask broke the symmetry, not the operands, so the loss
+            # warnings below would name the wrong cause.
+            aligned_inputs = []
+        out_symmetry = masked_symmetry
         # divmod is priced as running floor_divide and mod separately --
         # nout=2 applications of the reference algorithm, not one -- per
         # the same standard-algorithm/no-compute-sharing-discount rule (see
@@ -4270,6 +4324,7 @@ def clip(
     n_bounds = len(operand_arrays) - 1
     output_shape = _np.broadcast_shapes(*(arr.shape for arr, _ in operand_arrays))
     symmetry, _ = _pointwise_symmetry(operand_arrays, output_shape)
+    symmetry = _where_mask_symmetry(symmetry, output_shape, out, kwargs.get("where"))
     _prepare_symmetric_out(out, symmetry)
     cost = _builtins.max(n_bounds, 1) * _pointwise_write_cost(
         output_shape, symmetry, out, kwargs.get("where")
@@ -4288,7 +4343,12 @@ def clip(
             _np.clip,
             a,
             *args,
-            out=None if isinstance(out, SymmetricTensor) else out,
+            # A tagged destination is filled through a scratch copy of itself,
+            # as in the pointwise factories, so the positions a where= mask
+            # skips keep its values rather than coming back uninitialised.
+            out=(
+                _symmetric_out_scratch(out) if isinstance(out, SymmetricTensor) else out
+            ),
             supports_out=True,
             **kwargs,
         )
