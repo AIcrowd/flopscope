@@ -1008,7 +1008,24 @@ combined op, not a measurement of `divmod`'s own backend cost. `out=` does not m
 this a second time — the `nout` scaling lives in `flop_cost` (the cell-count axis),
 which is independent of the `out=` destination-dtype-rate axis described in [Which
 dtype prices a call](#which-dtype-prices-a-call); supplying `out=` widens the rate
-exactly as it would for any other op, never the cell count.
+exactly as it would for any other op, and changes the cell count only by broadcasting
+(next paragraph).
+
+**`numel(output)` is the shape numpy writes.** An `out=` buffer or a `where=` mask
+larger than the operands broadcasts them, and numpy evaluates the loop over every
+output element, so the cell count is `numel(broadcast(operands, out, where))`:
+`exp(x, out=O)` bills what `exp` costs on `x` broadcast to `O.shape`. A destination
+or mask of the operands' own shape changes nothing. `clip` follows the same rule; an op
+without a native `out=` computes over its operand and keeps the operand count.
+
+**A `where=` mask can break an operand's symmetry.** numpy writes only the positions the
+mask selects; the rest keep the previous contents of `out=`, or are left uninitialised
+without it. A mask that skips any position therefore keeps a symmetric operand's
+orbit-count price, and the result its tag, only when the mask is invariant under the
+group and every destination is a tagged buffer (checked against the same group).
+Otherwise the call is priced dense and the result is untagged, as for any other
+operation that breaks the symmetry, and a tagged destination is refused the same way.
+`where=True`, or a mask that selects every position, changes nothing.
 
 **Baseline tier (weight 1.0)**: arithmetic (+, −, ×, ÷, √), rounding
 (ceil, floor, trunc, rint, around/round), sign/abs, logical (not, and, or,
@@ -1148,6 +1165,11 @@ flop_cost = (2K − 1) × M
 | `matvec`, `vecmat` | matrix·vector / vector·matrix, contracting `k` → length-`m` | `m(2k − 1)` |
 | `kron` | `(a,) ⊗ (b,)` of flattened operands — nothing summed, `K = 1` | `a.size × b.size` |
 | `einsum` | any subscripts | whole-expression accumulation (below) |
+
+The gufunc contractions (`matmul`, `vecdot`, `matvec`, `vecmat`) broadcast their loop
+dimensions against `out=` as well: a destination with more or longer batch dimensions
+than the operands makes numpy repeat the contraction once per batch element it writes,
+so the cost above is multiplied by `numel(out) / numel(result without out=)`.
 
 **Symmetry savings** make `M` drop below `prod(output)` (here `v` is length `n`,
 `A` is `n × n`):
