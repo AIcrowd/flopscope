@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 import numpy as _np
 
 from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._canonical_symmetry import canonicalize
 from flopscope._config import get_setting
 from flopscope._dtype_billing import resolve_billing_dtype, store_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
@@ -771,8 +772,12 @@ def einsum(
         - ``False``: treated as ``'auto'``.
     symmetry : SymmetryGroup or symmetry shorthand, optional
         Declares output symmetry and wraps the validated result as a
-        ``SymmetricTensor``. This does NOT declare input symmetry; use
-        ``flops.as_symmetric()`` for that.
+        ``SymmetricTensor``. As with ``flops.as_symmetric()``, a result
+        that matches the group only within the validation tolerance is
+        copied first, each orbit taking the value at its lexicographically
+        smallest index, so the tag describes the data it is attached to.
+        This does NOT declare input symmetry; use ``flops.as_symmetric()``
+        for that.
 
     Returns
     -------
@@ -970,7 +975,15 @@ def einsum(
     if target_symmetry is not None and _validate_result_symmetry(
         result, target_symmetry
     ):
-        result = SymmetricTensor(_np.asarray(result), symmetry=target_symmetry)
+        data = _np.asarray(result)
+        if symmetry is not None:
+            # A declared ``symmetry=`` is the caller's claim, the same trust
+            # boundary as ``as_symmetric``: the check above is tolerant, but
+            # the tag is read as exact. Copy one representative across each
+            # orbit so the tag describes the buffer it is attached to; a
+            # result that is already exactly invariant is kept as it is.
+            data = canonicalize(data, target_symmetry)
+        result = SymmetricTensor(data, symmetry=target_symmetry)
     else:
         # An unverified claim is not stamped. Validation is skipped for
         # non-finite results, so tagging regardless would let a caller mint a
