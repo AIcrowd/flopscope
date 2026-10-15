@@ -61,6 +61,7 @@ from flopscope._symmetry_utils import (
     intersect_groups,
     reduce_group,
     remap_group_axes,
+    remap_group_for_expand_dims,
     restrict_group_to_axes,
     unique_elements_for_shape,
 )
@@ -4062,15 +4063,18 @@ if hasattr(_np, "vecdot"):
     @_counted_wrapper
     def vecdot(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
         """Counted version of np.vecdot (vector dot product along last axis)."""
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.vecdot, a, b, "...n,...n->...", kwargs
+        )
         return _einsum_routed_binary(
             "vecdot",
             _np.vecdot,
-            "...n,...n->...",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -4089,15 +4093,18 @@ if hasattr(_np, "matvec"):
         A is (..., m, n), v is (..., n), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.matvec, a, b, "...mn,...n->...m", kwargs
+        )
         return _einsum_routed_binary(
             "matvec",
             _np.matvec,
-            "...mn,...n->...m",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -4116,15 +4123,18 @@ if hasattr(_np, "vecmat"):
         v is (..., n), A is (..., n, m), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 2, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.vecmat, a, b, "...n,...nm->...m", kwargs
+        )
         return _einsum_routed_binary(
             "vecmat",
             _np.vecmat,
-            "...n,...nm->...m",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -5449,41 +5459,147 @@ def _validate_contracted_extents(
 
 
 def _core_contraction_axes(
-    a: Any, b: Any, b_core_from_end: int, call_kwargs: dict[str, Any]
-) -> tuple[Any, Any, int | None, int | None]:
-    """Coerce a gufunc contraction's operands and locate its contracted pair.
+    np_fn: Any, a: Any, b: Any, subs: str, call_kwargs: dict[str, Any]
+) -> tuple[Any, Any, str, int | None, int | None, int | None]:
+    """Coerce a gufunc contraction's operands and lay out what it contracts.
 
     ``matmul``'s broadcasting siblings -- ``vecdot`` (``(n),(n)->()``),
     ``matvec`` (``(m,n),(n)->(m)``) and ``vecmat`` (``(n),(n,m)->(m)``) --
-    each contract a's LAST axis against b's ``b_core_from_end``-th from the
-    end. Their pairing is implicit in the ``...``-broadcasting subscript they
-    are priced with, which is not the same as being checked by it: einsum
-    broadcasts an extent of 1, numpy's gufunc core does not, so a size-1
-    contracted axis was priced and charged against a size-n one before numpy
-    refused the call. Returning the pair gets it validated ahead of any cost
-    -- see :func:`_validate_contracted_extents`.
+    are priced with a ``...``-broadcasting subscript ``subs`` that keeps each
+    operand's core dimensions last, in signature order. Returns the operands,
+    the subscript to price with, the contracted axis pair, and the output
+    position of a ``keepdims=True`` size-1 axis that the subscript has no
+    label for (``None`` when there is none to re-insert; see
+    ``_einsum_routed_binary``).
 
-    Both axes come back ``None``, skipping validation, in the two cases where
-    the default pair is not the pair numpy will contract:
+    The pairing being implicit in the subscript is not the same as it being
+    checked by it: einsum broadcasts an extent of 1, numpy's gufunc core does
+    not, so a size-1 contracted axis was priced and charged against a size-n
+    one before numpy refused the call. Returning the pair gets it validated
+    ahead of any cost -- see :func:`_validate_contracted_extents`. Both axes
+    come back ``None`` for an operand with too few dimensions to have its
+    core axis: numpy rejects that call for the missing core dimension, which
+    is not this check's to pre-empt (and it already charged nothing for it).
 
-    * An operand with too few dimensions to have that axis. numpy rejects the
-      call for the missing core dimension, which is not this check's to
-      pre-empt (and it already charged nothing for it).
-    * An explicit ``axis=``/``axes=``, which relocates the core dimension off
-      the position the subscript assumes. Validating the default pair there
-      would refuse calls numpy runs -- a worse failure than the
-      charge-then-fail this closes. Those spellings also price from the
-      default layout, a separate pre-existing gap this does not touch.
+    An explicit ``axis=``/``axes=`` moves the core dimensions off the
+    positions ``subs`` assumes, so those calls are laid out by
+    :func:`_relocated_core_subscripts` instead: the subscript, the validated
+    pair and the output symmetry all follow the axes numpy contracts. The
+    core dimensions themselves are read off ``subs`` with its ellipses
+    removed, which is exactly what each operand's part names.
     """
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
+    inputs, out_core = subs.split("->")
+    a_core, b_core = (part.replace("...", "") for part in inputs.split(","))
+    core = (a_core, b_core, out_core.replace("...", ""))
     if "axis" in call_kwargs or "axes" in call_kwargs:
-        return a, b, None, None
-    a_axis = a.ndim - 1 if a.ndim >= 1 else None
-    b_axis = b.ndim - b_core_from_end if b.ndim >= b_core_from_end else None
-    return a, b, a_axis, b_axis
+        return a, b, *_relocated_core_subscripts(np_fn, a, b, core, call_kwargs)
+    (label,) = set(a_core) & set(b_core)
+    a_from_end = len(a_core) - a_core.index(label)
+    b_from_end = len(b_core) - b_core.index(label)
+    a_axis = a.ndim - a_from_end if a.ndim >= a_from_end else None
+    b_axis = b.ndim - b_from_end if b.ndim >= b_from_end else None
+    return a, b, subs, a_axis, b_axis, None
+
+
+def _relocated_core_subscripts(
+    np_fn: Any,
+    a: _np.ndarray,
+    b: _np.ndarray,
+    core: tuple[str, str, str],
+    call_kwargs: dict[str, Any],
+) -> tuple[str, int, int, int | None]:
+    """Explicit einsum subscripts for a gufunc call that relocates its core axes.
+
+    numpy's ``axis=``/``axes=`` name, per operand, the axes that play the
+    signature's core dimensions, in signature order (``core`` spells them per
+    operand, output last). Every other axis is a loop axis: it keeps its
+    relative order and broadcasts right-aligned against the other operand's,
+    and the output places its own core axes -- or, under ``keepdims=True``,
+    the kept size-1 axis -- among the loop axes the same way. The default
+    subscript assumes the core axes are last, so pricing a relocated call
+    with it contracted the wrong axis: ``vecdot(a, b, axis=0)`` on a
+    ``(4096, 1)`` pair was billed as 4096 length-1 dot products (#272).
+
+    The spec is first run through numpy itself, on stand-ins of the operands'
+    ranks with every extent 1. numpy checks ``axis=``/``axes=``/``keepdims=``
+    against the ranks alone, and with every extent 1 nothing else can fail,
+    so whatever numpy would refuse about the spec is refused here, with
+    numpy's own exception, before anything is priced -- a behavioural check
+    rather than a copy of numpy's parser, so it keeps holding as that parser
+    changes. The normalisation below can then rely on a well-formed spec.
+
+    Returns the subscript (one label per axis, so the einsum engine reads
+    each operand's symmetry on the axes it really occupies), the contracted
+    axis of each operand, and the output position of the kept axis under
+    ``keepdims=True`` (``None`` otherwise). Nothing is summed into the kept
+    axis, so it has no label: it is left out of the output subscript and
+    re-inserted into the output symmetry by ``_einsum_routed_binary``.
+    Labels come from ``opt_einsum``'s symbol table, the one that already
+    expands the ``...`` of the default subscripts, so no rank numpy accepts
+    runs out of them. They are handed out in output order, which keeps the
+    output subscript in sorted label order: the order the einsum engine's
+    symmetry oracle reports the output group in, so the tag lands on the
+    right axes even where the output's core axes are not last (relabelling
+    any other order is #281).
+    """
+    from opt_einsum.parser import get_symbol
+
+    layout = {
+        k: call_kwargs[k] for k in ("axis", "axes", "keepdims") if k in call_kwargs
+    }
+    np_fn(_np.zeros((1,) * a.ndim), _np.zeros((1,) * b.ndim), **layout)
+
+    a_core, b_core, out_core = core
+    keepdims = bool(layout.get("keepdims", False))
+    loop_ndim = _builtins.max(a.ndim - len(a_core), b.ndim - len(b_core))
+    # numpy accepts keepdims only for an (n),(n)->() style signature, where
+    # the output takes one kept axis per core axis of an input.
+    out_ncore = len(a_core) if keepdims else len(out_core)
+    ncores = (len(a_core), len(b_core), out_ncore)
+    ndims = (a.ndim, b.ndim, loop_ndim + out_ncore)
+    if "axis" in layout:
+        spec = [(layout["axis"],) if n else () for n in ncores]
+    else:
+        spec = [e if isinstance(e, tuple) else (e,) for e in layout["axes"]]
+        # An omitted output entry keeps numpy's default: core axes last.
+        spec += [tuple(range(-n, 0)) for n in ncores[len(spec) :]]
+    a_pos, b_pos, out_pos = (
+        [_operator.index(ax) % ndim for ax in entry]
+        for entry, ndim in zip(spec, ndims, strict=True)
+    )
+
+    # The output's axes take the symbols in sorted order, in output order, and
+    # the contracted dimension the last one, so the output subscript is in
+    # sorted label order wherever the output's core axes sit among its loop
+    # axes (past 26 axes opt_einsum's table is not itself in sorted order).
+    out_slots = [i for i in range(ndims[2]) if not (keepdims and i == out_pos[0])]
+    symbols = sorted(get_symbol(k) for k in range(len(out_slots) + 1))
+    symbol_at = dict(zip(out_slots, symbols, strict=False))
+    core_symbol = (
+        {}
+        if keepdims
+        else dict(zip(out_core, (symbol_at[p] for p in out_pos), strict=True))
+    )
+    (label,) = set(a_core) & set(b_core)
+    core_symbol[label] = symbols[-1]
+    loop_symbols = [symbol_at[p] for p in out_slots if p not in out_pos]
+
+    def operand_subscript(ndim: int, part: str, positions: list[int]) -> str:
+        placed = {pos: core_symbol[c] for c, pos in zip(part, positions, strict=True)}
+        loop = iter(loop_symbols[loop_ndim - (ndim - len(part)) :])
+        return "".join(placed[i] if i in placed else next(loop) for i in range(ndim))
+
+    subs = (
+        f"{operand_subscript(a.ndim, a_core, a_pos)},"
+        f"{operand_subscript(b.ndim, b_core, b_pos)}->"
+        + "".join(symbol_at[p] for p in out_slots)
+    )
+    kept_axis = out_pos[0] if keepdims else None
+    return subs, a_pos[a_core.index(label)], b_pos[b_core.index(label)], kept_axis
 
 
 def _fallback_contraction_output_symmetry(
@@ -5569,6 +5685,7 @@ def _einsum_routed_binary(
     fallback_output_shape: tuple[int, ...] | None = None,
     a_contract_axis: int | None = None,
     b_contract_axis: int | None = None,
+    kept_axis: int | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -5596,8 +5713,15 @@ def _einsum_routed_binary(
     `matvec`, `vecmat`) included: a `...`-broadcasting `subs` makes the
     pairing implicit, not checked, and einsum broadcasts an extent of 1 that
     the gufunc core rejects. `None` means only that this call has no such pair
-    to check -- a 0-d operand, or an `axis=`/`axes=` that relocated the core
-    dimension (see `_core_contraction_axes`).
+    to check -- an operand without the core dimension (a 0-d one, say). An
+    `axis=`/`axes=` that relocates the core dimension still has a pair: the
+    gufunc callers read it, and `subs`, off the relocated layout (see
+    `_core_contraction_axes`).
+
+    `kept_axis` is the output position of the size-1 axis numpy keeps under
+    `keepdims=True` when `subs` has no label for it (the relocated layout
+    leaves it out, since nothing is summed into it). The inferred output
+    symmetry is shifted past it so the tag lands on the axes it describes.
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -5622,6 +5746,10 @@ def _einsum_routed_binary(
         accumulation = info.accumulation
         canonical_subs = info.canonical_subscripts
         output_symmetry = info.output_symmetry
+        if kept_axis is not None and output_symmetry is not None:
+            output_symmetry = remap_group_for_expand_dims(
+                output_symmetry, ndim=len(info.output_subscript), axis=kept_axis
+            )
         cost = accumulation.total
         accumulation_for_billing = accumulation
     else:

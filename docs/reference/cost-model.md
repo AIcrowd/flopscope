@@ -1169,6 +1169,11 @@ operands only an allowlisted, linear-time `optimize=` choice runs verbatim —
 every other choice, including every `opt_einsum` alias for an exhaustive or
 superlinear search, is downgraded to `'greedy'` before the search runs.
 
+**Relocated core axes.** The closed forms above assume numpy's default gufunc
+layout, core dimensions last. A gufunc row's `axis=`/`axes=` names other axes
+for them, and the contraction is priced on the axes it names: `K` is the extent
+of the axis actually summed and `M` the cells numpy actually writes.
+
 **Compound linalg** ops are *chains* of matmuls, billed as the sum of their steps
 through the `matmul_cost(m, k, n)` helper — which itself delegates to
 `einsum_cost('ij,jk->ik', …)`, so each step equals a 2-D matmul by construction

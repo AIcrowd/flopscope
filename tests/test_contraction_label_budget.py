@@ -1455,13 +1455,12 @@ def test_matmul_scalar_operand_behaviour_is_untouched():
 @requires_vecmat
 def test_gufunc_relocated_core_axis_is_left_to_numpy():
     """`axis=`/`axes=` move the gufunc's core dimension off the position the
-    subscript assumes, so the pair this check would validate is no longer the
-    pair numpy contracts. The validation is skipped for those spellings rather
-    than applied to the wrong axes -- refusing a call numpy runs is a worse
-    failure than the charge-then-fail this fixes. (Those spellings also carry
-    a separate, pre-existing pricing gap: the cost is still read off the
-    default layout. Out of scope here; pinned only so it is not mistaken for
-    a regression.)"""
+    default subscript assumes, so the default pair is no longer the pair numpy
+    contracts. Validating it would refuse calls numpy runs, a worse failure
+    than the charge-then-fail this check closes; the pair validated (and
+    priced) for those spellings is the relocated one instead, which is
+    covered in `test_gufunc_axis_pricing.py`. Pinned here: a valid relocated
+    call is not refused."""
     a, b = np.ones((3, 4)), np.ones((3, 4))
     # numpy's stubs omit the gufunc `axis=` keyword its own docstring
     # advertises; the runtime takes it, which is the whole point here.
