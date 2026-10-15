@@ -15,7 +15,8 @@ def _billed(fn):
 def test_reviewer_repro():
     load_weights()
     x = np.random.default_rng(0).standard_normal((1024, 1))
-    assert _billed(lambda: fnp.fft.fftn(x, s=(1, 1024), axes=(0, 1))) == 104857600
+    # The length-one final stage moves 1024 complex128 values: +4096.
+    assert _billed(lambda: fnp.fft.fftn(x, s=(1, 1024), axes=(0, 1))) == 104861696
 
 
 def test_fused_equals_explicit_1d_sequence():

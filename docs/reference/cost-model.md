@@ -1992,3 +1992,13 @@ weight tables by `scripts/generate_api_docs.py` and powers the website's API pag
 > shape-dependent. For those, the closed form and its derivation live in the family
 > tables above. Treat `ops.json` as the complete index and this document as the precise
 > reference; the completeness test ties them together.
+
+### Singleton FFT stages
+
+FFT arithmetic already includes complex real-FLOPs. Every executed length-one
+transform stage therefore bills 2 base FLOPs per batch entry for moving its
+complex working value, even for real forward/inverse transforms whose working
+precision follows the FFT complex-dtype policy. Apply the existing dtype and
+destination rates and operation weight. Multidimensional pricing applies this
+floor to each executed stage at that stage's batch size; empty batches cost zero.
+Transforms longer than one retain their existing butterfly formula.

@@ -13,6 +13,8 @@
 
 - `histogram2d` and `histogramdd` now apply per-axis bin-search pricing to NumPy scalar counts, array count vectors, shared edges, and mixed count/edge specifications. These forms no longer fall back to a sample-count-only charge.
 
+- Length-one FFT stages now bill 2 base FLOPs per batch entry for complex working-buffer movement, before dtype rates and operation weights. This applies to forward/inverse, real/complex, and multidimensional transforms; ordinary butterfly formulas are unchanged.
+
 ### Fix
 
 - Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).

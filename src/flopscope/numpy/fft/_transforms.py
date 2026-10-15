@@ -40,10 +40,14 @@ def fft_cost(n: int) -> int:
 
     Notes
     -----
-    Assumes radix-2 algorithm.
+    Assumes radix-2 algorithm. Length-one stages bill 2 FLOPs for the
+    complex working-buffer movement rather than zero butterfly work.
     """
-    if n <= 1:
+    # The complex working-buffer movement costs two real component stores.
+    if n <= 0:
         return 0
+    if n == 1:
+        return 2
     return 5 * n * math.ceil(math.log2(n))
 
 
@@ -63,10 +67,14 @@ def rfft_cost(n: int) -> int:
     Notes
     -----
     The real FFT exploits conjugate symmetry, roughly halving the work
-    compared to a full complex FFT.
+    compared to a full complex FFT. Length-one transforms bill 2 FLOPs
+    for complex working-buffer movement.
     """
-    if n <= 1:
+    # The complex working-buffer movement costs two real component stores.
+    if n <= 0:
         return 0
+    if n == 1:
+        return 2
     return 5 * (n // 2) * math.ceil(math.log2(n))
 
 
@@ -93,10 +101,9 @@ def fftn_cost(shape: tuple[int, ...]) -> int:
     N = 1
     for d in shape:
         N *= d
-    if N <= 1:
+    if N == 0:
         return 0
-    log_sum = sum(math.ceil(math.log2(d)) for d in shape if d > 1)
-    return 5 * N * log_sum
+    return sum((N // d) * fft_cost(d) for d in shape)
 
 
 def rfftn_cost(shape: tuple[int, ...]) -> int:
@@ -120,10 +127,20 @@ def rfftn_cost(shape: tuple[int, ...]) -> int:
     N = 1
     for d in shape:
         N *= d
-    if N <= 1:
+    if N == 0:
         return 0
     log_sum = sum(math.ceil(math.log2(d)) for d in shape if d > 1)
-    return 5 * (N // 2) * log_sum
+    # This legacy helper retains its half-volume arithmetic approximation;
+    # actual ND wrappers use staged_fftn_cost. Singleton leading axes run
+    # after the last-axis Hermitian reduction, so their movement sees that
+    # reduced batch, not the original input volume.
+    singleton_cost = 0
+    if shape:
+        reduced = (N // shape[-1]) * (shape[-1] // 2 + 1)
+        singleton_cost = 2 * reduced * shape[:-1].count(1)
+        if shape[-1] == 1:
+            singleton_cost += 2 * N
+    return 5 * (N // 2) * log_sum + singleton_cost
 
 
 def staged_fftn_cost(
@@ -228,8 +245,10 @@ def hfft_cost(n_out: int) -> int:
     hfft(a, n) == irfft(conj(a), n): real-output c2r transform.
     Exploits conjugate symmetry, roughly halving the work vs a full complex FFT.
     """
-    if n_out <= 1:
+    if n_out <= 0:
         return 0
+    if n_out == 1:
+        return 2
     return 5 * (n_out // 2) * math.ceil(math.log2(n_out))
 
 
@@ -1097,3 +1116,26 @@ import sys as _sys  # noqa: E402
 from flopscope._ndarray import wrap_module_returns as _wrap_module_returns  # noqa: E402
 
 _wrap_module_returns(_sys.modules[__name__])
+
+# FFT arithmetic formulas include the complex factor. A singleton stage still
+# moves one complex working value per batch entry (two real components).
+for _transform in (
+    fft,
+    ifft,
+    rfft,
+    irfft,
+    fft2,
+    ifft2,
+    rfft2,
+    irfft2,
+    fftn,
+    ifftn,
+    rfftn,
+    irfftn,
+    hfft,
+    ihfft,
+):
+    _transform.__doc__ = (
+        (_transform.__doc__ or "")
+        + "\nLength-one transform stages bill 2 FLOPs per batch item before dtype rates and weights.\n"
+    )
