@@ -334,12 +334,13 @@ def fft(
         n = a.shape[axis]
     cost = _batch_count_1d(a, axis) * fft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.fft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.fft,
             _to_base_ndarray(a),
@@ -349,7 +350,6 @@ def fft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -377,12 +377,13 @@ def ifft(
         n = a.shape[axis]
     cost = _batch_count_1d(a, axis) * fft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.ifft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.ifft,
             _to_base_ndarray(a),
@@ -392,7 +393,6 @@ def ifft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -420,12 +420,13 @@ def rfft(
         n = a.shape[axis]
     cost = _batch_count_1d(a, axis) * rfft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.rfft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.rfft,
             _to_base_ndarray(a),
@@ -435,7 +436,6 @@ def rfft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -463,12 +463,13 @@ def irfft(
         n = 2 * (a.shape[axis] - 1)
     cost = _batch_count_1d(a, axis) * rfft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.irfft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.irfft,
             _to_base_ndarray(a),
@@ -478,7 +479,6 @@ def irfft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -523,12 +523,13 @@ def fft2(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.fft2",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.fft2,
             _to_base_ndarray(a),
@@ -538,7 +539,6 @@ def fft2(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -585,12 +585,13 @@ def ifft2(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.ifft2",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.ifft2,
             _to_base_ndarray(a),
@@ -600,7 +601,6 @@ def ifft2(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -647,12 +647,13 @@ def rfft2(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="r2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.rfft2",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.rfft2,
             _to_base_ndarray(a),
@@ -662,7 +663,6 @@ def rfft2(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -726,12 +726,13 @@ def irfft2(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2r")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.irfft2",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.irfft2,
             _to_base_ndarray(a),
@@ -741,7 +742,6 @@ def irfft2(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -789,12 +789,13 @@ def fftn(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.fftn",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.fftn,
             _to_base_ndarray(a),
@@ -804,7 +805,6 @@ def fftn(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -851,12 +851,13 @@ def ifftn(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.ifftn",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.ifftn,
             _to_base_ndarray(a),
@@ -866,7 +867,6 @@ def ifftn(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -913,12 +913,13 @@ def rfftn(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="r2c")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.rfftn",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.rfftn,
             _to_base_ndarray(a),
@@ -928,7 +929,6 @@ def rfftn(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -992,12 +992,13 @@ def irfftn(
     axes_nn = tuple(ax % a.ndim for ax in eff)
     cost = staged_fftn_cost(a.shape, s_for_cost, axes_nn, kind="c2r")  # type: ignore[reportArgumentType]
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.irfftn",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.irfftn,
             _to_base_ndarray(a),
@@ -1007,7 +1008,6 @@ def irfftn(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -1039,12 +1039,13 @@ def hfft(
         n = 2 * (a.shape[axis] - 1)
     cost = _batch_count_1d(a, axis) * hfft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.hfft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.hfft,
             _to_base_ndarray(a),
@@ -1054,7 +1055,6 @@ def hfft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 
@@ -1085,12 +1085,13 @@ def ihfft(
         n = a.shape[axis]
     cost = _batch_count_1d(a, axis) * hfft_cost(n)
     dest = _to_base_ndarray(out) if out is not None else None
-    with budget.deduct_after(
+    with budget.deduct(
         "fft.ihfft",
+        flop_cost=cost,
         subscripts=None,
         shapes=(a.shape,),
         dtypes=(fft_billing_dtype(a.dtype),) + store_billing_dtypes(out),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.fft.ihfft,
             _to_base_ndarray(a),
@@ -1100,7 +1101,6 @@ def ihfft(
             out=dest,  # type: ignore[reportArgumentType]
         )
         _ensure_out_written(dest, result)
-        rec.set_cost(cost)
     return out if out is not None else result  # type: ignore[reportReturnType]
 
 

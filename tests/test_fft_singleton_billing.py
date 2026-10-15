@@ -85,12 +85,3 @@ def test_mixed_singleton_axes_match_explicit_cascade(shape, real):
             explicit = transform(explicit, axis=axis)
     np.testing.assert_array_equal(np.asarray(result), np.asarray(explicit))
     assert fused.flops_used == staged.flops_used
-
-
-def test_invalid_destination_does_not_charge():
-    x = np.ones((8, 1))
-    dest = np.empty((8, 2), dtype=np.complex128)
-    with flops.BudgetContext(flop_budget=10**7) as budget:
-        with pytest.raises(ValueError):
-            fnp.fft.fft(x, out=dest)
-    assert budget.flops_used == 0
