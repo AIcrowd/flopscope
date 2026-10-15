@@ -1283,7 +1283,7 @@ delegation or the op-specific factor applies instead.)
 | `linalg.trace` | `diagonal_len × batch`, `diagonal_len = min(m,n)` reduced by `|offset|` (floored at 1) | DERIVED: diagonal adds, batch-multiplied | `_properties.py:trace_cost` |
 | `linalg.tensorinv` | `2n³`, `n = prod(shape[:ind])` | DERIVED: via inv | `_solvers.py:tensorinv_cost` |
 | `linalg.tensorsolve` | `2n³/3 + 2n²`, `n = isqrt(prod(shape))` | DERIVED: via solve; n is the solved system's true dimension, independent of `axes` reordering | `_solvers.py:tensorsolve_cost` |
-| `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: values-only SVD + `min(m,n)` threshold comparisons | `_properties.py:matrix_rank_cost` |
+| `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)`; the `min(m,n)` term is paid once per (matrix, tolerance) pair when an array `tol=`/`rtol=` broadcasts against the batch | DERIVED: values-only SVD + `min(m,n)` threshold comparisons per threshold | `_properties.py:matrix_rank_cost` |
 | `linalg.cond` | `2ab² + 2b³ + 1` for `ord∈{None,2,−2}` (values-only SVD + 1 divide); `2k³ + 4mn + 1`, `k=min(m,n)` for other ords (inv-based) | DERIVED | `_properties.py:cond_cost` |
 | `linalg.pinv` | `6ab² + 20b³ + min(m,n) + n·min(m,n) + matmul\_cost(n, min(m,n), m)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: thin SVD (with vectors) + threshold + diagonal scale + reconstruction matmul | `_solvers.py:pinv_cost` |
 | `linalg.lstsq` | `6ab² + 20b³ + matmul\_cost(k,m,c) + k·c + matmul\_cost(n,k,c)`, `k=min(m,n)`, `c=#rhs cols` | DERIVED: thin SVD (with vectors) + U^T b + divide by s + reconstruction | `_solvers.py:lstsq_cost` |

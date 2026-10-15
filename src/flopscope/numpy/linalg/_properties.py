@@ -561,6 +561,22 @@ def matrix_rank_cost(m: int, n: int) -> int:
     return max(svd_cost(m, n, with_vectors=False) + min(m, n), 1)
 
 
+def _broadcast_pairs(batch_shape, threshold, batch: int) -> int:
+    """(matrix, tolerance) pairs ``matrix_rank`` thresholds: ``batch_shape``
+    broadcast against an array ``tol``/``rtol``. Shapes numpy cannot broadcast
+    keep ``batch``; numpy refuses the call in its own words."""
+    shape = (
+        threshold.shape if isinstance(threshold, _np.ndarray) else _np.shape(threshold)
+    )
+    try:
+        pairs = 1
+        for extent in _np.broadcast_shapes(tuple(batch_shape), shape):
+            pairs *= extent
+    except ValueError:
+        return batch
+    return pairs
+
+
 @_counted_wrapper
 def matrix_rank(
     A: ArrayLike,
@@ -582,6 +598,15 @@ def matrix_rank(
         m, n = A.shape[-2], A.shape[-1]
         batch = _batch_size(A.shape)
         cost = matrix_rank_cost(m, n) * batch if not _has_zero_dim(A.shape) else 0
+        # numpy compares the singular values of every matrix against every
+        # entry of an array ``tol=``/``rtol=``, broadcast against the batch,
+        # and returns one rank per pair: the threshold compares run once per
+        # (matrix, tolerance) pair, not once per matrix. A scalar threshold
+        # gives one pair per matrix, as before.
+        threshold = tol if tol is not None else rtol
+        if cost and threshold is not None:
+            pairs = _broadcast_pairs(A.shape[:-2], threshold, batch)
+            cost += min(m, n) * (pairs - batch)
     kwargs = {"hermitian": hermitian}
     if tol is not None:
         kwargs["tol"] = tol  # type: ignore[reportAssignmentType]
@@ -604,5 +629,5 @@ attach_docstring(
     matrix_rank,
     _np.linalg.matrix_rank,
     "linalg",
-    r"values-only SVD + min(m,n)",
+    r"values-only SVD + min(m,n) per (matrix, tolerance) pair",
 )

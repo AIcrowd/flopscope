@@ -1255,7 +1255,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Matrix rank. Cost: values-only SVD + min(m,n).",
+        "notes": "Matrix rank. Cost: values-only SVD + min(m,n) per (matrix, tolerance) pair (an array tol/rtol broadcasts against the batch).",
     },
     "linalg.matrix_transpose": {
         "category": "free",
