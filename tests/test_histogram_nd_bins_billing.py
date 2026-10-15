@@ -53,3 +53,16 @@ def test_invalid_bins_do_not_charge(bins):
         with pytest.raises((ValueError, TypeError)):
             fnp.histogram2d(np.arange(20), np.arange(20), bins=bins)
     assert budget.flops_used == 0
+
+
+def test_production_bin_spellings_have_equal_price():
+    from flopscope._weights import load_weights
+
+    load_weights()
+    sample = np.arange(40, dtype=np.float64).reshape(20, 2)
+    charges = []
+    for bins in (8, np.int64(8), np.array(8), np.array([8, 8])):
+        with BudgetContext(flop_budget=10**7) as budget:
+            fnp.histogramdd(sample, bins=bins)
+        charges.append(budget.flops_used)
+    assert charges == [960] * 4
