@@ -1,6 +1,6 @@
 # Unary Ufunc Dtype Billing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Bill unary forced loops and destinations consistently with existing dtype policy.
 
@@ -31,11 +31,11 @@
 
 **Interfaces:** Consume `_freeze_binary_ufunc_type_kwargs(kwargs)`, `_ufunc_loop_signature(ufunc, *dtypes, signature=..., casting=..., strict=...)`, existing dtype/store helpers. Preserve public unary signatures.
 
-- [ ] Add production exp assertions (128/396/128) and parameterized NumPy parity for sig/signature/tuple forms, forced narrowing, predicates, casting, stateful constraints and rejected forms.
-- [ ] Run new tests with root venv and worktree PYTHONPATH; confirm billing failures on retained baseline.
-- [ ] Resolve constrained single-output loops and independently include store dtype; preserve unforced operand floors and explicit complex loop factor.
-- [ ] Add and observe failures for modf/frexp forced-loop and destination cases, then apply the same resolution to multi-output wrappers using resolved output slots.
-- [ ] Run focused and existing dtype/complex/ufunc tests; inspect any changed behavior against spec.
+- [x] Add production exp assertions (128/396/128) and parameterized NumPy parity for sig/signature/tuple forms, forced narrowing, predicates, casting, stateful constraints and rejected forms.
+- [x] Run new tests with root venv and worktree PYTHONPATH; confirm billing failures on retained baseline.
+- [x] Resolve constrained single-output loops and independently include store dtype; preserve unforced operand floors and explicit complex loop factor.
+- [x] Add and observe failures for modf/frexp forced-loop and destination cases, then apply the same resolution to multi-output wrappers using resolved output slots.
+- [x] Run focused and existing dtype/complex/ufunc tests; inspect any changed behavior against spec.
 
 ### Task 2: Wire, documentation and delivery
 
@@ -43,10 +43,10 @@
 
 **Interfaces:** Existing client/server fixtures; no protocol change unless necessary for already accepted forms.
 
-- [ ] Probe and add actual wire assertions for accepted constraint/destination spellings and exact charged delta.
-- [ ] Explain unary constrained-loop and independent destination pricing in docs/changelog; update generated index if docstrings change.
-- [ ] Run Ruff/Pyright, timing guards, sync/docs verification and appropriate parity/integration tests. Parent runs combined release checks.
-- [ ] Inspect diff and record precise checks/limitations. Commit a conventional billing fix, push isolated branch, open individual issue and PR against retained release baseline, and report links.
+- [x] Probe and add actual wire assertions for accepted constraint/destination spellings and exact charged delta.
+- [x] Explain unary constrained-loop and independent destination pricing in docs/changelog; update generated index if docstrings change.
+- [x] Run Ruff/Pyright, timing guards, sync/docs verification and appropriate parity/integration tests. Parent runs combined release checks.
+- [x] Inspect diff and record precise checks/limitations. Commit a conventional billing fix, push isolated branch, open individual issue and PR against retained release baseline, and report links.
 
 ## Execution record
 
@@ -56,3 +56,7 @@
 - Ruling: validate destination casts with the exact resolved loop via NumPy metadata, rather than execute first and charge afterwards. This preserves advance budget enforcement and prevents invalid casting calls consuming budget.
 - Ruling: keep existing unary complex-destination classification; extending the binary store-only complex factor is a separate policy change, outside B6.
 - Shared root environment is used with explicit worktree PYTHONPATH, never uv sync. Isolated NumPy boundary environments do not change it.
+
+- Final clean-tree default suite: 10,553 passed, 125 skipped, 2 xfailed. Full real client/server integration: 48 passed. Ruff check/format clean; Pyright 0 errors and 4 existing warnings. Generated API verification and client synchronization pass.
+- Parent performed fresh review of the complete implementation and found no blocker.
+- Issue: https://github.com/AIcrowd/flopscope/issues/304 ; PR: https://github.com/AIcrowd/flopscope/pull/310 . No merge or release performed.
