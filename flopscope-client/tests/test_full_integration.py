@@ -707,3 +707,37 @@ def test_fixture_recovers_a_deliberately_failed_close(monkeypatch) -> None:
     summary = flops.budget_summary_dict(True)
     assert summary["flops_used"] == fresh.flops_used
     assert set(summary["by_namespace"]) == {"after-recovery"}
+
+
+@pytest.mark.parametrize("positional", [True, False])
+def test_choose_destination_cannot_discount_general_matmul(positional):
+    """Exercise actual wire decoding and server write tracking, not handlers alone."""
+    import numpy as np
+
+    import flopscope as we
+
+    rng = np.random.default_rng(12)
+    left = rng.normal(size=(3, 32))
+    right = rng.normal(size=(32, 7))
+    shape = (2,) * 5 + (7,)
+    with we.BudgetContext(flop_budget=10**9) as budget:
+        left_values = we.array(left.reshape((3,) + (2,) * 5).tolist())
+        lhs = we.zeros((3,) + (2,) * 5)
+        left_indices = we.zeros(lhs.shape, dtype="int64")
+        values = we.array(right.reshape(shape).tolist())
+        indices = we.zeros(shape, dtype="int64")
+        dest = we.zeros(shape)
+        if positional:
+            we.choose(left_indices, [left_values], lhs)
+            we.choose(indices, [values], dest)
+        else:
+            we.choose(left_indices, [left_values], out=lhs)
+            we.choose(indices, [values], out=dest)
+        before = budget.flops_used
+        result = we.einsum("zabcde,abcdef->zf", lhs, dest)
+        charged = budget.flops_used - before
+        before = budget.flops_used
+        we.einsum("zabcde,abcdef->zf", left_values, values)
+        reference_charge = budget.flops_used - before
+        np.testing.assert_allclose(result.tolist(), left @ right)
+        assert charged == reference_charge

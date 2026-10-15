@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact
