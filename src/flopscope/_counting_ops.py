@@ -373,6 +373,17 @@ attach_docstring(
 histogram.__signature__ = _inspect.signature(_np.histogram)  # pyright: ignore[reportFunctionMemberAccess]
 
 
+def _histogram_scalar_bins(bins: Any) -> bool:
+    return _np.isscalar(bins) or (isinstance(bins, _np.ndarray) and bins.ndim == 0)
+
+
+def _histogram_axis_search_cost(bins: Any) -> int:
+    """Count binary-search comparisons for an axis count or edge array."""
+    if _histogram_scalar_bins(bins):
+        return _ceil_log2(bins)
+    return _ceil_log2(len(bins))
+
+
 @_counted_wrapper
 def histogram2d(
     x: ArrayLike,
@@ -385,28 +396,14 @@ def histogram2d(
     y = _np.asarray(y)
     n = x.size
 
-    # Determine bx, by
-    if isinstance(bins, _builtins.int):
-        cost = _builtins.max(n * (_ceil_log2(bins) + _ceil_log2(bins)), 1)
-    elif (
-        isinstance(bins, (_builtins.list, tuple))
-        and _builtins.len(bins) == 2
-        and isinstance(bins[0], _builtins.int)
-        and isinstance(bins[1], _builtins.int)
-    ):
-        bx, by = bins[0], bins[1]
-        cost = _builtins.max(n * (_ceil_log2(bx) + _ceil_log2(by)), 1)
-    elif isinstance(bins, (_builtins.list, tuple)) and _builtins.len(bins) == 2:
-        b0 = _np.asarray(bins[0])
-        b1 = _np.asarray(bins[1])
-        if b0.ndim >= 1 and b1.ndim >= 1:
-            cost = _builtins.max(
-                n * (_ceil_log2(_builtins.len(b0)) + _ceil_log2(_builtins.len(b1))), 1
-            )
-        else:
-            cost = _builtins.max(n, 1)
+    # Match NumPy's shared-edges versus per-axis bin specifications.
+    if _histogram_scalar_bins(bins):
+        axis_bins = [bins, bins]
+    elif len(bins) == 2:
+        axis_bins = list(bins)
     else:
-        cost = _builtins.max(n, 1)
+        axis_bins = [bins, bins]
+    cost = _builtins.max(n * sum(_histogram_axis_search_cost(b) for b in axis_bins), 1)
 
     # Array-valued bin edges are genuine operands numpy promotes across; fold
     # their dtype in so complex/fp64 edges don't bypass the factor. Integer
@@ -418,13 +415,10 @@ def histogram2d(
     # bool -> float64, float preserved) -- so both x and y route through
     # mean_compute_dtype and a float64 sentinel joins the resolve.
     _bin_dtypes = tuple(
-        _np.asarray(b).dtype
-        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
-        if not _np.isscalar(b)
+        _np.asarray(b).dtype for b in axis_bins if not _histogram_scalar_bins(b)
     )
-    with budget.deduct(
+    with budget.deduct_after(
         "histogram2d",
-        flop_cost=cost,
         subscripts=None,
         shapes=(x.shape, y.shape),
         dtypes=(
@@ -432,7 +426,7 @@ def histogram2d(
             + _bin_dtypes
             + (_np.dtype(_np.float64),)
         ),
-    ):
+    ) as rec:
         result = _call_numpy(
             _np.histogram2d,
             x,
@@ -440,6 +434,7 @@ def histogram2d(
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
+        rec.set_cost(cost)
     return result  # type: ignore[return-value]
 
 
@@ -447,7 +442,7 @@ attach_docstring(
     histogram2d,
     _np.histogram2d,
     "counted_custom",
-    "n * (ceil(log2(bx)) + ceil(log2(by))) FLOPs when bins is int pair; n FLOPs otherwise",
+    "n * sum(ceil(log2(axis bin count or edge length))) FLOPs for all supported bin forms",
 )
 histogram2d.__signature__ = _inspect.signature(_np.histogram2d)  # pyright: ignore[reportFunctionMemberAccess]
 
@@ -467,47 +462,31 @@ def histogramdd(
     else:
         n, d = sample.shape[0], sample.shape[1]
 
-    if isinstance(bins, _builtins.int):
-        cost = _builtins.max(n * d * _ceil_log2(bins), 1)
-    elif isinstance(bins, (_builtins.list, tuple)):
-        total_log = 0
-        for b in bins:
-            if isinstance(b, _builtins.int):
-                total_log += _ceil_log2(b)
-            else:
-                b_arr = _np.asarray(b)
-                if b_arr.ndim >= 1 and b_arr.size > 0:
-                    total_log += _ceil_log2(_builtins.len(b_arr))
-                else:
-                    total_log += 1
-        cost = _builtins.max(n * total_log, 1)
-    else:
-        cost = _builtins.max(n, 1)
+    axis_bins = [bins] * d if _histogram_scalar_bins(bins) else list(bins)
+    cost = _builtins.max(n * sum(_histogram_axis_search_cost(b) for b in axis_bins), 1)
 
     # Array-valued bin edges are genuine operands numpy promotes across; fold
     # their dtype in so complex/fp64 edges don't bypass the factor. Integer
     # bins are counts, not data -> skipped. Same histogram2d/mean-shaped
     # rule: counts always float64, edges follow mean_compute_dtype(sample).
     _bin_dtypes = tuple(
-        _np.asarray(b).dtype
-        for b in (bins if isinstance(bins, (_builtins.list, tuple)) else ())
-        if not _np.isscalar(b)
+        _np.asarray(b).dtype for b in axis_bins if not _histogram_scalar_bins(b)
     )
-    with budget.deduct(
+    with budget.deduct_after(
         "histogramdd",
-        flop_cost=cost,
         subscripts=None,
         shapes=(sample.shape,),
         dtypes=(mean_compute_dtype(sample.dtype),)
         + _bin_dtypes
         + (_np.dtype(_np.float64),),
-    ):
+    ) as rec:
         result = _call_numpy(
             _np.histogramdd,
             sample,
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
+        rec.set_cost(cost)
     return result  # type: ignore[return-value]
 
 
@@ -515,7 +494,7 @@ attach_docstring(
     histogramdd,
     _np.histogramdd,
     "counted_custom",
-    "n * d * ceil(log2(bins)) FLOPs when bins is int; n FLOPs otherwise",
+    "n * sum(ceil(log2(axis bin count or edge length))) FLOPs for all supported bin forms",
 )
 histogramdd.__signature__ = _inspect.signature(_np.histogramdd)  # pyright: ignore[reportFunctionMemberAccess]
 

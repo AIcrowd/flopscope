@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- `histogram2d` and `histogramdd` now apply per-axis bin-search pricing to NumPy scalar counts, array count vectors, shared edges, and mixed count/edge specifications. These forms no longer fall back to a sample-count-only charge.
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact

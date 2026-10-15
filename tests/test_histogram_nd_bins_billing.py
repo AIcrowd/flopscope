@@ -1,0 +1,55 @@
+"""Equivalent histogram bin spellings must not select a cheap fallback."""
+
+import numpy as np
+import pytest
+
+import flopscope.numpy as fnp
+from flopscope import BudgetContext
+
+
+@pytest.mark.parametrize(
+    "bins", [8, np.int64(8), np.array(8), [8, 8], np.array([8, 8])]
+)
+@pytest.mark.parametrize("name", ["histogram2d", "histogramdd"])
+def test_counts_have_equivalent_price(name, bins):
+    sample = np.arange(40, dtype=np.float64).reshape(20, 2)
+    args = (sample[:, 0], sample[:, 1]) if name == "histogram2d" else (sample,)
+    with BudgetContext(flop_budget=10**7) as budget:
+        result = getattr(fnp, name)(*args, bins=bins)
+    expected = getattr(np, name)(*args, bins=bins)
+    np.testing.assert_array_equal(np.asarray(result[0]), expected[0])
+    assert budget.flops_used == 20 * (3 + 3)
+
+
+@pytest.mark.parametrize(
+    "bins", [[8, np.arange(17)], [np.arange(17), np.int64(8)], np.arange(17)]
+)
+def test_histogram2d_mixed_and_shared_edges(bins):
+    x = np.arange(20, dtype=np.float64)
+    with BudgetContext(flop_budget=10**7) as budget:
+        result = fnp.histogram2d(x, x, bins=bins)
+    np.testing.assert_array_equal(
+        np.asarray(result[0]), np.histogram2d(x, x, bins=bins)[0]
+    )
+    assert budget.flops_used == 20 * (8 if isinstance(bins, list) else 10)
+
+
+@pytest.mark.parametrize(
+    "bins", [[np.int64(8), np.arange(17)], np.array([[0, 1, 2], [0, 1, 2]])]
+)
+def test_histogramdd_mixed_and_array_edges(bins):
+    sample = np.arange(40, dtype=np.float64).reshape(20, 2)
+    with BudgetContext(flop_budget=10**7) as budget:
+        result = fnp.histogramdd(sample, bins=bins)
+    np.testing.assert_array_equal(
+        np.asarray(result[0]), np.histogramdd(sample, bins=bins)[0]
+    )
+    assert budget.flops_used == 20 * (8 if isinstance(bins, list) else 4)
+
+
+@pytest.mark.parametrize("bins", [0, [8], [8, np.array([2, 1])]])
+def test_invalid_bins_do_not_charge(bins):
+    with BudgetContext(flop_budget=10**7) as budget:
+        with pytest.raises((ValueError, TypeError)):
+            fnp.histogram2d(np.arange(20), np.arange(20), bins=bins)
+    assert budget.flops_used == 0
