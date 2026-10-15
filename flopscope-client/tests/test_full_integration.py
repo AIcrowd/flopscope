@@ -202,6 +202,39 @@ class TestPointwise:
             assert abs(vals[1] - math.e) < 1e-10
 
 
+class TestUnaryConstraints:
+    @pytest.mark.parametrize("keyword", ["signature", "sig"])
+    @pytest.mark.parametrize(
+        "signature,price,dtype", [("d->d", 128, "float64"), ("D->D", 396, "complex128")]
+    )
+    def test_exp_forced_loop_billing(self, keyword, signature, price, dtype):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.0, 1.0, 2.0, 3.0], dtype="float32")
+            before = budget.flops_used
+            result = flops.exp(x, **{keyword: signature})
+            assert budget.flops_used - before == price
+            assert str(result.dtype) == dtype
+
+    def test_exp_explicit_dtype_wider_destination(self):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.0, 1.0, 2.0, 3.0], dtype="float32")
+            out = flops.empty(4, dtype="float64")
+            before = budget.flops_used
+            result = flops.exp(x, dtype="float32", out=out)
+            assert budget.flops_used - before == 128
+            assert str(result.dtype) == "float64"
+
+    @pytest.mark.parametrize("name,signature", [("modf", "d->dd"), ("frexp", "d->di")])
+    def test_multioutput_forced_loop(self, name, signature):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.5, 1.5, 2.5, 3.5], dtype="float32")
+            before = budget.flops_used
+            result = getattr(flops, name)(x, signature=signature)
+            # Server uses production weights; both operations have weight 1.
+            assert budget.flops_used - before == 16
+            assert str(result[0].dtype) == "float64"
+
+
 # ===========================================================================
 # Category 2: Reductions
 # ===========================================================================
@@ -707,3 +740,62 @@ def test_fixture_recovers_a_deliberately_failed_close(monkeypatch) -> None:
     summary = flops.budget_summary_dict(True)
     assert summary["flops_used"] == fresh.flops_used
     assert set(summary["by_namespace"]) == {"after-recovery"}
+
+
+@pytest.mark.parametrize("positional", [True, False])
+def test_choose_destination_cannot_discount_general_matmul(positional):
+    """Exercise actual wire decoding and server write tracking, not handlers alone."""
+    import random
+
+    import flopscope as we
+
+    rng = random.Random(12)
+    left = [[rng.gauss(0, 1) for _ in range(32)] for _ in range(3)]
+    right = [[rng.gauss(0, 1) for _ in range(7)] for _ in range(32)]
+    expected = [
+        [sum(left[i][k] * right[k][j] for k in range(32)) for j in range(7)]
+        for i in range(3)
+    ]
+    shape = (2,) * 5 + (7,)
+    with we.BudgetContext(flop_budget=10**9) as budget:
+        left_values = we.reshape(we.array(left), (3,) + (2,) * 5)
+        lhs = we.zeros((3,) + (2,) * 5)
+        left_indices = we.zeros(lhs.shape, dtype="int64")
+        values = we.reshape(we.array(right), shape)
+        indices = we.zeros(shape, dtype="int64")
+        dest = we.zeros(shape)
+        if positional:
+            we.choose(left_indices, [left_values], lhs)
+            we.choose(indices, [values], dest)
+        else:
+            we.choose(left_indices, [left_values], out=lhs)
+            we.choose(indices, [values], out=dest)
+        before = budget.flops_used
+        result = we.einsum("zabcde,abcdef->zf", lhs, dest)
+        charged = budget.flops_used - before
+        before = budget.flops_used
+        we.einsum("zabcde,abcdef->zf", left_values, values)
+        reference_charge = budget.flops_used - before
+        for actual_row, expected_row in zip(result.tolist(), expected, strict=True):
+            assert actual_row == pytest.approx(expected_row)
+        assert charged == reference_charge
+
+
+def test_module_shuffle_invalidates_server_symmetry():
+    import flopscope as we
+
+    gram = [
+        [float((i + 1) * (j + 1) + int(i == j)) for j in range(8)] for i in range(8)
+    ]
+    with we.BudgetContext(flop_budget=10**9) as budget:
+        tagged = we.as_symmetric(we.array(gram), symmetry=(0, 1))
+        we.random.seed(42)
+        we.random.shuffle(tagged)
+        shuffled = tagged.tolist()
+        dense = we.array(shuffled)
+        before = budget.flops_used
+        we.einsum("ij,ij->", tagged, tagged)
+        charged = budget.flops_used - before
+        before = budget.flops_used
+        we.einsum("ij,ij->", dense, dense)
+        assert charged == budget.flops_used - before

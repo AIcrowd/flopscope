@@ -17,7 +17,8 @@ The scope is worth stating exactly, because it is narrower than "a tag always
 means exact invariance". What this module guarantees is a property of the
 *ingress* points -- ``as_symmetric`` and the public ``SymmetricTensor``
 constructor, the two places a caller hands over a buffer the library has never
-inspected. Symmetry that propagates algebraically through later operations is
+inspected, and ``einsum``'s ``symmetry=``, where a caller declares the group of
+a result. Symmetry that propagates algebraically through later operations is
 trusted on the mathematics, not re-established here, and float arithmetic makes
 that a genuinely weaker claim: the Reynolds projection sums each orbit in a
 fixed element order, so its own output is typically invariant only to about an

@@ -24,6 +24,8 @@ def polyval_cost(deg: int, m: int) -> int:
     """Cost for polyval: Horner's method under FMA=2 textbook convention.
 
     Per coefficient: 1 multiply + 1 add (FMA=2). m output cells, deg coefficients.
+    For an N-D coefficient array, m is the size of the broadcast output
+    ``broadcast_shapes(p.shape[1:], x.shape)``, not ``x.size``.
     Returns 2 * m * deg FLOPs.
     """
     return max(2 * m * deg, 1)
@@ -222,6 +224,28 @@ def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
     return max(vandermonde + solve, 1)
 
 
+def polyfit_covariance_cost(
+    m: int, deg: int, covariance_size: int, *, scaled: bool
+) -> int:
+    """Additional covariance branch, sharing matrix work across RHS columns.
+
+    Gram and inverse follow the dense dot/inverse pricing. The aliased
+    outer(scale, scale) uses its guaranteed symmetric orbit count. Final
+    multiplication bills the requested covariance size (including NumPy's
+    singleton RHS dimension for unscaled multi-output fits).
+    """
+    from flopscope._flops import matmul_cost
+    from flopscope.numpy.linalg import inv_cost
+
+    n = deg + 1
+    gram = matmul_cost(n, m, n)
+    inverse = inv_cost(n)
+    scale_outer = n * (n + 1) // 2
+    normalize = n * n
+    residual_scale = covariance_size // (n * n) if scaled else 0
+    return gram + inverse + scale_outer + normalize + covariance_size + residual_scale
+
+
 def poly_cost(n: int) -> int:
     """Cost for poly (1-D build-from-roots): ``(3*n^2 + n) // 2`` FLOPs.
 
@@ -281,7 +305,16 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
     p_arr = _to_base_ndarray(_np.asarray(p))
     x_arr = _to_base_ndarray(_np.asarray(x))
     deg = len(p_arr) - 1
-    m = x_arr.size
+    # Every Horner step ``y = y * x + p[i]`` runs over the broadcast of ``x``
+    # with one coefficient slice ``p[i]``, so trailing dimensions of ``p``
+    # (or an ``x`` smaller than ``p[i]``, down to a 0-d point) widen every
+    # step: ``m`` is the size of that output, not ``x.size``. Shapes numpy
+    # cannot broadcast keep ``x.size``; numpy refuses the call in its own
+    # words.
+    try:
+        m = _math.prod(_np.broadcast_shapes(p_arr.shape[1:], x_arr.shape))
+    except ValueError:
+        m = x_arr.size
     cost = polyval_cost(deg, m)
     with budget.deduct(
         "polyval",
@@ -295,7 +328,11 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
 
 
 attach_docstring(
-    polyval, _np.polyval, "counted_custom", "2 * m * deg FLOPs (Horner's method, FMA=2)"
+    polyval,
+    _np.polyval,
+    "counted_custom",
+    "2 * m * deg FLOPs (Horner's method, FMA=2), "
+    "m = size of the broadcast output (p.shape[1:] against x.shape)",
 )
 
 
@@ -524,6 +561,16 @@ def polyfit(
     billing_dtypes = (x_arr.dtype, y_arr.dtype, _np.dtype(_np.float64))
     if kwargs.get("w") is not None:
         billing_dtypes += (kwargs["w"].dtype,)
+    if kwargs.get("cov", False) and not kwargs.get("full", False):
+        if deg < 0:
+            raise ValueError("expected deg >= 0")
+        scaled = kwargs["cov"] != "unscaled"
+        if scaled and m <= deg + 1:
+            raise ValueError(
+                "the number of data points must exceed order to scale the covariance matrix"
+            )
+        covariance_size = (deg + 1) ** 2 * (ncols if scaled else 1)
+        cost += polyfit_covariance_cost(m, deg, covariance_size, scaled=scaled)
     with budget.deduct(
         "polyfit",
         flop_cost=cost,
@@ -541,7 +588,10 @@ attach_docstring(
     "counted_custom",
     "m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) FLOPs "
     "(ncols = y.shape[1] for 2-D y, else 1; SVD factorization is shared "
-    "across ncols, so cost grows sublinearly in ncols)",
+    "across ncols, so cost grows sublinearly in ncols); cov adds "
+    "matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance), "
+    "plus one residual division per covariance slice for scaled cov; "
+    "p=deg+1, shared across RHS columns; full=True skips covariance",
 )
 polyfit.__signature__ = _inspect.signature(_np.polyfit)  # type: ignore[attr-defined]
 

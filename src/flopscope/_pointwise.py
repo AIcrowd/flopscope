@@ -47,6 +47,7 @@ from flopscope._flops import (
 from flopscope._flops import (
     analytical_reduction_cost as reduction_cost,
 )
+from flopscope._flops import sort_cost as _sort_cost
 from flopscope._ndarray import (
     FlopscopeArray,
     _asflopscope,
@@ -61,6 +62,7 @@ from flopscope._symmetry_utils import (
     intersect_groups,
     reduce_group,
     remap_group_axes,
+    remap_group_for_expand_dims,
     restrict_group_to_axes,
     unique_elements_for_shape,
 )
@@ -89,6 +91,20 @@ _INTEGER_ACCUMULATING_REDUCTIONS = frozenset(
         "cumulative_prod",
         "nansum",
         "nanprod",
+        "nancumsum",
+        "nancumprod",
+    }
+)
+
+# Cumulative scans: the result has the input's shape. Only the scanned axis
+# loses its symmetry partners; every other axis keeps its position, so the
+# output tag must be derived with ``keepdims=True``.
+_CUMULATIVE_REDUCTIONS = frozenset(
+    {
+        "cumsum",
+        "cumprod",
+        "cumulative_sum",
+        "cumulative_prod",
         "nancumsum",
         "nancumprod",
     }
@@ -1116,6 +1132,14 @@ def _counted_unary(np_func, op_name: str):
             _preflight_ufunc_out_arity(out, np_func.nout)
             _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
+        explicit_dtype = None
+        explicit_signature = _UFUNC_SIGNATURE_MISSING
+        explicit_casting = _UFUNC_CASTING_MISSING
+        loop_dtypes: tuple = ()
+        if is_ufunc:
+            explicit_dtype, explicit_signature, explicit_casting = (
+                _freeze_binary_ufunc_type_kwargs(kwargs)
+            )
         symmetry = _symmetry_of(x)
         if is_ufunc:
             x, x_fwd = _resolve_ufunc_data_operand(x)
@@ -1125,118 +1149,43 @@ def _counted_unary(np_func, op_name: str):
             x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        # An explicit dtype= forces the ufunc loop: numpy casts operands on
-        # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop. A bool
-        # dtype= is excluded: it names the output of a value-testing loop,
-        # which still reads full-width operands -- bill the operands.
-        explicit_dtype = kwargs.get("dtype")
-        # What a destination buffer contributes, kept SEPARATE from the
-        # operand resolution below. Folding it in first let a narrow out=
-        # pull the resolved dtype down before the compute-dtype mapping ran
-        # (float16 out= on angle(bool_) resolved float16, whose kind is no
-        # longer "b", so the float64 override never fired and the call
-        # billed half price). The compute dtype numpy selects is a function
-        # of the OPERANDS alone; a destination can only ever widen the bill
-        # on top of it, never shrink it -- see cost-model.md's "out= alone
-        # never shrinks the loop".
-        store_dtypes: tuple = ()
-        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
-        if not bills_operand:
-            assert explicit_dtype is not None
-            operand_dtypes: tuple = (_np.dtype(explicit_dtype),)
+        if is_ufunc:
+            loop_dtypes, operand_dtypes = _unary_ufunc_billing_dtypes(
+                np_func,
+                op_name,
+                x.dtype,
+                explicit_dtype,
+                explicit_signature,
+                explicit_casting,
+            )
         else:
-            operand_dtypes = (x.dtype,)
-            if isinstance(out, _np.ndarray):
-                store_dtypes = store_billing_dtypes(out)
-        compute_dtype = None
-        # A loop numpy does not have is a refusal, not a price. Ask before the
-        # deduct so it costs nothing, the same doctrine as the ``out=`` guards
-        # at the top of this wrapper and as percentile's ``q`` check (#241):
-        # ``invert(float32)`` and ``sign(bool_)`` used to bill ``numel`` in
-        # full and then raise, because the only guard was numpy's own dispatch
-        # inside the deduct block.
-        #
-        # The answer is also the PRICE. numpy's resolved signature names the
-        # dtype the loop really reads, so a ufunc-backed op needs no entry in
-        # the name sets below -- the same rule ``_counted_binary`` has always
-        # used, and the reason its float-only family (copysign, heaviside,
-        # nextafter, hypot, logaddexp) has never needed one. A hand-kept set
-        # can only be as complete as the last person to edit it: it missed
-        # ``angle``'s bool case, then ``signbit``/``isneginf``/``isposinf``,
-        # each found as an undercharge in production rather than here.
-        #
-        # Restricted to the UNCONSTRAINED form. ``dtype=`` and
-        # ``signature=``/``sig=`` name a loop explicitly, and this wrapper
-        # forwards them untouched; reconstructing numpy's constraint semantics
-        # here to pre-judge them would risk refusing a form numpy accepts,
-        # which is the one failure mode worse than the overcharge being fixed.
-        # Those forms keep billing the dtype the caller named, as before.
-        # ``bills_operand`` is the SAME predicate that chose operand_dtypes
-        # above, deliberately sharing one expression: a bool ``dtype=`` names
-        # the output of a value-testing loop, so the wrapper ignores it and
-        # bills the operand -- which means the operand's loop still has to be
-        # resolved. Gating this on ``explicit_dtype is None`` alone reopened
-        # signbit's undercharge through the ``dtype=bool`` door, billing
-        # ``signbit(int32, dtype=bool)`` at int32 while numpy read float64.
-        #
-        # The REFUSAL stays gated on the stricter ``explicit_dtype is None``.
-        # A caller who named a dtype gets numpy's own error from the real
-        # call, exactly as before; pre-judging that form here could refuse
-        # something numpy accepts, the one failure mode worse than the
-        # overcharge this resolution fixes.
-        if is_ufunc and bills_operand and "signature" not in kwargs:
-            if "sig" not in kwargs:
-                try:
-                    loop_dtypes: tuple = _ufunc_loop_signature(
-                        np_func,
-                        x.dtype,
-                        casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
-                        strict=True,
-                    )
-                except (TypeError, ValueError) as loop_error:
-                    if explicit_dtype is None:
-                        _refuse_unsupported_loop(op_name, (x.dtype,), loop_error)
-                        raise  # unreachable; _refuse_unsupported_loop raises
-                    loop_dtypes = ()
-                # ``_rate_bearing_loop_dtypes`` drops control-input slots.
-                # No unary ufunc has one today (``ldexp``'s exponent is the
-                # only such slot in numpy's namespace and it is binary), so
-                # this is forward insurance, not a filter that fires -- it is
-                # used anyway so the unary and binary collapses cannot drift.
-                if loop_dtypes:
-                    compute_dtype = heavier_billing_dtype(
-                        *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
-                    )
-                    # The operand floor: a resolved loop can be NARROWER than
-                    # the operand (``abs(complex128) -> d``), and a narrower
-                    # loop must not discount the wider value it reads. Read
-                    # from the operands ALONE -- a destination is folded in
-                    # after the mapping, never before it (#243).
-                    input_floor = resolve_billing_dtype(operand_dtypes)
-                    if input_floor is not None:
-                        compute_dtype = heavier_billing_dtype(
-                            compute_dtype, input_floor
-                        )
-        elif op_name in _UNARY_FLOAT_LOOP_OPS:
+            # Non-ufunc composites retain their existing compute-dtype mapping.
+            explicit_dtype = kwargs.get("dtype")
+            bills_operand = (
+                explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
+            )
+            operand_dtypes = (
+                (x.dtype,) if bills_operand else (_np.dtype(explicit_dtype),)
+            )
             resolved = resolve_billing_dtype(operand_dtypes)
-            if resolved is not None:
+            if resolved is not None and op_name in _UNARY_FLOAT_LOOP_OPS:
                 compute_dtype = unary_float_loop_dtype(resolved)
-                # angle(bool_) computes float64, not the float16 the
-                # itemsize-based mapping predicts -- see the comment above
-                # _UNARY_FLOAT_LOOP_OPS.
                 if op_name == "angle" and resolved.kind == "b":
                     compute_dtype = _np.dtype(_np.float64)
-        elif op_name in _UNARY_FLOAT64_MIN_OPS:
-            resolved = resolve_billing_dtype(operand_dtypes)
-            if resolved is not None:
-                compute_dtype = integer_to_float64_min_dtype(resolved)
-        if compute_dtype is not None:
-            operand_dtypes = (compute_dtype,)
-        # The store dtype stays in the tuple rather than being resolved away:
-        # ``deduct`` keys its non-numeric refusal on these entries, and a
-        # genuinely wider destination must still reach the rate.
+                operand_dtypes = (compute_dtype,)
+            elif resolved is not None and op_name in _UNARY_FLOAT64_MIN_OPS:
+                operand_dtypes = (integer_to_float64_min_dtype(resolved),)
+        # Constraints select computation, never suppress destination billing.
+        # Inspect the real ndarray descriptor rather than a subclass override.
+        out_view = (
+            _np.asarray(_to_base_ndarray(out)) if isinstance(out, _np.ndarray) else None
+        )
+        store_dtypes = store_billing_dtypes(out_view) if out_view is not None else ()
         billing_dtypes = operand_dtypes + store_dtypes
+        if is_ufunc:
+            _preflight_unary_ufunc_stores(
+                np_func, op_name, loop_dtypes, (out_view,), explicit_casting
+            )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1295,7 +1244,17 @@ def _counted_unary(np_func, op_name: str):
 
     wrapper.__name__ = op_name
     wrapper.__qualname__ = op_name
-    attach_docstring(wrapper, np_func, "counted_unary", "numel(output) FLOPs")
+    attach_docstring(
+        wrapper,
+        np_func,
+        "counted_unary",
+        "numel(output) FLOPs"
+        + (
+            "; dtype=/signature=/sig= select the computation loop; out= can widen billing"
+            if is_ufunc
+            else ""
+        ),
+    )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -1406,6 +1365,9 @@ def _counted_unary_multi(np_func, op_name: str):
         _preflight_ufunc_out_arity(out, nout)
         _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
+        explicit_dtype, explicit_signature, explicit_casting = (
+            _freeze_binary_ufunc_type_kwargs(kwargs)
+        )
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
         # A multi-output ufunc is priced as nout independent applications of
@@ -1423,54 +1385,31 @@ def _counted_unary_multi(np_func, op_name: str):
         # multi_store_billing_dtypes) -- supplying out= does not multiply
         # this again.
         cost = nout * pointwise_cost(x.shape, symmetry=symmetry)
-        # An explicit dtype= forces the ufunc loop: numpy casts operands on
-        # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop. A bool
-        # dtype= is excluded: it names the output of a value-testing loop,
-        # which still reads full-width operands -- bill the operands.
-        explicit_dtype = kwargs.get("dtype")
-        store_dtypes: tuple = ()
-        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
-        if not bills_operand:
-            assert explicit_dtype is not None
-            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
-        else:
-            billing_dtypes = (x.dtype,)
-            # Only what a destination adds ON TOP of the buffer numpy would
-            # have allocated for that slot: ``frexp``'s exponent is int32 by
-            # signature, not because anything asked for 32-bit integer
-            # arithmetic, so naming it must not promote the resolution.
-            store_dtypes = multi_store_billing_dtypes(
-                out, natural_output_dtypes(np_func, x.dtype)
+        loop_dtypes, computation_dtypes = _unary_ufunc_billing_dtypes(
+            np_func,
+            op_name,
+            x.dtype,
+            explicit_dtype,
+            explicit_signature,
+            explicit_casting,
+        )
+        out_views = (
+            None
+            if out is None
+            else tuple(
+                _np.asarray(_to_base_ndarray(slot))
+                if isinstance(slot, _np.ndarray)
+                else slot
+                for slot in out
             )
-            billing_dtypes += store_dtypes
-        # Same rule as the single-output wrapper: numpy's resolved signature
-        # names the loop, so neither ``modf`` nor ``frexp`` needs a name-set
-        # entry. Collapsing the whole signature also subsumes the hardcoded
-        # ``heavier(mapped, int32)`` this used to apply for ``frexp`` -- that
-        # int32 was the exponent OUTPUT slot, which the resolved signature
-        # reports directly instead of naming a width in source. A caller's
-        # ``out=`` for that slot is still measured against the natural
-        # destination above, so naming it cannot promote the resolution.
-        if bills_operand and "signature" not in kwargs and "sig" not in kwargs:
-            loop_dtypes = _ufunc_loop_signature(
-                np_func,
-                x.dtype,
-                casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
-            )
-            mapped = heavier_billing_dtype(
-                *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
-            )
-            # Operands ONLY. The destination is appended below as its own
-            # entry, never folded into this floor: ``heavier`` does not widen
-            # on a rate tie, so folding a float32 ``out=`` into a float16 loop
-            # resolved DOWN to float16 -- the narrowing #243 closed for the
-            # single-output wrapper -- and it hid a complex128 destination
-            # from the refusal ``deduct`` keys on these entries.
-            input_floor = resolve_billing_dtype((x.dtype,))
-            if input_floor is not None:
-                mapped = heavier_billing_dtype(mapped, input_floor)
-            billing_dtypes = (mapped,) + store_dtypes
+        )
+        # Compare stores with this constrained loop's natural output slots.
+        # frexp's int32 exponent must remain neutral when explicitly supplied.
+        store_dtypes = multi_store_billing_dtypes(out_views, loop_dtypes[np_func.nin :])
+        billing_dtypes = computation_dtypes + store_dtypes
+        _preflight_unary_ufunc_stores(
+            np_func, op_name, loop_dtypes, out_views, explicit_casting
+        )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1492,7 +1431,13 @@ def _counted_unary_multi(np_func, op_name: str):
 
     wrapper.__name__ = op_name
     wrapper.__qualname__ = op_name
-    attach_docstring(wrapper, np_func, "counted_unary", "numel(input) FLOPs")
+    attach_docstring(
+        wrapper,
+        np_func,
+        "counted_unary",
+        "nout * numel(input) FLOPs; dtype=/signature=/sig= select the computation loop; "
+        "out= can widen billing; natural per-slot destinations are price-neutral",
+    )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -1915,6 +1860,62 @@ def _ufunc_loop_signature(
             raise
         fallback = _np.result_type(*operand_dtypes)
         return (fallback,) * (len(inputs) + ufunc.nout)
+
+
+def _unary_ufunc_billing_dtypes(
+    ufunc,
+    op_name: str,
+    input_dtype: _np.dtype,
+    explicit_dtype: _np.dtype | None,
+    explicit_signature: object,
+    explicit_casting: object,
+) -> tuple[tuple[_np.dtype, ...], tuple[_np.dtype, ...]]:
+    """Resolve unary computation independently of any destination buffers.
+
+    Explicit constraints replace the source-width floor: NumPy casts into
+    that loop on read. Unconstrained calls retain their prior operand floor.
+    Every loop slot participates, including a predicate's numeric input and
+    frexp's fixed-width exponent output.
+    """
+    constraint = explicit_signature
+    if constraint is _UFUNC_SIGNATURE_MISSING and explicit_dtype is not None:
+        constraint = (None, *([explicit_dtype] * ufunc.nout))
+    try:
+        loop = _ufunc_loop_signature(
+            ufunc,
+            input_dtype,
+            signature=constraint,
+            casting=explicit_casting,
+            strict=True,
+        )
+    except (TypeError, ValueError) as error:
+        if constraint is _UFUNC_SIGNATURE_MISSING:
+            _refuse_unsupported_loop(op_name, (input_dtype,), error)
+        raise
+    compute = heavier_billing_dtype(*_rate_bearing_loop_dtypes(ufunc, loop))
+    if constraint is _UFUNC_SIGNATURE_MISSING:
+        floor = resolve_billing_dtype((input_dtype,))
+        if floor is not None:
+            compute = heavier_billing_dtype(compute, floor)
+    return loop, (compute,)
+
+
+def _preflight_unary_ufunc_stores(
+    ufunc, op_name: str, loop: tuple, outputs, casting: object
+) -> None:
+    """Validate stores against the already selected loop without running it."""
+    if outputs is None or _builtins.all(slot is None for slot in outputs):
+        return
+    destinations = tuple(
+        slot.dtype if isinstance(slot, _np.ndarray) else None for slot in outputs
+    )
+    refuse_non_numeric_dtype(op_name, *(dt for dt in destinations if dt is not None))
+    resolve_kwargs: dict[str, Any] = {"signature": loop}
+    if casting is not _UFUNC_CASTING_MISSING:
+        resolve_kwargs["casting"] = casting
+    # Supplying exact resolved slots prevents destinations from selecting a
+    # different loop; NumPy only checks each slot's output casting here.
+    ufunc.resolve_dtypes((*loop[: ufunc.nin], *destinations), **resolve_kwargs)
 
 
 def _ufunc_loop_dtype(
@@ -3516,8 +3517,13 @@ def _counted_reduction(
         if op_name in _INDEX_RETURNING_REDUCTIONS:
             _refuse_non_index_destination(op_name, out, axis)
 
+        # A cumulative scan keeps every axis (it takes no keepdims): treating
+        # the scanned axis as removed renumbered the surviving group one axis
+        # to the left, tagging axes whose values are not symmetric (#279).
+        # ``ufunc.accumulate`` derives its tag the same way.
+        tag_keepdims = True if op_name in _CUMULATIVE_REDUCTIONS else keepdims
         new_symmetry = (
-            reduce_group(symmetry, ndim=len(a.shape), axis=axis, keepdims=keepdims)
+            reduce_group(symmetry, ndim=len(a.shape), axis=axis, keepdims=tag_keepdims)
             if symmetry is not None
             else None
         )
@@ -3616,15 +3622,6 @@ def _counted_reduction(
             shapes=(a.shape,),
             dtypes=billing_dtypes,
         ):
-            if out_came_from_args:
-                # The destination travels in a positional slot of ``args_list``,
-                # so ``np_out_kwarg`` is None and _call_numpy's out= hook never
-                # sees it -- the same write that the keyword spelling records
-                # would otherwise go unnoticed, leaving a symmetry tag standing
-                # over data it no longer describes. Recorded here rather than
-                # above the deduct so a refused op does not void a tag on a
-                # buffer numpy was never given the chance to write.
-                note_write(out_for_np)
             if _axis_is_second_positional:
                 result = _call_with_optional_out(
                     np_func,
@@ -3957,14 +3954,32 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
     # and break float32 vs Python-float comparisons).
     a_arr = a if isinstance(a, _np.ndarray) else _np.asarray(a)
     b_arr = b if isinstance(b, _np.ndarray) else _np.asarray(b)
-    output_shape = _np.broadcast_shapes(a_arr.shape, b_arr.shape)
+    # rtol= and atol= are operands of the tolerance core as well: numpy
+    # broadcasts them against a and b, so an array tolerance can enlarge the
+    # result, break the operands' symmetry and widen the arithmetic.
+    tolerances = [
+        (v, v if isinstance(v, _np.ndarray) else _np.asarray(v))
+        for k, v in kwargs.items()
+        if k in ("rtol", "atol")
+    ]
+    output_shape = _np.broadcast_shapes(
+        a_arr.shape, b_arr.shape, *(arr.shape for _, arr in tolerances)
+    )
     out_symmetry, _ = _pointwise_symmetry(
-        ((a_arr, _symmetry_of(a_arr)), (b_arr, _symmetry_of(b_arr))),
+        (
+            (a_arr, _symmetry_of(a_arr)),
+            (b_arr, _symmetry_of(b_arr)),
+            *((arr, _symmetry_of(arr)) for _, arr in tolerances),
+        ),
         output_shape,
     )
     # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
     cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
-    billing_dtypes: tuple = (billing_operand(a, a_arr), billing_operand(b, b_arr))
+    billing_dtypes: tuple = (
+        billing_operand(a, a_arr),
+        billing_operand(b, b_arr),
+        *(billing_operand(v, arr) for v, arr in tolerances),
+    )
     # numpy's isclose casts its reference operand -- ``dt = result_type(y, 1.)``
     # -- before running ``|x-y| <= atol + rtol*|y|``, so an integer or bool
     # operand computes in float64 whatever the tolerances are (an explicit
@@ -3987,7 +4002,10 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
         dtypes=billing_dtypes,
     ):
         result = _call_numpy(
-            _np.isclose, _to_base_ndarray(a), _to_base_ndarray(b), **kwargs
+            _np.isclose,
+            _to_base_ndarray(a),
+            _to_base_ndarray(b),
+            **{k: _to_base_ndarray(v) for k, v in kwargs.items()},
         )
     if a_is_scalar and b_is_scalar and _np.ndim(result) == 0:
         return bool(result)
@@ -4062,15 +4080,18 @@ if hasattr(_np, "vecdot"):
     @_counted_wrapper
     def vecdot(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
         """Counted version of np.vecdot (vector dot product along last axis)."""
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.vecdot, a, b, "...n,...n->...", kwargs
+        )
         return _einsum_routed_binary(
             "vecdot",
             _np.vecdot,
-            "...n,...n->...",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -4089,15 +4110,18 @@ if hasattr(_np, "matvec"):
         A is (..., m, n), v is (..., n), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 1, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.matvec, a, b, "...mn,...n->...m", kwargs
+        )
         return _einsum_routed_binary(
             "matvec",
             _np.matvec,
-            "...mn,...n->...m",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -4116,15 +4140,18 @@ if hasattr(_np, "vecmat"):
         v is (..., n), A is (..., n, m), result is (..., m). Cost is the exact
         einsum accumulation cost, counting batch/broadcast on either operand.
         """
-        a, b, a_axis, b_axis = _core_contraction_axes(a, b, 2, kwargs)
+        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+            _np.vecmat, a, b, "...n,...nm->...m", kwargs
+        )
         return _einsum_routed_binary(
             "vecmat",
             _np.vecmat,
-            "...n,...nm->...m",
+            subs,
             a,
             b,
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
+            kept_axis=kept_axis,
             **kwargs,
         )
 
@@ -4369,7 +4396,7 @@ def _counted_mean(np_func, op_name: str):
 mean = _counted_mean(_np.mean, "mean")
 
 
-def _variance_family_cost(a, axis, symmetry, *, with_sqrt: bool) -> int:
+def _variance_family_cost(shape, axis, symmetry, *, with_sqrt: bool) -> int:
     """Honest FMA=2 cost: 2 pointwise passes (center, square) + 2 reductions
     (mean-sum, var-sum) + per-output divides (+ sqrt for std) = 4*numel (+M)."""
     from flopscope._accumulation._reduction import (
@@ -4378,17 +4405,33 @@ def _variance_family_cost(a, axis, symmetry, *, with_sqrt: bool) -> int:
         compute_reduction_accumulation_cost,
     )
 
-    axes_summed = _normalize_axis(axis, a.ndim)
-    m = _num_output_orbits(tuple(a.shape), axes_summed, symmetry)
+    shape = tuple(shape)
+    axes_summed = _normalize_axis(axis, len(shape))
+    m = _num_output_orbits(shape, axes_summed, symmetry)
     reduce_cost = compute_reduction_accumulation_cost(
-        input_shape=tuple(a.shape),
+        input_shape=shape,
         axes_summed=axes_summed,
         symmetry=symmetry,
         op_factor=2,
         extra_ops=2 * m,
     ).total
-    cost = 2 * pointwise_cost(tuple(a.shape), symmetry) + reduce_cost
+    cost = 2 * pointwise_cost(shape, symmetry) + reduce_cost
     return cost + m if with_sqrt else cost
+
+
+def _centered_shape(a_shape, mean) -> tuple:
+    """Shape of ``a - mean``, the array every pass of ``var(..., mean=)`` runs over.
+
+    numpy subtracts a caller-supplied ``mean`` from ``a`` as given, so a mean
+    with extra (or longer) dimensions broadcasts the centred array, and the
+    square and the sum run over that larger shape. A mean numpy cannot
+    broadcast keeps ``a.shape``: numpy refuses the call in its own words.
+    """
+    mean_shape = mean.shape if isinstance(mean, _np.ndarray) else _np.shape(mean)
+    try:
+        return tuple(_np.broadcast_shapes(tuple(a_shape), mean_shape))
+    except ValueError:
+        return tuple(a_shape)
 
 
 def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
@@ -4411,7 +4454,21 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
             a = _np.asarray(a)
         symmetry = _symmetry_of(a)
         keepdims = bool(keepdims)
-        cost = _variance_family_cost(a, axis, symmetry, with_sqrt=with_sqrt)
+        cost = _variance_family_cost(a.shape, axis, symmetry, with_sqrt=with_sqrt)
+        # A ``mean=`` that broadcasts ``a`` to a larger shape turns one
+        # variance into a batch of them, all computed over ``a - mean``.
+        # Bill that array, dense: ``a``'s symmetry tag describes ``a``, not
+        # the broadcast result, so it neither discounts the bill nor tags the
+        # output. Only the plain forms: nanvar/nanstd centre ``a`` in place,
+        # and numpy refuses a mean that would enlarge it.
+        mean = kwargs.get("mean")
+        if mean is not None and not op_name.startswith("nan"):
+            centered_shape = _centered_shape(a.shape, mean)
+            if centered_shape != tuple(a.shape):
+                symmetry = None
+                cost = _variance_family_cost(
+                    centered_shape, axis, None, with_sqrt=with_sqrt
+                )
         # A nan-prefixed reduction tests every INEXACT input element for NaN
         # before reducing -- one extra full pass its plain sibling does not
         # run. The model charges every other value test (count_nonzero,
@@ -4874,6 +4931,16 @@ nanmin = _counted_reduction(_np.nanmin, "nanmin")
 nanprod = _counted_reduction(_np.nanprod, "nanprod")
 
 
+def _quantile_output_symmetry(sym, *, ndim, axis, keepdims, q_ndim):
+    """Reduction axes retain their order after NumPy prepends q.shape."""
+    if sym is None:
+        return None
+    group = reduce_group(sym, ndim=ndim, axis=axis, keepdims=keepdims)
+    if group is not None and q_ndim:
+        group = remap_group_axes(group, {ax: ax + q_ndim for ax in range(ndim)})
+    return group
+
+
 @_counted_wrapper
 def nanpercentile(
     a: ArrayLike,
@@ -4941,10 +5008,8 @@ def nanpercentile(
     # calls ``np.isnan`` whatever the dtype.
     cost += pointwise_cost(tuple(a.shape), sym)
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     # numpy's percentile family always divides q by 100 first (an implicit
@@ -5050,10 +5115,8 @@ def nanquantile(
     # calls ``np.isnan`` whatever the dtype.
     cost += pointwise_cost(tuple(a.shape), sym)
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
@@ -5141,10 +5204,8 @@ def percentile(
         ),
     )
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     # Same "always divides q by 100 first" rule as nanpercentile: integer/
@@ -5231,10 +5292,8 @@ def quantile(
         ),
     )
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
@@ -5419,41 +5478,147 @@ def _validate_contracted_extents(
 
 
 def _core_contraction_axes(
-    a: Any, b: Any, b_core_from_end: int, call_kwargs: dict[str, Any]
-) -> tuple[Any, Any, int | None, int | None]:
-    """Coerce a gufunc contraction's operands and locate its contracted pair.
+    np_fn: Any, a: Any, b: Any, subs: str, call_kwargs: dict[str, Any]
+) -> tuple[Any, Any, str, int | None, int | None, int | None]:
+    """Coerce a gufunc contraction's operands and lay out what it contracts.
 
     ``matmul``'s broadcasting siblings -- ``vecdot`` (``(n),(n)->()``),
     ``matvec`` (``(m,n),(n)->(m)``) and ``vecmat`` (``(n),(n,m)->(m)``) --
-    each contract a's LAST axis against b's ``b_core_from_end``-th from the
-    end. Their pairing is implicit in the ``...``-broadcasting subscript they
-    are priced with, which is not the same as being checked by it: einsum
-    broadcasts an extent of 1, numpy's gufunc core does not, so a size-1
-    contracted axis was priced and charged against a size-n one before numpy
-    refused the call. Returning the pair gets it validated ahead of any cost
-    -- see :func:`_validate_contracted_extents`.
+    are priced with a ``...``-broadcasting subscript ``subs`` that keeps each
+    operand's core dimensions last, in signature order. Returns the operands,
+    the subscript to price with, the contracted axis pair, and the output
+    position of a ``keepdims=True`` size-1 axis that the subscript has no
+    label for (``None`` when there is none to re-insert; see
+    ``_einsum_routed_binary``).
 
-    Both axes come back ``None``, skipping validation, in the two cases where
-    the default pair is not the pair numpy will contract:
+    The pairing being implicit in the subscript is not the same as it being
+    checked by it: einsum broadcasts an extent of 1, numpy's gufunc core does
+    not, so a size-1 contracted axis was priced and charged against a size-n
+    one before numpy refused the call. Returning the pair gets it validated
+    ahead of any cost -- see :func:`_validate_contracted_extents`. Both axes
+    come back ``None`` for an operand with too few dimensions to have its
+    core axis: numpy rejects that call for the missing core dimension, which
+    is not this check's to pre-empt (and it already charged nothing for it).
 
-    * An operand with too few dimensions to have that axis. numpy rejects the
-      call for the missing core dimension, which is not this check's to
-      pre-empt (and it already charged nothing for it).
-    * An explicit ``axis=``/``axes=``, which relocates the core dimension off
-      the position the subscript assumes. Validating the default pair there
-      would refuse calls numpy runs -- a worse failure than the
-      charge-then-fail this closes. Those spellings also price from the
-      default layout, a separate pre-existing gap this does not touch.
+    An explicit ``axis=``/``axes=`` moves the core dimensions off the
+    positions ``subs`` assumes, so those calls are laid out by
+    :func:`_relocated_core_subscripts` instead: the subscript, the validated
+    pair and the output symmetry all follow the axes numpy contracts. The
+    core dimensions themselves are read off ``subs`` with its ellipses
+    removed, which is exactly what each operand's part names.
     """
     if not isinstance(a, _np.ndarray):
         a = _np.asarray(a)
     if not isinstance(b, _np.ndarray):
         b = _np.asarray(b)
+    inputs, out_core = subs.split("->")
+    a_core, b_core = (part.replace("...", "") for part in inputs.split(","))
+    core = (a_core, b_core, out_core.replace("...", ""))
     if "axis" in call_kwargs or "axes" in call_kwargs:
-        return a, b, None, None
-    a_axis = a.ndim - 1 if a.ndim >= 1 else None
-    b_axis = b.ndim - b_core_from_end if b.ndim >= b_core_from_end else None
-    return a, b, a_axis, b_axis
+        return a, b, *_relocated_core_subscripts(np_fn, a, b, core, call_kwargs)
+    (label,) = set(a_core) & set(b_core)
+    a_from_end = len(a_core) - a_core.index(label)
+    b_from_end = len(b_core) - b_core.index(label)
+    a_axis = a.ndim - a_from_end if a.ndim >= a_from_end else None
+    b_axis = b.ndim - b_from_end if b.ndim >= b_from_end else None
+    return a, b, subs, a_axis, b_axis, None
+
+
+def _relocated_core_subscripts(
+    np_fn: Any,
+    a: _np.ndarray,
+    b: _np.ndarray,
+    core: tuple[str, str, str],
+    call_kwargs: dict[str, Any],
+) -> tuple[str, int, int, int | None]:
+    """Explicit einsum subscripts for a gufunc call that relocates its core axes.
+
+    numpy's ``axis=``/``axes=`` name, per operand, the axes that play the
+    signature's core dimensions, in signature order (``core`` spells them per
+    operand, output last). Every other axis is a loop axis: it keeps its
+    relative order and broadcasts right-aligned against the other operand's,
+    and the output places its own core axes -- or, under ``keepdims=True``,
+    the kept size-1 axis -- among the loop axes the same way. The default
+    subscript assumes the core axes are last, so pricing a relocated call
+    with it contracted the wrong axis: ``vecdot(a, b, axis=0)`` on a
+    ``(4096, 1)`` pair was billed as 4096 length-1 dot products (#272).
+
+    The spec is first run through numpy itself, on stand-ins of the operands'
+    ranks with every extent 1. numpy checks ``axis=``/``axes=``/``keepdims=``
+    against the ranks alone, and with every extent 1 nothing else can fail,
+    so whatever numpy would refuse about the spec is refused here, with
+    numpy's own exception, before anything is priced -- a behavioural check
+    rather than a copy of numpy's parser, so it keeps holding as that parser
+    changes. The normalisation below can then rely on a well-formed spec.
+
+    Returns the subscript (one label per axis, so the einsum engine reads
+    each operand's symmetry on the axes it really occupies), the contracted
+    axis of each operand, and the output position of the kept axis under
+    ``keepdims=True`` (``None`` otherwise). Nothing is summed into the kept
+    axis, so it has no label: it is left out of the output subscript and
+    re-inserted into the output symmetry by ``_einsum_routed_binary``.
+    Labels come from ``opt_einsum``'s symbol table, the one that already
+    expands the ``...`` of the default subscripts, so no rank numpy accepts
+    runs out of them. They are handed out in output order, which keeps the
+    output subscript in sorted label order: the order the einsum engine's
+    symmetry oracle reports the output group in, so the tag lands on the
+    right axes even where the output's core axes are not last (relabelling
+    any other order is #281).
+    """
+    from opt_einsum.parser import get_symbol
+
+    layout = {
+        k: call_kwargs[k] for k in ("axis", "axes", "keepdims") if k in call_kwargs
+    }
+    np_fn(_np.zeros((1,) * a.ndim), _np.zeros((1,) * b.ndim), **layout)
+
+    a_core, b_core, out_core = core
+    keepdims = bool(layout.get("keepdims", False))
+    loop_ndim = _builtins.max(a.ndim - len(a_core), b.ndim - len(b_core))
+    # numpy accepts keepdims only for an (n),(n)->() style signature, where
+    # the output takes one kept axis per core axis of an input.
+    out_ncore = len(a_core) if keepdims else len(out_core)
+    ncores = (len(a_core), len(b_core), out_ncore)
+    ndims = (a.ndim, b.ndim, loop_ndim + out_ncore)
+    if "axis" in layout:
+        spec = [(layout["axis"],) if n else () for n in ncores]
+    else:
+        spec = [e if isinstance(e, tuple) else (e,) for e in layout["axes"]]
+        # An omitted output entry keeps numpy's default: core axes last.
+        spec += [tuple(range(-n, 0)) for n in ncores[len(spec) :]]
+    a_pos, b_pos, out_pos = (
+        [_operator.index(ax) % ndim for ax in entry]
+        for entry, ndim in zip(spec, ndims, strict=True)
+    )
+
+    # The output's axes take the symbols in sorted order, in output order, and
+    # the contracted dimension the last one, so the output subscript is in
+    # sorted label order wherever the output's core axes sit among its loop
+    # axes (past 26 axes opt_einsum's table is not itself in sorted order).
+    out_slots = [i for i in range(ndims[2]) if not (keepdims and i == out_pos[0])]
+    symbols = sorted(get_symbol(k) for k in range(len(out_slots) + 1))
+    symbol_at = dict(zip(out_slots, symbols, strict=False))
+    core_symbol = (
+        {}
+        if keepdims
+        else dict(zip(out_core, (symbol_at[p] for p in out_pos), strict=True))
+    )
+    (label,) = set(a_core) & set(b_core)
+    core_symbol[label] = symbols[-1]
+    loop_symbols = [symbol_at[p] for p in out_slots if p not in out_pos]
+
+    def operand_subscript(ndim: int, part: str, positions: list[int]) -> str:
+        placed = {pos: core_symbol[c] for c, pos in zip(part, positions, strict=True)}
+        loop = iter(loop_symbols[loop_ndim - (ndim - len(part)) :])
+        return "".join(placed[i] if i in placed else next(loop) for i in range(ndim))
+
+    subs = (
+        f"{operand_subscript(a.ndim, a_core, a_pos)},"
+        f"{operand_subscript(b.ndim, b_core, b_pos)}->"
+        + "".join(symbol_at[p] for p in out_slots)
+    )
+    kept_axis = out_pos[0] if keepdims else None
+    return subs, a_pos[a_core.index(label)], b_pos[b_core.index(label)], kept_axis
 
 
 def _fallback_contraction_output_symmetry(
@@ -5539,6 +5704,7 @@ def _einsum_routed_binary(
     fallback_output_shape: tuple[int, ...] | None = None,
     a_contract_axis: int | None = None,
     b_contract_axis: int | None = None,
+    kept_axis: int | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -5566,8 +5732,15 @@ def _einsum_routed_binary(
     `matvec`, `vecmat`) included: a `...`-broadcasting `subs` makes the
     pairing implicit, not checked, and einsum broadcasts an extent of 1 that
     the gufunc core rejects. `None` means only that this call has no such pair
-    to check -- a 0-d operand, or an `axis=`/`axes=` that relocated the core
-    dimension (see `_core_contraction_axes`).
+    to check -- an operand without the core dimension (a 0-d one, say). An
+    `axis=`/`axes=` that relocates the core dimension still has a pair: the
+    gufunc callers read it, and `subs`, off the relocated layout (see
+    `_core_contraction_axes`).
+
+    `kept_axis` is the output position of the size-1 axis numpy keeps under
+    `keepdims=True` when `subs` has no label for it (the relocated layout
+    leaves it out, since nothing is summed into it). The inferred output
+    symmetry is shifted past it so the tag lands on the axes it describes.
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -5592,6 +5765,10 @@ def _einsum_routed_binary(
         accumulation = info.accumulation
         canonical_subs = info.canonical_subscripts
         output_symmetry = info.output_symmetry
+        if kept_axis is not None and output_symmetry is not None:
+            output_symmetry = remap_group_for_expand_dims(
+                output_symmetry, ndim=len(info.output_subscript), axis=kept_axis
+            )
         cost = accumulation.total
         accumulation_for_billing = accumulation
     else:
@@ -7165,6 +7342,45 @@ attach_docstring(
 cov.__signature__ = _inspect.signature(_np.cov)  # pyright: ignore[reportFunctionMemberAccess]
 
 
+def _trapezoid_cost(y, x_arr, axis) -> int:
+    """4 FLOPs per sample of ``y`` (FMA=2), once per integral numpy forms.
+
+    numpy sums ``d * (y[1:] + y[:-1]) / 2`` along ``axis``, where ``d`` is
+    ``diff(x)`` (or ``dx``). A 1-D ``x`` is laid along ``axis`` and adds no
+    integrals, but an N-D ``x`` broadcasts ``diff(x)`` against ``y``: a stack
+    of K sample grids integrates ``y`` K times. ``4 * y.size`` is scaled by
+    that broadcast factor, so it is unchanged whenever ``x`` adds no
+    dimensions. Shapes numpy cannot combine keep ``4 * y.size``; numpy
+    refuses the call in its own words.
+    """
+    import math as _math
+
+    base = 4 * y.size
+
+    def _axis_index(ndim: int) -> int:
+        index = _operator.index(axis)
+        if not -ndim <= index < ndim:
+            raise ValueError("axis out of range")
+        return index % ndim
+
+    if x_arr is None or x_arr.ndim <= 1:
+        return base
+    try:
+        d_shape = list(x_arr.shape)
+        k = _axis_index(len(d_shape))
+        d_shape[k] = _builtins.max(d_shape[k] - 1, 0)
+        sliced = list(y.shape)
+        k = _axis_index(len(sliced))
+        sliced[k] = _builtins.max(sliced[k] - 1, 0)
+        work = _np.broadcast_shapes(tuple(sliced), tuple(d_shape))
+    except (TypeError, ValueError):
+        return base
+    per_grid = _math.prod(sliced)
+    if per_grid == 0:
+        return base
+    return base * (_math.prod(work) // per_grid)
+
+
 @_counted_wrapper
 def trapezoid(
     y: ArrayLike, x: ArrayLike | None = None, dx: float = 1.0, axis: int = -1
@@ -7174,12 +7390,13 @@ def trapezoid(
     if not isinstance(y, _np.ndarray):
         y = _np.asarray(y)
     billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+    x_arr = None
     if x is not None:
         x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
         billing_dtypes += (billing_operand(x, x_arr),)
     with budget.deduct(
         "trapezoid",
-        flop_cost=4 * y.size,
+        flop_cost=_trapezoid_cost(y, x_arr, axis),
         subscripts=None,
         shapes=(y.shape,),
         dtypes=billing_dtypes,
@@ -7195,7 +7412,11 @@ def trapezoid(
 
 
 attach_docstring(
-    trapezoid, _np.trapezoid, "counted_custom", "4 * numel(input) FLOPs (FMA=2)"
+    trapezoid,
+    _np.trapezoid,
+    "counted_custom",
+    "4 * numel(y) FLOPs per integral (FMA=2); an N-D x that broadcasts "
+    "y over K sample grids bills K integrals",
 )
 
 
@@ -7210,12 +7431,13 @@ if hasattr(_np, "trapz"):
         if not isinstance(y, _np.ndarray):
             y = _np.asarray(y)
         billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+        x_arr = None
         if x is not None:
             x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
             billing_dtypes += (billing_operand(x, x_arr),)
         with budget.deduct(
             "trapz",
-            flop_cost=4 * y.size,
+            flop_cost=_trapezoid_cost(y, x_arr, axis),
             subscripts=None,
             shapes=(y.shape,),
             dtypes=billing_dtypes,
@@ -7230,7 +7452,11 @@ if hasattr(_np, "trapz"):
         return _wrap_metered_result(result)  # type: ignore[return-value]
 
     attach_docstring(
-        trapz, _np.trapz, "counted_custom", "4 * numel(input) FLOPs (FMA=2)"
+        trapz,
+        _np.trapz,
+        "counted_custom",
+        "4 * numel(y) FLOPs per integral (FMA=2); an N-D x that broadcasts "
+        "y over K sample grids bills K integrals",
     )
 
 else:
@@ -7241,17 +7467,66 @@ else:
         )
 
 
+def _interp_period_cost(
+    x: _np.ndarray, xp: _np.ndarray, fp: _np.ndarray, period: Any
+) -> int:
+    """FLOPs of the work ``np.interp`` does for ``period=`` before it interpolates.
+
+    numpy reduces ``x`` and ``xp`` modulo the period, argsorts ``xp``, gathers
+    ``xp`` and ``fp`` in that order and pads both with one wrapped point at
+    each end; the search and blend then run on that ``len(xp) + 2`` table.
+    Each step is billed as the op that spells it out (``remainder``,
+    ``argsort``, ``take``, ``concatenate``, and the two one-element shifts that
+    build the padding), folded into interp's single charge at that op's own
+    weight, the way composite ops fold their sub-tiers: 16 per element reduced
+    modulo the period, 4 per sort comparison and per gathered element, 1 per
+    padded element written. Without it ``period=`` sorted a table of any
+    length for free (#276).
+
+    Refuses, before anything is charged, what numpy's period branch refuses
+    with a ``ValueError``, with numpy's own message: a zero period, an ``xp``
+    or ``fp`` that is not 1-D, and ``xp`` and ``fp`` of different lengths.
+    """
+    if period == 0:
+        raise ValueError("period must be a non-zero value")
+    if xp.ndim != 1 or fp.ndim != 1:
+        raise ValueError("Data points must be 1-D sequences")
+    if xp.shape[0] != fp.shape[0]:
+        raise ValueError("fp and xp are not of the same length")
+    m = xp.shape[0]
+    return (
+        16 * (x.size + m)  # x % period, xp % period
+        + 4 * _sort_cost(m)  # argsort(xp)
+        + 4 * 2 * m  # xp[order], fp[order]
+        + 2 * (m + 2)  # the padded xp and fp
+        + 2  # xp[-1:] - period, xp[0:1] + period
+    )
+
+
 @_counted_wrapper
 def interp(x: ArrayLike, xp: ArrayLike, fp: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.interp. Cost: n * ceil(log2(len(xp))) FLOPs."""
+    """Counted version of np.interp.
+
+    Cost: ``3*n + n*ceil(log2(len(xp)))`` FLOPs for ``n`` queries. With
+    ``period=``, numpy's period branch is added (see ``_interp_period_cost``)
+    and the search runs on its ``len(xp) + 2`` padded table.
+    """
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     xp_arr = _np.asarray(xp)
     fp_arr = _np.asarray(fp)
+    # left=, right= and period= are forwarded to numpy, whose period branch
+    # computes ``xp % period``: a tracked period would reach numpy from inside
+    # this wrapper.
+    kwargs = {k: _to_base_ndarray(v) for k, v in kwargs.items()}
     n = _builtins.max(x.size, 1)
     xp_len = _builtins.max(xp_arr.size, 1)
-    cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1)
+    period_cost = 0
+    if kwargs.get("period") is not None:
+        period_cost = _interp_period_cost(x, xp_arr, fp_arr, kwargs["period"])
+        xp_len = xp_arr.size + 2
+    cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1) + period_cost
     # np.interp always computes the x/xp search+blend in float64 regardless
     # of x/xp's own precision, but the interpolated VALUE keeps fp's dtype
     # (e.g. complex fp -> complex128 output); bill both contributions.
@@ -7277,6 +7552,7 @@ attach_docstring(
     interp,
     _np.interp,
     "counted_custom",
-    "3*n + n*ceil(log2(xp)) FLOPs (arithmetic + search)",
+    "3*n + n*ceil(log2(xp)) FLOPs (arithmetic + search), plus the mod, argsort, "
+    "gather and padding numpy runs first for period=",
 )
 interp.__signature__ = _inspect.signature(_np.interp)  # pyright: ignore[reportFunctionMemberAccess]

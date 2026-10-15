@@ -107,6 +107,13 @@ def test_every_wrapper_with_budget_deduct_is_decorated():
                 # must not be wrapped a second time, same shape as
                 # _einsum_routed_binary above.
                 "_validate_and_charge_symmetry",
+                # Shared bin-edge and density charges
+                # (src/flopscope/_counting_ops.py), called only by the
+                # already-decorated `histogram` and `histogram_bin_edges`.
+                # They must not be wrapped a second time, same shape as
+                # _einsum_routed_binary above.
+                "_charge_linspace_edges",
+                "_charge_histogram_bins",
             ):
                 continue
             if not _has_counted_wrapper_decorator(fn):

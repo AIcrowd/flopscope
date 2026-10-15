@@ -526,6 +526,19 @@ Worked consequences:
   complex `out=`, the destination still participates in width billing, but computation
   keeps its resolved classification. The call uses a store-only complex factor of `2.0`
   instead of the ufunc's complex-arithmetic factor.
+- **Unary ufunc constraints follow the same computation/destination separation.**
+  Both single-output unary ufuncs and `modf`/`frexp` resolve the complete loop
+  selected by `dtype=`, `signature=`, or `sig=`, including explicit `casting=`.
+  A forced complex loop pays the operation's complex factor even if its result
+  is cast into a real destination. A narrower destination cannot hide a wider
+  loop, and an explicit narrow loop cannot hide a wider destination. For four
+  float32 values, `exp(dtype=float64)` and `exp(signature="d->d")` both cost
+  `128`; `exp(signature="D->D")` costs `396`; and float32 computation into a
+  float64 destination costs `128`. These examples use production weights.
+  Multi-output calls compare each destination with the resolved loop's own
+  output slot: naming `frexp`'s natural int32 exponent is still price-neutral.
+  Invalid constraints and incompatible destination casts are refused before
+  charging. Existing unary complex-destination pricing is unchanged.
 - **A destination NumPy would have allocated anyway is price-neutral.** The rule above
   prices a destination as a buffer the call materializes — but two kinds of destination
   are not stores of the computed value at all, and naming them must cost exactly what
@@ -880,7 +893,7 @@ each backed by a CI-enforced test you can open and read:
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a dtype that is still zero-itemsize once NumPy materialises it is the one exception, since it carries no data either way — `'U0'`/`'S0'` are not, because NumPy promotes them to `'U1'`/`'S1'` on allocation | `tests/test_object_dtype_ban.py` |
 | **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
-| **A symmetry tag matches the buffer it is attached to** | symmetry validation uses a tolerance (`np.allclose`, `atol=1e-6`, `rtol=1e-5`) while the cost model reads the tag as exact — it prices every position in an orbit after the first as a redundant degree of freedom and does not read the buffer again. The two untrusted ingress points, `as_symmetric(data, symmetry=…)` and a *bare, top-level* `SymmetricTensor(data, symmetry=…)`, therefore validate the claim (raising `SymmetryError` on a mismatch, charging `k·(7n − 1)` for a genuine one, `k` = non-identity generators, `n = data.size`) and then canonicalize: each orbit takes the value at its lexicographically smallest index, so values that survived only within the tolerance do not reach the tag. Data already exactly invariant is passed through unchanged, so the charge and the zero-copy view semantics are unaffected; the caller's array is never modified. Symmetry a flopscope op derives *internally* (e.g. `exp` propagating an already-validated operand's tag, or a slice/transpose view) is exempt, since it never carries a fresh caller-supplied claim. **Scope:** this is a property of those two ingress points, not a package-wide invariant — a Reynolds projection sums each orbit in a fixed element order, so its own output is typically invariant only to about an ulp, as is a symmetric matmul. That residue is rounding rather than caller-placed information, so it is sound for accounting; code needing bit-exactness should use an ingress point or `_canonical_symmetry.is_exactly_invariant`. In-process code can attach a tag regardless (`arr.view(SymmetricTensor)` plus an attribute assignment needs nothing from this package), so the boundary that holds is the wire: the server dispatches registered ops only, and none of those names is registered | `tests/test_symmetry_canonicalization.py`; `tests/test_symmetric_tensor_new_validation.py`; `tests/test_symmetric_cost.py` (`k·(7n−1)` rate) |
+| **A symmetry tag matches the buffer it is attached to** | symmetry validation uses a tolerance (`np.allclose`, `atol=1e-6`, `rtol=1e-5`) while the cost model reads the tag as exact: it prices every position in an orbit after the first as a redundant degree of freedom and does not read the buffer again. The two untrusted ingress points, `as_symmetric(data, symmetry=…)` and a *bare, top-level* `SymmetricTensor(data, symmetry=…)`, therefore validate the claim (raising `SymmetryError` on a mismatch, charging `k·(7n − 1)` for a genuine one, `k` = non-identity generators, `n = data.size`) and then canonicalize: each orbit takes the value at its lexicographically smallest index, so values that survived only within the tolerance do not reach the tag. Data already exactly invariant is passed through unchanged, so the charge and the zero-copy view semantics are unaffected; the caller's array is never modified. `einsum(…, symmetry=…)`, which attaches a caller-declared group to the result it returns, canonicalizes that result the same way once its own check passes. Symmetry a flopscope op derives *internally* (e.g. `exp` propagating an already-validated operand's tag, or a slice/transpose view) is exempt, since it never carries a fresh caller-supplied claim. **Scope:** this is a property of those ingress points, not a package-wide invariant: a Reynolds projection sums each orbit in a fixed element order, so its own output is typically invariant only to about an ulp, as is a symmetric matmul. That residue is rounding rather than caller-placed information, so it is sound for accounting; code needing bit-exactness should use an ingress point or `_canonical_symmetry.is_exactly_invariant`. In-process code can attach a tag regardless (`arr.view(SymmetricTensor)` plus an attribute assignment needs nothing from this package), so the boundary that holds is the wire: the server dispatches registered ops only, and none of those names is registered | `tests/test_symmetry_canonicalization.py`; `tests/test_symmetric_tensor_new_validation.py`; `tests/test_einsum_declared_symmetry.py`; `tests/test_symmetric_cost.py` (`k·(7n−1)` rate) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
 | **Complex packing example non-profitable** | folding two real payloads into one complex op's real/imag lanes bills the op's true complex structure (`multiply` factor 6, matmul exact `≈4.13×`), so the pack costs more than the honest real work it replaces | `tests/test_dtype_cost.py` (packing tests) |
@@ -1098,7 +1111,7 @@ passes under one op-level factor.
 | `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) (+numel(input) for the `nan*` forms on float/complex input only) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
 | `mean`, `average` (unweighted) | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides |
 | `average(weights=)` | `3·numel − M`, M = num output slices (1 for full reduction) | 1.0 | DERIVED: a·w multiply pass (numel) + a·w sum (numel−M) + weight sum (numel−M) + M divides |
-| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass on float/complex input only ⇒ ≈ 5 × numel(input) there, ≈ 4 × on integer/bool | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
+| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass on float/complex input only ⇒ ≈ 5 × numel(input) there, ≈ 4 × on integer/bool; `var`/`std` with a `mean=` that broadcasts the input to a larger shape: the same formula on `numel(broadcast(a, mean))`, dense, since every pass runs over `a - mean` (#273) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
 | `median`, `nanmedian` | axis length per output slice (+numel(input) for `nanmedian`, every dtype) | 1.0 | DECLARED; partition (introselect) per output |
 | `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` (+numel(input) for the `nan*` forms, every dtype) | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
@@ -1168,6 +1181,11 @@ invariant in [§Non-exploitability](#non-exploitability)), so at `k ≥ 8`
 operands only an allowlisted, linear-time `optimize=` choice runs verbatim —
 every other choice, including every `opt_einsum` alias for an exhaustive or
 superlinear search, is downgraded to `'greedy'` before the search runs.
+
+**Relocated core axes.** The closed forms above assume numpy's default gufunc
+layout, core dimensions last. A gufunc row's `axis=`/`axes=` names other axes
+for them, and the contraction is priced on the axes it names: `K` is the extent
+of the axis actually summed and `M` the cells numpy actually writes.
 
 **Compound linalg** ops are *chains* of matmuls, billed as the sum of their steps
 through the `matmul_cost(m, k, n)` helper — which itself delegates to
@@ -1278,7 +1296,7 @@ delegation or the op-specific factor applies instead.)
 | `linalg.trace` | `diagonal_len × batch`, `diagonal_len = min(m,n)` reduced by `|offset|` (floored at 1) | DERIVED: diagonal adds, batch-multiplied | `_properties.py:trace_cost` |
 | `linalg.tensorinv` | `2n³`, `n = prod(shape[:ind])` | DERIVED: via inv | `_solvers.py:tensorinv_cost` |
 | `linalg.tensorsolve` | `2n³/3 + 2n²`, `n = isqrt(prod(shape))` | DERIVED: via solve; n is the solved system's true dimension, independent of `axes` reordering | `_solvers.py:tensorsolve_cost` |
-| `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: values-only SVD + `min(m,n)` threshold comparisons | `_properties.py:matrix_rank_cost` |
+| `linalg.matrix_rank` | `2ab² + 2b³ + min(m,n)`, `a=max(m,n)`, `b=min(m,n)`; the `min(m,n)` term is paid once per (matrix, tolerance) pair when an array `tol=`/`rtol=` broadcasts against the batch | DERIVED: values-only SVD + `min(m,n)` threshold comparisons per threshold | `_properties.py:matrix_rank_cost` |
 | `linalg.cond` | `2ab² + 2b³ + 1` for `ord∈{None,2,−2}` (values-only SVD + 1 divide); `2k³ + 4mn + 1`, `k=min(m,n)` for other ords (inv-based) | DERIVED | `_properties.py:cond_cost` |
 | `linalg.pinv` | `6ab² + 20b³ + min(m,n) + n·min(m,n) + matmul\_cost(n, min(m,n), m)`, `a=max(m,n)`, `b=min(m,n)` | DERIVED: thin SVD (with vectors) + threshold + diagonal scale + reconstruction matmul | `_solvers.py:pinv_cost` |
 | `linalg.lstsq` | `6ab² + 20b³ + matmul\_cost(k,m,c) + k·c + matmul\_cost(n,k,c)`, `k=min(m,n)`, `c=#rhs cols` | DERIVED: thin SVD (with vectors) + U^T b + divide by s + reconstruction | `_solvers.py:lstsq_cost` |
@@ -1371,11 +1389,21 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 
 ---
 
+#### Singleton stages
+
+FFT arithmetic already includes complex real-FLOPs. Every executed length-one
+transform stage therefore bills 2 base FLOPs per batch entry for moving its
+complex working value, even for real forward/inverse transforms whose working
+precision follows the FFT complex-dtype policy. Apply the existing dtype and
+destination rates and operation weight. Multidimensional pricing applies this
+floor to each executed stage at that stage's batch size; empty batches cost zero.
+Transforms longer than one retain their existing butterfly formula.
+
 ### Polynomial
 
 | Op | flop_cost | basis | source |
 |---|---|---|---|
-| `polyval` | `2 × deg × points` (Horner: 1 mul + 1 add per coefficient per point, FMA=2) | DERIVED | `_polynomial.py` |
+| `polyval` | `2 × deg × numel(output)`, output = `broadcast_shapes(p.shape[1:], x.shape)` (= `2 × deg × points` for 1-D `p`; trailing dims of `p` widen every Horner step) (Horner: 1 mul + 1 add per coefficient per output cell, FMA=2) | DERIVED | `_polynomial.py` |
 | `polyfit` | `m×deg` (Vandermonde build) `+ lstsq_cost(m, deg+1, ncols)` (`ncols = y.shape[1]` for 2-D `y`, else 1) | DERIVED: builds an `(m, deg+1)` Vandermonde matrix and solves it via `lstsq` (SVD least-squares) — prices the identical solve `linalg.lstsq` charges for the same shape, rather than a cheaper standalone normal-equations estimate; the SVD factorization is shared across `ncols` RHS columns, so cost grows sublinearly in `ncols`, not linearly | `_polynomial.py:polyfit_cost` |
 | `polyadd`, `polysub` | size of the axis-0 zero-padded, broadcast-aligned result (= `numpy.polyadd(a1, a2).size`; reduces to `max(n1, n2, 1)` for 1-D inputs) | DERIVED: mirrors numpy's own zero-pad-then-broadcast algorithm on shapes, including higher-rank/broadcasting operands | `_polynomial.py` |
 | `polymul` | `2nm − n − m` (direct conv, FMA=2) | DERIVED | `_polynomial.py` |
@@ -1395,6 +1423,20 @@ kind-conditional promotion an `eigvals`-backed linalg op uses.
 Source: `src/flopscope/_polynomial.py`.
 
 ---
+
+#### Covariance output
+
+In addition to the existing Vandermonde plus least-squares cost, `polyfit`
+executes a covariance branch only when `cov` is truthy and `full` is false.
+For `p = deg + 1` and `m = len(x)`, add
+`matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance)`.
+These terms cover the dense Gram product and inverse, the aliased symmetric
+`outer(scale,scale)`, covariance normalization, and final multiplication.
+Scaled covariance additionally divides one residual per returned covariance
+slice; unscaled covariance still multiplies by one, as NumPy does. The Gram
+and inverse are shared across RHS columns; NumPy returns only one covariance
+slice for an unscaled multi-output fit. Existing polyfit computation-dtype,
+complex-factor and weight rules apply to the composite price.
 
 ### Random (module-level, Generator, RandomState)
 
@@ -1536,21 +1578,30 @@ are not bin-search ops and stay at weight 1.0.
 
 | Op | flop_cost | weight | basis | source |
 |---|---|---|---|---|
-| `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query) | 1.0 | DERIVED | `_counting_ops.py` |
+| `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query); with `period=`, numpy's period branch is added at its ops' own weights, `16(m + p) + 4p⌈log₂ p⌉ + 8p + 2(p + 2) + 2` for `p = numel(xp)` (mod of `x` and `xp`, argsort, two gathers, two padded concatenates, two pad shifts), and the search runs on the `p + 2` padded table | 1.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (integer bins) | `n × ⌈log₂(bins)⌉` (binary-search binning pass only) | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (string bins, e.g. `'auto'`) | `n × (2 + estimator_cost + ⌈log₂ resolved_bins⌉)` (deferred: resolved after the call; estimator costs: sturges/sqrt/rice=0, fd/auto=+1n, scott=+4n, doane=+6n, stone=+max(100,√n)n) | 4.0 | DERIVED | `_counting_ops.py` |
-| `histogram2d`, `histogramdd` | same as `histogram` per axis | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram2d`, `histogramdd` | `n * sum(ceil(log2(b_i)))`, where `b_i` is each axis count or edge-array length; all supported count/edge spellings use the same rule | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | 4.0 | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
 | `bincount` | `numel(x)` (floor 1) | 4.0 | DECLARED: one bucket increment per element | `_counting_ops.py` |
 | `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |
-| `trapezoid`, `trapz` | `4 × numel(y)` | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
+| `trapezoid`, `trapz` | `4 × numel(y) × K`, K = integrals per lane of `y`: the factor by which an N-D `x` broadcasts `diff(x)` against `y` (K = 1 for `dx` or a 1-D `x`) | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
 
 `histogram`, `histogram2d`, `histogramdd`, and `bincount` produce `int64` counts
 regardless of the input dtype, so the dtype rate adds a further `2×` on top of the
-formulas above (e.g. `histogram` with `n=100, bins=8` bills `2400`, not `1200`).
+formulas above (e.g. the binning pass of `histogram` with `n=100, bins=8` bills `2400`,
+not `1200`).
 `digitize` and `histogram_bin_edges` return the query's own index/edge dtype and do
 **not** carry this overlay. `interp` also always returns float64, so it too bills `2×`
 its `flop_cost` above regardless of the input dtype.
+
+**Edges and density.** An integer or string `bins` makes numpy build the `bins + 1`
+edges with `linspace(first_edge, last_edge, bins + 1)`, so `histogram` and
+`histogram_bin_edges` also charge exactly what `linspace` charges for them
+(`2 × (bins + 1)` at the edge dtype, weight 1.0, recorded as a `linspace` op). An array
+`bins` is the edges already and adds nothing. `histogram(..., density=True)` also
+charges the per-bin arithmetic numpy returns, `counts / diff(edges) / counts.sum()`, as
+the `diff`, `divide`, `sum` and `divide` it runs (`4 × bins − 1` in all, weight 1.0).
 
 Source: `src/flopscope/_counting_ops.py`, `src/flopscope/_array_ops.py`.
 
@@ -1581,8 +1632,8 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `diff` | `prod(a.shape[:ax]) × (n×L − n×(n+1)/2) × prod(a.shape[ax+1:])`, `L = a.shape[ax]` | DERIVED: `n` passes of `L−k` subtractions | `_pointwise.py` |
 | `ediff1d` | `ary.size − 1 + size(to_begin) + size(to_end)` | DECLARED | `_pointwise.py` |
 | `gradient` | base: `sum over the axes axis= selects (all axes when axis=None) of 2·S` (`S = f.size`; one output value per element along each axis — interior differences and both boundaries — at ~2 FLOPs each, so at `edge_order=1` the cost is independent of axis length). Any other accepted `edge_order` (0, 2, or a non-integer in (1, 2]; > 2 is rejected) runs the 5-FLOP second-order boundary stencil on each of the two boundary hyperplanes instead of the 2-FLOP one-sided difference, adding `+6·S/L` per selected axis (`L = f.shape[axis]`). Each coord-array axis adds a spacing surcharge (uniform: `+3(L−1)`; non-uniform: `+3S(L−2)/L + 10(L−2) + 3(L−1) + 4S/L`) | DERIVED | `_pointwise.py:gradient` |
-| `allclose` | `7·numel(broadcast) − 1` (6 FLOPs/elem tolerance core + numel−1 all-reduce) | DERIVED | `_counting_ops.py` |
-| `isclose` | `6·numel(broadcast)` (sub + 2·abs + mul + add + cmp per element) | DECLARED | `_pointwise.py` |
+| `allclose` | `7·numel(broadcast) − 1` (6 FLOPs/elem tolerance core + numel−1 all-reduce); the broadcast includes an array `rtol=`/`atol=` | DERIVED | `_counting_ops.py` |
+| `isclose` | `6·numel(broadcast)` (sub + 2·abs + mul + add + cmp per element); the broadcast includes an array `rtol=`/`atol=`, which also joins the symmetry and dtype resolution | DECLARED | `_pointwise.py` |
 | `trace` (numpy.trace) | `diagonal_len × n_traces` where `diagonal_len = min(shape[ax1], shape[ax2])` reduced by `|offset|` (floored at 1) and `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied); bills identically to `linalg.trace` on matched axes | DERIVED | `_counting_ops.py:trace` |
 | `correlate` | mode-aware: `full` = `2nm−n−m+1`; `valid` = `(2·min−1)·(max−min+1)`; `same` = exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:_correlate_cost` |
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |

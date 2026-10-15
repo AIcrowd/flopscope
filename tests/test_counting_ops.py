@@ -167,18 +167,20 @@ class TestHistogram:
         numpy.testing.assert_array_equal(edges, np_edges)
 
     def test_cost_int_bins(self):
-        # n=100, bins=8 → ceil(log2(8))=3 → cost=300
+        # n=100, bins=8 → ceil(log2(8))=3 → cost=300, plus the 9 edges
+        # charged as linspace (2 per edge)
         a = numpy.random.randn(100)
         with BudgetContext(flop_budget=10**6) as budget:
             histogram(a, bins=8)
-        assert budget.flops_used == 300
+        assert budget.flops_used == 300 + 2 * 9
 
     def test_cost_int_bins_default(self):
-        # default bins=10, n=100 → ceil(log2(10))=4 → cost=400
+        # default bins=10, n=100 → ceil(log2(10))=4 → cost=400, plus the 11
+        # edges charged as linspace
         a = numpy.random.randn(100)
         with BudgetContext(flop_budget=10**6) as budget:
             histogram(a)
-        assert budget.flops_used == 400
+        assert budget.flops_used == 400 + 2 * 11
 
     def test_cost_string_bins(self):
         # bins="auto" → cost = n*(2 + estimator + ceil_log2(resolved_bins))
@@ -188,7 +190,8 @@ class TestHistogram:
         a = numpy.random.randn(100)
         n = 100
         nb = len(numpy.histogram_bin_edges(a, "auto")) - 1
-        expected = n * (2 + 1 + math.ceil(math.log2(max(nb, 1))))
+        # plus the nb + 1 edges, charged as linspace
+        expected = n * (2 + 1 + math.ceil(math.log2(max(nb, 1)))) + 2 * (nb + 1)
         with BudgetContext(flop_budget=10**6) as budget:
             histogram(a, bins="auto")
         assert budget.flops_used == expected
@@ -286,7 +289,8 @@ class TestHistogramBinEdges:
         a = numpy.random.randn(80)
         with BudgetContext(flop_budget=10**6) as budget:
             histogram_bin_edges(a)
-        assert budget.flops_used == 80
+        # numel(a), plus the default 11 edges charged as linspace
+        assert budget.flops_used == 80 + 2 * 11
 
 
 # ---------------------------------------------------------------------------

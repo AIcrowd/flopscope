@@ -41,29 +41,29 @@ from flopscope.numpy.fft._transforms import (
 
 def test_fft_cost_small():
     assert fft_cost(0) == 0
-    assert fft_cost(1) == 0
+    assert fft_cost(1) == 2
     assert fft_cost(8) == 5 * 8 * 3
 
 
 def test_rfft_cost_small():
     assert rfft_cost(0) == 0
-    assert rfft_cost(1) == 0
+    assert rfft_cost(1) == 2
     assert rfft_cost(16) == 5 * 8 * math.ceil(math.log2(16))
 
 
 def test_fftn_cost():
-    assert fftn_cost((1,)) == 0
+    assert fftn_cost((1,)) == 2
     assert fftn_cost((4, 4)) == 5 * 16 * math.ceil(math.log2(16))
 
 
 def test_rfftn_cost():
-    assert rfftn_cost((1,)) == 0
+    assert rfftn_cost((1,)) == 2
     assert rfftn_cost((4, 4)) == 5 * 8 * math.ceil(math.log2(16))
 
 
 def test_hfft_cost():
     assert hfft_cost(0) == 0
-    assert hfft_cost(1) == 0
+    assert hfft_cost(1) == 2
     # hfft_cost(8) = 5 * (8//2) * ceil(log2(8)) = 5 * 4 * 3 = 60
     assert hfft_cost(8) == 5 * (8 // 2) * 3
 

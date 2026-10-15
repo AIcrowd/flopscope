@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 import numpy as _np
 
 from flopscope._budget import _call_numpy, _counted_wrapper
+from flopscope._canonical_symmetry import canonicalize
 from flopscope._config import get_setting
 from flopscope._dtype_billing import resolve_billing_dtype, store_billing_dtypes
 from flopscope._ndarray import FlopscopeArray, _to_base_ndarray
@@ -590,9 +591,15 @@ def _infer_multi_operand_output_symmetry(path_info, output_subscript: str):
     or None if no symmetry was derived or relabel fails.
 
     The path walker's oracle stores `output_group` on each StepInfo with axes
-    indexing the *step's* output subscript.  We must relabel those axes to
-    positions in the *einsum's* output_subscript, which may differ (opt_einsum
-    can permute labels for BLAS-friendly orientation).
+    indexing its own label frame: the step's free labels in sorted order,
+    recorded on the group as ``_labels``.  We must relabel those axes to
+    positions in the *einsum's* output_subscript, which may order the same
+    labels differently.  Reading the axes as positions in the step's output
+    subscript instead agreed with the frame only while that subscript listed
+    its labels in sorted order: ``ij,k->ijk`` was tagged right, while
+    ``ij,k->kij`` put the group on axes that do not carry the symmetry and the
+    result failed its own validation (#281).  A group without a recorded frame
+    falls back to the step's output subscript.
     """
     if path_info is None:
         return None
@@ -612,11 +619,12 @@ def _infer_multi_operand_output_symmetry(path_info, output_subscript: str):
     _, step_out = step_subscript.split("->", 1)
     if not step_out:
         return None
-    # group.axes are positions in step_out; map each to its label, then relabel
-    # to positions in output_subscript.
+    # group.axes are positions in the oracle's label frame; map each to its
+    # label, then relabel to positions in output_subscript.
+    frame = getattr(group, "_labels", None) or step_out
     axes = group.axes if group.axes is not None else tuple(range(group.degree))
     try:
-        source_labels = tuple(step_out[ax] for ax in axes)
+        source_labels = tuple(frame[ax] for ax in axes)
     except IndexError:
         return None
     return _relabel_group_to_output(group, source_labels, output_subscript)
@@ -764,8 +772,12 @@ def einsum(
         - ``False``: treated as ``'auto'``.
     symmetry : SymmetryGroup or symmetry shorthand, optional
         Declares output symmetry and wraps the validated result as a
-        ``SymmetricTensor``. This does NOT declare input symmetry; use
-        ``flops.as_symmetric()`` for that.
+        ``SymmetricTensor``. As with ``flops.as_symmetric()``, a result
+        that matches the group only within the validation tolerance is
+        copied first, each orbit taking the value at its lexicographically
+        smallest index, so the tag describes the data it is attached to.
+        This does NOT declare input symmetry; use ``flops.as_symmetric()``
+        for that.
 
     Returns
     -------
@@ -963,7 +975,15 @@ def einsum(
     if target_symmetry is not None and _validate_result_symmetry(
         result, target_symmetry
     ):
-        result = SymmetricTensor(_np.asarray(result), symmetry=target_symmetry)
+        data = _np.asarray(result)
+        if symmetry is not None:
+            # A declared ``symmetry=`` is the caller's claim, the same trust
+            # boundary as ``as_symmetric``: the check above is tolerant, but
+            # the tag is read as exact. Copy one representative across each
+            # orbit so the tag describes the buffer it is attached to; a
+            # result that is already exactly invariant is kept as it is.
+            data = canonicalize(data, target_symmetry)
+        result = SymmetricTensor(data, symmetry=target_symmetry)
     else:
         # An unverified claim is not stamped. Validation is skipped for
         # non-finite results, so tagging regardless would let a caller mint a

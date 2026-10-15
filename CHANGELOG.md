@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- Unary ufuncs now price the actual computation loop selected by `signature=`
+  or `sig=`, matching `dtype=`. Wider `out=` destinations still contribute when
+  a computation dtype is explicit. With production weights, four float32 values
+  passed to `exp(signature="d->d")` now cost 128 instead of 64, and a forced
+  complex128 loop costs 396 instead of 64. `modf` and `frexp` share this fix;
+  natural per-slot destinations remain price-neutral.
+
+- `histogram2d` and `histogramdd` now apply per-axis bin-search pricing to NumPy scalar counts, array count vectors, shared edges, and mixed count/edge specifications. These forms no longer fall back to a sample-count-only charge.
+
+- Length-one FFT stages now bill 2 base FLOPs per batch entry for complex working-buffer movement, before dtype rates and operation weights. This applies to forward/inverse, real/complex, and multidimensional transforms; ordinary butterfly formulas are unchanged.
+
+- `polyfit(cov=True)` and `cov="unscaled"` now bill the additional normal-matrix construction, inverse, covariance normalization and output scaling. Matrix work is shared across RHS columns; `full=True` still skips covariance. For eight float64 samples and degree three, production charges rise from 4,328 to 5,150 (scaled) or 5,148 (unscaled).
+
+### Fix
+
+- Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).
+- Module-level `random.shuffle` invalidates symmetry tags on the mutated buffer and its aliases, matching other in-place writes (#264).
+
+- Freeze unary dtype/signature constraints once so billing and NumPy execute
+  the same loop, and reject invalid constraints or incompatible output casts
+  without charging.
+
+- Quantile and percentile operations, including NaN variants, now place surviving symmetry on the correct axes when `q` adds output dimensions.
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact

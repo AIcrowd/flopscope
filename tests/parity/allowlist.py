@@ -449,17 +449,6 @@ ENTRIES: tuple[Entry, ...] = (
         issue="INTERNAL-P4-family-9",
     ),
     Entry(
-        case_id="grid/isnat::*",
-        dimension="flops",
-        category=Category.KNOWN_BUG,
-        reason=(
-            "The client's `fnp` module has no `isnat` attribute, so the call never"
-            " dispatches and 0 FLOPs are billed on the client, while in-process the"
-            " call runs and bills its real cost."
-        ),
-        issue="INTERNAL-P4-family-9",
-    ),
-    Entry(
         case_id="grid/ndenumerate::*",
         dimension="exc_type",
         category=Category.KNOWN_BUG,

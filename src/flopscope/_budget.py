@@ -346,8 +346,42 @@ _MUTATES_FIRST_ARG = frozenset(
         _np.place,
         _np.fill_diagonal,
         _np.put_along_axis,
+        _np.random.shuffle,
     }
 )
+
+
+@functools.lru_cache(maxsize=256)
+def _positional_out_index(fn: Any) -> int | None:
+    """Locate a NumPy function's positional destination, if supported.
+
+    Most public functions expose a signature. These C builtins do not, but
+    accept out as their third argument. Ufuncs deliberately remain under the
+    pointwise wrappers' tracking: positional out is also used internally to
+    defer a foreign callback's write until its staged result is committed.
+    """
+    # NumPy 2.4 exposes inspectable signatures on ufuncs too. They must
+    # still use the pointwise wrappers' staged write tracking, rather than
+    # invalidating an output before a foreign callback actually commits it.
+    if isinstance(fn, _np.ufunc):
+        return None
+    if fn is _np.concatenate or fn is _np.dot:
+        return 2
+    # Internal protocol helpers may accept an argument named out while staging
+    # a callback rather than writing it. Their commit path tracks writes itself.
+    if not (getattr(fn, "__module__", "") or "").startswith("numpy"):
+        return None
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    for index, parameter in enumerate(parameters):
+        if parameter.name == "out" and parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return index
+    return None
 
 
 class _LiveBackendCall:
@@ -503,6 +537,9 @@ def _call_numpy_impl(
     out = kwargs.get("out")
     if out is not None:
         note_write(out)
+    out_index = _positional_out_index(fn)
+    if out_index is not None and len(args) > out_index:
+        note_write(args[out_index])
     if fn in _MUTATES_FIRST_ARG and args:
         note_write(args[0])
 
