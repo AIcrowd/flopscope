@@ -112,3 +112,60 @@ def test_declared_group_the_data_does_not_satisfy_still_raises():
     B = np.random.default_rng(4).standard_normal((16, 16))
     with _ctx(), pytest.raises(SymmetryError):
         fnp.einsum("ij->ij", fnp.asarray(B), symmetry=SG.symmetric(axes=(0, 1)))
+
+
+def test_five_axis_declared_symmetry_cannot_preserve_general_matmul_inputs():
+    """Ivan's (64,1024)@(1024,1024), with 1024 split into five axes.
+
+    Both operands must claim the same contracted S5 action to obtain the
+    original orbit discount. After canonicalization, those claims describe
+    modified data and cannot compute the original arbitrary matrix product.
+    """
+    rng = np.random.default_rng(12)
+    left = rng.normal(size=(64, 1024))
+    right = rng.normal(size=(1024, 1024))
+    left_tensor = left.reshape((64,) + (4,) * 5)
+    right_tensor = right.reshape((4,) * 5 + (1024,))
+    scale = 2.0**-40
+    with _ctx():
+        lhs = (
+            fnp.einsum(
+                "zabcde->zabcde",
+                left_tensor * scale,
+                symmetry=SG.symmetric(axes=(1, 2, 3, 4, 5)),
+            )
+            / scale
+        )
+        rhs = (
+            fnp.einsum(
+                "abcdef->abcdef",
+                right_tensor * scale,
+                symmetry=SG.symmetric(axes=(0, 1, 2, 3, 4)),
+            )
+            / scale
+        )
+        result = fnp.einsum("zabcde,abcdef->zf", lhs, rhs)
+    lhs_raw = np.asarray(lhs)
+    rhs_raw = np.asarray(rhs)
+    # Adjacent transpositions generate S5, so each accepted tag is exact.
+    for axis in range(1, 5):
+        np.testing.assert_array_equal(lhs_raw, lhs_raw.swapaxes(axis, axis + 1))
+    for axis in range(4):
+        np.testing.assert_array_equal(rhs_raw, rhs_raw.swapaxes(axis, axis + 1))
+    assert not np.array_equal(lhs_raw, left_tensor)
+    assert not np.array_equal(rhs_raw, right_tensor)
+    np.testing.assert_allclose(
+        np.asarray(result),
+        np.einsum(
+            "ik,kj->ij",
+            lhs_raw.reshape(64, 1024),
+            rhs_raw.reshape(1024, 1024),
+            optimize=False,
+        ),
+        rtol=1e-11,
+        atol=1e-10,
+    )
+    assert np.isfinite(np.asarray(result)).all()
+    assert not np.allclose(
+        np.asarray(result), np.einsum("ik,kj->ij", left, right, optimize=False)
+    )
