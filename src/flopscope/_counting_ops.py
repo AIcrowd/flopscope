@@ -221,6 +221,59 @@ array_equiv.__signature__ = _inspect.signature(_np.array_equiv)  # pyright: igno
 # ---------------------------------------------------------------------------
 
 
+def _charge_linspace_edges(budget, bins, edges) -> None:
+    """Charge the bin edges numpy builds for an integer or string ``bins``.
+
+    numpy evaluates ``linspace(first_edge, last_edge, nbins + 1)`` for them, so
+    they are charged as ``fnp.linspace`` charges that call: ``2 * numel`` at the
+    dtype produced, under ``linspace``'s own name and weight (the way ``einsum``
+    charges its ``out=`` copy as ``copyto``). An array ``bins`` is used as the
+    edges and adds nothing.
+    """
+    if _np.ndim(_to_base_ndarray_tree(bins)) != 0:
+        return
+    with budget.deduct(
+        "linspace",
+        flop_cost=2 * edges.size,
+        subscripts=None,
+        shapes=(),
+        dtypes=(edges.dtype,),
+    ):
+        pass
+
+
+def _charge_histogram_bins(budget, bins, result, kwargs) -> None:
+    """Charge what ``histogram`` computes over its bins besides the binning pass.
+
+    The edges of an integer or string ``bins`` (``_charge_linspace_edges``) and,
+    with ``density=True``, the per-bin arithmetic numpy returns,
+    ``counts / diff(edges) / counts.sum()``: a diff, a divide, a sum and a
+    divide over the bins, each charged under its own name at the dtype it runs
+    in, so the call costs what that expression costs written out with ``fnp``.
+    """
+    hist, edges = result
+    _charge_linspace_edges(budget, bins, edges)
+    if not kwargs.get("density"):
+        return
+    nbins = hist.size
+    weights = kwargs.get("weights")
+    counts = (
+        _np.dtype(_np.intp)
+        if weights is None
+        else _np.asarray(_to_base_ndarray(weights)).dtype
+    )
+    for op_name, flop_cost, dtypes in (
+        ("diff", nbins, (edges.dtype,)),
+        ("divide", nbins, (counts, _np.dtype(_np.float64))),
+        ("sum", _builtins.max(nbins - 1, 0), (sum_accumulator_dtype(counts),)),
+        ("divide", nbins, (hist.dtype,)),
+    ):
+        with budget.deduct(
+            op_name, flop_cost=flop_cost, subscripts=None, shapes=(), dtypes=dtypes
+        ):
+            pass
+
+
 @_counted_wrapper
 def histogram(
     a: ArrayLike,
@@ -262,6 +315,7 @@ def histogram(
                 else _HIST_ESTIMATOR_COST.get(bins, 1)
             )
             _op.set_cost(_builtins.max(n * (2 + est + _ceil_log2(nbins)), 1))
+        _charge_histogram_bins(budget, bins, result, kwargs)
         return result  # type: ignore[return-value]
     else:
         bins_arr = _np.asarray(bins)
@@ -288,6 +342,7 @@ def histogram(
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
+    _charge_histogram_bins(budget, bins, result, kwargs)
     return result  # type: ignore[return-value]
 
 
@@ -295,7 +350,8 @@ attach_docstring(
     histogram,
     _np.histogram,
     "counted_custom",
-    "n * ceil(log2(bins)) FLOPs when bins is int or edges; n*(2+estimator+ceil(log2(resolved bins))) when bins is a string estimator",
+    "n * ceil(log2(bins)) FLOPs when bins is int or edges; n*(2+estimator+ceil(log2(resolved bins))) when bins is a string estimator; "
+    "an int or string bins also bills its bins + 1 edges as linspace, and density=True its per-bin diff/divide/sum/divide",
 )
 histogram.__signature__ = _inspect.signature(_np.histogram)  # pyright: ignore[reportFunctionMemberAccess]
 
@@ -487,6 +543,7 @@ def histogram_bin_edges(
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
+    _charge_linspace_edges(budget, bins, result)
     return result  # type: ignore[return-value]
 
 
@@ -494,7 +551,8 @@ attach_docstring(
     histogram_bin_edges,
     _np.histogram_bin_edges,
     "counted_custom",
-    "numel(a) FLOPs (int/edges); n*(2+estimator) FLOPs (string estimator)",
+    "numel(a) FLOPs (int/edges); n*(2+estimator) FLOPs (string estimator); "
+    "an int or string bins also bills its bins + 1 edges as linspace",
 )
 histogram_bin_edges.__signature__ = _inspect.signature(_np.histogram_bin_edges)  # pyright: ignore[reportFunctionMemberAccess]
 

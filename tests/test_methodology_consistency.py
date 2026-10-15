@@ -199,7 +199,11 @@ class TestMiscConsistency:
         n = 1000
         bins = 10
         a = np.random.rand(n)
-        runtime_cost = _run_and_get_cost(fnp.histogram, a, bins=bins)
+        # The bins + 1 edges follow as their own linspace record, so read the
+        # histogram record itself rather than the last one.
+        with BudgetContext(flop_budget=10**18) as ctx:
+            fnp.histogram(a, bins=bins)
+        (runtime_cost,) = [r.flop_cost for r in ctx.op_log if r.op_name == "histogram"]
         expected = n * math.ceil(math.log2(bins))
         assert runtime_cost == expected, (
             f"histogram({n}, bins={bins}): runtime={runtime_cost}, expected={expected}"

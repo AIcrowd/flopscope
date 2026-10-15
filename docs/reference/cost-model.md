@@ -1552,10 +1552,19 @@ are not bin-search ops and stay at weight 1.0.
 
 `histogram`, `histogram2d`, `histogramdd`, and `bincount` produce `int64` counts
 regardless of the input dtype, so the dtype rate adds a further `2×` on top of the
-formulas above (e.g. `histogram` with `n=100, bins=8` bills `2400`, not `1200`).
+formulas above (e.g. the binning pass of `histogram` with `n=100, bins=8` bills `2400`,
+not `1200`).
 `digitize` and `histogram_bin_edges` return the query's own index/edge dtype and do
 **not** carry this overlay. `interp` also always returns float64, so it too bills `2×`
 its `flop_cost` above regardless of the input dtype.
+
+**Edges and density.** An integer or string `bins` makes numpy build the `bins + 1`
+edges with `linspace(first_edge, last_edge, bins + 1)`, so `histogram` and
+`histogram_bin_edges` also charge exactly what `linspace` charges for them
+(`2 × (bins + 1)` at the edge dtype, weight 1.0, recorded as a `linspace` op). An array
+`bins` is the edges already and adds nothing. `histogram(..., density=True)` also
+charges the per-bin arithmetic numpy returns, `counts / diff(edges) / counts.sum()`, as
+the `diff`, `divide`, `sum` and `divide` it runs (`4 × bins − 1` in all, weight 1.0).
 
 Source: `src/flopscope/_counting_ops.py`, `src/flopscope/_array_ops.py`.
 

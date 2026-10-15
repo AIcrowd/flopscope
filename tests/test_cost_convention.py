@@ -449,7 +449,8 @@ OP_EXPECTATIONS: dict[str, tuple] = {
     # ---- Histogram / digitize ---------------------------------------------
     "histogram": (
         lambda: fnp.histogram(_v100, bins=10),
-        100 * int(math.ceil(math.log2(10))),  # 400
+        # 400 for the binning, plus the 11 edges charged as linspace
+        100 * int(math.ceil(math.log2(10))) + 2 * 11,  # 422
     ),
     "histogram2d": (
         lambda: fnp.histogram2d(_v100, _v100b, bins=[10, 10]),
@@ -797,7 +798,7 @@ DEFERRED: dict[str, str] = {
     "tril": "elements at/below kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
     "triu": "elements at/above kth diagonal via _triangle_kept; batch leading dims multiply; weight 1.0",
     "einsum_path": "path planning only; returns list+string, no numeric FLOPs",
-    "histogram_bin_edges": "numel(a); bin-edge computation",
+    "histogram_bin_edges": "numel(a); bin-edge computation, plus the bins + 1 edges charged as linspace for int/string bins",
     "pad": "numel(output) + mode extras (movement 0; linear_ramp/odd +(out-in); stat modes +stat cost); mode=<callable> raises",
     "resize": "numel(output)",
     "meshgrid": "numel(output) per array; sparse=True bills sum(input lengths); copy=False bills 1",
