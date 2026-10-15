@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- Quantile and percentile operations, including NaN variants, now place surviving symmetry on the correct axes when `q` adds output dimensions.
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact

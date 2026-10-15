@@ -4955,6 +4955,16 @@ nanmin = _counted_reduction(_np.nanmin, "nanmin")
 nanprod = _counted_reduction(_np.nanprod, "nanprod")
 
 
+def _quantile_output_symmetry(sym, *, ndim, axis, keepdims, q_ndim):
+    """Reduction axes retain their order after NumPy prepends q.shape."""
+    if sym is None:
+        return None
+    group = reduce_group(sym, ndim=ndim, axis=axis, keepdims=keepdims)
+    if group is not None and q_ndim:
+        group = remap_group_axes(group, {ax: ax + q_ndim for ax in range(ndim)})
+    return group
+
+
 @_counted_wrapper
 def nanpercentile(
     a: ArrayLike,
@@ -5022,10 +5032,8 @@ def nanpercentile(
     # calls ``np.isnan`` whatever the dtype.
     cost += pointwise_cost(tuple(a.shape), sym)
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     # numpy's percentile family always divides q by 100 first (an implicit
@@ -5131,10 +5139,8 @@ def nanquantile(
     # calls ``np.isnan`` whatever the dtype.
     cost += pointwise_cost(tuple(a.shape), sym)
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
@@ -5222,10 +5228,8 @@ def percentile(
         ),
     )
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     # Same "always divides q by 100 first" rule as nanpercentile: integer/
@@ -5312,10 +5316,8 @@ def quantile(
         ),
     )
 
-    out_sym = (
-        reduce_group(sym, ndim=a.ndim, axis=axis, keepdims=keepdims)
-        if sym is not None
-        else None
+    out_sym = _quantile_output_symmetry(
+        sym, ndim=a.ndim, axis=axis, keepdims=keepdims, q_ndim=q_arr.ndim
     )
     out_stripped = _to_base_ndarray(out) if out is not None else None
     billing_dtypes: tuple = (a.dtype, billing_operand(q, q_arr))
