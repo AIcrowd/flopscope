@@ -711,6 +711,7 @@ def test_fixture_recovers_a_deliberately_failed_close(monkeypatch) -> None:
 
 def test_module_shuffle_invalidates_server_symmetry():
     import numpy as np
+
     import flopscope as we
 
     a = np.random.default_rng(12).normal(size=(8, 8))
