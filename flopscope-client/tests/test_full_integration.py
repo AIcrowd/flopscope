@@ -741,3 +741,23 @@ def test_choose_destination_cannot_discount_general_matmul(positional):
         reference_charge = budget.flops_used - before
         np.testing.assert_allclose(result.tolist(), left @ right)
         assert charged == reference_charge
+
+
+def test_module_shuffle_invalidates_server_symmetry():
+    import numpy as np
+
+    import flopscope as we
+
+    a = np.random.default_rng(12).normal(size=(8, 8))
+    with we.BudgetContext(flop_budget=10**9) as budget:
+        tagged = we.as_symmetric(we.array((a @ a.T).tolist()), symmetry=(0, 1))
+        we.random.seed(42)
+        we.random.shuffle(tagged)
+        shuffled = tagged.tolist()
+        dense = we.array(shuffled)
+        before = budget.flops_used
+        we.einsum("ij,ij->", tagged, tagged)
+        charged = budget.flops_used - before
+        before = budget.flops_used
+        we.einsum("ij,ij->", dense, dense)
+        assert charged == budget.flops_used - before

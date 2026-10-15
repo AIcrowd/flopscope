@@ -5,6 +5,7 @@
 ### Fix
 
 - Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).
+- Module-level `random.shuffle` invalidates symmetry tags on the mutated buffer and its aliases, matching other in-place writes (#264).
 
 ## v0.12.1 (2026-08-29)
 
