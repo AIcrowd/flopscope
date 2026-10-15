@@ -1543,7 +1543,7 @@ are not bin-search ops and stay at weight 1.0.
 | `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | 4.0 | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
 | `bincount` | `numel(x)` (floor 1) | 4.0 | DECLARED: one bucket increment per element | `_counting_ops.py` |
 | `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |
-| `trapezoid`, `trapz` | `4 × numel(y)` | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
+| `trapezoid`, `trapz` | `4 × numel(y) × K`, K = integrals per lane of `y`: the factor by which an N-D `x` broadcasts `diff(x)` against `y` (K = 1 for `dx` or a 1-D `x`) | 1.0 | DERIVED: `(d·(y₁+y₂)/2).sum()` ≈ 3 elementwise ops + sum-reduce per point, charged as a clean 4/point upper bound | `_pointwise.py` |
 
 `histogram`, `histogram2d`, `histogramdd`, and `bincount` produce `int64` counts
 regardless of the input dtype, so the dtype rate adds a further `2×` on top of the

@@ -7195,6 +7195,45 @@ attach_docstring(
 cov.__signature__ = _inspect.signature(_np.cov)  # pyright: ignore[reportFunctionMemberAccess]
 
 
+def _trapezoid_cost(y, x_arr, axis) -> int:
+    """4 FLOPs per sample of ``y`` (FMA=2), once per integral numpy forms.
+
+    numpy sums ``d * (y[1:] + y[:-1]) / 2`` along ``axis``, where ``d`` is
+    ``diff(x)`` (or ``dx``). A 1-D ``x`` is laid along ``axis`` and adds no
+    integrals, but an N-D ``x`` broadcasts ``diff(x)`` against ``y``: a stack
+    of K sample grids integrates ``y`` K times. ``4 * y.size`` is scaled by
+    that broadcast factor, so it is unchanged whenever ``x`` adds no
+    dimensions. Shapes numpy cannot combine keep ``4 * y.size``; numpy
+    refuses the call in its own words.
+    """
+    import math as _math
+
+    base = 4 * y.size
+
+    def _axis_index(ndim: int) -> int:
+        index = _operator.index(axis)
+        if not -ndim <= index < ndim:
+            raise ValueError("axis out of range")
+        return index % ndim
+
+    if x_arr is None or x_arr.ndim <= 1:
+        return base
+    try:
+        d_shape = list(x_arr.shape)
+        k = _axis_index(len(d_shape))
+        d_shape[k] = _builtins.max(d_shape[k] - 1, 0)
+        sliced = list(y.shape)
+        k = _axis_index(len(sliced))
+        sliced[k] = _builtins.max(sliced[k] - 1, 0)
+        work = _np.broadcast_shapes(tuple(sliced), tuple(d_shape))
+    except (TypeError, ValueError):
+        return base
+    per_grid = _math.prod(sliced)
+    if per_grid == 0:
+        return base
+    return base * (_math.prod(work) // per_grid)
+
+
 @_counted_wrapper
 def trapezoid(
     y: ArrayLike, x: ArrayLike | None = None, dx: float = 1.0, axis: int = -1
@@ -7204,12 +7243,13 @@ def trapezoid(
     if not isinstance(y, _np.ndarray):
         y = _np.asarray(y)
     billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+    x_arr = None
     if x is not None:
         x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
         billing_dtypes += (billing_operand(x, x_arr),)
     with budget.deduct(
         "trapezoid",
-        flop_cost=4 * y.size,
+        flop_cost=_trapezoid_cost(y, x_arr, axis),
         subscripts=None,
         shapes=(y.shape,),
         dtypes=billing_dtypes,
@@ -7225,7 +7265,11 @@ def trapezoid(
 
 
 attach_docstring(
-    trapezoid, _np.trapezoid, "counted_custom", "4 * numel(input) FLOPs (FMA=2)"
+    trapezoid,
+    _np.trapezoid,
+    "counted_custom",
+    "4 * numel(y) FLOPs per integral (FMA=2); an N-D x that broadcasts "
+    "y over K sample grids bills K integrals",
 )
 
 
@@ -7240,12 +7284,13 @@ if hasattr(_np, "trapz"):
         if not isinstance(y, _np.ndarray):
             y = _np.asarray(y)
         billing_dtypes: tuple = (y.dtype, billing_operand(dx, _np.asarray(dx)))
+        x_arr = None
         if x is not None:
             x_arr = x if isinstance(x, _np.ndarray) else _np.asarray(x)
             billing_dtypes += (billing_operand(x, x_arr),)
         with budget.deduct(
             "trapz",
-            flop_cost=4 * y.size,
+            flop_cost=_trapezoid_cost(y, x_arr, axis),
             subscripts=None,
             shapes=(y.shape,),
             dtypes=billing_dtypes,
@@ -7260,7 +7305,11 @@ if hasattr(_np, "trapz"):
         return _wrap_metered_result(result)  # type: ignore[return-value]
 
     attach_docstring(
-        trapz, _np.trapz, "counted_custom", "4 * numel(input) FLOPs (FMA=2)"
+        trapz,
+        _np.trapz,
+        "counted_custom",
+        "4 * numel(y) FLOPs per integral (FMA=2); an N-D x that broadcasts "
+        "y over K sample grids bills K integrals",
     )
 
 else:
