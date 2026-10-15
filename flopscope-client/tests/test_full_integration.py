@@ -745,19 +745,23 @@ def test_fixture_recovers_a_deliberately_failed_close(monkeypatch) -> None:
 @pytest.mark.parametrize("positional", [True, False])
 def test_choose_destination_cannot_discount_general_matmul(positional):
     """Exercise actual wire decoding and server write tracking, not handlers alone."""
-    import numpy as np
+    import random
 
     import flopscope as we
 
-    rng = np.random.default_rng(12)
-    left = rng.normal(size=(3, 32))
-    right = rng.normal(size=(32, 7))
+    rng = random.Random(12)
+    left = [[rng.gauss(0, 1) for _ in range(32)] for _ in range(3)]
+    right = [[rng.gauss(0, 1) for _ in range(7)] for _ in range(32)]
+    expected = [
+        [sum(left[i][k] * right[k][j] for k in range(32)) for j in range(7)]
+        for i in range(3)
+    ]
     shape = (2,) * 5 + (7,)
     with we.BudgetContext(flop_budget=10**9) as budget:
-        left_values = we.array(left.reshape((3,) + (2,) * 5).tolist())
+        left_values = we.reshape(we.array(left), (3,) + (2,) * 5)
         lhs = we.zeros((3,) + (2,) * 5)
         left_indices = we.zeros(lhs.shape, dtype="int64")
-        values = we.array(right.reshape(shape).tolist())
+        values = we.reshape(we.array(right), shape)
         indices = we.zeros(shape, dtype="int64")
         dest = we.zeros(shape)
         if positional:
@@ -772,18 +776,19 @@ def test_choose_destination_cannot_discount_general_matmul(positional):
         before = budget.flops_used
         we.einsum("zabcde,abcdef->zf", left_values, values)
         reference_charge = budget.flops_used - before
-        np.testing.assert_allclose(result.tolist(), left @ right)
+        for actual_row, expected_row in zip(result.tolist(), expected, strict=True):
+            assert actual_row == pytest.approx(expected_row)
         assert charged == reference_charge
 
 
 def test_module_shuffle_invalidates_server_symmetry():
-    import numpy as np
-
     import flopscope as we
 
-    a = np.random.default_rng(12).normal(size=(8, 8))
+    gram = [
+        [float((i + 1) * (j + 1) + int(i == j)) for j in range(8)] for i in range(8)
+    ]
     with we.BudgetContext(flop_budget=10**9) as budget:
-        tagged = we.as_symmetric(we.array((a @ a.T).tolist()), symmetry=(0, 1))
+        tagged = we.as_symmetric(we.array(gram), symmetry=(0, 1))
         we.random.seed(42)
         we.random.shuffle(tagged)
         shuffled = tagged.tolist()

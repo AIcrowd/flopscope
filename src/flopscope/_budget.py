@@ -360,6 +360,11 @@ def _positional_out_index(fn: Any) -> int | None:
     pointwise wrappers' tracking: positional out is also used internally to
     defer a foreign callback's write until its staged result is committed.
     """
+    # NumPy 2.4 exposes inspectable signatures on ufuncs too. They must
+    # still use the pointwise wrappers' staged write tracking, rather than
+    # invalidating an output before a foreign callback actually commits it.
+    if isinstance(fn, _np.ufunc):
+        return None
     if fn is _np.concatenate or fn is _np.dot:
         return 2
     # Internal protocol helpers may accept an argument named out while staging

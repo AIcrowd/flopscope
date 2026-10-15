@@ -5,8 +5,13 @@ import pytest
 
 import flopscope as flops
 import flopscope.numpy as fnp
-from flopscope._budget import _call_numpy
+from flopscope._budget import _call_numpy, _positional_out_index
 from flopscope._write_epoch import epoch_of
+
+
+@pytest.mark.parametrize("ufunc", [np.add, np.exp, np.modf])
+def test_ufunc_destinations_remain_under_staged_tracking(ufunc):
+    assert _positional_out_index(ufunc) is None
 
 
 def test_choose_positional_destination_matches_keyword():
