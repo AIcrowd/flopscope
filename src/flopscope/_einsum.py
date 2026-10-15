@@ -590,9 +590,15 @@ def _infer_multi_operand_output_symmetry(path_info, output_subscript: str):
     or None if no symmetry was derived or relabel fails.
 
     The path walker's oracle stores `output_group` on each StepInfo with axes
-    indexing the *step's* output subscript.  We must relabel those axes to
-    positions in the *einsum's* output_subscript, which may differ (opt_einsum
-    can permute labels for BLAS-friendly orientation).
+    indexing its own label frame: the step's free labels in sorted order,
+    recorded on the group as ``_labels``.  We must relabel those axes to
+    positions in the *einsum's* output_subscript, which may order the same
+    labels differently.  Reading the axes as positions in the step's output
+    subscript instead agreed with the frame only while that subscript listed
+    its labels in sorted order: ``ij,k->ijk`` was tagged right, while
+    ``ij,k->kij`` put the group on axes that do not carry the symmetry and the
+    result failed its own validation (#281).  A group without a recorded frame
+    falls back to the step's output subscript.
     """
     if path_info is None:
         return None
@@ -612,11 +618,12 @@ def _infer_multi_operand_output_symmetry(path_info, output_subscript: str):
     _, step_out = step_subscript.split("->", 1)
     if not step_out:
         return None
-    # group.axes are positions in step_out; map each to its label, then relabel
-    # to positions in output_subscript.
+    # group.axes are positions in the oracle's label frame; map each to its
+    # label, then relabel to positions in output_subscript.
+    frame = getattr(group, "_labels", None) or step_out
     axes = group.axes if group.axes is not None else tuple(range(group.degree))
     try:
-        source_labels = tuple(step_out[ax] for ax in axes)
+        source_labels = tuple(frame[ax] for ax in axes)
     except IndexError:
         return None
     return _relabel_group_to_output(group, source_labels, output_subscript)
