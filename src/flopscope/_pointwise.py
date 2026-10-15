@@ -47,6 +47,7 @@ from flopscope._flops import (
 from flopscope._flops import (
     analytical_reduction_cost as reduction_cost,
 )
+from flopscope._flops import sort_cost as _sort_cost
 from flopscope._ndarray import (
     FlopscopeArray,
     _asflopscope,
@@ -7448,17 +7449,66 @@ else:
         )
 
 
+def _interp_period_cost(
+    x: _np.ndarray, xp: _np.ndarray, fp: _np.ndarray, period: Any
+) -> int:
+    """FLOPs of the work ``np.interp`` does for ``period=`` before it interpolates.
+
+    numpy reduces ``x`` and ``xp`` modulo the period, argsorts ``xp``, gathers
+    ``xp`` and ``fp`` in that order and pads both with one wrapped point at
+    each end; the search and blend then run on that ``len(xp) + 2`` table.
+    Each step is billed as the op that spells it out (``remainder``,
+    ``argsort``, ``take``, ``concatenate``, and the two one-element shifts that
+    build the padding), folded into interp's single charge at that op's own
+    weight, the way composite ops fold their sub-tiers: 16 per element reduced
+    modulo the period, 4 per sort comparison and per gathered element, 1 per
+    padded element written. Without it ``period=`` sorted a table of any
+    length for free (#276).
+
+    Refuses, before anything is charged, what numpy's period branch refuses
+    with a ``ValueError``, with numpy's own message: a zero period, an ``xp``
+    or ``fp`` that is not 1-D, and ``xp`` and ``fp`` of different lengths.
+    """
+    if period == 0:
+        raise ValueError("period must be a non-zero value")
+    if xp.ndim != 1 or fp.ndim != 1:
+        raise ValueError("Data points must be 1-D sequences")
+    if xp.shape[0] != fp.shape[0]:
+        raise ValueError("fp and xp are not of the same length")
+    m = xp.shape[0]
+    return (
+        16 * (x.size + m)  # x % period, xp % period
+        + 4 * _sort_cost(m)  # argsort(xp)
+        + 4 * 2 * m  # xp[order], fp[order]
+        + 2 * (m + 2)  # the padded xp and fp
+        + 2  # xp[-1:] - period, xp[0:1] + period
+    )
+
+
 @_counted_wrapper
 def interp(x: ArrayLike, xp: ArrayLike, fp: ArrayLike, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.interp. Cost: n * ceil(log2(len(xp))) FLOPs."""
+    """Counted version of np.interp.
+
+    Cost: ``3*n + n*ceil(log2(len(xp)))`` FLOPs for ``n`` queries. With
+    ``period=``, numpy's period branch is added (see ``_interp_period_cost``)
+    and the search runs on its ``len(xp) + 2`` padded table.
+    """
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
     xp_arr = _np.asarray(xp)
     fp_arr = _np.asarray(fp)
+    # left=, right= and period= are forwarded to numpy, whose period branch
+    # computes ``xp % period``: a tracked period would reach numpy from inside
+    # this wrapper.
+    kwargs = {k: _to_base_ndarray(v) for k, v in kwargs.items()}
     n = _builtins.max(x.size, 1)
     xp_len = _builtins.max(xp_arr.size, 1)
-    cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1)
+    period_cost = 0
+    if kwargs.get("period") is not None:
+        period_cost = _interp_period_cost(x, xp_arr, fp_arr, kwargs["period"])
+        xp_len = xp_arr.size + 2
+    cost = _builtins.max(3 * n + n * _ceil_log2(xp_len), 1) + period_cost
     # np.interp always computes the x/xp search+blend in float64 regardless
     # of x/xp's own precision, but the interpolated VALUE keeps fp's dtype
     # (e.g. complex fp -> complex128 output); bill both contributions.
@@ -7484,6 +7534,7 @@ attach_docstring(
     interp,
     _np.interp,
     "counted_custom",
-    "3*n + n*ceil(log2(xp)) FLOPs (arithmetic + search)",
+    "3*n + n*ceil(log2(xp)) FLOPs (arithmetic + search), plus the mod, argsort, "
+    "gather and padding numpy runs first for period=",
 )
 interp.__signature__ = _inspect.signature(_np.interp)  # pyright: ignore[reportFunctionMemberAccess]
