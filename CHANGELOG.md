@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- Module-level `random.shuffle` invalidates symmetry tags on the mutated buffer and its aliases, matching other in-place writes (#264).
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact

@@ -346,6 +346,7 @@ _MUTATES_FIRST_ARG = frozenset(
         _np.place,
         _np.fill_diagonal,
         _np.put_along_axis,
+        _np.random.shuffle,
     }
 )
 
