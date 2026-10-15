@@ -24,6 +24,8 @@ def polyval_cost(deg: int, m: int) -> int:
     """Cost for polyval: Horner's method under FMA=2 textbook convention.
 
     Per coefficient: 1 multiply + 1 add (FMA=2). m output cells, deg coefficients.
+    For an N-D coefficient array, m is the size of the broadcast output
+    ``broadcast_shapes(p.shape[1:], x.shape)``, not ``x.size``.
     Returns 2 * m * deg FLOPs.
     """
     return max(2 * m * deg, 1)
@@ -281,7 +283,16 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
     p_arr = _to_base_ndarray(_np.asarray(p))
     x_arr = _to_base_ndarray(_np.asarray(x))
     deg = len(p_arr) - 1
-    m = x_arr.size
+    # Every Horner step ``y = y * x + p[i]`` runs over the broadcast of ``x``
+    # with one coefficient slice ``p[i]``, so trailing dimensions of ``p``
+    # (or an ``x`` smaller than ``p[i]``, down to a 0-d point) widen every
+    # step: ``m`` is the size of that output, not ``x.size``. Shapes numpy
+    # cannot broadcast keep ``x.size``; numpy refuses the call in its own
+    # words.
+    try:
+        m = _math.prod(_np.broadcast_shapes(p_arr.shape[1:], x_arr.shape))
+    except ValueError:
+        m = x_arr.size
     cost = polyval_cost(deg, m)
     with budget.deduct(
         "polyval",
@@ -295,7 +306,11 @@ def polyval(p: ArrayLike, x: ArrayLike) -> FlopscopeArray:
 
 
 attach_docstring(
-    polyval, _np.polyval, "counted_custom", "2 * m * deg FLOPs (Horner's method, FMA=2)"
+    polyval,
+    _np.polyval,
+    "counted_custom",
+    "2 * m * deg FLOPs (Horner's method, FMA=2), "
+    "m = size of the broadcast output (p.shape[1:] against x.shape)",
 )
 
 

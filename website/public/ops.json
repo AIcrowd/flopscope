@@ -6083,7 +6083,7 @@
       "free": false,
       "module": "flopscope._polynomial",
       "name": "polyval",
-      "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2).",
+      "notes": "Evaluate polynomial at given points. Cost: $2 \\cdot m \\cdot \\text{deg}$ (Horner's method, FMA=2), where m is the size of the broadcast output (p.shape[1:] against x.shape; x.size for 1-D p).",
       "numpy_ref": "np.polyval",
       "slug": "polyval",
       "status": "supported",
