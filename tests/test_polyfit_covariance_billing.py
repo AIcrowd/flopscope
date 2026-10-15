@@ -107,3 +107,11 @@ def test_insufficient_budget_prevents_numpy_execution(monkeypatch):
     with flops.BudgetContext(flop_budget=1):
         with pytest.raises(flops.errors.BudgetExhaustedError):
             fnp.polyfit(x, x * x, 3, cov=True)
+
+
+def test_negative_degree_covariance_preserves_numpy_error():
+    x = np.arange(8, dtype=np.float64)
+    with flops.BudgetContext(flop_budget=10**8) as budget:
+        with pytest.raises(ValueError, match="expected deg >= 0"):
+            fnp.polyfit(x, x * x, -1, cov=True)
+    assert budget.flops_used == 0

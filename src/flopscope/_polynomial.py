@@ -562,6 +562,8 @@ def polyfit(
     if kwargs.get("w") is not None:
         billing_dtypes += (kwargs["w"].dtype,)
     if kwargs.get("cov", False) and not kwargs.get("full", False):
+        if deg < 0:
+            raise ValueError("expected deg >= 0")
         scaled = kwargs["cov"] != "unscaled"
         if scaled and m <= deg + 1:
             raise ValueError(
