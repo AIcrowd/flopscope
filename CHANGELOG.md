@@ -11,6 +11,8 @@
   complex128 loop costs 396 instead of 64. `modf` and `frexp` share this fix;
   natural per-slot destinations remain price-neutral.
 
+- `histogram2d` and `histogramdd` now apply per-axis bin-search pricing to NumPy scalar counts, array count vectors, shared edges, and mixed count/edge specifications. These forms no longer fall back to a sample-count-only charge.
+
 ### Fix
 
 - Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).

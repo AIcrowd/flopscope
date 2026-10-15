@@ -1557,7 +1557,7 @@ are not bin-search ops and stay at weight 1.0.
 | `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query); with `period=`, numpy's period branch is added at its ops' own weights, `16(m + p) + 4p⌈log₂ p⌉ + 8p + 2(p + 2) + 2` for `p = numel(xp)` (mod of `x` and `xp`, argsort, two gathers, two padded concatenates, two pad shifts), and the search runs on the `p + 2` padded table | 1.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (integer bins) | `n × ⌈log₂(bins)⌉` (binary-search binning pass only) | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (string bins, e.g. `'auto'`) | `n × (2 + estimator_cost + ⌈log₂ resolved_bins⌉)` (deferred: resolved after the call; estimator costs: sturges/sqrt/rice=0, fd/auto=+1n, scott=+4n, doane=+6n, stone=+max(100,√n)n) | 4.0 | DERIVED | `_counting_ops.py` |
-| `histogram2d`, `histogramdd` | same as `histogram` per axis | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram2d`, `histogramdd` | `n * sum(ceil(log2(b_i)))`, where `b_i` is each axis count or edge-array length; all supported count/edge spellings use the same rule | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | 4.0 | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
 | `bincount` | `numel(x)` (floor 1) | 4.0 | DECLARED: one bucket increment per element | `_counting_ops.py` |
 | `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |

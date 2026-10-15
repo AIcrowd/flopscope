@@ -2108,13 +2108,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "2D binning; cost = n*(ceil(log2(bx))+ceil(log2(by))).",
+        "notes": "2D binning; cost = n*sum(ceil(log2(b_i))), where b_i is an axis bin count or edge-array length, for every supported bin spelling.",
     },
     "histogramdd": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "ND binning; cost = n*sum(ceil(log2(b_i))).",
+        "notes": "ND binning; cost = n*sum(ceil(log2(b_i))), where b_i is an axis bin count or edge-array length, for every supported bin spelling.",
     },
     "histogram_bin_edges": {
         "category": "counted_custom",
