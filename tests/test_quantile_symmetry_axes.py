@@ -57,5 +57,6 @@ def test_quantile_negative_and_tuple_reduction_axes(axis, shape):
         np.testing.assert_allclose(
             np.asarray(result), np.quantile(values, q, axis=axis)
         )
-        assert getattr(result, "symmetry").axes == (2, 3)
+        group = getattr(result, "symmetry", None)
+        assert group is not None and group.axes == (2, 3)
         fnp.exp(result)
