@@ -231,7 +231,7 @@ def polyfit_covariance_cost(
 
     Gram and inverse follow the dense dot/inverse pricing. The aliased
     outer(scale, scale) uses its guaranteed symmetric orbit count. Final
-    multiplication bills the returned covariance size (including NumPy's
+    multiplication bills the requested covariance size (including NumPy's
     singleton RHS dimension for unscaled multi-output fits).
     """
     from flopscope._flops import matmul_cost
@@ -561,18 +561,22 @@ def polyfit(
     billing_dtypes = (x_arr.dtype, y_arr.dtype, _np.dtype(_np.float64))
     if kwargs.get("w") is not None:
         billing_dtypes += (kwargs["w"].dtype,)
-    with budget.deduct_after(
+    if kwargs.get("cov", False) and not kwargs.get("full", False):
+        scaled = kwargs["cov"] != "unscaled"
+        if scaled and m <= deg + 1:
+            raise ValueError(
+                "the number of data points must exceed order to scale the covariance matrix"
+            )
+        covariance_size = (deg + 1) ** 2 * (ncols if scaled else 1)
+        cost += polyfit_covariance_cost(m, deg, covariance_size, scaled=scaled)
+    with budget.deduct(
         "polyfit",
+        flop_cost=cost,
         subscripts=None,
         shapes=(x_arr.shape,),
         dtypes=billing_dtypes,
-    ) as rec:
+    ):
         result = _call_numpy(_np.polyfit, x_arr, y_arr, deg, **kwargs)  # type: ignore[arg-type]
-        if kwargs.get("cov", False) and not kwargs.get("full", False):
-            cost += polyfit_covariance_cost(
-                m, deg, result[1].size, scaled=kwargs["cov"] != "unscaled"
-            )
-        rec.set_cost(cost)
     return result  # type: ignore[return-value]
 
 

@@ -96,3 +96,14 @@ def test_covariance_dtype_and_weighted_values_match_numpy(dtype):
     for got, want in zip(result, expected, strict=True):
         assert got.dtype == want.dtype
         np.testing.assert_allclose(np.asarray(got), want)
+
+
+def test_insufficient_budget_prevents_numpy_execution(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("NumPy must not execute before budget approval")
+
+    monkeypatch.setattr(np, "polyfit", forbidden)
+    x = np.arange(8, dtype=np.float64)
+    with flops.BudgetContext(flop_budget=1):
+        with pytest.raises(flops.errors.BudgetExhaustedError):
+            fnp.polyfit(x, x * x, 3, cov=True)
