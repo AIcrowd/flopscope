@@ -1389,6 +1389,16 @@ All counted FFT ops use **weight 1.0**.  Source: `src/flopscope/numpy/fft/_trans
 
 ---
 
+#### Singleton stages
+
+FFT arithmetic already includes complex real-FLOPs. Every executed length-one
+transform stage therefore bills 2 base FLOPs per batch entry for moving its
+complex working value, even for real forward/inverse transforms whose working
+precision follows the FFT complex-dtype policy. Apply the existing dtype and
+destination rates and operation weight. Multidimensional pricing applies this
+floor to each executed stage at that stage's batch size; empty batches cost zero.
+Transforms longer than one retain their existing butterfly formula.
+
 ### Polynomial
 
 | Op | flop_cost | basis | source |
@@ -1413,6 +1423,20 @@ kind-conditional promotion an `eigvals`-backed linalg op uses.
 Source: `src/flopscope/_polynomial.py`.
 
 ---
+
+#### Covariance output
+
+In addition to the existing Vandermonde plus least-squares cost, `polyfit`
+executes a covariance branch only when `cov` is truthy and `full` is false.
+For `p = deg + 1` and `m = len(x)`, add
+`matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance)`.
+These terms cover the dense Gram product and inverse, the aliased symmetric
+`outer(scale,scale)`, covariance normalization, and final multiplication.
+Scaled covariance additionally divides one residual per returned covariance
+slice; unscaled covariance still multiplies by one, as NumPy does. The Gram
+and inverse are shared across RHS columns; NumPy returns only one covariance
+slice for an unscaled multi-output fit. Existing polyfit computation-dtype,
+complex-factor and weight rules apply to the composite price.
 
 ### Random (module-level, Generator, RandomState)
 
@@ -1992,27 +2016,3 @@ weight tables by `scripts/generate_api_docs.py` and powers the website's API pag
 > shape-dependent. For those, the closed form and its derivation live in the family
 > tables above. Treat `ops.json` as the complete index and this document as the precise
 > reference; the completeness test ties them together.
-
-### Singleton FFT stages
-
-FFT arithmetic already includes complex real-FLOPs. Every executed length-one
-transform stage therefore bills 2 base FLOPs per batch entry for moving its
-complex working value, even for real forward/inverse transforms whose working
-precision follows the FFT complex-dtype policy. Apply the existing dtype and
-destination rates and operation weight. Multidimensional pricing applies this
-floor to each executed stage at that stage's batch size; empty batches cost zero.
-Transforms longer than one retain their existing butterfly formula.
-
-### Polynomial-fit covariance
-
-In addition to the existing Vandermonde plus least-squares cost, `polyfit`
-executes a covariance branch only when `cov` is truthy and `full` is false.
-For `p = deg + 1` and `m = len(x)`, add
-`matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance)`.
-These terms cover the dense Gram product and inverse, the aliased symmetric
-`outer(scale,scale)`, covariance normalization, and final multiplication.
-Scaled covariance additionally divides one residual per returned covariance
-slice; unscaled covariance still multiplies by one, as NumPy does. The Gram
-and inverse are shared across RHS columns; NumPy returns only one covariance
-slice for an unscaled multi-output fit. Existing polyfit computation-dtype,
-complex-factor and weight rules apply to the composite price.
