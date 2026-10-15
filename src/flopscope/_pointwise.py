@@ -1132,6 +1132,14 @@ def _counted_unary(np_func, op_name: str):
             _preflight_ufunc_out_arity(out, np_func.nout)
             _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name)
+        explicit_dtype = None
+        explicit_signature = _UFUNC_SIGNATURE_MISSING
+        explicit_casting = _UFUNC_CASTING_MISSING
+        loop_dtypes: tuple = ()
+        if is_ufunc:
+            explicit_dtype, explicit_signature, explicit_casting = (
+                _freeze_binary_ufunc_type_kwargs(kwargs)
+            )
         symmetry = _symmetry_of(x)
         if is_ufunc:
             x, x_fwd = _resolve_ufunc_data_operand(x)
@@ -1141,118 +1149,43 @@ def _counted_unary(np_func, op_name: str):
             x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
         cost = pointwise_cost(x.shape, symmetry=symmetry)
-        # An explicit dtype= forces the ufunc loop: numpy casts operands on
-        # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop. A bool
-        # dtype= is excluded: it names the output of a value-testing loop,
-        # which still reads full-width operands -- bill the operands.
-        explicit_dtype = kwargs.get("dtype")
-        # What a destination buffer contributes, kept SEPARATE from the
-        # operand resolution below. Folding it in first let a narrow out=
-        # pull the resolved dtype down before the compute-dtype mapping ran
-        # (float16 out= on angle(bool_) resolved float16, whose kind is no
-        # longer "b", so the float64 override never fired and the call
-        # billed half price). The compute dtype numpy selects is a function
-        # of the OPERANDS alone; a destination can only ever widen the bill
-        # on top of it, never shrink it -- see cost-model.md's "out= alone
-        # never shrinks the loop".
-        store_dtypes: tuple = ()
-        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
-        if not bills_operand:
-            assert explicit_dtype is not None
-            operand_dtypes: tuple = (_np.dtype(explicit_dtype),)
+        if is_ufunc:
+            loop_dtypes, operand_dtypes = _unary_ufunc_billing_dtypes(
+                np_func,
+                op_name,
+                x.dtype,
+                explicit_dtype,
+                explicit_signature,
+                explicit_casting,
+            )
         else:
-            operand_dtypes = (x.dtype,)
-            if isinstance(out, _np.ndarray):
-                store_dtypes = store_billing_dtypes(out)
-        compute_dtype = None
-        # A loop numpy does not have is a refusal, not a price. Ask before the
-        # deduct so it costs nothing, the same doctrine as the ``out=`` guards
-        # at the top of this wrapper and as percentile's ``q`` check (#241):
-        # ``invert(float32)`` and ``sign(bool_)`` used to bill ``numel`` in
-        # full and then raise, because the only guard was numpy's own dispatch
-        # inside the deduct block.
-        #
-        # The answer is also the PRICE. numpy's resolved signature names the
-        # dtype the loop really reads, so a ufunc-backed op needs no entry in
-        # the name sets below -- the same rule ``_counted_binary`` has always
-        # used, and the reason its float-only family (copysign, heaviside,
-        # nextafter, hypot, logaddexp) has never needed one. A hand-kept set
-        # can only be as complete as the last person to edit it: it missed
-        # ``angle``'s bool case, then ``signbit``/``isneginf``/``isposinf``,
-        # each found as an undercharge in production rather than here.
-        #
-        # Restricted to the UNCONSTRAINED form. ``dtype=`` and
-        # ``signature=``/``sig=`` name a loop explicitly, and this wrapper
-        # forwards them untouched; reconstructing numpy's constraint semantics
-        # here to pre-judge them would risk refusing a form numpy accepts,
-        # which is the one failure mode worse than the overcharge being fixed.
-        # Those forms keep billing the dtype the caller named, as before.
-        # ``bills_operand`` is the SAME predicate that chose operand_dtypes
-        # above, deliberately sharing one expression: a bool ``dtype=`` names
-        # the output of a value-testing loop, so the wrapper ignores it and
-        # bills the operand -- which means the operand's loop still has to be
-        # resolved. Gating this on ``explicit_dtype is None`` alone reopened
-        # signbit's undercharge through the ``dtype=bool`` door, billing
-        # ``signbit(int32, dtype=bool)`` at int32 while numpy read float64.
-        #
-        # The REFUSAL stays gated on the stricter ``explicit_dtype is None``.
-        # A caller who named a dtype gets numpy's own error from the real
-        # call, exactly as before; pre-judging that form here could refuse
-        # something numpy accepts, the one failure mode worse than the
-        # overcharge this resolution fixes.
-        if is_ufunc and bills_operand and "signature" not in kwargs:
-            if "sig" not in kwargs:
-                try:
-                    loop_dtypes: tuple = _ufunc_loop_signature(
-                        np_func,
-                        x.dtype,
-                        casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
-                        strict=True,
-                    )
-                except (TypeError, ValueError) as loop_error:
-                    if explicit_dtype is None:
-                        _refuse_unsupported_loop(op_name, (x.dtype,), loop_error)
-                        raise  # unreachable; _refuse_unsupported_loop raises
-                    loop_dtypes = ()
-                # ``_rate_bearing_loop_dtypes`` drops control-input slots.
-                # No unary ufunc has one today (``ldexp``'s exponent is the
-                # only such slot in numpy's namespace and it is binary), so
-                # this is forward insurance, not a filter that fires -- it is
-                # used anyway so the unary and binary collapses cannot drift.
-                if loop_dtypes:
-                    compute_dtype = heavier_billing_dtype(
-                        *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
-                    )
-                    # The operand floor: a resolved loop can be NARROWER than
-                    # the operand (``abs(complex128) -> d``), and a narrower
-                    # loop must not discount the wider value it reads. Read
-                    # from the operands ALONE -- a destination is folded in
-                    # after the mapping, never before it (#243).
-                    input_floor = resolve_billing_dtype(operand_dtypes)
-                    if input_floor is not None:
-                        compute_dtype = heavier_billing_dtype(
-                            compute_dtype, input_floor
-                        )
-        elif op_name in _UNARY_FLOAT_LOOP_OPS:
+            # Non-ufunc composites retain their existing compute-dtype mapping.
+            explicit_dtype = kwargs.get("dtype")
+            bills_operand = (
+                explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
+            )
+            operand_dtypes = (
+                (x.dtype,) if bills_operand else (_np.dtype(explicit_dtype),)
+            )
             resolved = resolve_billing_dtype(operand_dtypes)
-            if resolved is not None:
+            if resolved is not None and op_name in _UNARY_FLOAT_LOOP_OPS:
                 compute_dtype = unary_float_loop_dtype(resolved)
-                # angle(bool_) computes float64, not the float16 the
-                # itemsize-based mapping predicts -- see the comment above
-                # _UNARY_FLOAT_LOOP_OPS.
                 if op_name == "angle" and resolved.kind == "b":
                     compute_dtype = _np.dtype(_np.float64)
-        elif op_name in _UNARY_FLOAT64_MIN_OPS:
-            resolved = resolve_billing_dtype(operand_dtypes)
-            if resolved is not None:
-                compute_dtype = integer_to_float64_min_dtype(resolved)
-        if compute_dtype is not None:
-            operand_dtypes = (compute_dtype,)
-        # The store dtype stays in the tuple rather than being resolved away:
-        # ``deduct`` keys its non-numeric refusal on these entries, and a
-        # genuinely wider destination must still reach the rate.
+                operand_dtypes = (compute_dtype,)
+            elif resolved is not None and op_name in _UNARY_FLOAT64_MIN_OPS:
+                operand_dtypes = (integer_to_float64_min_dtype(resolved),)
+        # Constraints select computation, never suppress destination billing.
+        # Inspect the real ndarray descriptor rather than a subclass override.
+        out_view = (
+            _np.asarray(_to_base_ndarray(out)) if isinstance(out, _np.ndarray) else None
+        )
+        store_dtypes = store_billing_dtypes(out_view) if out_view is not None else ()
         billing_dtypes = operand_dtypes + store_dtypes
+        if is_ufunc:
+            _preflight_unary_ufunc_stores(
+                np_func, op_name, loop_dtypes, (out_view,), explicit_casting
+            )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1311,7 +1244,17 @@ def _counted_unary(np_func, op_name: str):
 
     wrapper.__name__ = op_name
     wrapper.__qualname__ = op_name
-    attach_docstring(wrapper, np_func, "counted_unary", "numel(output) FLOPs")
+    attach_docstring(
+        wrapper,
+        np_func,
+        "counted_unary",
+        "numel(output) FLOPs"
+        + (
+            "; dtype=/signature=/sig= select the computation loop; out= can widen billing"
+            if is_ufunc
+            else ""
+        ),
+    )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -1422,6 +1365,9 @@ def _counted_unary_multi(np_func, op_name: str):
         _preflight_ufunc_out_arity(out, nout)
         _preflight_ufunc_opt_out(x, *_flatten_ufunc_out_slots(out))
         out = _normalize_out(out, op_name, nout=nout)
+        explicit_dtype, explicit_signature, explicit_casting = (
+            _freeze_binary_ufunc_type_kwargs(kwargs)
+        )
         symmetry = _symmetry_of(x)
         x, x_fwd = _resolve_ufunc_data_operand(x)
         # A multi-output ufunc is priced as nout independent applications of
@@ -1439,54 +1385,31 @@ def _counted_unary_multi(np_func, op_name: str):
         # multi_store_billing_dtypes) -- supplying out= does not multiply
         # this again.
         cost = nout * pointwise_cost(x.shape, symmetry=symmetry)
-        # An explicit dtype= forces the ufunc loop: numpy casts operands on
-        # read and computes at that width, so it replaces the operand
-        # promotion for billing. out= alone does not narrow the loop. A bool
-        # dtype= is excluded: it names the output of a value-testing loop,
-        # which still reads full-width operands -- bill the operands.
-        explicit_dtype = kwargs.get("dtype")
-        store_dtypes: tuple = ()
-        bills_operand = explicit_dtype is None or _np.dtype(explicit_dtype).kind == "b"
-        if not bills_operand:
-            assert explicit_dtype is not None
-            billing_dtypes: tuple = (_np.dtype(explicit_dtype),)
-        else:
-            billing_dtypes = (x.dtype,)
-            # Only what a destination adds ON TOP of the buffer numpy would
-            # have allocated for that slot: ``frexp``'s exponent is int32 by
-            # signature, not because anything asked for 32-bit integer
-            # arithmetic, so naming it must not promote the resolution.
-            store_dtypes = multi_store_billing_dtypes(
-                out, natural_output_dtypes(np_func, x.dtype)
+        loop_dtypes, computation_dtypes = _unary_ufunc_billing_dtypes(
+            np_func,
+            op_name,
+            x.dtype,
+            explicit_dtype,
+            explicit_signature,
+            explicit_casting,
+        )
+        out_views = (
+            None
+            if out is None
+            else tuple(
+                _np.asarray(_to_base_ndarray(slot))
+                if isinstance(slot, _np.ndarray)
+                else slot
+                for slot in out
             )
-            billing_dtypes += store_dtypes
-        # Same rule as the single-output wrapper: numpy's resolved signature
-        # names the loop, so neither ``modf`` nor ``frexp`` needs a name-set
-        # entry. Collapsing the whole signature also subsumes the hardcoded
-        # ``heavier(mapped, int32)`` this used to apply for ``frexp`` -- that
-        # int32 was the exponent OUTPUT slot, which the resolved signature
-        # reports directly instead of naming a width in source. A caller's
-        # ``out=`` for that slot is still measured against the natural
-        # destination above, so naming it cannot promote the resolution.
-        if bills_operand and "signature" not in kwargs and "sig" not in kwargs:
-            loop_dtypes = _ufunc_loop_signature(
-                np_func,
-                x.dtype,
-                casting=kwargs.get("casting", _UFUNC_CASTING_MISSING),
-            )
-            mapped = heavier_billing_dtype(
-                *_rate_bearing_loop_dtypes(np_func, loop_dtypes)
-            )
-            # Operands ONLY. The destination is appended below as its own
-            # entry, never folded into this floor: ``heavier`` does not widen
-            # on a rate tie, so folding a float32 ``out=`` into a float16 loop
-            # resolved DOWN to float16 -- the narrowing #243 closed for the
-            # single-output wrapper -- and it hid a complex128 destination
-            # from the refusal ``deduct`` keys on these entries.
-            input_floor = resolve_billing_dtype((x.dtype,))
-            if input_floor is not None:
-                mapped = heavier_billing_dtype(mapped, input_floor)
-            billing_dtypes = (mapped,) + store_dtypes
+        )
+        # Compare stores with this constrained loop's natural output slots.
+        # frexp's int32 exponent must remain neutral when explicitly supplied.
+        store_dtypes = multi_store_billing_dtypes(out_views, loop_dtypes[np_func.nin :])
+        billing_dtypes = computation_dtypes + store_dtypes
+        _preflight_unary_ufunc_stores(
+            np_func, op_name, loop_dtypes, out_views, explicit_casting
+        )
         with budget.deduct(
             op_name,
             flop_cost=cost,
@@ -1508,7 +1431,13 @@ def _counted_unary_multi(np_func, op_name: str):
 
     wrapper.__name__ = op_name
     wrapper.__qualname__ = op_name
-    attach_docstring(wrapper, np_func, "counted_unary", "numel(input) FLOPs")
+    attach_docstring(
+        wrapper,
+        np_func,
+        "counted_unary",
+        "nout * numel(input) FLOPs; dtype=/signature=/sig= select the computation loop; "
+        "out= can widen billing; natural per-slot destinations are price-neutral",
+    )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 
@@ -1931,6 +1860,62 @@ def _ufunc_loop_signature(
             raise
         fallback = _np.result_type(*operand_dtypes)
         return (fallback,) * (len(inputs) + ufunc.nout)
+
+
+def _unary_ufunc_billing_dtypes(
+    ufunc,
+    op_name: str,
+    input_dtype: _np.dtype,
+    explicit_dtype: _np.dtype | None,
+    explicit_signature: object,
+    explicit_casting: object,
+) -> tuple[tuple[_np.dtype, ...], tuple[_np.dtype, ...]]:
+    """Resolve unary computation independently of any destination buffers.
+
+    Explicit constraints replace the source-width floor: NumPy casts into
+    that loop on read. Unconstrained calls retain their prior operand floor.
+    Every loop slot participates, including a predicate's numeric input and
+    frexp's fixed-width exponent output.
+    """
+    constraint = explicit_signature
+    if constraint is _UFUNC_SIGNATURE_MISSING and explicit_dtype is not None:
+        constraint = (None, *([explicit_dtype] * ufunc.nout))
+    try:
+        loop = _ufunc_loop_signature(
+            ufunc,
+            input_dtype,
+            signature=constraint,
+            casting=explicit_casting,
+            strict=True,
+        )
+    except (TypeError, ValueError) as error:
+        if constraint is _UFUNC_SIGNATURE_MISSING:
+            _refuse_unsupported_loop(op_name, (input_dtype,), error)
+        raise
+    compute = heavier_billing_dtype(*_rate_bearing_loop_dtypes(ufunc, loop))
+    if constraint is _UFUNC_SIGNATURE_MISSING:
+        floor = resolve_billing_dtype((input_dtype,))
+        if floor is not None:
+            compute = heavier_billing_dtype(compute, floor)
+    return loop, (compute,)
+
+
+def _preflight_unary_ufunc_stores(
+    ufunc, op_name: str, loop: tuple, outputs, casting: object
+) -> None:
+    """Validate stores against the already selected loop without running it."""
+    if outputs is None or _builtins.all(slot is None for slot in outputs):
+        return
+    destinations = tuple(
+        slot.dtype if isinstance(slot, _np.ndarray) else None for slot in outputs
+    )
+    refuse_non_numeric_dtype(op_name, *(dt for dt in destinations if dt is not None))
+    resolve_kwargs: dict[str, Any] = {"signature": loop}
+    if casting is not _UFUNC_CASTING_MISSING:
+        resolve_kwargs["casting"] = casting
+    # Supplying exact resolved slots prevents destinations from selecting a
+    # different loop; NumPy only checks each slot's output casting here.
+    ufunc.resolve_dtypes((*loop[: ufunc.nin], *destinations), **resolve_kwargs)
 
 
 def _ufunc_loop_dtype(

@@ -86,7 +86,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": 3.1,
-        "notes": "Element-wise e^x.",
+        "notes": "Element-wise e^x. dtype=/signature=/sig= select the billed computation loop; out= independently contributes its destination dtype.",
     },
     "exp2": {
         "category": "counted_unary",
@@ -435,13 +435,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Return fractional and integral parts element-wise. Writes TWO output buffers (fractional part + integral part) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "dtype=/signature=/sig= price the resolved loop, with wider out= destinations billed independently. Return fractional and integral parts element-wise. Writes TWO output buffers (fractional part + integral part) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
     },
     "frexp": {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": "illegal",
-        "notes": "Decompose x into mantissa and exponent element-wise. Writes TWO output buffers (mantissa + exponent) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
+        "notes": "dtype=/signature=/sig= price the resolved loop; natural per-slot out= dtypes are neutral, wider destinations contribute independently. Decompose x into mantissa and exponent element-wise. Writes TWO output buffers (mantissa + exponent) per call, so flop_cost = 2 * numel(output), not numel(output). Complex-illegal: numpy raises TypeError on complex input.",
     },
     "isclose": {
         "category": "counted_unary",

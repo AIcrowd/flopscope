@@ -202,6 +202,39 @@ class TestPointwise:
             assert abs(vals[1] - math.e) < 1e-10
 
 
+class TestUnaryConstraints:
+    @pytest.mark.parametrize("keyword", ["signature", "sig"])
+    @pytest.mark.parametrize(
+        "signature,price,dtype", [("d->d", 128, "float64"), ("D->D", 396, "complex128")]
+    )
+    def test_exp_forced_loop_billing(self, keyword, signature, price, dtype):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.0, 1.0, 2.0, 3.0], dtype="float32")
+            before = budget.flops_used
+            result = flops.exp(x, **{keyword: signature})
+            assert budget.flops_used - before == price
+            assert str(result.dtype) == dtype
+
+    def test_exp_explicit_dtype_wider_destination(self):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.0, 1.0, 2.0, 3.0], dtype="float32")
+            out = flops.empty(4, dtype="float64")
+            before = budget.flops_used
+            result = flops.exp(x, dtype="float32", out=out)
+            assert budget.flops_used - before == 128
+            assert str(result.dtype) == "float64"
+
+    @pytest.mark.parametrize("name,signature", [("modf", "d->dd"), ("frexp", "d->di")])
+    def test_multioutput_forced_loop(self, name, signature):
+        with flops.BudgetContext(flop_budget=1_000_000) as budget:
+            x = flops.array([0.5, 1.5, 2.5, 3.5], dtype="float32")
+            before = budget.flops_used
+            result = getattr(flops, name)(x, signature=signature)
+            # Server uses production weights; both operations have weight 1.
+            assert budget.flops_used - before == 16
+            assert str(result[0].dtype) == "float64"
+
+
 # ===========================================================================
 # Category 2: Reductions
 # ===========================================================================

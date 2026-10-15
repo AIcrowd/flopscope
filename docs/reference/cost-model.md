@@ -526,6 +526,19 @@ Worked consequences:
   complex `out=`, the destination still participates in width billing, but computation
   keeps its resolved classification. The call uses a store-only complex factor of `2.0`
   instead of the ufunc's complex-arithmetic factor.
+- **Unary ufunc constraints follow the same computation/destination separation.**
+  Both single-output unary ufuncs and `modf`/`frexp` resolve the complete loop
+  selected by `dtype=`, `signature=`, or `sig=`, including explicit `casting=`.
+  A forced complex loop pays the operation's complex factor even if its result
+  is cast into a real destination. A narrower destination cannot hide a wider
+  loop, and an explicit narrow loop cannot hide a wider destination. For four
+  float32 values, `exp(dtype=float64)` and `exp(signature="d->d")` both cost
+  `128`; `exp(signature="D->D")` costs `396`; and float32 computation into a
+  float64 destination costs `128`. These examples use production weights.
+  Multi-output calls compare each destination with the resolved loop's own
+  output slot: naming `frexp`'s natural int32 exponent is still price-neutral.
+  Invalid constraints and incompatible destination casts are refused before
+  charging. Existing unary complex-destination pricing is unchanged.
 - **A destination NumPy would have allocated anyway is price-neutral.** The rule above
   prices a destination as a buffer the call materializes — but two kinds of destination
   are not stores of the computed value at all, and naming them must cost exactly what
