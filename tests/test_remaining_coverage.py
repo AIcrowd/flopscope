@@ -64,19 +64,19 @@ class TestHistogram2dTupleBinsNonInt:
             histogram2d(x, y, bins=[bins_x, bins_y])
         assert budget.flops_used > 0
 
-    def test_tuple_bins_with_scalar_fallback(self):
-        """Cover lines 142-143: scalar bin entries in tuple."""
+    def test_tuple_bins_with_zero_dimensional_counts(self):
+        """Zero-dimensional bin counts use each axis search price."""
         x = numpy.random.rand(10)
         y = numpy.random.rand(10)
-        # Pass scalars (0-d arrays) as bins -- hits the else branch
+        # Zero-dimensional arrays are bin counts, equivalent to [5, 5].
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope._counting_ops import histogram2d
 
             histogram2d(x, y, bins=[numpy.array(5), numpy.array(5)])
-        assert budget.flops_used == 10  # fallback: max(n, 1) = 10
+        assert budget.flops_used == 60  # 10 * (ceil(log2(5)) * 2)
 
-    def test_non_tuple_bins_fallback(self):
-        """Cover line 144-145: bins is not int, not list/tuple of length 2."""
+    def test_shared_edge_array_bins(self):
+        """A shared edge array searches both axes at its edge-length price."""
         x = numpy.random.rand(10)
         y = numpy.random.rand(10)
         bins_arr = numpy.linspace(0, 1, 6)
@@ -84,11 +84,11 @@ class TestHistogram2dTupleBinsNonInt:
             from flopscope._counting_ops import histogram2d
 
             histogram2d(x, y, bins=bins_arr)
-        assert budget.flops_used == 10
+        assert budget.flops_used == 60  # 10 * (ceil(log2(6)) * 2)
 
 
 class TestHistogramddNonIntBins:
-    """Cover lines 178-183, 186: non-int bins in list and else fallback."""
+    """Non-Python-integer bin forms use the same per-axis formula."""
 
     def test_list_bins_with_arrays(self):
         sample = numpy.random.rand(15, 2)
@@ -118,15 +118,15 @@ class TestHistogramddNonIntBins:
             histogramdd(sample, bins=10)
         assert budget.flops_used > 0
 
-    def test_non_list_bins_fallback(self):
-        """Cover line 186: bins is not int and not list/tuple."""
+    def test_zero_dimensional_count_applies_to_each_axis(self):
+        """Scalar array counts apply to every dimension, like Python counts."""
         sample = numpy.random.rand(10, 2)
         bins_arr = numpy.array(5)  # scalar, not list/tuple, not int
         with BudgetContext(flop_budget=10**6) as budget:
             from flopscope._counting_ops import histogramdd
 
             histogramdd(sample, bins=bins_arr)
-        assert budget.flops_used == 10
+        assert budget.flops_used == 60  # 10 * (ceil(log2(5)) * 2)
 
 
 class TestApplyAlongAxis:
