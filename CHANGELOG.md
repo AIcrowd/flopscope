@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- Length-one FFT stages now bill 2 base FLOPs per batch entry for complex working-buffer movement, before dtype rates and operation weights. This applies to forward/inverse, real/complex, and multidimensional transforms; ordinary butterfly formulas are unchanged.
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact
