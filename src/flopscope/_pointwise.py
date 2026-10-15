@@ -3637,15 +3637,6 @@ def _counted_reduction(
             shapes=(a.shape,),
             dtypes=billing_dtypes,
         ):
-            if out_came_from_args:
-                # The destination travels in a positional slot of ``args_list``,
-                # so ``np_out_kwarg`` is None and _call_numpy's out= hook never
-                # sees it -- the same write that the keyword spelling records
-                # would otherwise go unnoticed, leaving a symmetry tag standing
-                # over data it no longer describes. Recorded here rather than
-                # above the deduct so a refused op does not void a tag on a
-                # buffer numpy was never given the chance to write.
-                note_write(out_for_np)
             if _axis_is_second_positional:
                 result = _call_with_optional_out(
                     np_func,

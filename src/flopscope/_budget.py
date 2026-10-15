@@ -350,6 +350,29 @@ _MUTATES_FIRST_ARG = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=256)
+def _positional_out_index(fn: Any) -> int | None:
+    """Locate a NumPy function's positional destination, if supported.
+
+    Most public functions expose a signature. These C builtins do not, but
+    accept out as their third argument. Ufuncs are handled separately because
+    they accept one positional destination per output after the inputs.
+    """
+    if fn is _np.concatenate or fn is _np.dot:
+        return 2
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    for index, parameter in enumerate(parameters):
+        if parameter.name == "out" and parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return index
+    return None
+
+
 class _LiveBackendCall:
     """Reset-aware timing state for one in-flight raw backend invocation."""
 
@@ -503,6 +526,12 @@ def _call_numpy_impl(
     out = kwargs.get("out")
     if out is not None:
         note_write(out)
+    if isinstance(fn, _np.ufunc):
+        note_write(args[fn.nin : fn.nin + fn.nout])
+    else:
+        out_index = _positional_out_index(fn)
+        if out_index is not None and len(args) > out_index:
+            note_write(args[out_index])
     if fn in _MUTATES_FIRST_ARG and args:
         note_write(args[0])
 
