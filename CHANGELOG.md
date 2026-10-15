@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- `polyfit(cov=True)` and `cov="unscaled"` now bill the additional normal-matrix construction, inverse, covariance normalization and output scaling. Matrix work is shared across RHS columns; `full=True` still skips covariance. For eight float64 samples and degree three, production charges rise from 4,328 to 5,150 (scaled) or 5,148 (unscaled).
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact

@@ -5999,7 +5999,7 @@
       "free": false,
       "module": "flopscope._polynomial",
       "name": "polyfit",
-      "notes": "Least squares polynomial fit. Cost: m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) (ncols = y.shape[1] for 2-D y, else 1); the SVD factorization inside lstsq_cost is shared across RHS columns, so cost grows sublinearly in ncols.",
+      "notes": "Least squares polynomial fit. Cost: m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) (ncols = y.shape[1] for 2-D y, else 1); the SVD factorization inside lstsq_cost is shared across RHS columns, so cost grows sublinearly in ncols. Covariance adds matmul_cost(p,m,p)+inv_cost(p)+p*(p+1)//2+p*p+numel(covariance), plus one residual division per scaled covariance slice; p=deg+1, shared across RHS columns. full=True skips covariance.",
       "numpy_ref": "np.polyfit",
       "slug": "polyfit",
       "status": "supported",

@@ -1979,3 +1979,17 @@ weight tables by `scripts/generate_api_docs.py` and powers the website's API pag
 > shape-dependent. For those, the closed form and its derivation live in the family
 > tables above. Treat `ops.json` as the complete index and this document as the precise
 > reference; the completeness test ties them together.
+
+### Polynomial-fit covariance
+
+In addition to the existing Vandermonde plus least-squares cost, `polyfit`
+executes a covariance branch only when `cov` is truthy and `full` is false.
+For `p = deg + 1` and `m = len(x)`, add
+`matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance)`.
+These terms cover the dense Gram product and inverse, the aliased symmetric
+`outer(scale,scale)`, covariance normalization, and final multiplication.
+Scaled covariance additionally divides one residual per returned covariance
+slice; unscaled covariance still multiplies by one, as NumPy does. The Gram
+and inverse are shared across RHS columns; NumPy returns only one covariance
+slice for an unscaled multi-output fit. Existing polyfit computation-dtype,
+complex-factor and weight rules apply to the composite price.
