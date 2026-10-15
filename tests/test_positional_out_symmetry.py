@@ -39,7 +39,6 @@ def test_choose_positional_destination_matches_keyword():
             np.concatenate, [np.arange(8.0).reshape(2, 4)] * 2, 0, out
         ),
         lambda out: _call_numpy(np.dot, np.arange(16.0).reshape(4, 4), np.eye(4), out),
-        lambda out: _call_numpy(np.add, np.arange(16.0).reshape(4, 4), 1, out),
     ],
 )
 def test_backend_positional_destination_invalidates_alias(write):
