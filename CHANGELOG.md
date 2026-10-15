@@ -2,10 +2,23 @@
 
 ## Unreleased
 
+### Billing impact
+
+- Unary ufuncs now price the actual computation loop selected by `signature=`
+  or `sig=`, matching `dtype=`. Wider `out=` destinations still contribute when
+  a computation dtype is explicit. With production weights, four float32 values
+  passed to `exp(signature="d->d")` now cost 128 instead of 64, and a forced
+  complex128 loop costs 396 instead of 64. `modf` and `frexp` share this fix;
+  natural per-slot destinations remain price-neutral.
+
 ### Fix
 
 - Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).
 - Module-level `random.shuffle` invalidates symmetry tags on the mutated buffer and its aliases, matching other in-place writes (#264).
+
+- Freeze unary dtype/signature constraints once so billing and NumPy execute
+  the same loop, and reject invalid constraints or incompatible output casts
+  without charging.
 
 ## v0.12.1 (2026-08-29)
 
