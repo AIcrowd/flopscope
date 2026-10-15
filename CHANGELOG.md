@@ -20,6 +20,8 @@
   the same loop, and reject invalid constraints or incompatible output casts
   without charging.
 
+- Quantile and percentile operations, including NaN variants, now place surviving symmetry on the correct axes when `q` adds output dimensions.
+
 ## v0.12.1 (2026-08-29)
 
 ### Billing impact
