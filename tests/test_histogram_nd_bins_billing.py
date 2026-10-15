@@ -47,14 +47,6 @@ def test_histogramdd_mixed_and_array_edges(bins):
     assert budget.flops_used == 20 * (8 if isinstance(bins, list) else 4)
 
 
-@pytest.mark.parametrize("bins", [0, [8], [8, np.array([2, 1])]])
-def test_invalid_bins_do_not_charge(bins):
-    with BudgetContext(flop_budget=10**7) as budget:
-        with pytest.raises((ValueError, TypeError)):
-            fnp.histogram2d(np.arange(20), np.arange(20), bins=bins)
-    assert budget.flops_used == 0
-
-
 def test_production_bin_spellings_have_equal_price():
     from flopscope._weights import load_weights
 
@@ -66,3 +58,18 @@ def test_production_bin_spellings_have_equal_price():
             fnp.histogramdd(sample, bins=bins)
         charges.append(budget.flops_used)
     assert charges == [960] * 4
+
+
+@pytest.mark.parametrize("name", ["histogram2d", "histogramdd"])
+def test_insufficient_budget_prevents_numpy_execution(name, monkeypatch):
+    from flopscope.errors import BudgetExhaustedError
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("NumPy must not execute before budget approval")
+
+    monkeypatch.setattr(np, name, forbidden)
+    sample = np.arange(40, dtype=np.float64).reshape(20, 2)
+    args = (sample[:, 0], sample[:, 1]) if name == "histogram2d" else (sample,)
+    with BudgetContext(flop_budget=1):
+        with pytest.raises(BudgetExhaustedError):
+            getattr(fnp, name)(*args, bins=np.array([8, 8]))

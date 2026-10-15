@@ -417,8 +417,9 @@ def histogram2d(
     _bin_dtypes = tuple(
         _np.asarray(b).dtype for b in axis_bins if not _histogram_scalar_bins(b)
     )
-    with budget.deduct_after(
+    with budget.deduct(
         "histogram2d",
+        flop_cost=cost,
         subscripts=None,
         shapes=(x.shape, y.shape),
         dtypes=(
@@ -426,7 +427,7 @@ def histogram2d(
             + _bin_dtypes
             + (_np.dtype(_np.float64),)
         ),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.histogram2d,
             x,
@@ -434,7 +435,6 @@ def histogram2d(
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
-        rec.set_cost(cost)
     return result  # type: ignore[return-value]
 
 
@@ -472,21 +472,21 @@ def histogramdd(
     _bin_dtypes = tuple(
         _np.asarray(b).dtype for b in axis_bins if not _histogram_scalar_bins(b)
     )
-    with budget.deduct_after(
+    with budget.deduct(
         "histogramdd",
+        flop_cost=cost,
         subscripts=None,
         shapes=(sample.shape,),
         dtypes=(mean_compute_dtype(sample.dtype),)
         + _bin_dtypes
         + (_np.dtype(_np.float64),),
-    ) as rec:
+    ):
         result = _call_numpy(
             _np.histogramdd,
             sample,
             bins=_to_base_ndarray_tree(bins),
             **{k: _to_base_ndarray_tree(v) for k, v in kwargs.items()},
         )
-        rec.set_cost(cost)
     return result  # type: ignore[return-value]
 
 
