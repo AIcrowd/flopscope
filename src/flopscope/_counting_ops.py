@@ -18,6 +18,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from flopscope._budget import _call_numpy, _call_user_code, _counted_wrapper
 from flopscope._docstrings import attach_docstring
 from flopscope._dtype_billing import (
+    billing_operand,
     heavier_billing_dtype,
     integer_to_float64_min_dtype,
     mean_compute_dtype,
@@ -131,7 +132,17 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     budget = require_budget()
     a = _np.asarray(a)
     b = _np.asarray(b)
-    out_shape = _np.broadcast_shapes(a.shape, b.shape)
+    # rtol= and atol= broadcast against a and b in the tolerance core, so an
+    # array tolerance enlarges the compared shape and takes part in the
+    # arithmetic -- see the comment at ``_pointwise.isclose``.
+    tolerances = [
+        (v, v if isinstance(v, _np.ndarray) else _np.asarray(v))
+        for k, v in kwargs.items()
+        if k in ("rtol", "atol")
+    ]
+    out_shape = _np.broadcast_shapes(
+        a.shape, b.shape, *(arr.shape for _, arr in tolerances)
+    )
     numel = 1
     for d in out_shape:
         numel *= d
@@ -141,7 +152,11 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     # unconditional ``result_type(y, 1.)`` cast: integer and bool operands
     # run the tolerance core in float64. Same mapping, same reason -- see the
     # comment at ``_pointwise.isclose``.
-    billing_dtypes: tuple = (a.dtype, b.dtype)
+    billing_dtypes: tuple = (
+        a.dtype,
+        b.dtype,
+        *(billing_operand(v, arr) for v, arr in tolerances),
+    )
     resolved = resolve_billing_dtype(billing_dtypes)
     if resolved is not None:
         billing_dtypes = (integer_to_float64_min_dtype(resolved),)
@@ -152,7 +167,9 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
         shapes=(a.shape, b.shape),
         dtypes=billing_dtypes,
     ):
-        result = _call_numpy(_np.allclose, a, b, **kwargs)
+        result = _call_numpy(
+            _np.allclose, a, b, **{k: _to_base_ndarray(v) for k, v in kwargs.items()}
+        )
     return result  # type: ignore[return-value]
 
 
