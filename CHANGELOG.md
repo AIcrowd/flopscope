@@ -15,6 +15,8 @@
 
 - Length-one FFT stages now bill 2 base FLOPs per batch entry for complex working-buffer movement, before dtype rates and operation weights. This applies to forward/inverse, real/complex, and multidimensional transforms; ordinary butterfly formulas are unchanged.
 
+- `polyfit(cov=True)` and `cov="unscaled"` now bill the additional normal-matrix construction, inverse, covariance normalization and output scaling. Matrix work is shared across RHS columns; `full=True` still skips covariance. For eight float64 samples and degree three, production charges rise from 4,328 to 5,150 (scaled) or 5,148 (unscaled).
+
 ### Fix
 
 - Positional output destinations now invalidate symmetry tags just like `out=`, including `choose` and writes through aliases (#265).
