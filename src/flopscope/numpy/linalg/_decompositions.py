@@ -350,7 +350,7 @@ def svdvals_cost(m: int, n: int, k: int | None = None) -> int:
 
     Delegates to :func:`flopscope._flops.svd_cost` with ``with_vectors=False``:
     2*a*b^2 + 2*b^3, a = max(m, n), b = min(m, n). Top-k (1 <= k < min(m, n))
-    bills min(4*m*n*k, that cost).
+    bills min(4mnk + 2(m+n)k^2 + 2k^3, that cost).
     """
     from flopscope._flops import svd_cost
 
@@ -390,5 +390,6 @@ attach_docstring(
     svdvals,
     _np.linalg.svdvals,
     "linalg",
-    r"$2ab^2 + 2b^3$ FLOPs (values-only SVD; a=max(m,n), b=min(m,n))",
+    r"$2ab^2 + 2b^3$ FLOPs (values-only; a=max(m,n), b=min(m,n)); "
+    r"top-k: min(4mnk + 2(m+n)k^2 + 2k^3, full values-only cost)",
 )

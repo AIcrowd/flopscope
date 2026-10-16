@@ -192,15 +192,14 @@ def svd_cost(
     Constants follow the LAPACK dgesdd path; see docs/reference/cost-model.md.
 
     Top-k truncated SVD (``1 <= k < min(m, n)``):
-        min(4*m*n*k, economy)
-    ``4*m*n*k`` is the leading-order cost of a rank-k randomized SVD (two
-    passes over A, Theta(m*n*k)). flopscope bills
-    this standard truncated-algorithm cost even though the reference
-    implementation computes the full economy SVD and slices — it bills the
-    textbook cost of the operation (like matmul), not literal BLAS work.
-    Values-only is NOT leading-order cheaper for the truncated case (unlike the
-    full case). ``k >= min(m, n)`` bills the economy cost; the full_matrices
-    full-U premium applies only to the full decomposition (``k is None``).
+        with vectors: min(4mnk + 6(m+n)k^2 + 20k^3, thin economy)
+        values only:  min(4mnk + 2(m+n)k^2 + 2k^3, values-only economy)
+    The rank-dependent model includes two matrix passes plus quadratic
+    basis/factor work and a cubic small-decomposition term. This is an
+    analytical pricing convention, not a literal count of the backend,
+    which computes an exact economy SVD and slices its outputs.
+    ``k >= min(m, n)`` bills the corresponding economy cost. The full-U
+    premium applies only to a full decomposition (``k is None``).
     See docs/reference/cost-model.md.
     """
     a, b = max(m, n), min(m, n)
@@ -211,7 +210,9 @@ def svd_cost(
         return max(economy, 1)
     if k >= b:
         return max(economy, 1)
-    return max(min(4 * m * n * k, economy), 1)
+    quadratic, cubic = (6, 20) if with_vectors else (2, 2)
+    truncated = 4 * m * n * k + quadratic * (m + n) * k * k + cubic * k**3
+    return max(min(truncated, economy), 1)
 
 
 def matmul_cost(m: int, k: int, n: int) -> int:

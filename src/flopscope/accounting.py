@@ -200,7 +200,7 @@ True
     "linalg.svd": """\
 >>> import flopscope as flops
 >>> cost = flops.accounting.svd_cost(128, 64)
->>> cost_topk = flops.accounting.svd_cost(128, 64, k=8)  # min(4*128*64*8, economy)
+>>> cost_topk = flops.accounting.svd_cost(128, 64, k=8)  # values-only rank-dependent cost, capped at full values-only price
 >>> isinstance(cost, int)
 True
 """,

@@ -43,24 +43,24 @@ def test_svd_truncated_cost():
     A = numpy.random.randn(10, 5)
     with BudgetContext(flop_budget=10**6) as budget:
         svd(A, k=3)
-        # top-k truncated cost: min(4*m*n*k, economy) = min(4*10*5*3, 4000) = 600
-        assert budget.flops_used == 600
+        # min(4mnk + 6(m+n)k² + 20k³, economy) = 1950
+        assert budget.flops_used == 1950
 
 
 def test_svd_truncated_cost_batched():
     A = numpy.random.randn(4, 10, 5)  # 4 matrices
     with BudgetContext(flop_budget=10**6) as budget:
         svd(A, k=3)
-        # per-matrix 600, x4 batch
-        assert budget.flops_used == 2400
+        # per-matrix 1950, x4 batch
+        assert budget.flops_used == 7800
 
 
 def test_svd_truncated_values_only_cost():
     A = numpy.random.randn(10, 5)
     with BudgetContext(flop_budget=10**6) as budget:
         svd(A, k=3, compute_uv=False)
-        # values-only top-k is NOT cheaper than with-vectors: still 4mnk = 600
-        assert budget.flops_used == 600
+        # min(4mnk + 2(m+n)k² + 2k³, values-only economy) = 750
+        assert budget.flops_used == 750
 
 
 def test_svd_not_2d():
