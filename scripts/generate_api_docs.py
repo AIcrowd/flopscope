@@ -568,15 +568,15 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         "Input/estimator work + generated edges for integer/string bins (sub-operation weights)",
     ),
     "histogram2d": (
-        "max(n*sum(ceil(log2(b_i))),1); b_i is each axis count or edge-array length for all supported bin forms",
+        "max(n*sum(L(b_i)),1); L(b)=max(ceil(log2(b)),1); b_i is each axis count or edge-array length for all supported bin forms",
         "$\\max(n\\sum_i\\lceil\\log_2 b_i\\rceil,1)$",
     ),
     "histogramdd": (
-        "max(n*sum(ceil(log2(b_i))),1); b_i is each axis count or edge-array length for all supported bin forms",
+        "max(n*sum(L(b_i)),1); L(b)=max(ceil(log2(b)),1); b_i is each axis count or edge-array length for all supported bin forms",
         "$\\max(n\\sum_i\\lceil\\log_2 b_i\\rceil,1)$",
     ),
     "interp": (
-        "3*m+m*ceil(log2(p)); period= adds 16(m+p)+4p*ceil(log2(p))+8p+2(p+2)+2 at sub-op weights, searching p+2 edges; m=numel(x), p=numel(xp)",
+        "3*m+m*ceil(log2(p)); period= adds 16(m+p)+4p*ceil(log2(p))+8p+2(p+2)+2 at sub-op weights, searching p+2 edges; m=numel(x), p=numel(xp); logarithmic search/sort counts are clamped to at least 1",
         "Interpolation + optional periodic preprocessing; search uses p+2 table points with period (see notes)",
     ),
     "trapezoid": (
