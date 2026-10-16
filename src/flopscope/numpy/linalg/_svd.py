@@ -45,10 +45,11 @@ def svd(
     with thin U/V (full_matrices=False):    6*a*b^2 + 20*b^3 per matrix
     with full U (full_matrices=True, m!=n): 4*a^2*b + 22*b^3 per matrix
     where a = max(m, n), b = min(m, n). Top-k (1 <= k < min(m, n)) bills
-    min(4*m*n*k, economy) — the verified randomized-SVD truncated cost;
-    results stay exact (numpy economy SVD, sliced). See cost-model.md.
-    Constants confirmed by the 2026-06 evidence audit; see
-    docs/reference/cost-model.md.
+    min(4mnk + 6(m+n)k^2 + 20k^3, thin economy) with vectors, or
+    min(4mnk + 2(m+n)k^2 + 2k^3, values-only economy) without vectors.
+    This rank-dependent analytical model includes quadratic and cubic
+    work; the backend still computes exact economy factors and slices.
+    Full-decomposition formulas are unchanged. See cost-model.md.
 
     Parameters
     ----------

@@ -912,8 +912,8 @@ class TestLinalgDecompositionsExtended:
         with BudgetContext(flop_budget=10**9) as budget:
             result = svdvals(a, k=2)
         assert len(result) == 2
-        # top-k discount: min(4mnk, economy) = min(4*6*4*2, 320) = 192
-        assert budget.flops_used == 192
+        # values-only top-k: min(192 + 80 + 16, 320) = 288
+        assert budget.flops_used == 288
 
     def test_svdvals_invalid_k(self):
         from flopscope.numpy.linalg._decompositions import svdvals

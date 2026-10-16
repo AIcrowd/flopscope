@@ -1166,7 +1166,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Singular value decomposition. Cost: $4a^2b+22b^3$ (full U, full_matrices=True and m!=n), $6ab^2+20b^3$ (thin U/V), or $2ab^2+2b^3$ (values-only); a=max(m,n), b=min(m,n). Top-k (1<=k<min(m,n)) bills min(4mnk, economy) (randomized-SVD leading-order cost; see cost-model.md).",
+        "notes": "Singular value decomposition. Cost: $4a^2b+22b^3$ (full U, full_matrices=True and m!=n), $6ab^2+20b^3$ (thin U/V), or $2ab^2+2b^3$ (values-only); a=max(m,n), b=min(m,n). Top-k (1<=k<min(m,n)) bills min(4mnk+6(m+n)k^2+20k^3, thin economy) with vectors, or min(4mnk+2(m+n)k^2+2k^3, values-only economy) without vectors. Full costs are unchanged; see cost-model.md.",
     },
     "linalg.cholesky": {
         "category": "counted_custom",
@@ -1308,7 +1308,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Singular values only. Cost: $2ab^2+2b^3$ (values-only SVD; a=max(m,n), b=min(m,n)). Top-k (1<=k<min(m,n)) bills min(4mnk, that cost).",
+        "notes": "Singular values only. Cost: $2ab^2+2b^3$ (values-only SVD; a=max(m,n), b=min(m,n)). Top-k (1<=k<min(m,n)) bills min(4mnk+2(m+n)k^2+2k^3, that cost).",
     },
     "linalg.tensordot": {
         "category": "counted_custom",

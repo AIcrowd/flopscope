@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Billing impact
+
+- Truncated SVD now includes quadratic and cubic rank-dependent work. With
+  vectors the charge is `min(4mnk + 6(m+n)k² + 20k³, 6ab² + 20b³)`; values-only
+  uses `min(4mnk + 2(m+n)k² + 2k³, 2ab² + 2b³)`, where `a=max(m,n)` and
+  `b=min(m,n)`. Full-SVD prices, exact numerical outputs, dtype/weight rules
+  and batch multiplication are unchanged. Near-full-rank calls can now pay
+  full price; low-rank calls retain discounts. This addresses the reported
+  large-matrix missing-component and zero-padding routes without claiming
+  to prevent every cheaper small-matrix reconstruction.
+
 ## v0.12.2 (2026-10-15)
 
 ### Billing impact

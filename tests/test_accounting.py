@@ -117,8 +117,8 @@ def test_analytical_reduction_cost():
 
 
 def test_analytical_svd_cost():
-    # top-k discount: min(4mnk, economy) = min(4*100*50*10, 750000) = 200000
-    assert analytical_svd_cost(m=100, n=50, k=10) == 200_000
+    # values-only top-k: 200000 + 2*150*100 + 2*1000 = 232000
+    assert analytical_svd_cost(m=100, n=50, k=10) == 232_000
 
 
 def test_analytical_svd_cost_full():

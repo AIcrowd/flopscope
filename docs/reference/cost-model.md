@@ -892,7 +892,7 @@ each backed by a CI-enforced test you can open and read:
 | **Weight-tier policy** | every active weight ∈ `{0, 1, 4, 16}`; arithmetic ops are 0 or 1; **no algorithm constant in a weight** | `test_weight_tier_policy.py` |
 | **No substitution arbitrage** | a bit-identical alias cannot bill cheaper than its canonical (e.g. `acos` *is* `arccos` — the 16× ufunc-alias fix); equivalent contractions (`dot`/`inner`/`matmul`/`einsum`) share one cost engine | `test_ufunc_alias_parity.py`, `test_random_weight_aliasing.py`; the shared einsum engine ([§Contraction](#contraction-einsum-family)) |
 | **No unpriceable or mispriceable dtype** | a non-numeric dtype (`dtype.kind` outside the allowlist `"biufc"` — object, string, bytes, structured/void, datetime64, timedelta64) is refused before any charge — as an operand, an explicit `dtype=`, or an `out=` destination — because it either has unbounded per-element cost (object) or a real per-element cost no flat rate captures (the rest); a dtype that is still zero-itemsize once NumPy materialises it is the one exception, since it carries no data either way — `'U0'`/`'S0'` are not, because NumPy promotes them to `'U1'`/`'S1'` on allocation | `tests/test_object_dtype_ban.py` |
-| **No cheap in-op path** | top-k `svd(k=)` cannot yield a *full* decomposition below full price (the `min(4mnk, economy)` cap + `k ≥ min → full` guard); invalid `k` (`< 1` or `> min(m, n)`) is rejected before any billing | `test_svd_topk_cost.py` (cap / guard / monotonicity); `test_linalg.py` (invalid-`k` `ValueError`) |
+| **Rank-dependent SVD pricing** | top-k SVD includes quadratic/cubic terms and is capped at the corresponding full economy price; near-full-rank and padded-complete-factor regressions cover the reported large-matrix routes. Invalid `k` is rejected before billing. This is not a universal lower bound on composite reconstruction methods | `test_svd_topk_cost.py`; `test_svd_rank_pricing.py`; `test_linalg.py` |
 | **A symmetry tag matches the buffer it is attached to** | symmetry validation uses a tolerance (`np.allclose`, `atol=1e-6`, `rtol=1e-5`) while the cost model reads the tag as exact: it prices every position in an orbit after the first as a redundant degree of freedom and does not read the buffer again. The two untrusted ingress points, `as_symmetric(data, symmetry=…)` and a *bare, top-level* `SymmetricTensor(data, symmetry=…)`, therefore validate the claim (raising `SymmetryError` on a mismatch, charging `k·(7n − 1)` for a genuine one, `k` = non-identity generators, `n = data.size`) and then canonicalize: each orbit takes the value at its lexicographically smallest index, so values that survived only within the tolerance do not reach the tag. Data already exactly invariant is passed through unchanged, so the charge and the zero-copy view semantics are unaffected; the caller's array is never modified. `einsum(…, symmetry=…)`, which attaches a caller-declared group to the result it returns, canonicalizes that result the same way once its own check passes. Symmetry a flopscope op derives *internally* (e.g. `exp` propagating an already-validated operand's tag, or a slice/transpose view) is exempt, since it never carries a fresh caller-supplied claim. **Scope:** this is a property of those ingress points, not a package-wide invariant: a Reynolds projection sums each orbit in a fixed element order, so its own output is typically invariant only to about an ulp, as is a symmetric matmul. That residue is rounding rather than caller-placed information, so it is sound for accounting; code needing bit-exactness should use an ingress point or `_canonical_symmetry.is_exactly_invariant`. In-process code can attach a tag regardless (`arr.view(SymmetricTensor)` plus an attribute assignment needs nothing from this package), so the boundary that holds is the wire: the server dispatches registered ops only, and none of those names is registered | `tests/test_symmetry_canonicalization.py`; `tests/test_symmetric_tensor_new_validation.py`; `tests/test_einsum_declared_symmetry.py`; `tests/test_symmetric_cost.py` (`k·(7n−1)` rate) |
 | **Free-tier discipline** | weight 0 is limited to views/metadata, untouched (zero-page or uninitialized) allocation, and the narrow `astype`/`asarray` no-op (`copy=False` with an already-matching dtype; a dtype-free or dtype-matching `asarray`) — every other cast or copy, including a same-dtype `astype(copy=True)`, bills `numel` like `copy`. Any **metered** op that writes a new buffer — copied, replicated, constant-filled, gathered, or scattered — carries weight ≥ 1 (ndarray methods inherited from numpy are outside the meter by design — see [§The meter boundary](#the-meter-boundary)). Every value-test is charged wherever it hides: `a.nonzero()` (method), `where(1-arg)`, `argwhere`, `flatnonzero`, `count_nonzero` | `test_weight_tier_policy.py`; `test_data_movement_free_tier.py` (free-labels consistency guard) |
 | **No free-gather discount** | a computed-index gather (`take`, `take_along_axis`, `choose`) is metered at the access tier (weight 4.0) like any other non-sequential read, so precomputing a look-up table and then gathering from it no longer buys a categorical discount; only genuine view-indexing (a static/basic index, `arr[i]`) stays free | `test_data_movement_free_tier.py`; [§Copy and gather](#copy-and-gather) |
@@ -1328,28 +1328,32 @@ direct linalg family).
 #### Top-k (truncated) SVD
 
 `linalg.svd(..., k=)` and `linalg.svdvals(..., k=)` accept a top-k parameter.
-For `1 ≤ k < min(m, n)` the billed cost is
+For `1 ≤ k < b`, with `a=max(m,n)` and `b=min(m,n)`, the analytical charges are:
 
-    min(4·m·n·k, economy)
+| Result | Rank-dependent price | Full-price cap |
+|---|---|---|
+| Singular vectors and values | `4mnk + 6(m+n)k² + 20k³` | `6ab² + 20b³` |
+| Singular values only | `4mnk + 2(m+n)k² + 2k³` | `2ab² + 2b³` |
 
-where `economy` is the full thin/values-only cost above. `4·m·n·k` is the
-leading-order cost (FMA=2, Θ(mnk)) of a rank-k truncated SVD (two
-unavoidable passes over A). It is billed as the
-**standard truncated-algorithm cost of the operation** — consistent with how
-this model bills direct-linalg ops at their textbook standard-algorithm count
-rather than literal BLAS/LAPACK work — even though the reference implementation
-computes the full economy SVD
-and slices (results stay exact). Unlike the full case, **values-only is not
-leading-order cheaper** for top-k. `k = min(m, n)` (all components) bills the
-full economy cost, and the `full_matrices` full-U premium applies only to the
-full decomposition (`k is None`); so a complete decomposition can never be
-obtained below full price. Invalid `k` (`< 1` or `> min(m, n)`) raises
-`ValueError`.
+Bill the smaller of the rank-dependent price and its corresponding full-price
+cap. Both models retain the two-pass `4mnk` term and include quadratic
+basis/factor work and cubic small-decomposition work. The coefficients are
+analytical pricing conventions; the reference backend still computes an exact
+economy SVD and slices its outputs rather than running an approximate algorithm.
 
-**Accepted residual:** because `4mnk < 6ab²+20b³` for all `k ≤ min(m, n)`, the
-truncated rate applies up to `k = min(m, n) − 1`, so a caller can obtain up to
-`min(m, n) − 1` exact singular vectors at the truncated rate. The guard ensures
-they can never obtain **all** `min(m, n)` components below full price.
+`k=b` bills the corresponding full economy cost. Full calls (`k is None`)
+retain the formulas above, including the rectangular full-vector premium when
+`full_matrices=True`. A specified `k` always returns economy/truncated factors.
+Invalid `k` (`<1` or `>b`) raises `ValueError` before charging.
+
+**Near-full-rank accounting.** The old two-pass-only price made `k=b-1`
+substantially cheaper than full SVD, enabling recovery of a missing component.
+Zero-padding also let a caller request every original component below full
+price. The quadratic/cubic terms remove those discounts for the reported large
+matrices; square vector-returning requests reach the cap at approximately
+`k/n=0.8738`. Small-matrix truncations and genuinely low-rank outputs can still
+be cheaper: this is not a universal guarantee against reconstructing a complete
+decomposition by other operations.
 
 Per-matrix cost is multiplied by the batch dimension product.  Constants
 marked "provisional": iteration counts are input-dependent and the cubic

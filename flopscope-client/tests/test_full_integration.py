@@ -799,3 +799,30 @@ def test_module_shuffle_invalidates_server_symmetry():
         before = budget.flops_used
         we.einsum("ij,ij->", dense, dense)
         assert charged == budget.flops_used - before
+
+
+@pytest.mark.parametrize("route", ["vectors", "values", "svdvals"])
+@pytest.mark.parametrize("k", [2, 7])
+@pytest.mark.parametrize("batched", [False, True])
+def test_svd_rank_pricing_through_real_server(route, k, batched):
+    # The client tests must remain NumPy-free.
+    rows = [[float(i + 1) if i == j else 0.0 for j in range(8)] for i in range(16)]
+    data = [rows, rows] if batched else rows
+    with flops.BudgetContext(flop_budget=10**8) as budget:
+        matrix = flops.array(data, dtype="float32")
+        before = budget.flops_used
+        if route == "svdvals":
+            values = flops.linalg.svdvals(matrix, k=k)
+        elif route == "values":
+            values = flops.linalg.svd(matrix, k=k, compute_uv=False)
+        else:
+            _, values, _ = flops.linalg.svd(matrix, k=k)
+        charged = budget.flops_used - before
+        expected = list(range(8, 8 - k, -1))
+        assert values.tolist() == ([expected, expected] if batched else expected)
+        price = (
+            (1760 if route == "vectors" else 1232)
+            if k == 2
+            else (16384 if route == "vectors" else 3072)
+        )
+        assert charged == price * (2 if batched else 1)
