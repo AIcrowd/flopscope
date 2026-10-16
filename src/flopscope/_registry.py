@@ -447,7 +447,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Element-wise approximate equality test. Cost: 6*numel(broadcast(a,b,rtol,atol)). Array tolerances participate in billing dtype and output symmetry; wider or asymmetric tolerances can widen the price or remove a symmetry discount.",
+        "notes": "Element-wise approximate equality test. Cost: 6*numel(broadcast(a,b,rtol,atol)). Array and NumPy-scalar tolerances participate in billing dtype and output symmetry; wider or asymmetric tolerances can widen the price or remove a symmetry discount.",
     },
     "isnat": {
         "category": "blacklisted",
@@ -1750,7 +1750,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Element-wise tolerance check; cost = 7*numel(broadcast(a,b,rtol,atol)) - 1 (6/elem tolerance core + all-reduce). Array tolerances participate in billing dtype resolution and may widen the rate.",
+        "notes": "Element-wise tolerance check; cost = 7*numel(broadcast(a,b,rtol,atol)) - 1 (6/elem tolerance core + all-reduce). Array and NumPy-scalar tolerances participate in billing dtype resolution and may widen the rate.",
     },
     # Additional free ops
     "rot90": {
