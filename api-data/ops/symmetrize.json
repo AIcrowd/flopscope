@@ -1,0 +1,673 @@
+{
+  "detail_href": "/docs/api/numpy/symmetrize/",
+  "detail_json_href": "/api-data/ops/symmetrize.json",
+  "docs": {
+    "sections": [
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Make an array invariant under a permutation group."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Summary"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Two modes, differing in whether the discarded entries get a vote.\n"
+              },
+              {
+                "kind": "code",
+                "text": "\"reynolds-projection\""
+              },
+              {
+                "kind": "text",
+                "text": " (the default) averages each orbit:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "R_G(T) = (1 / |G|) * sum_{g in G} g \u00b7 T"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "\"canonical-copy\""
+              },
+              {
+                "kind": "text",
+                "text": " instead keeps one entry per orbit -- the one at the\nlexicographically smallest index -- and copies it over the rest. Every\nother value in the orbit is discarded rather than mixed in, which is what\nmakes it the right choice when the input is not trusted: nothing a caller\nhid in the redundant positions can reach the result. It is also the\ncheaper of the two, being one copy pass rather than "
+              },
+              {
+                "kind": "code",
+                "text": "|G|"
+              },
+              {
+                "kind": "text",
+                "text": " transposed\nadds, and it never enumerates the group."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Extended Summary"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Input array to symmetrize."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "array_like",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Input array to symmetrize."
+                  }
+                ],
+                "name": "data",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Symmetry group to average over. If "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "symmetry.axes"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " is "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "None"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ", axes are\ninterpreted as "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "tuple(range(symmetry.degree))"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryGroup",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Symmetry group to average over. If "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "symmetry.axes"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " is "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "None"
+                  },
+                  {
+                    "kind": "text",
+                    "text": ", axes are\ninterpreted as "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "tuple(range(symmetry.degree))"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "symmetry",
+                "type": "field_list"
+              },
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "Which symmetrization to apply. Defaults to "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "\"reynolds-projection\""
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "{\"reynolds-projection\", \"canonical-copy\"}, optional",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "Which symmetrization to apply. Defaults to "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "\"reynolds-projection\""
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "mode",
+                "type": "field_list"
+              }
+            ],
+            "title": "Parameters",
+            "type": "field_list"
+          }
+        ],
+        "title": "Parameters"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "The projected tensor, validated and wrapped as a "
+                      },
+                      {
+                        "display_text": "SymmetricTensor",
+                        "explicit_title": false,
+                        "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.SymmetricTensor.html",
+                        "href": "",
+                        "kind": "role_reference",
+                        "original_target": "SymmetricTensor",
+                        "role": "class",
+                        "suppress_link": false,
+                        "target": "SymmetricTensor",
+                        "unresolved": false
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetricTensor",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "The projected tensor, validated and wrapped as a "
+                  },
+                  {
+                    "display_text": "SymmetricTensor",
+                    "explicit_title": false,
+                    "external_url": "https://numpy.org/doc/stable/reference/generated/numpy.SymmetricTensor.html",
+                    "href": "",
+                    "kind": "role_reference",
+                    "original_target": "SymmetricTensor",
+                    "role": "class",
+                    "suppress_link": false,
+                    "target": "SymmetricTensor",
+                    "unresolved": false
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Returns",
+            "type": "field_list"
+          }
+        ],
+        "title": "Returns"
+      },
+      {
+        "blocks": [
+          {
+            "items": [
+              {
+                "body_blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "If "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "data"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " has incompatible dimensions for "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "group"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " axes or if the\nprojected result cannot be validated as symmetric for "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "group"
+                      },
+                      {
+                        "kind": "text",
+                        "text": "."
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ],
+                "data_type": "SymmetryError",
+                "inline": [
+                  {
+                    "kind": "text",
+                    "text": "If "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "data"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " has incompatible dimensions for "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "group"
+                  },
+                  {
+                    "kind": "text",
+                    "text": " axes or if the\nprojected result cannot be validated as symmetric for "
+                  },
+                  {
+                    "kind": "code",
+                    "text": "group"
+                  },
+                  {
+                    "kind": "text",
+                    "text": "."
+                  }
+                ],
+                "name": "",
+                "type": "field_list"
+              }
+            ],
+            "title": "Raises",
+            "type": "field_list"
+          }
+        ],
+        "title": "Raises"
+      },
+      {
+        "blocks": [
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "\"reynolds-projection\""
+              },
+              {
+                "kind": "text",
+                "text": " performs exact Reynolds averaging internally,\nbilling "
+              },
+              {
+                "kind": "code",
+                "text": "(|G| + 1) * numel(data)"
+              },
+              {
+                "kind": "text",
+                "text": " FLOPs:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "items": [
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "code",
+                        "text": "|G|"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " transposed add passes over "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "numel"
+                      },
+                      {
+                        "kind": "text",
+                        "text": " elements"
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              },
+              {
+                "blocks": [
+                  {
+                    "inline": [
+                      {
+                        "kind": "text",
+                        "text": "one final scaling pass (divide by "
+                      },
+                      {
+                        "kind": "code",
+                        "text": "|G|"
+                      },
+                      {
+                        "kind": "text",
+                        "text": ")"
+                      }
+                    ],
+                    "type": "paragraph"
+                  }
+                ]
+              }
+            ],
+            "ordered": false,
+            "type": "list"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "Internal validation runs but is NOT billed (decision D1)."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "where "
+              },
+              {
+                "kind": "code",
+                "text": "|G|"
+              },
+              {
+                "kind": "text",
+                "text": " is the group order and "
+              },
+              {
+                "kind": "code",
+                "text": "numel = data.size"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "\"canonical-copy\""
+              },
+              {
+                "kind": "text",
+                "text": " bills "
+              },
+              {
+                "kind": "code",
+                "text": "numel(data)"
+              },
+              {
+                "kind": "text",
+                "text": " -- one write per output\nelement, the same rate as every other materializing copy ("
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/copy/",
+                "kind": "link",
+                "target": "copy",
+                "text": "copy"
+              },
+              {
+                "kind": "text",
+                "text": ",\n"
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/take/",
+                "kind": "link",
+                "target": "take",
+                "text": "take"
+              },
+              {
+                "kind": "text",
+                "text": ", "
+              },
+              {
+                "external_url": "",
+                "href": "/docs/api/numpy/repeat/",
+                "kind": "link",
+                "target": "repeat",
+                "text": "repeat"
+              },
+              {
+                "kind": "text",
+                "text": "). It needs no validation pass because its output is\ninvariant by construction, and it never enumerates "
+              },
+              {
+                "kind": "code",
+                "text": "|G|"
+              },
+              {
+                "kind": "text",
+                "text": ": the orbit map\nis built from the group's generators and cached per\n"
+              },
+              {
+                "kind": "code",
+                "text": "(shape, group action)"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "The two modes also differ in dtype. Averaging must divide, so\n"
+              },
+              {
+                "kind": "code",
+                "text": "\"reynolds-projection\""
+              },
+              {
+                "kind": "text",
+                "text": " accumulates in\n"
+              },
+              {
+                "kind": "code",
+                "text": "result_type(data, float64)"
+              },
+              {
+                "kind": "text",
+                "text": " -- a "
+              },
+              {
+                "kind": "code",
+                "text": "float32"
+              },
+              {
+                "kind": "text",
+                "text": " input comes back\n"
+              },
+              {
+                "kind": "code",
+                "text": "float64"
+              },
+              {
+                "kind": "text",
+                "text": ". "
+              },
+              {
+                "kind": "code",
+                "text": "\"canonical-copy\""
+              },
+              {
+                "kind": "text",
+                "text": " only moves values, so it preserves the\ninput dtype exactly, including integer, boolean and complex types."
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "text",
+                "text": "The canonical pattern for generating random data with symmetry is:"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "inline": [
+              {
+                "kind": "code",
+                "text": "fnp.random.symmetric(shape, symmetry_group, distribution=...)"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": "Notes"
+      },
+      {
+        "blocks": [
+          {
+            "lines": [
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope as flops"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "import flopscope.numpy as fnp"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "data = fnp.random.randn(4, 4)"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S = flops.symmetrize(data, symmetry=flops.SymmetryGroup.symmetric(axes=(0, 1)))"
+              },
+              {
+                "kind": "input",
+                "prompt": ">>>",
+                "text": "S.is_symmetric((0, 1))"
+              },
+              {
+                "kind": "output",
+                "text": "True"
+              }
+            ],
+            "type": "doctest_block"
+          }
+        ],
+        "title": "Examples"
+      }
+    ]
+  },
+  "op": {
+    "category": "counted_custom",
+    "cost_formula": "per-operation",
+    "cost_formula_latex": "varies",
+    "flopscope_ref": "fnp.symmetrize",
+    "module": "flopscope",
+    "name": "symmetrize",
+    "notes": "Symmetrize onto a permutation group's invariant subspace. Cost depends on mode: mode='reynolds-projection' (default) is (|G|+1)*numel (|G| transposed adds + scaling pass; transpose/zeros free; validation uncounted); mode='canonical-copy' is numel (one write per element, copying each orbit's lexicographically-first entry over the orbit; orbit map built from generators and cached, never enumerates |G|; no validation pass, exact by construction). Reynolds upcasts to result_type(input, float64); canonical-copy preserves the input dtype.",
+    "numpy_ref": "np.symmetrize",
+    "signature": "fnp.symmetrize(data: 'np.ndarray', *, symmetry, mode: 'str' = 'reynolds-projection') -> 'SymmetricTensor'",
+    "status": "supported",
+    "summary": "Make an array invariant under a permutation group.",
+    "weight": 1.0
+  },
+  "schema_version": 1,
+  "slug": "symmetrize",
+  "source": {
+    "flopscope": "https://github.com/AIcrowd/flopscope/blob/main/src/flopscope/_symmetric.py#L165",
+    "numpy": "https://numpy.org/doc/stable/reference/generated/numpy.symmetrize.html"
+  }
+}
