@@ -84,7 +84,13 @@ with flops.BudgetContext(flop_budget=10**8) as budget:
     result = fnp.einsum('ij,j->i', S, v)  # cost reduced by input symmetry
 ```
 
-**Output symmetry** — pass `symmetry=` to `einsum()` to declare that the result is symmetric. This wraps the output as a `SymmetricTensor` so downstream operations benefit from reduced costs. It does NOT affect the cost of this einsum — it's a declaration about the result's structure:
+**Output symmetry** — pass `symmetry=` to `einsum()` to declare that the result is symmetric. The claim is validated within a tolerance, then canonicalized before the result
+is wrapped as a `SymmetricTensor`: each symmetry orbit takes its
+lexicographically first value. Consequently, values that pass only within the
+tolerance can change; this is not just a metadata annotation. Already exactly
+symmetric values are unchanged. Downstream operations can then use the
+symmetry discount. Declaring output symmetry does not discount this einsum's
+own contraction charge:
 
 ```python
 with flops.BudgetContext(flop_budget=10**8) as budget:

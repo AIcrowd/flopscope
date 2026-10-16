@@ -70,8 +70,8 @@ decomposition that produces `flop_cost`. (The weight half is enforced by
 
 **We bill the textbook standard-algorithm cost, not literal BLAS/LAPACK.**
 `linalg.inv` is billed `2n³` (the standard LU-based `dgetrf`+`dgetri` operation
-count) regardless of what the underlying library does; top-k SVD is billed as the
-standard truncated-algorithm cost. This keeps billing deterministic,
+count) regardless of what the underlying library does; top-k SVD uses the
+rank-dependent analytical reference prices below. This keeps billing deterministic,
 hardware-independent, and composable. 
 
 The rest of this section defines the conventions these principles rest on.
@@ -683,7 +683,7 @@ computation actually happens, not the input's label:
 | binary float-only ufuncs except division (`arctan2`, `hypot`, `logaddexp`, …) | NumPy-selected float loop (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) | unchanged — this replaces the old blanket-float64 rule for narrow integers |
 | `divide` / `true_divide` | integer pairs resolve to `float64` | unchanged |
 | predicate ufunc family (`signbit`, and the `logical_and(isinf(x), signbit(x))` composites `isneginf`/`isposinf`) | the same-size float, exactly as the unary float-only row above (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) — NumPy publishes no integer `signbit` loop, so an integer operand is promoted before the sign test runs | unchanged |
-| tolerance checks (`isclose`, `allclose`, and the symmetry validators `is_symmetric`/`as_symmetric`, whose billed `k·(7n−1)` *is* an `allclose`) | `float64`, whatever the integer's own width — NumPy's `isclose` casts its reference operand with `result_type(y, 1.)` before comparing, unconditionally (an explicit `rtol=0, atol=0` promotes just the same) | unchanged — `float16` and `float32` keep their own loop |
+| tolerance checks (`isclose`, `allclose`, and the symmetry validators `is_symmetric`/`as_symmetric`, whose billed `k·(7n−1)` *is* an `allclose`) | `float64`, whatever the integer's own width — NumPy's `isclose` casts its reference operand with `result_type(y, 1.)` before comparing, unconditionally (an explicit `rtol=0, atol=0` promotes just the same) | `float16`/`float32` keep their own loop with default weak Python tolerances; supplied NumPy-scalar or array `rtol`/`atol` participate in billing dtype resolution and may widen the rate |
 | `float_power` | NumPy's selected loop has a `float64` real minimum | `float64` real minimum — unchanged in effect |
 | FFT family | `complex128` (no size-mapping — even `int8` runs the `complex128` path) | `float16`/`float32` → `complex64`; `float64` → `complex128` |
 | LAPACK-backed `linalg.*` | `float64` | unchanged — single-precision drivers stay single |
@@ -1111,7 +1111,7 @@ passes under one op-level factor.
 | `cumsum`, `cumprod`, `nancumsum`, `nancumprod`, `cumulative_sum`, `cumulative_prod` | numel(input) − num_output_slices (= n−1 for a full 1-D scan; product of non-reduced dims otherwise) (+numel(input) for the `nan*` forms on float/complex input only) | 1.0 | DECLARED: scan accumulation; output shape = input shape so the generic `numel(in)−numel(out)` formula evaluates to 0 — these use the correct per-slice count instead |
 | `mean`, `average` (unweighted) | numel(input) | 1.0 | DERIVED: reduction (numel−M) + M divides |
 | `average(weights=)` | `3·numel − M`, M = num output slices (1 for full reduction) | 1.0 | DERIVED: a·w multiply pass (numel) + a·w sum (numel−M) + weight sum (numel−M) + M divides |
-| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass on float/complex input only ⇒ ≈ 5 × numel(input) there, ≈ 4 × on integer/bool; `var`/`std` with a `mean=` that broadcasts the input to a larger shape: the same formula on `numel(broadcast(a, mean))`, dense, since every pass runs over `a - mean` (#273) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
+| `std`, `var`, `nanstd`, `nanvar` | ≈ 4 × numel(input) (std: + M sqrt); `nanstd`/`nanvar`: + numel(input) isnan pass on float/complex input only ⇒ ≈ 5 × numel(input) there, ≈ 4 × on integer/bool; `var`/`std` with a `mean=` that broadcasts the input to a larger shape: the same formula on `numel(broadcast(a, mean))`, dense, under the same reference four-pass pricing convention; supplying `mean=` skips NumPy's mean calculation but does not discount that convention (#273) | 1.0 | DERIVED four-pass: mean-sum, centre, square, var-sum (exact: 2·numel + 2·(numel−M) + 2M) |
 | `argmax`, `argmin` | numel(input) − num_output_slices (= n−1 for full 1-D; reduction_cost model) | 1.0 | DECLARED scan: same orbit model as reduction family |
 | `median`, `nanmedian` | axis length per output slice (+numel(input) for `nanmedian`, every dtype) | 1.0 | DECLARED; partition (introselect) per output |
 | `percentile`, `nanpercentile`, `quantile`, `nanquantile` | per output slice, piecewise in axis length `n` and `q.size` `k` — unweighted: `n·min(k, 1 + 4⌈log₂ min(k,n)⌉) + 4k`; with `weights=`: `4n⌈log₂ n⌉ + 3n + k(⌈log₂ n⌉ + 4)` (+numel(input) for the `nan*` forms, every dtype) | 1.0 | DECLARED; unweighted bills the cheaper of `k` partition passes or one shared sort-parity pass (a dense `q` returns the sorted input); the weighted branch sorts internally, so it is priced at sort parity plus a per-`q` lookup |
@@ -1585,7 +1585,7 @@ are not bin-search ops and stay at weight 1.0.
 | `interp` | `3m + m × ⌈log₂(numel(xp))⌉`, `m = numel(x)` (interpolation arithmetic + binary search per query); with `period=`, numpy's period branch is added at its ops' own weights, `16(m + p) + 4p⌈log₂ p⌉ + 8p + 2(p + 2) + 2` for `p = numel(xp)` (mod of `x` and `xp`, argsort, two gathers, two padded concatenates, two pad shifts), and the search runs on the `p + 2` padded table | 1.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (integer bins) | `n × ⌈log₂(bins)⌉` (binary-search binning pass only) | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram` (string bins, e.g. `'auto'`) | `n × (2 + estimator_cost + ⌈log₂ resolved_bins⌉)` (deferred: resolved after the call; estimator costs: sturges/sqrt/rice=0, fd/auto=+1n, scott=+4n, doane=+6n, stone=+max(100,√n)n) | 4.0 | DERIVED | `_counting_ops.py` |
-| `histogram2d`, `histogramdd` | `n * sum(ceil(log2(b_i)))`, where `b_i` is each axis count or edge-array length; all supported count/edge spellings use the same rule | 4.0 | DERIVED | `_counting_ops.py` |
+| `histogram2d`, `histogramdd` | `max(n * sum(L(b_i)), 1)`, `L(b)=max(ceil(log2(b)),1)`, where `b_i` is each axis count or edge-array length; all supported count/edge spellings use the same rule | 4.0 | DERIVED | `_counting_ops.py` |
 | `histogram_bin_edges` | `n` (= `max(n, 1)`) for integer bins; string estimator bins: same formula as `histogram` string path | 4.0 | DECLARED: integer bins charge one comparison per element (no log₂ factor); estimator resolves bin count at call time | `_counting_ops.py` |
 | `bincount` | `numel(x)` (floor 1) | 4.0 | DECLARED: one bucket increment per element | `_counting_ops.py` |
 | `digitize` | `numel(x) × ⌈log₂(len(bins))⌉` (floor 1) | 4.0 | DECLARED: binary search per element | `_counting_ops.py` |

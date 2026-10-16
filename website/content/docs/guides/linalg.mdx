@@ -19,14 +19,24 @@ title: "Linear Algebra"
 
 | Operation | Cost | Weight | Notes |
 |-----------|------|--------|-------|
-| `fnp.linalg.svd(A, k=k)` | $m \cdot n \cdot k$ | 4.0 | Truncated SVD |
+| `fnp.linalg.svd(A, k=k)` | $\min(4mnk+6(m+n)k^2+20k^3,6ab^2+20b^3)$ | 1.0 | Truncated, with vectors |
 | `fnp.linalg.eig(A)` | $10n^3$ | 4.0 | General eigendecomposition |
 | `fnp.linalg.eigh(A)` | $4n^3/3$ | 4.0 | Symmetric eigendecomposition |
 | `fnp.linalg.cholesky(A)` | $n^3/3$ | 4.0 | Cholesky (symmetric positive definite) |
 | `fnp.linalg.qr(A)` | $mn^2 - n^3/3$ | 4.0 | Householder QR (FMA=2) |
 | `fnp.linalg.eigvals(A)` | $10n^3$ | 4.0 | Eigenvalues only |
 | `fnp.linalg.eigvalsh(A)` | $4n^3/3$ | 4.0 | Symmetric eigenvalues only |
-| `fnp.linalg.svdvals(A)` | $m \cdot n \cdot \min(m,n)$ | 4.0 | Singular values only |
+| `fnp.linalg.svdvals(A)` | $2ab^2+2b^3$ | 1.0 | Full singular values only |
+
+For SVD, `a=max(m,n)` and `b=min(m,n)`. Truncated values-only calls
+(`svd(A, compute_uv=False, k=k)` or `svdvals(A, k=k)`) bill
+`min(4mnk+2(m+n)k²+2k³, 2ab²+2b³)` for `1 <= k < b`. At `k=b`, the
+corresponding full economy price applies. Full calls without `k` retain their
+thin/full-vector/values-only formulas, including the rectangular full-vector
+premium. Multiply per-matrix prices by the batch size and apply dtype/complex
+rates. The backend returns exact factors; pricing is an analytical convention.
+See the [cost model](/docs/understanding/flop-counting-model/#top-k-truncated-svd)
+for details and the limits of the near-full-rank accounting guarantee.
 
 ### Solvers
 
@@ -51,7 +61,7 @@ ignored in the cost model.
 | `fnp.linalg.slogdet(A)` | $n^3$ | 4.0 |
 | `fnp.linalg.norm(x)` | depends on ord | varies |
 | `fnp.linalg.cond(A)` | $m \cdot n \cdot \min(m,n)$ | varies |
-| `fnp.linalg.matrix_rank(A)` | $m \cdot n \cdot \min(m,n)$ | varies |
+| `fnp.linalg.matrix_rank(A)` | Values-only SVD per matrix + $b$ comparisons per broadcast `(matrix,tol/rtol)` pair | varies |
 | `fnp.linalg.trace(A)` | $n$ | varies |
 
 ### Compound
@@ -86,7 +96,7 @@ See [Exploit Symmetry Savings](/docs/guides/symmetry/) for full details.
 
 ```python
 cost = flops.accounting.svd_cost(m=256, n=256, k=10)
-print(f"SVD cost: {cost:,}")  # 655,360
+print(f"SVD cost: {cost:,}")  # 2,725,840 (values-only default; dtype-neutral query)
 
 cost = flops.accounting.solve_cost(n=256)
 print(f"Solve cost: {cost:,}")  # 16,777,216 (= 256^3; symmetric/nrhs params currently ignored)

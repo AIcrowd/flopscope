@@ -26,6 +26,13 @@ FFT costs are based on the Cooley-Tukey radix-2 algorithm:
 | `fftfreq`, `rfftfreq` | 0 (free) | 0 |
 | `fftshift`, `ifftshift` | 0 (free) | 0 |
 
+**Singleton stages:** each executed transform stage of length one bills 2 base
+FLOPs per batch entry, rather than the zero given by the logarithmic butterfly
+formula. Multidimensional calls apply this floor at each stage's current shape;
+empty batches cost zero. Dtype/destination rates and operation weights apply
+afterward. The ordinary length-greater-than-one butterfly prices are unchanged.
+See the [cost model](/docs/understanding/flop-counting-model/#fft).
+
 Real-valued transforms (`rfft`, `irfft`, `rfftn`, `irfftn`) cost roughly half of their complex counterparts because they exploit conjugate symmetry.
 
 ## Basic usage
