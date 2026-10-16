@@ -20,7 +20,7 @@ from typing import Any
 
 import msgpack
 
-__version__ = "0.12.2"
+__version__ = "0.12.3"
 
 # ---------------------------------------------------------------------------
 # Errors
