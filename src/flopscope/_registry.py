@@ -447,7 +447,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_unary",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Element-wise approximate equality test. Cost: 6*numel(output).",
+        "notes": "Element-wise approximate equality test. Cost: 6*numel(broadcast(a,b,rtol,atol)). Array tolerances participate in billing dtype and output symmetry; wider or asymmetric tolerances can widen the price or remove a symmetry discount.",
     },
     "isnat": {
         "category": "blacklisted",
@@ -772,21 +772,21 @@ REGISTRY: dict[str, dict] = {
         "module": "numpy",
         "min_numpy": "2.1",
         "complex_factor": "exact",
-        "notes": "Vector dot product along last axis. Einsum-accumulation family; cost computed exactly per-call.",
+        "notes": "Vector dot product (last axis by default); axis=/axes= selects the contracted axes. Dense real cost: (2*K-1)*numel(output), including batches; the shared einsum engine handles symmetry and complex arithmetic.",
     },
     "matvec": {
         "category": "counted_binary",
         "module": "numpy",
         "min_numpy": "2.2",
         "complex_factor": "exact",
-        "notes": "Matrix-vector product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
+        "notes": "Matrix-vector product with trailing core axes by default; axes= selects their placement. Dense real cost: (2*K-1)*numel(output), including batches; shared einsum symmetry and complex accounting apply.",
     },
     "vecmat": {
         "category": "counted_binary",
         "module": "numpy",
         "min_numpy": "2.2",
         "complex_factor": "exact",
-        "notes": "Vector-matrix product. Cost = 2*output_size*contracted_axis - output_size (FMA=2 einsum; computed exactly per-call).",
+        "notes": "Vector-matrix product with trailing core axes by default; axes= selects their placement. Dense real cost: (2*K-1)*numel(output), including batches; shared einsum symmetry and complex accounting apply.",
     },
     # ------------------------------------------------------------------
     # counted_reduction — implemented in _pointwise.py
@@ -837,13 +837,13 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": 2.5,
-        "notes": "Standard deviation; cost ~ 4*numel + M (2 pointwise + 2 reduction passes, per-output divide + sqrt).",
+        "notes": "Standard deviation; reference dense cost 4*N+M, M=numel(output); ordinary symmetry savings apply. N is the input size; if mean= enlarges the input, N is the dense broadcast(input,mean) size and output symmetry is dropped. Supplying mean= retains the reference four-pass charge even though NumPy skips calculating the mean.",
     },
     "var": {
         "category": "counted_reduction",
         "module": "numpy",
         "complex_factor": 2.5,
-        "notes": "Variance; cost ~ 4*numel (2 pointwise + 2 reduction passes, per-output divide).",
+        "notes": "Variance; reference dense cost 4*N; ordinary symmetry savings apply. N is the input size; if mean= enlarges the input, N is the dense broadcast(input,mean) size and output symmetry is dropped. Supplying mean= retains the reference four-pass charge even though NumPy skips calculating the mean.",
     },
     "argmax": {
         "category": "counted_reduction",
@@ -1144,20 +1144,20 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Integrate using the trapezoidal rule.",
+        "notes": "Integrate using the trapezoidal rule. Cost: 4*numel(y)*K, where K is the broadcast integral multiplier from N-D x; K=1 for scalar dx or 1-D x.",
     },
     "trapz": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
         "max_numpy": "2.4",
-        "notes": "Alias for trapezoid (deprecated). Removed in numpy 2.4; use `trapezoid` instead.",
+        "notes": "Alias for trapezoid, including its 4*numel(y)*K price for broadcasting N-D x. Removed in numpy 2.4; use `trapezoid` instead.",
     },
     "interp": {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 3.0,
-        "notes": "1-D linear interpolation.",
+        "notes": "1-D linear interpolation: 3*m+m*ceil(log2(p)) for m query points and p table points. period= additionally charges modulo, argsort, two gathers and padded concatenation at their own operation weights; binary search uses the padded p+2 table. See cost-model.md for the full branch formula.",
     },
     # ------------------------------------------------------------------
     # linalg — svd + decompositions implemented; rest blacklisted
@@ -1338,7 +1338,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy.linalg",
         "complex_factor": 4.0,
-        "notes": "Delegates to `fnp.vecdot` which charges `2*n - 1` FLOPs.",
+        "notes": "Delegates to fnp.vecdot: dense real cost (2*K-1)*numel(output), including batch dimensions; axis= relocates the default last contracted axis. Shared symmetry and complex accounting apply.",
     },
     "linalg.vector_norm": {
         "category": "counted_custom",
@@ -1750,7 +1750,7 @@ REGISTRY: dict[str, dict] = {
         "category": "counted_custom",
         "module": "numpy",
         "complex_factor": 2.0,
-        "notes": "Element-wise tolerance check; cost = 7*numel(broadcast) - 1 (6/elem tolerance core + all-reduce).",
+        "notes": "Element-wise tolerance check; cost = 7*numel(broadcast(a,b,rtol,atol)) - 1 (6/elem tolerance core + all-reduce). Array tolerances participate in billing dtype resolution and may widen the rate.",
     },
     # Additional free ops
     "rot90": {

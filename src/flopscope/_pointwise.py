@@ -4079,7 +4079,13 @@ if hasattr(_np, "vecdot"):
 
     @_counted_wrapper
     def vecdot(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
-        """Counted version of np.vecdot (vector dot product along last axis)."""
+        """Vector dot product, along the last axis by default.
+
+        ``axis=``/``axes=`` selects the contracted axes. Dense real cost is
+        ``(2*K-1)*numel(output)`` including batches, with K the selected
+        contracted extent. The shared einsum engine handles symmetry and
+        complex accounting.
+        """
         a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
             _np.vecdot, a, b, "...n,...n->...", kwargs
         )
@@ -4107,8 +4113,10 @@ if hasattr(_np, "matvec"):
     def matvec(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
         """Counted version of np.matvec (matrix-vector product).
 
-        A is (..., m, n), v is (..., n), result is (..., m). Cost is the exact
-        einsum accumulation cost, counting batch/broadcast on either operand.
+        By default A is (..., m, n), v is (..., n), result is (..., m).
+        ``axes=`` can relocate the core dimensions. Cost is the exact einsum
+        accumulation price on the selected axes, including batch/broadcast
+        dimensions and symmetry.
         """
         a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
             _np.matvec, a, b, "...mn,...n->...m", kwargs
@@ -4137,8 +4145,10 @@ if hasattr(_np, "vecmat"):
     def vecmat(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray:  # pyright: ignore[reportRedeclaration]
         """Counted version of np.vecmat (vector-matrix product).
 
-        v is (..., n), A is (..., n, m), result is (..., m). Cost is the exact
-        einsum accumulation cost, counting batch/broadcast on either operand.
+        By default v is (..., n), A is (..., n, m), result is (..., m).
+        ``axes=`` can relocate the core dimensions. Cost is the exact einsum
+        accumulation price on the selected axes, including batch/broadcast
+        dimensions and symmetry.
         """
         a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
             _np.vecmat, a, b, "...n,...nm->...m", kwargs
@@ -4531,6 +4541,19 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
 
     wrapper.__name__ = op_name
     wrapper.__qualname__ = op_name
+    attach_docstring(
+        wrapper,
+        np_func,
+        "counted_reduction",
+        "4*N"
+        + (" + M" if with_sqrt else "")
+        + " FLOPs (reference four-pass price; M=numel(output)). "
+        "N=numel(input), or dense numel(broadcast(input,mean)) when mean= "
+        "enlarges input; that enlarged path drops output symmetry. "
+        "Supplying mean= retains this reference price even though NumPy "
+        "skips calculating the mean. Ordinary symmetry savings still apply "
+        "when mean= does not enlarge the input.",
+    )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
 

@@ -495,7 +495,26 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
         r"$2 \cdot K \cdot \text{out} - \text{out}$",
     ),
     "vdot": ("2*n - 1", r"$2n - 1$"),
-    "vecdot": ("n", "$n$"),
+    "vecdot": (
+        "dense real: (2*K-1)*numel(output); K follows axis=/axes=; symmetry via einsum",
+        "$(2K-1)M$",
+    ),
+    "matvec": (
+        "dense real: (2*K-1)*numel(output); K follows axes=; symmetry via einsum",
+        "$(2K-1)M$",
+    ),
+    "vecmat": (
+        "dense real: (2*K-1)*numel(output); K follows axes=; symmetry via einsum",
+        "$(2K-1)M$",
+    ),
+    "var": (
+        "4*N; N=numel(input), or dense numel(broadcast(input,mean)) when mean= enlarges input",
+        "$4N$",
+    ),
+    "std": (
+        "4*N+M; N=numel(input), or dense numel(broadcast(input,mean)) when mean= enlarges input; M=numel(output)",
+        "$4N+M$",
+    ),
     "kron": ("m1*m2 * n1*n2", r"$m_1 m_2 \cdot n_1 n_2$"),
     # Multi-output ufuncs (nout=2): every output is a full written buffer,
     # so the family's usual numel(output) is doubled -- see the "every byte
@@ -540,11 +559,42 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     ),
     "corrcoef": ("(2*f^2*s + 2*f*s) + 2*f^2 + f", r"$2f^2 s + 2fs + 2f^2 + f$"),
     "cov": ("2*f^2*s + 2*f*s", r"$2f^2 s + 2fs$"),
-    "interp": ("3*n + n*ceil(log2(len(xp)))", r"$3n + n \lceil\log_2 |xp|\rceil$"),
-    "trapezoid": ("4*numel", r"$4 \cdot \text{numel}$"),
-    "trapz": ("4*numel", r"$4 \cdot \text{numel}$"),
-    "linalg.svd": ("m * n * k", r"$m \cdot n \cdot k$"),
-    "linalg.svdvals": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
+    "histogram": (
+        "binning/estimator at weight 4 + int/string edge construction as linspace at weight 1 + density arithmetic at sub-op weights; each term uses its own dtype",
+        "Binning/estimator + generated edges + optional density arithmetic (sub-operation weights)",
+    ),
+    "histogram_bin_edges": (
+        "input/estimator term at weight 4 + int/string bins+1 edges as linspace at weight 1; array edges add no construction term",
+        "Input/estimator work + generated edges for integer/string bins (sub-operation weights)",
+    ),
+    "histogram2d": (
+        "max(n*sum(ceil(log2(b_i))),1); b_i is each axis count or edge-array length for all supported bin forms",
+        "$\\max(n\\sum_i\\lceil\\log_2 b_i\\rceil,1)$",
+    ),
+    "histogramdd": (
+        "max(n*sum(ceil(log2(b_i))),1); b_i is each axis count or edge-array length for all supported bin forms",
+        "$\\max(n\\sum_i\\lceil\\log_2 b_i\\rceil,1)$",
+    ),
+    "interp": (
+        "3*m+m*ceil(log2(p)); period= adds 16(m+p)+4p*ceil(log2(p))+8p+2(p+2)+2 at sub-op weights, searching p+2 edges; m=numel(x), p=numel(xp)",
+        "Interpolation + optional periodic preprocessing; search uses p+2 table points with period (see notes)",
+    ),
+    "trapezoid": (
+        "4*numel(y)*K; K is the broadcast integral multiplier from N-D x (1 for scalar dx or 1-D x)",
+        "$4\\,\\mathrm{numel}(y)K$",
+    ),
+    "trapz": (
+        "4*numel(y)*K; alias of trapezoid, including its N-D x broadcast multiplier",
+        "$4\\,\\mathrm{numel}(y)K$",
+    ),
+    "linalg.svd": (
+        "top-k vectors: min(4mnk+6(m+n)k^2+20k^3,6ab^2+20b^3); top-k values: min(4mnk+2(m+n)k^2+2k^3,2ab^2+2b^3); full costs and rectangular full-vector premium: see notes",
+        "Top-k vectors: min(4mnk+6(m+n)k²+20k³,6ab²+20b³); values: min(4mnk+2(m+n)k²+2k³,2ab²+2b³); full: see notes",
+    ),
+    "linalg.svdvals": (
+        "full: 2ab^2+2b^3; top-k: min(4mnk+2(m+n)k^2+2k^3,2ab^2+2b^3); a=max(m,n), b=min(m,n)",
+        "Full: 2ab²+2b³; top-k: min(4mnk+2(m+n)k²+2k³,2ab²+2b³)",
+    ),
     "linalg.cholesky": ("n^3", r"$n^3$"),
     "linalg.qr": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
     "linalg.eig": ("n^3", r"$n^3$"),
@@ -555,7 +605,10 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "linalg.matmul": ("delegates to flops.matmul", r"delegates to `matmul`"),
     "linalg.outer": ("delegates to flops.outer", r"delegates to `outer`"),
     "linalg.tensordot": ("delegates to flops.tensordot", r"delegates to `tensordot`"),
-    "linalg.vecdot": ("delegates to flops.vecdot", r"delegates to `vecdot`"),
+    "linalg.vecdot": (
+        "delegates to fnp.vecdot, including selected axes and batches",
+        "Delegates to vecdot (selected axes and batches)",
+    ),
     "linalg.solve": ("n^3", r"$n^3$"),
     "linalg.inv": ("n^3", r"$n^3$"),
     "linalg.lstsq": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
@@ -569,23 +622,68 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "linalg.vector_norm": ("numel", r"$n$"),
     "linalg.matrix_norm": ("depends on ord", r"varies"),
     "linalg.cond": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
-    "linalg.matrix_rank": ("m * n * min(m,n)", r"$m \cdot n \cdot \min(m,n)$"),
+    "linalg.matrix_rank": (
+        "values-only SVD per matrix + b comparisons per broadcast (matrix,tol/rtol) pair; b=min(m,n)",
+        "Values-only SVD per matrix + b comparisons per broadcast tolerance pair",
+    ),
     "linalg.multi_dot": ("optimal chain cost", r"optimal chain"),
     "linalg.matrix_power": ("log2(k) * n^3", r"$\lfloor\log_2 k\rfloor \cdot n^3$"),
-    "fft.fft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
-    "fft.ifft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
-    "fft.fft2": ("5N * ceil(log2(N))", r"$5N \cdot \lceil\log_2 N\rceil$"),
-    "fft.ifft2": ("5N * ceil(log2(N))", r"$5N \cdot \lceil\log_2 N\rceil$"),
-    "fft.fftn": ("5N * ceil(log2(N))", r"$5N \cdot \lceil\log_2 N\rceil$"),
-    "fft.ifftn": ("5N * ceil(log2(N))", r"$5N \cdot \lceil\log_2 N\rceil$"),
-    "fft.rfft": ("5(n/2) * ceil(log2(n))", r"$5(n/2) \cdot \lceil\log_2 n\rceil$"),
-    "fft.irfft": ("5(n/2) * ceil(log2(n))", r"$5(n/2) \cdot \lceil\log_2 n\rceil$"),
-    "fft.rfft2": ("5(N/2) * ceil(log2(N))", r"$5(N/2) \cdot \lceil\log_2 N\rceil$"),
-    "fft.irfft2": ("5(N/2) * ceil(log2(N))", r"$5(N/2) \cdot \lceil\log_2 N\rceil$"),
-    "fft.rfftn": ("5(N/2) * ceil(log2(N))", r"$5(N/2) \cdot \lceil\log_2 N\rceil$"),
-    "fft.irfftn": ("5(N/2) * ceil(log2(N))", r"$5(N/2) \cdot \lceil\log_2 N\rceil$"),
-    "fft.hfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
-    "fft.ihfft": ("5n * ceil(log2(n))", r"$5n \cdot \lceil\log_2 n\rceil$"),
+    "fft.fft": (
+        "5n * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
+    "fft.ifft": (
+        "5n * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
+    "fft.fft2": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.ifft2": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.fftn": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.ifftn": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.rfft": (
+        "5(n/2) * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
+    "fft.irfft": (
+        "5(n/2) * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
+    "fft.rfft2": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.irfft2": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.rfftn": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.irfftn": (
+        "sum of executed 1-D stage costs at each intermediate shape; each length-one stage: 2*batch_i before dtype rates/weight",
+        "Sum of executed stage prices; each singleton stage: 2 × batch count (see notes)",
+    ),
+    "fft.hfft": (
+        "5n * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
+    "fft.ihfft": (
+        "5n * ceil(log2(n)) for length > 1; length 1: 2 per batch item before dtype rates/weight",
+        "Length 1: 2 per batch item; otherwise radix-2 formula (see notes)",
+    ),
     "polyval": ("2 * m * deg (FMA=2)", r"$2 \cdot m \cdot \text{deg}$"),
     "polyadd": (
         "size of broadcast-aligned result (numpy.polyadd(a1, a2).size; = max(n1, n2) for 1-D)",
@@ -600,8 +698,8 @@ CUSTOM_COSTS: dict[str, tuple[str, str]] = {
     "polymul": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polydiv": ("n1 * n2", r"$n_1 \cdot n_2$"),
     "polyfit": (
-        "m*deg + lstsq_cost(m, deg+1, ncols)",
-        r"$m \cdot \text{deg} + \text{lstsq\_cost}(m, \text{deg}+1, \text{ncols})$",
+        "m*deg+lstsq_cost(m,p,ncols); cov without full=True adds matmul_cost(p,m,p)+inv_cost(p)+p*(p+1)//2+p^2+numel(covariance), plus one residual division per scaled covariance slice; p=deg+1",
+        "Vandermonde + shared least squares + optional covariance work (see notes)",
     ),
     "poly": ("n^2", r"$n^2$"),
     "roots": ("10n^3", r"$10n^3$"),

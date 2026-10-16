@@ -89,14 +89,16 @@ def fftn_cost(shape: tuple[int, ...]) -> int:
     Returns
     -------
     int
-        Estimated FLOP count: 5 * N * sum(ceil(log2(d_i))), where N = prod(shape).
+        Sum of per-axis FFT prices at the unresized shape. Length-one axes
+        contribute 2 * batch entries; other axes use the radix-2 formula.
 
     Notes
     -----
     The multi-dimensional FFT is computed as successive 1-D FFTs along each
     axis. The cost along axis *i* is 5 * (N / d_i) * d_i * ceil(log2(d_i))
     = 5 * N * ceil(log2(d_i)). Summing over axes gives
-    5 * N * sum(ceil(log2(d_i))).
+    5 * N * sum(ceil(log2(d_i))) when no axis has length one. A singleton
+    stage instead charges its complex working-buffer movement.
     """
     N = 1
     for d in shape:

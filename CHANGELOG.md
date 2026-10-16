@@ -13,6 +13,13 @@
   large-matrix missing-component and zero-padding routes without claiming
   to prevent every cheaper small-matrix reconstruction.
 
+### Documentation
+
+- Align generated formula displays, relevant guides and cost examples with the
+  SVD rank model and the 0.12.2 broadcast, dtype, histogram, FFT, covariance and
+  symmetry changes. Clarify deferred histogram surcharges and reference
+  variance pricing. No numerical or billing behavior changes.
+
 ## v0.12.2 (2026-10-15)
 
 ### Billing impact
@@ -64,7 +71,10 @@ retain their existing pricing.
 
 - All three packages release together at 0.12.2. NumPy requirements remain
   `>=2.0.0,<2.5.0`; this release does not raise the NumPy minimum.
-- FFT, histogram and polyfit changes preserve upfront budget enforcement.
+- FFT, multidimensional histogram bin-search pricing and polyfit changes
+  preserve upfront budget enforcement. One-dimensional histogram edge/density
+  surcharges are deducted after execution; string-bin estimator pricing is
+  also deferred until the resolved bins are known.
 
 ## v0.12.1 (2026-08-29)
 
