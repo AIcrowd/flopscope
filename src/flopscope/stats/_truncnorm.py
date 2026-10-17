@@ -2,24 +2,15 @@
 
 from __future__ import annotations
 
-import numpy as _np
-
+from flopscope.stats import _truncnorm_kernels
 from flopscope.stats._base import ContinuousDistribution
-from flopscope.stats._erf import _erf
-from flopscope.stats._ndtri import _ndtri
 
-_SQRT2 = _np.sqrt(2.0)
-_INV_SQRT_2PI = 1.0 / _np.sqrt(2.0 * _np.pi)
-
-
-def _std_norm_cdf(x):
-    """Standard normal CDF (no budget deduction)."""
-    return 0.5 * (1.0 + _erf(x / _SQRT2))
-
-
-def _std_norm_pdf(x):
-    """Standard normal PDF (no budget deduction)."""
-    return _INV_SQRT_2PI * _np.exp(-0.5 * x * x)
+# Fixed analytical bounds for the numerical kernels, before dtype pricing.
+# See docs/reference/cost-model.md. Four Newton steps and eight quadrature nodes
+# are part of this derivation; changing them requires revisiting these bounds.
+_PDF_COST = 315
+_CDF_COST = 844
+_PPF_COST = 1392
 
 
 class TruncnormDistribution(ContinuousDistribution):
@@ -40,14 +31,17 @@ class TruncnormDistribution(ContinuousDistribution):
     -----
     ``a`` and ``b`` are standardized lower and upper bounds. The truncated
     support is ``[a * scale + loc, b * scale + loc]``, and both bounds appear
-    before ``loc`` and ``scale`` to match SciPy's signature. pdf deducts
-    ``28 * numel(broadcast(input, a, b, loc, scale))`` FLOPs (composite:
-    z(2)+std_norm_pdf(20)+div(1)+bounds(5), FMA=2, weight 1.0; calibrated
-    alpha 28.0). cdf deducts ``51 * numel(broadcast(input, a, b, loc, scale))``
-    FLOPs (composite: z(2)+std_norm_cdf(46)+result(3)+2 where(4), FMA=2,
-    weight 1.0; calibrated alpha 50.6). ppf deducts
-    ``81 * numel(broadcast(input, a, b, loc, scale))`` FLOPs (composite:
-    erf + ndtri rational approx + arithmetic, weight 1.0; audit-2 verified).
+    before ``loc`` and ``scale`` to match SciPy's signature. Invalid bounds
+    (``a >= b``), nonpositive scales, and NaN inputs return NaN; ppf also
+    returns NaN for probabilities outside ``[0, 1]``.
+
+    Base composite costs are ``315*n`` for pdf, ``844*n`` for cdf, and
+    ``1392*n`` for ppf, where
+    ``n = max(numel(broadcast(input, a, b, loc, scale)), 1)``. These are
+    analytical numerical upper bounds (FMA=2, stats weight 1.0), not hardware
+    calibrations. Configured dtype pricing applies to the float64 output.
+    The kernels use stable log-tail probabilities, eight fixed quadrature
+    nodes for narrow intervals, and four fixed inverse-refinement steps.
     """
 
     def __init__(self):
@@ -78,9 +72,9 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.pdf(x, a, b, loc, scale)``.
-        FLOP cost: ``28 * numel(broadcast(x, a, b, loc, scale))`` (composite:
-        z(2)+std_norm_pdf(20)+div(1)+bounds(5), FMA=2, weight 1.0; calibrated
-        alpha 28.0).
+        Base FLOP cost: ``315 * max(numel(broadcast(x, a, b, loc, scale)), 1)``.
+        Analytical numerical upper bound, FMA=2, weight 1.0, before the
+        configured float64 dtype multiplier.
 
         Examples
         --------
@@ -90,7 +84,7 @@ class TruncnormDistribution(ContinuousDistribution):
         >>> np.round(flops.stats.truncnorm.pdf(x, a=-1.0, b=1.0), 3)
         array([0.516, 0.584, 0.516])
         """
-        return self._deduct_and_call("pdf", 28, x, a, b, loc=loc, scale=scale)
+        return self._deduct_and_call("pdf", _PDF_COST, x, a, b, loc=loc, scale=scale)
 
     def cdf(self, x, a, b, loc=0, scale=1):
         """Evaluate the cumulative distribution function.
@@ -117,9 +111,9 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.cdf(x, a, b, loc, scale)``.
-        FLOP cost: ``51 * numel(broadcast(x, a, b, loc, scale))`` (composite:
-        z(2)+std_norm_cdf(46)+result(3)+2 where(4), FMA=2, weight 1.0;
-        calibrated alpha 50.6).
+        Base FLOP cost: ``844 * max(numel(broadcast(x, a, b, loc, scale)), 1)``.
+        Analytical numerical upper bound, FMA=2, weight 1.0, before the
+        configured float64 dtype multiplier.
 
         Examples
         --------
@@ -129,7 +123,7 @@ class TruncnormDistribution(ContinuousDistribution):
         >>> np.round(flops.stats.truncnorm.cdf(x, a=-1.0, b=1.0), 3)
         array([0.22, 0.5 , 0.78])
         """
-        return self._deduct_and_call("cdf", 51, x, a, b, loc=loc, scale=scale)
+        return self._deduct_and_call("cdf", _CDF_COST, x, a, b, loc=loc, scale=scale)
 
     def ppf(self, q, a, b, loc=0, scale=1):
         """Evaluate the percent-point function.
@@ -156,8 +150,9 @@ class TruncnormDistribution(ContinuousDistribution):
         Notes
         -----
         Equivalent to ``scipy.stats.truncnorm.ppf(q, a, b, loc, scale)``.
-        FLOP cost: ``81 * numel(broadcast(q, a, b, loc, scale))`` (composite:
-        erf + ndtri rational approx + arithmetic, weight 1.0).
+        Base FLOP cost: ``1392 * max(numel(broadcast(q, a, b, loc, scale)), 1)``.
+        Analytical numerical upper bound, FMA=2, weight 1.0, before the
+        configured float64 dtype multiplier.
 
         Examples
         --------
@@ -167,31 +162,16 @@ class TruncnormDistribution(ContinuousDistribution):
         >>> np.round(flops.stats.truncnorm.ppf(q, a=-1.0, b=1.0), 3)
         array([-0.442,  0.   ,  0.442])
         """
-        return self._deduct_and_call("ppf", 81, q, a, b, loc=loc, scale=scale)
+        return self._deduct_and_call("ppf", _PPF_COST, q, a, b, loc=loc, scale=scale)
 
     def _compute_pdf(self, x, a, b, loc=0, scale=1):
-        z = (x - loc) / scale
-        phi_a = _std_norm_cdf(a)
-        phi_b = _std_norm_cdf(b)
-        denom = scale * (phi_b - phi_a)
-        result = _std_norm_pdf(z) / denom
-        return _np.where((z >= a) & (z <= b), result, 0.0)
+        return _truncnorm_kernels.pdf(x, a, b, loc=loc, scale=scale)
 
     def _compute_cdf(self, x, a, b, loc=0, scale=1):
-        z = (x - loc) / scale
-        phi_a = _std_norm_cdf(a)
-        phi_b = _std_norm_cdf(b)
-        result = (_std_norm_cdf(z) - phi_a) / (phi_b - phi_a)
-        result = _np.where(z < a, 0.0, result)
-        result = _np.where(z > b, 1.0, result)
-        return result
+        return _truncnorm_kernels.cdf(x, a, b, loc=loc, scale=scale)
 
     def _compute_ppf(self, q, a, b, loc=0, scale=1):
-        phi_a = _std_norm_cdf(a)
-        phi_b = _std_norm_cdf(b)
-        inner = phi_a + q * (phi_b - phi_a)
-        z = _ndtri(inner)
-        return loc + scale * z
+        return _truncnorm_kernels.ppf(q, a, b, loc=loc, scale=scale)
 
 
 truncnorm = TruncnormDistribution()

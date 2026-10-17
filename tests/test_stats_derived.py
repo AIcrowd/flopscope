@@ -119,5 +119,5 @@ class TestTruncnormPpf:
         x = np.random.randn(40)
         with BudgetContext(flop_budget=10**6) as b:
             truncnorm.cdf(x, -2, 2)
-            # old: == 40 (cost_per_elem=1, weight=16.0); now: 51*40 (composite, weight 1.0)
-            assert b.flops_used == 51 * 40
+            # Stable tail kernel's analytical bound, stats weight 1.0.
+            assert b.flops_used == 844 * 40
