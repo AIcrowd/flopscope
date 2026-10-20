@@ -238,7 +238,7 @@ def _mvhg_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> in
     return out
 
 
-def multivariate_normal_flops(N: int, d: int) -> int:
+def multivariate_normal_flops(N: int, d: int, method: str = "svd") -> int:
     """Composite mvn cost: covariance factorization (SVD of the d×d covariance,
     matching numpy's default method='svd' which calls np.linalg.svd(cov) with
     full U/V) + affine transform (2*N*d^2) + N*d standard-normal draws at the
@@ -249,10 +249,21 @@ def multivariate_normal_flops(N: int, d: int) -> int:
     numpy.random.multivariate_normal (Generator default method='svd',
     RandomState always SVD, module-level np.random.multivariate_normal) calls
     np.linalg.svd(cov) on the symmetric d×d covariance matrix.
+
+    ``Generator.multivariate_normal(..., method=)`` factors the covariance with
+    the method it names instead, and the factorization term follows it:
+    ``'eigh'`` bills eigh_cost(d) = 9*d^3 and ``'cholesky'`` cholesky_cost(d)
+    = d^3/3, the same as those factorizations standalone.
     """
-    return _builtins.max(
-        _svd_cost(d, d, with_vectors=True) + 2 * N * d * d + 16 * N * d, 1
-    )
+    from flopscope.numpy.linalg._decompositions import cholesky_cost, eigh_cost
+
+    if method == "cholesky":
+        factorization = cholesky_cost(d)
+    elif method == "eigh":
+        factorization = eigh_cost(d)
+    else:
+        factorization = _svd_cost(d, d, with_vectors=True)
+    return _builtins.max(factorization + 2 * N * d * d + 16 * N * d, 1)
 
 
 def _multivariate_normal_cost(
@@ -262,7 +273,8 @@ def _multivariate_normal_cost(
     shape = getattr(result, "shape", ())
     d = int(shape[-1]) if shape else 1
     n = int(result.size // d) if d else 1
-    return multivariate_normal_flops(n, d)
+    # Generator's keyword-only method= (RandomState has none: always SVD).
+    return multivariate_normal_flops(n, d, kwargs.get("method", "svd"))
 
 
 def _uniform_cost(args: tuple[Any, ...], kwargs: dict[str, Any], result: Any) -> int:
