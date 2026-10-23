@@ -1723,7 +1723,6 @@ class BudgetContext:
         self._live_backend_calls: set[_LiveBackendCall] = set()
         self._recorded_flops_used = 0
         self._recorded_op_count = 0
-        self._unrecorded_replaced_op_indices: set[int] = set()
         self._recorded_wall_time_s = 0.0
         self._recorded_flopscope_backend_time = 0.0
         self._recorded_overhead_time: float = 0.0
@@ -1869,8 +1868,6 @@ class BudgetContext:
         self._op_log[index] = record
         self._summary_rollup.apply_record(old, record)
         self._unrecorded_rollup.apply_record(old, record)
-        if index < self._recorded_op_count:
-            self._unrecorded_replaced_op_indices.add(index)
         self._advance_summary_generation(rollup_changed=True)
 
     @_summary_locked
@@ -2115,20 +2112,6 @@ class BudgetContext:
                 f"Namespace stack corrupted: expected {expected!r}, got {actual!r}"
             )
 
-    @_summary_locked
-    def _snapshot_diagnostic_delta(
-        self,
-    ) -> tuple[int, list[OpRecord], dict[int, OpRecord]]:
-        start = self._recorded_op_count
-        return (
-            start,
-            list(self._op_log[start:]),
-            {
-                index: self._op_log[index]
-                for index in self._unrecorded_replaced_op_indices
-            },
-        )
-
     def _snapshot_record(self) -> NamespaceRecord:
         wall_time = self._accounting_wall_time_s()
         if wall_time is not None:
@@ -2218,7 +2201,6 @@ class BudgetContext:
         self._recorded_overhead_time = overhead_time_boundary
         self._recorded_summary_generation = self._summary_generation
         self._unrecorded_rollup.clear()
-        self._unrecorded_replaced_op_indices.clear()
         self._budget_recorded = True
 
     @_summary_locked
@@ -2244,7 +2226,6 @@ class BudgetContext:
             self._total_flopscope_overhead_time + pending_pre_enter_overhead
         )
         self._unrecorded_rollup.clear()
-        self._unrecorded_replaced_op_indices.clear()
         self._budget_recorded = False
         for timer in tuple(self._live_op_timers):
             timer._rebase_after_reset(reset_time)
@@ -2467,9 +2448,6 @@ class BudgetAccumulator:
         self._rollup_generation = 0
         self._stable_rollup_cache: dict[tuple, tuple[dict, dict | None]] = {}
         self._closed_snapshot_cache: dict[bool, tuple[int, dict]] = {}
-        self._diagnostic_op_locations: weakref.WeakKeyDictionary[
-            BudgetContext, dict[int, tuple[list[OpRecord], int]]
-        ] = weakref.WeakKeyDictionary()
         self._lock = threading.RLock()
 
     def _invalidate_caches(self, *, rollup_changed: bool) -> None:
@@ -2504,50 +2482,22 @@ class BudgetAccumulator:
             prepared = ctx._snapshot_summary_delta()
             rollup_changed = bool(prepared.rollup.operations)
             self._merge_non_timing(prepared)
-            diagnostic_start, diagnostic_ops, diagnostic_replacements = (
-                ctx._snapshot_diagnostic_delta()
-            )
-
             final = prepared
-
             self._merge_timing(final)
-            diagnostic_locations = self._diagnostic_op_locations.get(ctx)
-            for index, operation in diagnostic_replacements.items():
-                location = (
-                    diagnostic_locations.get(index)
-                    if diagnostic_locations is not None
-                    else None
-                )
-                if location is not None:
-                    assert diagnostic_locations is not None
-                    log, position = location
-                    log[position] = operation
-                    if operation.flopscope_backend_duration_s is not None:
-                        del diagnostic_locations[index]
-            if diagnostic_locations == {}:
-                del self._diagnostic_op_locations[ctx]
-                diagnostic_locations = None
             self._records.append(
                 NamespaceRecord(
                     namespace=final.namespace,
                     flop_budget=final.flop_budget,
                     flops_used=final.flops_used,
-                    op_log=diagnostic_ops,
+                    # The rollup contains all summary data. Keep raw records
+                    # only on the caller-owned context, not in global history.
+                    op_log=[],
                     wall_time_s=final.wall_time_s,
                     total_flopscope_backend_time=final.backend_time_s,
                     total_flopscope_overhead_time=final.overhead_time_s,
                     summary_rollup=final.rollup,
                 )
             )
-            for position, operation in enumerate(diagnostic_ops):
-                if operation.flopscope_backend_duration_s is None:
-                    if diagnostic_locations is None:
-                        diagnostic_locations = {}
-                        self._diagnostic_op_locations[ctx] = diagnostic_locations
-                    diagnostic_locations[diagnostic_start + position] = (
-                        diagnostic_ops,
-                        position,
-                    )
             ctx._mark_recorded(
                 wall_time_delta_s=final.wall_time_s or 0.0,
                 backend_time_delta_s=final.backend_time_s,
@@ -2556,9 +2506,9 @@ class BudgetAccumulator:
             self._invalidate_caches(rollup_changed=rollup_changed)
 
             if body_end is not None:
-                # Close timing is sampled only after the accumulator has applied
-                # diagnostic replacements, appended the record, committed the
-                # context boundary, and invalidated its caches.  Those steps are
+                # Close timing is sampled only after the accumulator has
+                # appended the record, committed the context boundary, and
+                # invalidated its caches. Those steps are
                 # part of BudgetContext.__exit__ and therefore Flopscope overhead.
                 ctx._finalize_close_timing(body_end=body_end)
                 close_timing = ctx._snapshot_summary_delta()
@@ -2706,7 +2656,6 @@ class BudgetAccumulator:
             self._backend_s = 0.0
             self._overhead_s = 0.0
             self._display_totals = _DisplayTotals()
-            self._diagnostic_op_locations.clear()
             self._invalidate_caches(rollup_changed=True)
 
 

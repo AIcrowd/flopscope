@@ -503,3 +503,30 @@ def test_record_commits_wall_boundary_from_delta_snapshot(monkeypatch) -> None:
         accumulator.record(ctx)
 
         assert accumulator.snapshot()["wall_time_s"] == 6.0
+
+
+def test_closed_context_history_does_not_retain_raw_operations() -> None:
+    import gc
+    import weakref
+
+    import flopscope.numpy as fnp
+    from flopscope._budget import _accumulator
+
+    budget_reset()
+    for _ in range(12):
+        with BudgetContext(10_000, namespace="predict", quiet=True) as ctx:
+            value = fnp.ones(8)
+            for _ in range(100):
+                value = fnp.add(value, 1.0)
+        # Caller-owned diagnostics remain valid after context exit.
+        assert len(ctx.op_log) == 101
+        reference = weakref.ref(ctx)
+        del value, ctx
+        gc.collect()
+        assert reference() is None
+        assert not any(record.op_log for record in _accumulator._records)
+
+    summary = budget_summary_dict(by_namespace=True)
+    assert summary["operations"]["add"]["calls"] == 1200
+    assert summary["by_namespace"]["predict"]["calls"] == 1212
+    assert _accumulator.get_data(by_namespace=True) == summary

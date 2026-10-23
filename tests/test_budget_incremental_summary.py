@@ -7,12 +7,44 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from flopscope._budget import (
+    BudgetAccumulator,
     OpRecord,
     _summarize_by_namespace,
     _summarize_operations,
     _SummaryRollup,
     _timing_summary,
 )
+
+
+class _ScanAccumulator(BudgetAccumulator):
+    """Test-only history for the independent scan oracle.
+
+    Keep context slices here so production history need not retain raw ops.
+    Reading the slice at scan time also observes completed in-flight timers.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.slices = []
+
+    def record(self, ctx, *, body_end=None):
+        start = ctx._recorded_op_count
+        count = len(self._records)
+        super().record(ctx, body_end=body_end)
+        if len(self._records) != count:
+            self.slices.append((ctx, start, ctx._recorded_op_count))
+
+    def scan_records(self):
+        return [
+            record._replace(op_log=list(ctx.op_log[start:end]))
+            for record, (ctx, start, end) in zip(
+                self._records, self.slices, strict=True
+            )
+        ]
+
+    def reset(self):
+        super().reset()
+        self.slices.clear()
 
 
 class _PoisonedHistory(list):
@@ -207,7 +239,9 @@ def _scan_global(
 ) -> dict:
     import flopscope._budget as budget_module
 
-    records = list(budget_module._accumulator._records)
+    accumulator = budget_module._accumulator
+    assert isinstance(accumulator, _ScanAccumulator)
+    records = accumulator.scan_records()
     active = budget_module.get_active_budget()
     global_default = budget_module._global_default
     if global_default is not None and global_default._has_unrecorded_activity():
@@ -287,6 +321,8 @@ def test_generated_context_and_session_transitions_match_scan(
     import flopscope as flops
     import flopscope._budget as budget_module
 
+    original_accumulator = budget_module._accumulator
+    budget_module._accumulator = _ScanAccumulator()
     budget_module._reset_global_default()
     flops.budget_reset()
     context_accessor_overhead = 0.01
@@ -601,6 +637,7 @@ def test_generated_context_and_session_transitions_match_scan(
                     flops.budget_reset()
             finally:
                 budget_module._thread_local.active_budget = None
+                budget_module._accumulator = original_accumulator
 
 
 def test_global_accessor_overhead_is_deferred_until_next_public_snapshot(
@@ -1447,9 +1484,7 @@ def test_inflight_op_completion_merges_zero_call_timing_delta(monkeypatch) -> No
         )
         == result["flopscope_overhead_time_s"]
     )
-    diagnostic_ops = [
-        operation for record in accumulator._records for operation in record.op_log
-    ]
+    diagnostic_ops = ctx.op_log
     assert _summarize_operations(diagnostic_ops) == result["operations"]
     assert _summarize_by_namespace(diagnostic_ops) == result["by_namespace"]
     assert accumulator._generation == first_generation + 2
@@ -1461,7 +1496,7 @@ def test_inflight_op_completion_merges_zero_call_timing_delta(monkeypatch) -> No
     assert stable == (result["operations"], result["by_namespace"])
 
 
-def test_reset_drops_inflight_diagnostic_provenance_but_keeps_later_timing(
+def test_reset_drops_history_but_keeps_later_inflight_timing(
     monkeypatch,
 ) -> None:
     import flopscope._budget as budget_module
@@ -1498,9 +1533,8 @@ def test_reset_drops_inflight_diagnostic_provenance_but_keeps_later_timing(
     assert namespace["calls"] == 0
     assert namespace["flops_used"] == 0
     assert namespace["operations"]["add"] == operation
-    assert [
-        operation.flopscope_backend_duration_s for operation in detached_record.op_log
-    ] == [None]
+    assert detached_record.op_log == []
+    assert ctx.op_log[0].flopscope_backend_duration_s == 2.0
     assert all(not record.op_log for record in accumulator._records)
     assert accumulator.get_data(by_namespace=True) == result
     assert budget_module.budget_summary_dict(by_namespace=True) == result
@@ -1722,7 +1756,9 @@ def test_reset_waits_for_live_timer_exit_accounting(monkeypatch) -> None:
     ctx.__exit__(None, None, None)
 
 
-def test_diagnostic_provenance_tracks_only_unfinished_operations(monkeypatch) -> None:
+def test_recording_unfinished_operations_keeps_only_summary_history(
+    monkeypatch,
+) -> None:
     import flopscope._budget as budget_module
     from flopscope._budget import BudgetAccumulator, BudgetContext
 
@@ -1737,17 +1773,18 @@ def test_diagnostic_provenance_tracks_only_unfinished_operations(monkeypatch) ->
             with ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=()):
                 pass
         accumulator.record(ctx)
-        assert ctx not in accumulator._diagnostic_op_locations
+        assert all(not record.op_log for record in accumulator._records)
 
         timer = ctx.deduct("add", flop_cost=1, subscripts=None, shapes=(), dtypes=())
-        unfinished_index = len(ctx.op_log) - 1
         accumulator.record(ctx)
-        assert set(accumulator._diagnostic_op_locations[ctx]) == {unfinished_index}
+        assert all(not record.op_log for record in accumulator._records)
 
         with timer:
             pass
         accumulator.record(ctx)
-        assert ctx not in accumulator._diagnostic_op_locations
+        assert all(not record.op_log for record in accumulator._records)
+        assert accumulator.snapshot()["operations"]["add"]["calls"] == 11
+        assert ctx.op_log[-1].flopscope_backend_duration_s == 0.0
 
 
 def test_timing_only_delta_is_unrecorded_activity() -> None:
