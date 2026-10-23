@@ -1,13 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.12.4 (2026-10-23)
 
 ### Memory
 
 - Stop retaining raw operation logs in completed budget accumulator records
-  (#321). Long-lived workers keep compact summaries while caller-owned
-  `BudgetContext.op_log` diagnostics remain available. FLOP accounting and
-  summary exports are unchanged.
+  ([#328](https://github.com/AIcrowd/flopscope/pull/328), fixes #321). Long-lived
+  workers keep compact summaries while caller-owned `BudgetContext.op_log`
+  diagnostics remain available. FLOP accounting, timing and namespace summaries,
+  and final report exports are unchanged. Compact per-context history still grows
+  with the number of contexts; raw logs no longer grow with the total op count.
 
 ## v0.12.3 (2026-10-16)
 
