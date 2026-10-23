@@ -334,3 +334,28 @@ def test_bare_session_still_works_with_private_store():
     h = s.store_array(np.array([1]))
     np.testing.assert_array_equal(s.get_array(h), np.array([1]))
     s.close()
+
+
+def test_repeated_session_exports_survive_without_retained_raw_logs():
+    import json
+
+    import msgpack
+
+    from flopscope._budget import _accumulator
+
+    flops.budget_reset()
+    for _ in range(12):
+        session = Session(flop_budget=10_000, namespace="predict")
+        ctx = session.budget_context
+        for _ in range(100):
+            with ctx.deduct("add", flop_cost=5, subscripts=None, shapes=(), dtypes=()):
+                pass
+        exported = session.close()
+        assert exported["budget_breakdown"]["flops_used"] == 500
+        assert exported["budget_breakdown"]["operations"]["add"]["calls"] == 100
+        assert len(ctx.op_log) == 100
+        assert json.loads(json.dumps(exported)) == exported
+        assert msgpack.unpackb(msgpack.packb(exported), raw=False) == exported
+        assert all(not record.op_log for record in _accumulator._records)
+    assert flops.budget_summary_dict()["flops_used"] == 6000
+    assert flops.budget_summary_dict()["operations"]["add"]["calls"] == 1200

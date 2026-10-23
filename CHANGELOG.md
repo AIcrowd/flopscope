@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Memory
+
+- Stop retaining raw operation logs in completed budget accumulator records
+  (#321). Long-lived workers keep compact summaries while caller-owned
+  `BudgetContext.op_log` diagnostics remain available. FLOP accounting and
+  summary exports are unchanged.
+
 ## v0.12.3 (2026-10-16)
 
 ### Billing impact
