@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as _np
+from numpy.lib.array_utils import normalize_axis_index as _normalize_axis_index
 from numpy.typing import ArrayLike
 
 import flopscope.numpy as _me
@@ -42,8 +43,18 @@ def cross(x1: ArrayLike, x2: ArrayLike, /, *, axis: int = -1) -> FlopscopeArray:
     )
     x1_arr = _np.asarray(x1)
     x2_arr = _np.asarray(x2)
-    out_shape = _np.broadcast_shapes(x1_arr.shape, x2_arr.shape)
-    out_size = 1
+    # Only the batch dimensions broadcast. The vector axis is normalized
+    # separately for each operand, including operands of different ranks.
+    # Broadcasting the raw shapes can reject valid moved-axis inputs or
+    # enlarge a singleton batch and overprice the result.
+    ax1 = _normalize_axis_index(axis, x1_arr.ndim)
+    ax2 = _normalize_axis_index(axis, x2_arr.ndim)
+    if x1_arr.shape[ax1] != 3 or x2_arr.shape[ax2] != 3:
+        raise ValueError("Both input arrays must be (arrays of) 3-dimensional vectors")
+    batch1 = x1_arr.shape[:ax1] + x1_arr.shape[ax1 + 1 :]
+    batch2 = x2_arr.shape[:ax2] + x2_arr.shape[ax2 + 1 :]
+    out_shape = _np.broadcast_shapes(batch1, batch2)
+    out_size = 3
     for d in out_shape:
         out_size *= d
     with budget.deduct(
