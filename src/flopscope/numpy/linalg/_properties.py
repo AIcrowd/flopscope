@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from operator import index as _index
 from typing import Any
 
 import numpy as _np
@@ -20,6 +21,17 @@ from flopscope._ndarray import FlopscopeArray, _asflopscope, _to_base_ndarray
 from flopscope._symmetric import SymmetricTensor
 from flopscope._validation import require_budget
 from flopscope.numpy.linalg._solvers import _batch_size, _has_zero_dim
+
+
+def _index_scalar_axis(axis: Any) -> Any:
+    """Recognize integer-index scalars while preserving sequence axis handling."""
+    if axis is None or isinstance(axis, tuple):
+        return axis
+    try:
+        return _index(axis)
+    except TypeError:
+        # Leave other inputs to the existing shape handling and NumPy validation.
+        return axis
 
 
 def trace_cost(n: int) -> int:
@@ -270,6 +282,7 @@ def norm(
     inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
+    axis = _index_scalar_axis(axis)
     # Compute effective shape for FLOP cost, guarding against invalid axis.
     # If axis is out of bounds or ord is invalid, numpy will raise the correct
     # error (AxisError / ValueError); we skip budget deduction in that case.
@@ -371,6 +384,7 @@ def vector_norm(
     inputs_were_tracked = isinstance(x, FlopscopeArray)
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
+    axis = _index_scalar_axis(axis)
     if axis is not None:
         if isinstance(axis, int):
             effective_shape = (x.shape[axis],)
