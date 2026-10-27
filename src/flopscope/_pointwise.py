@@ -1116,6 +1116,52 @@ def _pointwise_symmetry(operands, output_shape):
     return output_symmetry, aligned_groups
 
 
+def _ufunc_write_shape(shape, out, where) -> tuple[int, ...]:
+    """Shape a ufunc call evaluates over: the operands' broadcast ``shape``,
+    widened by an ``out=`` buffer or ``where=`` mask that is larger.
+
+    numpy broadcasts the operands against the destination (and the mask) and
+    runs the loop over every output element, so a destination larger than
+    the operands is computed in full, not once per operand element. Shapes
+    numpy cannot broadcast keep ``shape``: numpy refuses the call in its own
+    words.
+    """
+    shape = tuple(shape)
+    extra = [
+        slot.shape
+        for slot in (out if isinstance(out, tuple) else (out,))
+        if isinstance(slot, _np.ndarray)
+    ]
+    if where is not None and where is not True:
+        extra.append(
+            where.shape if isinstance(where, _np.ndarray) else _np.shape(where)
+        )
+    if not extra:
+        return shape
+    try:
+        return tuple(_np.broadcast_shapes(shape, *extra))
+    except ValueError:
+        return shape
+
+
+def _pointwise_write_cost(shape, symmetry, out, where) -> int:
+    """``pointwise_cost`` over the shape the call writes (``_ufunc_write_shape``).
+
+    When ``out=`` or ``where=`` widens the call, the operands' symmetry is
+    carried into the larger frame with ``broadcast_group``, which prices the
+    call exactly like the same ufunc on the operands broadcast to that shape.
+    """
+    shape = tuple(shape)
+    write_shape = _ufunc_write_shape(shape, out, where)
+    if write_shape == shape:
+        return pointwise_cost(shape, symmetry=symmetry)
+    if symmetry is not None:
+        symmetry = broadcast_group(
+            symmetry, input_shape=shape, output_shape=write_shape
+        )
+    return pointwise_cost(write_shape, symmetry=symmetry)
+
+
 @_counted_wrapper
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
@@ -1148,7 +1194,14 @@ def _counted_unary(np_func, op_name: str):
                 x = _np.asarray(x)
             x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
-        cost = pointwise_cost(x.shape, symmetry=symmetry)
+        # Only a destination numpy itself evaluates into widens the call: an
+        # op without a native out= computes over ``x`` and is copied after.
+        cost = _pointwise_write_cost(
+            x.shape,
+            symmetry,
+            out if supports_out else None,
+            kwargs.get("where") if is_ufunc else None,
+        )
         if is_ufunc:
             loop_dtypes, operand_dtypes = _unary_ufunc_billing_dtypes(
                 np_func,
@@ -1384,7 +1437,7 @@ def _counted_unary_multi(np_func, op_name: str):
         # orthogonal to the out= dtype-rate axis (see
         # multi_store_billing_dtypes) -- supplying out= does not multiply
         # this again.
-        cost = nout * pointwise_cost(x.shape, symmetry=symmetry)
+        cost = nout * _pointwise_write_cost(x.shape, symmetry, out, kwargs.get("where"))
         loop_dtypes, computation_dtypes = _unary_ufunc_billing_dtypes(
             np_func,
             op_name,
@@ -1503,7 +1556,12 @@ def _counted_binary(np_func, op_name: str):
             )
         out_symmetry = _prepare_symmetric_out(out, out_symmetry)
 
-        cost = pointwise_cost(output_shape, symmetry=out_symmetry)
+        cost = _pointwise_write_cost(
+            output_shape,
+            out_symmetry,
+            out if supports_out else None,
+            kwargs.get("where"),
+        )
         # dtype= constrains the output DType, while signature=/sig= can
         # constrain any loop slot. Resolve the COMPLETE constrained signature
         # so a forced complex loop stays visible to both the rate and factor
@@ -1715,7 +1773,9 @@ def _counted_binary_multi(np_func, op_name: str):
         # ~1x floor_divide, not ~2x), but flopscope prices the reference
         # algorithm, not this backend's implementation. Independent of the
         # out= dtype-rate axis.
-        cost = nout * pointwise_cost(output_shape, symmetry=out_symmetry)
+        cost = nout * _pointwise_write_cost(
+            output_shape, out_symmetry, out, kwargs.get("where")
+        )
         # An explicit dtype= forces the ufunc loop: numpy casts operands on
         # read and computes at that width, so it replaces the operand
         # promotion for billing. out= alone does not narrow the loop. A bool
@@ -4086,7 +4146,7 @@ if hasattr(_np, "vecdot"):
         contracted extent. The shared einsum engine handles symmetry and
         complex accounting.
         """
-        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+        a, b, subs, a_axis, b_axis, kept_axis, out_core_axes = _core_contraction_axes(
             _np.vecdot, a, b, "...n,...n->...", kwargs
         )
         return _einsum_routed_binary(
@@ -4098,6 +4158,7 @@ if hasattr(_np, "vecdot"):
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
             kept_axis=kept_axis,
+            out_core_axes=out_core_axes,
             **kwargs,
         )
 
@@ -4118,7 +4179,7 @@ if hasattr(_np, "matvec"):
         accumulation price on the selected axes, including batch/broadcast
         dimensions and symmetry.
         """
-        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+        a, b, subs, a_axis, b_axis, kept_axis, out_core_axes = _core_contraction_axes(
             _np.matvec, a, b, "...mn,...n->...m", kwargs
         )
         return _einsum_routed_binary(
@@ -4130,6 +4191,7 @@ if hasattr(_np, "matvec"):
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
             kept_axis=kept_axis,
+            out_core_axes=out_core_axes,
             **kwargs,
         )
 
@@ -4150,7 +4212,7 @@ if hasattr(_np, "vecmat"):
         accumulation price on the selected axes, including batch/broadcast
         dimensions and symmetry.
         """
-        a, b, subs, a_axis, b_axis, kept_axis = _core_contraction_axes(
+        a, b, subs, a_axis, b_axis, kept_axis, out_core_axes = _core_contraction_axes(
             _np.vecmat, a, b, "...n,...nm->...m", kwargs
         )
         return _einsum_routed_binary(
@@ -4162,6 +4224,7 @@ if hasattr(_np, "vecmat"):
             a_contract_axis=a_axis,
             b_contract_axis=b_axis,
             kept_axis=kept_axis,
+            out_core_axes=out_core_axes,
             **kwargs,
         )
 
@@ -4248,7 +4311,9 @@ def clip(
     output_shape = _np.broadcast_shapes(*(arr.shape for arr, _ in operand_arrays))
     symmetry, _ = _pointwise_symmetry(operand_arrays, output_shape)
     _prepare_symmetric_out(out, symmetry)
-    cost = _builtins.max(n_bounds, 1) * pointwise_cost(output_shape, symmetry=symmetry)
+    cost = _builtins.max(n_bounds, 1) * _pointwise_write_cost(
+        output_shape, symmetry, out, kwargs.get("where")
+    )
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
     with budget.deduct(
@@ -5502,17 +5567,20 @@ def _validate_contracted_extents(
 
 def _core_contraction_axes(
     np_fn: Any, a: Any, b: Any, subs: str, call_kwargs: dict[str, Any]
-) -> tuple[Any, Any, str, int | None, int | None, int | None]:
+) -> tuple[Any, Any, str, int | None, int | None, int | None, tuple[int, ...] | None]:
     """Coerce a gufunc contraction's operands and lay out what it contracts.
 
     ``matmul``'s broadcasting siblings -- ``vecdot`` (``(n),(n)->()``),
     ``matvec`` (``(m,n),(n)->(m)``) and ``vecmat`` (``(n),(n,m)->(m)``) --
     are priced with a ``...``-broadcasting subscript ``subs`` that keeps each
     operand's core dimensions last, in signature order. Returns the operands,
-    the subscript to price with, the contracted axis pair, and the output
+    the subscript to price with, the contracted axis pair, the output
     position of a ``keepdims=True`` size-1 axis that the subscript has no
     label for (``None`` when there is none to re-insert; see
-    ``_einsum_routed_binary``).
+    ``_einsum_routed_binary``), and numpy's axis numbers for the output's
+    core axes when they are placed by ``axis=``/``axes=`` or kept by
+    ``keepdims=True`` (``None`` when they are simply its trailing axes; see
+    ``_out_batch_repeats``).
 
     The pairing being implicit in the subscript is not the same as it being
     checked by it: einsum broadcasts an extent of 1, numpy's gufunc core does
@@ -5544,7 +5612,10 @@ def _core_contraction_axes(
     b_from_end = len(b_core) - b_core.index(label)
     a_axis = a.ndim - a_from_end if a.ndim >= a_from_end else None
     b_axis = b.ndim - b_from_end if b.ndim >= b_from_end else None
-    return a, b, subs, a_axis, b_axis, None
+    # numpy accepts keepdims only for an output without core axes, and puts
+    # the kept size-1 axis last, where ``subs`` has no label for it.
+    out_core_axes = (-1,) if call_kwargs.get("keepdims") and not core[2] else None
+    return a, b, subs, a_axis, b_axis, None, out_core_axes
 
 
 def _relocated_core_subscripts(
@@ -5553,7 +5624,7 @@ def _relocated_core_subscripts(
     b: _np.ndarray,
     core: tuple[str, str, str],
     call_kwargs: dict[str, Any],
-) -> tuple[str, int, int, int | None]:
+) -> tuple[str, int, int, int | None, tuple[int, ...]]:
     """Explicit einsum subscripts for a gufunc call that relocates its core axes.
 
     numpy's ``axis=``/``axes=`` name, per operand, the axes that play the
@@ -5576,9 +5647,11 @@ def _relocated_core_subscripts(
 
     Returns the subscript (one label per axis, so the einsum engine reads
     each operand's symmetry on the axes it really occupies), the contracted
-    axis of each operand, and the output position of the kept axis under
-    ``keepdims=True`` (``None`` otherwise). Nothing is summed into the kept
-    axis, so it has no label: it is left out of the output subscript and
+    axis of each operand, the output position of the kept axis under
+    ``keepdims=True`` (``None`` otherwise), and the output's entry of the
+    spec as numpy numbers it, which numpy reads against the rank of an
+    ``out=`` as well (see ``_out_batch_repeats``). Nothing is summed into the
+    kept axis, so it has no label: it is left out of the output subscript and
     re-inserted into the output symmetry by ``_einsum_routed_binary``.
     Labels come from ``opt_einsum``'s symbol table, the one that already
     expands the ``...`` of the default subscripts, so no rank numpy accepts
@@ -5641,7 +5714,8 @@ def _relocated_core_subscripts(
         + "".join(symbol_at[p] for p in out_slots)
     )
     kept_axis = out_pos[0] if keepdims else None
-    return subs, a_pos[a_core.index(label)], b_pos[b_core.index(label)], kept_axis
+    a_axis, b_axis = a_pos[a_core.index(label)], b_pos[b_core.index(label)]
+    return subs, a_axis, b_axis, kept_axis, spec[2]
 
 
 def _fallback_contraction_output_symmetry(
@@ -5713,6 +5787,67 @@ def _fallback_contraction_output_symmetry(
         return None
 
 
+def _einsum_output_shape(input_parts, shapes, output_subscript) -> tuple[int, ...]:
+    """Shape of an einsum result: each output label's broadcast extent."""
+    extents: dict[str, list[int]] = {}
+    for part, shape in zip(input_parts, shapes, strict=True):
+        for label, extent in zip(part, shape, strict=True):
+            extents.setdefault(label, []).append(extent)
+    return tuple(
+        _np.broadcast_shapes(*((extent,) for extent in extents[label]))[0]
+        for label in output_subscript
+    )
+
+
+def _split_core_axes(shape, core_axes):
+    """``shape``'s loop extents and core extents, ``core_axes`` being numpy's
+    axis numbers read against this rank; ``None`` if the rank lacks them."""
+    ndim = len(shape)
+    if not _builtins.all(-ndim <= _operator.index(ax) < ndim for ax in core_axes):
+        return None
+    core = [_operator.index(ax) % ndim for ax in core_axes]
+    loop = tuple(extent for i, extent in enumerate(shape) if i not in core)
+    return loop, tuple(shape[i] for i in core)
+
+
+def _out_batch_repeats(natural_shape, out_shape, core_axes=None) -> int:
+    """Times a gufunc evaluates its natural result to fill ``out``.
+
+    1 unless ``out`` broadcasts the natural result to a larger shape; a shape
+    numpy would refuse also counts once, so a refused call is not overbilled.
+
+    ``core_axes`` are numpy's axis numbers for the output's core axes when
+    ``axis=``/``axes=`` places them or ``keepdims=True`` keeps one (``None``:
+    its trailing axes, which line up from the end). numpy reads them against
+    each array's own rank, so an ``out`` with more dimensions can hold them
+    at other positions than the natural result: they are set aside in both
+    shapes, must agree, and only the loop extents left are broadcast.
+    """
+    natural_shape, out_shape = tuple(natural_shape), tuple(out_shape)
+    if core_axes:
+        natural_split = _split_core_axes(natural_shape, core_axes)
+        out_split = _split_core_axes(out_shape, core_axes)
+        if natural_split is None or out_split is None:
+            return 1
+        if natural_split[1] != out_split[1]:
+            return 1
+        natural_shape, out_shape = natural_split[0], out_split[0]
+    natural = 1
+    for extent in natural_shape:
+        natural *= extent
+    if natural == 0 or out_shape == natural_shape:
+        return 1
+    try:
+        if tuple(_np.broadcast_shapes(natural_shape, out_shape)) != out_shape:
+            return 1
+    except ValueError:
+        return 1
+    written = 1
+    for extent in out_shape:
+        written *= extent
+    return written // natural
+
+
 def _einsum_routed_binary(
     op_name: str,
     np_fn: Any,
@@ -5728,6 +5863,7 @@ def _einsum_routed_binary(
     a_contract_axis: int | None = None,
     b_contract_axis: int | None = None,
     kept_axis: int | None = None,
+    out_core_axes: tuple[int, ...] | None = None,
     **call_kwargs: Any,
 ) -> Any:
     """Route a binary contraction op's cost + output-symmetry through the einsum
@@ -5764,6 +5900,11 @@ def _einsum_routed_binary(
     `keepdims=True` when `subs` has no label for it (the relocated layout
     leaves it out, since nothing is summed into it). The inferred output
     symmetry is shifted past it so the tag lands on the axes it describes.
+
+    `out_core_axes` are numpy's axis numbers for the output's core axes when
+    `axis=`/`axes=` places them or `keepdims=True` keeps one (`None` when
+    they are its trailing axes). A larger `out=` is compared with the natural
+    result on its loop axes only (see `_out_batch_repeats`).
     """
     from flopscope._einsum import _resolve_cost_and_output_symmetry
 
@@ -5794,6 +5935,7 @@ def _einsum_routed_binary(
             )
         cost = accumulation.total
         accumulation_for_billing = accumulation
+        output_layout = (info.input_parts, info.shapes, info.output_subscript)
     else:
         # Out of subscript letters. Price it arithmetically from the same
         # FMA=2 model; repeated-operand savings are forfeited, which errs
@@ -5824,6 +5966,25 @@ def _einsum_routed_binary(
         # rather than bill a ratio derived from the wrong total. Same
         # reasoning as tensordot's `accumulation_for_billing`.
         accumulation_for_billing = accumulation if cost == accumulation.total else None
+        output_layout = None
+    # A gufunc (matmul, vecdot, matvec, vecmat) broadcasts its loop dimensions
+    # against ``out=`` too: a destination with more (or longer) batch
+    # dimensions than the operands makes numpy run the whole contraction once
+    # per batch element it writes. Non-ufunc ops such as ``dot`` refuse such a
+    # destination. The repeat scales mu and alpha alike, so the complex
+    # override (a ratio) is unaffected.
+    if isinstance(np_fn, _np.ufunc) and isinstance(out, _np.ndarray):
+        natural_shape = (
+            _einsum_output_shape(*output_layout)
+            if output_layout is not None
+            else tuple(fallback_output_shape or ())
+        )
+        if out_core_axes and call_kwargs.get("keepdims"):
+            # The kept size-1 axis has no subscript label: put it back where
+            # the natural result holds it (``kept_axis``, last by default).
+            at = len(natural_shape) if kept_axis is None else kept_axis
+            natural_shape = natural_shape[:at] + (1,) + natural_shape[at:]
+        cost *= _out_batch_repeats(natural_shape, out.shape, out_core_axes)
     # The gate the pointwise factories already apply: a tag the caller paid
     # ``as_symmetric`` to validate is a claim about this buffer, so a result
     # that contradicts it is an error; a tag merely inferred from a constant
