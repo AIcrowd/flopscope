@@ -490,14 +490,19 @@ def cond_cost(m: int, n: int, p=None) -> int:
     """FLOP cost of condition number.
 
     p in {None, 2, -2}: values-only SVD + 1 divide.
-    other p (square only): norm(A)*norm(inv(A)) -> inv (2n^3) + two
-    elementwise norm passes (2n^2 each) + 1 multiply.
+    other p (square only): norm(A)*norm(inv(A)) -> inv (2n^3) + the two
+    norms + 1 multiply. For p='nuc' both are nuclear norms, which numpy
+    computes with a values-only SVD each (``_multi_svd_norm``), the price
+    ``linalg.norm(x, 'nuc')`` bills; every other p is an elementwise norm
+    pass (2n^2 each).
     """
     from flopscope._flops import svd_cost
 
     if p is None or p == 2 or p == -2:
         return max(svd_cost(m, n, with_vectors=False) + 1, 1)
     k = min(m, n)
+    if isinstance(p, str) and p == "nuc":
+        return max(2 * k**3 + 2 * svd_cost(m, n, with_vectors=False) + 1, 1)
     return max(2 * k**3 + 4 * m * n + 1, 1)
 
 
@@ -550,7 +555,8 @@ attach_docstring(
     cond,
     _np.linalg.cond,
     "linalg",
-    r"values-only SVD + 1 (p in {None,2,-2}) or 2n^3 + 4n^2 + 1 (inv-based)",
+    r"values-only SVD + 1 (p in {None,2,-2}); 2n^3 + 2 values-only SVDs + 1 "
+    r"(p='nuc'); 2n^3 + 4n^2 + 1 (other p, inv-based)",
 )
 
 
