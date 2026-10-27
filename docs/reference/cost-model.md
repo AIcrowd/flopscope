@@ -259,6 +259,13 @@ kernels, norms with SVD), all per-element factors are folded into `flop_cost`
 and the active weight is set to 1.0.  This avoids double-counting with the
 tier factor.
 
+Multi-pass rounding is folded the same way. NumPy's `fix` runs `ceil`,
+`greater_equal` and `floor(where=)`, and `round`/`around` with `decimals != 0`
+scale, round with `rint` and unscale (`true_divide(rint(multiply(a, 10**decimals)),
+10**decimals)`, the divide first for negative `decimals`), so each bills
+`3 × numel(output)`; `round(a, 0)` is a single `rint`, and an integer input with
+`decimals > 0`, which NumPy returns unchanged, keeps one pass (#332).
+
 ### NumPy 2.x ufunc aliases
 
 NumPy 2.x introduced `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`, `atan2`, and

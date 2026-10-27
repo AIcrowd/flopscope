@@ -272,6 +272,10 @@ _UNARY_FLOAT_LOOP_OPS |= frozenset(
 # float/complex unchanged" mapping already expresses exactly this rule (it
 # doesn't care about arity), so it is reused here instead of a new helper.
 _UNARY_FLOAT64_MIN_OPS = frozenset({"i0", "sinc"})
+# Unary ops numpy runs as more than one elementwise pass, each pass billed like
+# a one-pass op. ``fix`` is ``ceil`` over every element, then
+# ``floor(x, out=res, where=greater_equal(x, 0))`` (numpy/lib/_ufunclike_impl.py).
+_UNARY_PASSES = {"fix": (3, "ceil, greater_equal, floor(where=)")}
 
 
 # ``ufunc.types`` reports each loop as a string of single-character dtype
@@ -1120,6 +1124,7 @@ def _pointwise_symmetry(operands, output_shape):
 def _counted_unary(np_func, op_name: str):
     supports_out = _supports_out_argument(np_func)
     is_ufunc = isinstance(np_func, _np.ufunc)
+    passes, pass_steps = _UNARY_PASSES.get(op_name, (1, ""))
 
     @_counted_wrapper
     def wrapper(
@@ -1148,7 +1153,7 @@ def _counted_unary(np_func, op_name: str):
                 x = _np.asarray(x)
             x_fwd = x
         symmetry = _prepare_symmetric_out(out, symmetry)
-        cost = pointwise_cost(x.shape, symmetry=symmetry)
+        cost = pointwise_cost(x.shape, symmetry=symmetry) * passes
         if is_ufunc:
             loop_dtypes, operand_dtypes = _unary_ufunc_billing_dtypes(
                 np_func,
@@ -1248,7 +1253,11 @@ def _counted_unary(np_func, op_name: str):
         wrapper,
         np_func,
         "counted_unary",
-        "numel(output) FLOPs"
+        (
+            f"{passes}*numel(output) FLOPs ({pass_steps})"
+            if passes > 1
+            else "numel(output) FLOPs"
+        )
         + (
             "; dtype=/signature=/sig= select the computation loop; out= can widen billing"
             if is_ufunc
@@ -3725,11 +3734,38 @@ arctan = _counted_unary(_np.arctan, "arctan")
 arctanh = _counted_unary(_np.arctanh, "arctanh")
 
 
+def _round_passes(dtype, decimals) -> int:
+    """Elementwise passes numpy's ``round``/``around`` run for ``decimals``.
+
+    numpy's ``PyArray_Round`` rounds with one ``rint`` when ``decimals == 0``.
+    Any other ``decimals`` scales, rounds and unscales,
+    ``true_divide(rint(multiply(a, 10**decimals)), 10**decimals)``, with the
+    divide first and the multiply last when ``decimals < 0``: three passes,
+    for a float or complex input (complex rounds both parts) and for an
+    integer input with ``decimals < 0``. numpy returns an integer input with
+    ``decimals > 0`` unchanged; it keeps its one-pass price, as does a
+    ``decimals`` numpy refuses in its own words.
+    """
+    try:
+        decimals = _operator.index(decimals)
+    except TypeError:
+        return 1
+    if decimals == 0:
+        return 1
+    if dtype.kind in "fc" or (dtype.kind in "iu" and decimals < 0):
+        return 3
+    return 1
+
+
 @_counted_wrapper
 def around(
     a: ArrayLike, decimals: int = 0, out: FlopscopeArray | None = None
 ) -> FlopscopeArray | Any:
-    """Counted version of np.around. Cost = numel(output) FLOPs."""
+    """Counted version of np.around. Cost = numel(output) FLOPs per pass.
+
+    One ``rint`` pass for ``decimals=0``, three (scale, ``rint``, unscale)
+    otherwise; see ``_round_passes``.
+    """
     budget = require_budget()
     out = _normalize_out(out, "around")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
@@ -3737,7 +3773,7 @@ def around(
         a = _np.asarray(a)
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
-    cost = pointwise_cost(a.shape, symmetry=symmetry)
+    cost = pointwise_cost(a.shape, symmetry=symmetry) * _round_passes(a.dtype, decimals)
     billing_dtypes: tuple = (a.dtype,)
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
@@ -3766,7 +3802,14 @@ def around(
     return _wrap_result(result, out=out, symmetry=symmetry)
 
 
-attach_docstring(around, _np.around, "counted_unary", "numel(output) FLOPs")
+attach_docstring(
+    around,
+    _np.around,
+    "counted_unary",
+    "numel(output) FLOPs for decimals=0; 3*numel(output) when numpy scales, "
+    "rounds and unscales (decimals != 0 on float or complex input, "
+    "decimals < 0 on integer input)",
+)
 asin = _counted_unary(_np.asin, "asin")
 asinh = _counted_unary(_np.asinh, "asinh")
 atan = _counted_unary(_np.atan, "atan")
@@ -3840,7 +3883,11 @@ rint = _counted_unary(_np.rint, "rint")
 def round(
     a: ArrayLike, decimals: int = 0, out: FlopscopeArray | None = None
 ) -> FlopscopeArray | Any:
-    """Counted version of np.round. Cost = numel(output) FLOPs."""
+    """Counted version of np.round. Cost = numel(output) FLOPs per pass.
+
+    One ``rint`` pass for ``decimals=0``, three (scale, ``rint``, unscale)
+    otherwise; see ``_round_passes``.
+    """
     budget = require_budget()
     out = _normalize_out(out, "round")
     a_is_scalar = not isinstance(a, _np.ndarray) and _np.ndim(a) == 0
@@ -3848,7 +3895,7 @@ def round(
         a = _np.asarray(a)
     symmetry = _symmetry_of(a)
     _prepare_symmetric_out(out, symmetry)
-    cost = pointwise_cost(a.shape, symmetry=symmetry)
+    cost = pointwise_cost(a.shape, symmetry=symmetry) * _round_passes(a.dtype, decimals)
     billing_dtypes: tuple = (a.dtype,)
     if isinstance(out, _np.ndarray):
         billing_dtypes += store_billing_dtypes(out)
@@ -3877,7 +3924,14 @@ def round(
     return _wrap_result(result, out=out, symmetry=symmetry)
 
 
-attach_docstring(round, _np.round, "counted_unary", "numel(output) FLOPs")
+attach_docstring(
+    round,
+    _np.round,
+    "counted_unary",
+    "numel(output) FLOPs for decimals=0; 3*numel(output) when numpy scales, "
+    "rounds and unscales (decimals != 0 on float or complex input, "
+    "decimals < 0 on integer input)",
+)
 signbit = _counted_unary(_np.signbit, "signbit")
 sinc = _counted_unary(_np.sinc, "sinc")
 sinh = _counted_unary(_np.sinh, "sinh")
