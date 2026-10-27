@@ -7215,8 +7215,41 @@ def _reject_zero_d_y(y_arr, op_name: str) -> None:
         )
 
 
-def _cov_cost(x, y=None, rowvar=True):
-    """Cost for cov: 2 * f^2 * s + 2 * f * s FLOPs.
+def _cov_weights_cost(f, s, *, fweights, aweights, ddof) -> int:
+    """Extra FLOPs of the weighted path numpy's ``cov`` runs for weights.
+
+    For ``f`` variables and ``s`` samples, on top of the unweighted
+    ``2 * f^2 * s + 2 * f * s``, numpy runs:
+
+    - the checks: ``any(w < 0)`` for each weight vector given (``2s - 1``),
+      and for ``fweights`` also ``all(fweights == around(fweights))``
+      (``3s - 1``);
+    - ``w *= aweights`` when both are given (``s``);
+    - ``average(X, axis=1, weights=w)`` in place of the plain mean: the
+      weight sum (``s - 1``) and one more multiply pass over ``X`` (``f s``);
+    - for ``aweights`` with ``ddof != 0``, the normalisation's
+      ``sum(w * aweights)`` (``2s - 1``);
+    - ``X * w`` before the Gram product (``f s``).
+
+    Scalar arithmetic on the weight sum is O(1) and, as in the unweighted
+    formula, not counted.
+    """
+    cost = (s - 1) + 2 * f * s
+    if fweights:
+        cost += (3 * s - 1) + (2 * s - 1)
+    if aweights:
+        cost += 2 * s - 1
+        if ddof != 0:
+            cost += 2 * s - 1
+    if fweights and aweights:
+        cost += s
+    return cost
+
+
+def _cov_cost(
+    x, y=None, rowvar=True, *, fweights=None, aweights=None, ddof=None, bias=False
+):
+    """Cost for cov: 2 * f^2 * s + 2 * f * s FLOPs, plus the weighted path.
 
     For a (f, s) input: f features, s samples. ``rowvar=True`` (numpy's
     default) reads x as (features, samples) -- f=shape[0], s=shape[1].
@@ -7228,6 +7261,9 @@ def _cov_cost(x, y=None, rowvar=True):
     - Gram term:      f^2 dot products of length s → ``2 * f^2 * s`` FLOPs (FMA=2)
     - Centering pass: subtract per-feature mean from each sample → ``2 * f * s``
       FLOPs (1 mean divide + 1 subtract per element, 2 * f * s total).
+
+    - Weights: ``fweights=`` or ``aweights=`` switch numpy to a weighted path
+      whose extra passes ``_cov_weights_cost`` prices.
 
     Previously only the Gram term was counted, under-counting by ``2 * f * s``.
     Previously ``rowvar`` was also ignored entirely, pinning every call to the
@@ -7253,7 +7289,18 @@ def _cov_cost(x, y=None, rowvar=True):
         else:
             f2 = y_arr.shape[1]  # numpy transposes y under rowvar=False
         f += f2
-    return _builtins.max(2 * f * f * s + 2 * f * s, 1)
+    cost = 2 * f * f * s + 2 * f * s
+    if fweights is not None or aweights is not None:
+        if ddof is None:
+            ddof = 0 if bias else 1  # numpy's default: 1, or 0 under bias
+        cost += _cov_weights_cost(
+            f,
+            s,
+            fweights=fweights is not None,
+            aweights=aweights is not None,
+            ddof=ddof,
+        )
+    return _builtins.max(cost, 1)
 
 
 def _corrcoef_cost(x, y=None, rowvar=True):
@@ -7330,11 +7377,22 @@ corrcoef.__signature__ = _inspect.signature(_np.corrcoef)  # pyright: ignore[rep
 
 @_counted_wrapper
 def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.cov. Cost: 2 * f^2 * s + 2 * f * s FLOPs (Gram + centering)."""
+    """Counted version of np.cov. Cost: 2 * f^2 * s + 2 * f * s FLOPs (Gram + centering).
+
+    ``fweights=``/``aweights=`` add the passes of numpy's weighted path.
+    """
     budget = require_budget()
     if not isinstance(m, _np.ndarray):
         m = _np.asarray(m)
-    cost = _cov_cost(m, y, rowvar=kwargs.get("rowvar", True))
+    cost = _cov_cost(
+        m,
+        y,
+        rowvar=kwargs.get("rowvar", True),
+        fweights=kwargs.get("fweights"),
+        aweights=kwargs.get("aweights"),
+        ddof=kwargs.get("ddof"),
+        bias=kwargs.get("bias", False),
+    )
     # np.cov always computes at least in float64 (numpy internally uses
     # np.result_type(m, y, np.float64)), regardless of the input dtype.
     billing_dtypes: tuple = (m.dtype, _np.dtype("float64"))
@@ -7360,7 +7418,11 @@ def cov(m: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArr
 
 
 attach_docstring(
-    cov, _np.cov, "counted_custom", r"$2 f^2 s + 2 f s$ FLOPs (Gram + centering)"
+    cov,
+    _np.cov,
+    "counted_custom",
+    r"$2 f^2 s + 2 f s$ FLOPs (Gram + centering); fweights=/aweights= add the "
+    r"weighted path (checks, weighted average, X*w)",
 )
 cov.__signature__ = _inspect.signature(_np.cov)  # pyright: ignore[reportFunctionMemberAccess]
 
