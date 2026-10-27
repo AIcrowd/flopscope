@@ -357,6 +357,33 @@ def svdvals_cost(m: int, n: int, k: int | None = None) -> int:
     return svd_cost(m, n, k, with_vectors=False)
 
 
+def hermitian_svd_cost(n: int, *, with_vectors: bool) -> int:
+    """FLOP cost of ``numpy.linalg.svd(a, hermitian=True)`` on one n x n matrix.
+
+    numpy runs no SVD for ``hermitian=True``. It factors with ``eigh`` (or
+    ``eigvalsh`` when no vectors are asked for) and turns the eigenpairs into
+    singular ones ordered by magnitude: with vectors, ``sign`` and ``abs`` of
+    the eigenvalues, an ``argsort``, three ``take_along_axis`` gathers (signs,
+    values and the n x n eigenvectors), the signs folded into the vectors and
+    the conjugate copy that forms ``Vh``; values only, an ``abs`` and a
+    ``sort``. Each step is billed as that op, the sort and the gathers at
+    their own weight 4, the way composite ops fold their sub-tiers::
+
+        with vectors:  eigh_cost(n) + 2n + 4*sort_cost(n) + 4*(2n + n^2) + 2n^2
+        values only:   eigvalsh_cost(n) + n + 4*sort_cost(n)
+
+    ``linalg.svd``, ``linalg.pinv`` and ``linalg.matrix_rank`` bill this in
+    place of the general SVD whenever ``hermitian=True`` reaches numpy with a
+    square matrix (numpy refuses a non-square one).
+    """
+    from flopscope._flops import sort_cost
+
+    if with_vectors:
+        reorder = 2 * n + 4 * sort_cost(n) + 4 * (2 * n + n * n) + 2 * n * n
+        return eigh_cost(n) + reorder
+    return eigvalsh_cost(n) + n + 4 * sort_cost(n)
+
+
 @_counted_wrapper
 def svdvals(x: ArrayLike, /, *, k: int | None = None) -> FlopscopeArray:
     """Singular values with FLOP counting."""

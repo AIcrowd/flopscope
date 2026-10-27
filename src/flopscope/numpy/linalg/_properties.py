@@ -554,11 +554,22 @@ attach_docstring(
 )
 
 
-def matrix_rank_cost(m: int, n: int) -> int:
-    """FLOP cost of matrix rank: values-only SVD + min(m, n) threshold compares."""
+def matrix_rank_cost(m: int, n: int, *, hermitian: bool = False) -> int:
+    """FLOP cost of matrix rank: values-only SVD + min(m, n) threshold compares.
+
+    With ``hermitian=True`` numpy's values-only SVD runs ``eigvalsh``, so a
+    square matrix bills
+    :func:`~flopscope.numpy.linalg._decompositions.hermitian_svd_cost` in place
+    of the general values-only SVD.
+    """
     from flopscope._flops import svd_cost
 
-    return max(svd_cost(m, n, with_vectors=False) + min(m, n), 1)
+    svd = svd_cost(m, n, with_vectors=False)
+    if hermitian and m == n:
+        from flopscope.numpy.linalg._decompositions import hermitian_svd_cost
+
+        svd = hermitian_svd_cost(n, with_vectors=False)
+    return max(svd + min(m, n), 1)
 
 
 def _broadcast_pairs(batch_shape, threshold, batch: int) -> int:
@@ -597,7 +608,11 @@ def matrix_rank(
     else:
         m, n = A.shape[-2], A.shape[-1]
         batch = _batch_size(A.shape)
-        cost = matrix_rank_cost(m, n) * batch if not _has_zero_dim(A.shape) else 0
+        cost = (
+            matrix_rank_cost(m, n, hermitian=hermitian) * batch
+            if not _has_zero_dim(A.shape)
+            else 0
+        )
         # numpy compares the singular values of every matrix against every
         # entry of an array ``tol=``/``rtol=``, broadcast against the batch,
         # and returns one rank per pair: the threshold compares run once per

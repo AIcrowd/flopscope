@@ -278,7 +278,7 @@ attach_docstring(
 )
 
 
-def pinv_cost(m: int, n: int) -> int:
+def pinv_cost(m: int, n: int, *, hermitian: bool = False) -> int:
     """FLOP cost of Moore-Penrose pseudoinverse.
 
     Parameters
@@ -287,6 +287,11 @@ def pinv_cost(m: int, n: int) -> int:
         Number of rows.
     n : int
         Number of columns.
+    hermitian : bool, optional
+        ``pinv(..., hermitian=True)``: numpy's SVD step then runs ``eigh``,
+        so a square matrix bills
+        :func:`~flopscope.numpy.linalg._decompositions.hermitian_svd_cost`
+        in place of the general SVD.
 
     Returns
     -------
@@ -312,6 +317,10 @@ def pinv_cost(m: int, n: int) -> int:
 
     k = min(m, n)
     svd = svd_cost(m, n, with_vectors=True)
+    if hermitian and m == n:
+        from flopscope.numpy.linalg._decompositions import hermitian_svd_cost
+
+        svd = hermitian_svd_cost(n, with_vectors=True)
     threshold = k
     diag_scale = n * k
     reconstruction = matmul_cost(n, k, m)
@@ -333,7 +342,11 @@ def pinv(
         a = _np.asarray(a)
     m, n = a.shape[-2], a.shape[-1]
     batch = _batch_size(a.shape)
-    cost = pinv_cost(m, n) * batch if not _has_zero_dim(a.shape) else 0
+    cost = (
+        pinv_cost(m, n, hermitian=hermitian) * batch
+        if not _has_zero_dim(a.shape)
+        else 0
+    )
     kwargs = {"hermitian": hermitian}
     if rcond is not None:
         kwargs["rcond"] = rcond  # type: ignore[reportAssignmentType]
