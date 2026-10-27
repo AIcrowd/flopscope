@@ -4291,6 +4291,39 @@ min = _counted_reduction(_np.min, "min")
 prod = _counted_reduction(_np.prod, "prod")
 
 
+def _where_count_cost(shape, axis, where) -> int:
+    """The mask count numpy's ``mean``, ``var`` and ``std`` take under ``where=``.
+
+    Before dividing, numpy's ``_count_reduce_items`` sums the mask broadcast
+    to the input's shape (``umr_sum(broadcast_to(where, arr.shape), axis,
+    ...)``): one more reduction over the whole input, billed like any sum,
+    ``numel(input) - numel(output)``, and dense, since the broadcast mask
+    carries no symmetry. ``where=True``, the default, takes numpy's fast path
+    and counts nothing; a mask numpy cannot broadcast to the input adds
+    nothing either, and numpy refuses the call in its own words.
+    """
+    from flopscope._accumulation._reduction import (
+        _normalize_axis,
+        compute_reduction_accumulation_cost,
+    )
+
+    if where is True:
+        return 0
+    shape = tuple(shape)
+    try:
+        if _np.broadcast_shapes(_np.shape(where), shape) != shape:
+            return 0
+    except ValueError:
+        return 0
+    return compute_reduction_accumulation_cost(
+        input_shape=shape,
+        axes_summed=_normalize_axis(axis, len(shape)),
+        symmetry=None,
+        op_factor=1,
+        extra_ops=0,
+    ).total
+
+
 def _counted_mean(np_func, op_name: str):
     """Factory for mean-family wrappers (mean, nanmean).
 
@@ -4353,6 +4386,10 @@ def _counted_mean(np_func, op_name: str):
         # a rank-4 symmetric tensor.
         if op_name.startswith("nan") and a.dtype.kind in "fc":
             cost += pointwise_cost(tuple(a.shape), symmetry=symmetry)
+        # With a where= mask, numpy counts the mask before dividing. The nan*
+        # variants count their own way and are priced separately.
+        if not op_name.startswith("nan"):
+            cost += _where_count_cost(a.shape, axis, kwargs.get("where", True))
 
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
@@ -4497,6 +4534,10 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         # a rank-4 symmetric tensor.
         if op_name.startswith("nan") and a.dtype.kind in "fc":
             cost += pointwise_cost(tuple(a.shape), symmetry=symmetry)
+        # With a where= mask, numpy counts the mask before dividing. The nan*
+        # variants count their own way and are priced separately.
+        if not op_name.startswith("nan"):
+            cost += _where_count_cost(a.shape, axis, kwargs.get("where", True))
         new_symmetry = (
             reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
             if symmetry is not None
@@ -4552,7 +4593,13 @@ def _counted_variance(np_func, op_name: str, *, with_sqrt: bool):
         "enlarges input; that enlarged path drops output symmetry. "
         "Supplying mean= retains this reference price even though NumPy "
         "skips calculating the mean. Ordinary symmetry savings still apply "
-        "when mean= does not enlarge the input.",
+        "when mean= does not enlarge the input."
+        + (
+            ""
+            if op_name.startswith("nan")
+            else " A where= mask adds N - M for the count NumPy takes of "
+            "the mask, broadcast to the input, before dividing."
+        ),
     )
     _apply_numpy_signature(wrapper, np_func)
     return wrapper
