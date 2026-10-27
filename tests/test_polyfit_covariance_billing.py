@@ -52,7 +52,7 @@ def test_production_precision_price():
     baseline, _ = _bill(y, cov=False)
     scaled, _ = _bill(y, cov=True)
     unscaled, _ = _bill(y, cov="unscaled")
-    assert baseline == 4328
+    assert baseline == 4528  # includes the column scaling (#333)
     assert scaled - baseline == 822
     assert unscaled - baseline == 820
 

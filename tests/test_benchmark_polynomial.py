@@ -32,9 +32,10 @@ class TestAnalyticalCost:
         # The benchmark's y is 1-D (ncols=1, see benchmark_polynomial), so the
         # benchmark denominator must agree exactly with the real billing
         # formula: m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols=1)
-        # == 1000*5 + lstsq_cost(1000, 6, 1) == 237386.
+        # + the column scaling 3*m*(deg+1) + (deg+1) (#333)
+        # == 1000*5 + lstsq_cost(1000, 6, 1) + 18006 == 255392.
         assert _analytical_cost("polyfit", 1000, 5) == polyfit_cost(1000, 5, ncols=1)
-        assert _analytical_cost("polyfit", 1000, 5) == 237386
+        assert _analytical_cost("polyfit", 1000, 5) == 255392
 
     def test_roots(self):
         # roots delegates to eigvals_cost(degree) = 10*degree^3 (PROVISIONAL)

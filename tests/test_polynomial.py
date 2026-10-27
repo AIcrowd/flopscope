@@ -231,12 +231,13 @@ def test_polyfit_cost():
     # to lstsq_cost (numpy.polyfit builds a Vandermonde matrix and solves it
     # via SVD least-squares) instead of the old normal-equations-shaped
     # 2*m*(deg+1)^2 estimate (90 here). cost = m*deg (Vandermonde build) +
-    # lstsq_cost(5, 3, ncols=1) = 10 + 855 = 865.
+    # lstsq_cost(5, 3, ncols=1) + the column scaling around the solve,
+    # 3*m*n + n*ncols (#333) = 10 + 855 + 48 = 913.
     x = numpy.array([0.0, 1.0, 2.0, 3.0, 4.0])
     y = numpy.array([0.0, 1.0, 4.0, 9.0, 16.0])
     with BudgetContext(flop_budget=10**6) as budget:
         polyfit(x, y, 2)
-        assert budget.flops_used == 865
+        assert budget.flops_used == 913
 
 
 def test_polyfit_no_budget():

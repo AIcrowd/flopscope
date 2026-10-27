@@ -499,7 +499,8 @@ OP_EXPECTATIONS: dict[str, tuple] = {
         # 2*m*(deg+1)^2 estimate (7200 here) that billed 3-13x cheaper than
         # the identical solve billed through linalg.lstsq.
         lambda: fnp.polyfit(_v100_np, _v100_np, 5),
-        100 * 5 + 27186,  # m*deg + lstsq_cost(100, 6, ncols=1) == 27686
+        # m*deg + lstsq_cost(100, 6, ncols=1) + column scaling 3*m*n + n (#333)
+        100 * 5 + 27186 + 3 * 100 * 6 + 6,  # == 29492
     ),
     "roots": (
         # 10-coeff poly → 9×9 companion matrix; eigvals cost = 10*9^3

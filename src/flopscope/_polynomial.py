@@ -180,8 +180,8 @@ def polydiv_cost(n1: int, n2: int) -> int:
     return max(1 + q * (2 * n2 + 1), 1)
 
 
-def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
-    """Cost for polyfit: Vandermonde build + lstsq solve.
+def polyfit_cost(m: int, deg: int, ncols: int = 1, *, weighted: bool = False) -> int:
+    """Cost for polyfit: Vandermonde build + column scaling + lstsq solve.
 
     ``numpy.polyfit`` builds an ``(m, deg+1)`` Vandermonde matrix from ``x``
     and solves it against ``y`` with ``numpy.linalg.lstsq`` (an SVD-based
@@ -198,6 +198,14 @@ def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
     ``ncols`` -- so this cost grows *sublinearly* in ``ncols``, unlike the
     old formula, which scaled every term linearly with ``ncols``.
 
+    Around the solve numpy scales every column of the Vandermonde matrix and
+    unscales the coefficients, on every call: ``scale =
+    sqrt((lhs*lhs).sum(axis=0))`` (``m*n`` squares, ``(m-1)*n`` adds, ``n``
+    roots), ``lhs /= scale`` (``m*n``) and ``c = (c.T/scale).T``
+    (``n*ncols``), ``3*m*n + n*ncols`` in all for ``n = deg + 1``. With
+    ``w=`` it first weights both sides, ``w + 0.0``, ``lhs *= w[:, None]``
+    and ``rhs *= w``: ``m + m*n + m*ncols`` more.
+
     Parameters
     ----------
     m : int
@@ -209,19 +217,26 @@ def polyfit_cost(m: int, deg: int, ncols: int = 1) -> int:
         usual case), or ``y.shape[1]`` when ``y`` is 2-D (numpy solves one
         independent least-squares system per column, sharing the same
         Vandermonde factorization).
+    weighted : bool, default False
+        Whether ``w=`` weights were given.
 
     Returns
     -------
     int
         Estimated FLOP count: ``m*deg`` (Vandermonde build) plus
-        ``lstsq_cost(m, deg+1, ncols)`` (SVD least-squares solve).
+        ``lstsq_cost(m, deg+1, ncols)`` (SVD least-squares solve), plus
+        the column scaling and, when ``weighted``, the weighting.
     """
     from flopscope.numpy.linalg import lstsq_cost
 
     n = deg + 1
     vandermonde = m * deg  # build the (m, deg+1) Vandermonde: ~m*deg mults
     solve = lstsq_cost(m, n, b_cols=ncols, b_ndim=1 if ncols == 1 else 2)
-    return max(vandermonde + solve, 1)
+    # lhs*lhs, the column sums and their roots, lhs /= scale, (c.T/scale).T
+    scaling = 3 * m * n + n * ncols
+    # w + 0.0, lhs *= w[:, None], rhs *= w
+    weighting = m + m * n + m * ncols if weighted else 0
+    return max(vandermonde + solve + scaling + weighting, 1)
 
 
 def polyfit_covariance_cost(
@@ -551,7 +566,7 @@ def polyfit(
     # numpy itself downstream); a 2-D y fits one independent least-squares
     # system per column, so the solve cost scales with ncols, not just m.
     ncols = y_arr.shape[1] if y_arr.ndim == 2 else 1
-    cost = polyfit_cost(m, deg, ncols)
+    cost = polyfit_cost(m, deg, ncols, weighted=kwargs.get("w") is not None)
     # np.polyfit's least-squares solve always runs in (at least) float64 --
     # even from float32 x/y (verified: polyfit(f32, f32, deg).dtype ==
     # float64) -- and complex64 y computes complex128, so the float64
@@ -586,7 +601,8 @@ attach_docstring(
     polyfit,
     _np.polyfit,
     "counted_custom",
-    "m*deg (Vandermonde build) + lstsq_cost(m, deg+1, ncols) FLOPs "
+    "m*deg (Vandermonde build) + 3*m*(deg+1) + (deg+1)*ncols (column scaling) "
+    "+ lstsq_cost(m, deg+1, ncols) FLOPs, + m*(deg+2+ncols) with w= (weighting) "
     "(ncols = y.shape[1] for 2-D y, else 1; SVD factorization is shared "
     "across ncols, so cost grows sublinearly in ncols); cov adds "
     "matmul_cost(p,m,p) + inv_cost(p) + p*(p+1)//2 + p*p + numel(covariance), "

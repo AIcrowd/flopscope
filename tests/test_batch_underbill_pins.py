@@ -514,14 +514,16 @@ def test_polyfit_scales_with_rhs_columns():
     # fixed by (m, deg+1) alone -- is shared across every RHS column; only
     # the back-substitution (U^T b, divide-by-s, reconstruction) scales with
     # ncols. So more columns is still more work (b100 > b1), just
-    # *sublinearly* -- a (50, 100) y now bills ~5.1x a (50, 1) y, not ~100x.
+    # *sublinearly* -- a (50, 100) y now bills ~4.9x a (50, 1) y, not ~100x.
     x = np.linspace(0, 1, 50)
     y1 = fnp.asarray(np.random.default_rng(10).standard_normal((50, 1)))
     y100 = fnp.asarray(np.random.default_rng(11).standard_normal((50, 100)))
     b1 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y1, 5))
     b100 = _bill(lambda: fnp.polyfit(fnp.asarray(x), y100, 5))
-    assert b1 == 16036  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=1)
-    assert b100 == 81970  # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols=100)
+    # m*deg (Vandermonde) + lstsq_cost(50, 6, ncols) + the column scaling
+    # 3*m*n + n*ncols around the solve (#333)
+    assert b1 == 16942  # 250 + 15786 + 906
+    assert b100 == 83470  # 250 + 81720 + 1500
     assert b100 > b1  # still scales with ncols ...
     assert b100 < 100 * b1  # ... but sublinearly: SVD factorization is shared
     # The under-bill is closed: the OLD formula would have billed the 1-D-y
