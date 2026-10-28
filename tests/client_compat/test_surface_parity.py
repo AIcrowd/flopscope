@@ -125,14 +125,23 @@ _BY_DESIGN_IMMUTABLE = {
 # Only the two numpy dispatch-protocol hooks remain — DEFERRED, not participant-
 # relevant for the evaluation model (participant code never registers custom ufuncs
 # or __array_function__ overrides against the flopscope server).
+# Since #352 the surface also covers attributes that are not callable (real,
+# imag, mT and the like), which participant code reaches as often as methods.
+# Two of those are not bridged yet: flat and device.
 KNOWN_MISSING = {
+    "flat",  # flat iterator: needs a flatiter proxy; ravel() covers reads
+    "device",  # array API device attribute, not bridged
     "__array_ufunc__",  # numpy dispatch protocol — deferred, not eval-model
     "__array_function__",  # numpy dispatch protocol — deferred, not eval-model
 }
 
 
 def _participant_relevant_surface() -> set[str]:
-    surface = {n for n in dir(np.ndarray) if callable(getattr(np.ndarray, n, None))}
+    # Every attribute an array still has, callable or not. dir() also lists
+    # names NumPy 2 removed from ndarray (ptp, itemset, newbyteorder), which
+    # raise when an array is asked for them, so they are read off an instance.
+    probe = np.ndarray((2, 2))  # the class itself: numpy functions are patched here
+    surface = {n for n in dir(np.ndarray) if hasattr(probe, n)}
     return surface - _PROXY_IMPOSSIBLE - _BY_DESIGN_IMMUTABLE
 
 
@@ -153,4 +162,5 @@ def test_remote_array_surface_matches_measured_baseline():
 def test_baseline_is_an_honest_count():
     # Guards the documented inventory number against silent drift.
     # rc3: down from 48 to 2 (only the numpy dispatch-protocol hooks remain, deferred).
-    assert len(KNOWN_MISSING) == 2
+    # #352: plus flat and device, now that non-callable attributes are compared.
+    assert len(KNOWN_MISSING) == 4

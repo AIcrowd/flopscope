@@ -679,6 +679,21 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
         """Transpose of the array (dispatched to server)."""
         return self._dispatch_op("transpose", self)
 
+    @property
+    def mT(self):
+        """Transpose of the last two axes (dispatched to server)."""
+        return self._dispatch_op("matrix_transpose", self)
+
+    @property
+    def real(self):
+        """Real part of the array (dispatched to server)."""
+        return self._dispatch_op("real", self)
+
+    @property
+    def imag(self):
+        """Imaginary part of the array (dispatched to server)."""
+        return self._dispatch_op("imag", self)
+
     def __len__(self) -> int:
         if not self._shape:
             raise TypeError("len() of unsized object (0-d array)")
