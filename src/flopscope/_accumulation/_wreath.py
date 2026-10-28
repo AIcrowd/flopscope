@@ -164,6 +164,12 @@ def enumerate_wreath(
         # Base H_i — all copies in the group share the same declared symmetry.
         base_sym = per_op_symmetry[grp[0]]
         base_rank = axis_ranks[grp[0]]
+        if any(axis_ranks[p] != base_rank for p in grp):
+            raise ValueError(
+                f"identical group {tuple(grp)} mixes operands of ranks "
+                f"{tuple(axis_ranks[p] for p in grp)}; copies of one array "
+                f"must have the same rank"
+            )
         h_elements = list(enumerate_h(base_sym, base_rank))
 
         group_options: list[tuple[list[int], dict]] = []

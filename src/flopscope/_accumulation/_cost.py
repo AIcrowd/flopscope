@@ -488,6 +488,36 @@ def _operand_names_from_identity_pattern(
     return tuple(name_of.get(i, f"op_{i}") for i in range(num_ops))
 
 
+def _reduction_signature(subscript: str, removed: _Any) -> tuple[int, ...]:
+    """Describe how a pre-reduction sums axes out of one operand.
+
+    Entry ``k`` is ``-1`` when axis ``k`` is kept, otherwise the first position
+    of that axis's label, so summing ``'kk'`` away (a trace) and summing
+    ``'ij'`` away (a full sum) give different signatures.
+    """
+    return tuple(subscript.index(c) if c in removed else -1 for c in subscript)
+
+
+def _identity_pattern_after_pre_reduction(
+    identity_pattern: tuple[tuple[int, ...], ...] | None,
+    signatures: _Seq[tuple[int, ...]],
+) -> tuple[tuple[int, ...], ...] | None:
+    """Keep the identity groups whose members still hold equal arrays.
+
+    Copies of one array stay equal after their pre-reductions only when every
+    copy was reduced the same way. Any other group is dropped, so the step
+    prices those operands as distinct arrays, as it does for a copy.
+    """
+    if not identity_pattern:
+        return identity_pattern
+    kept = tuple(
+        group
+        for group in identity_pattern
+        if len({signatures[pos] for pos in group}) == 1
+    )
+    return kept or None
+
+
 def _per_op_symmetry_for_wreath(sym: _Any) -> _Any:
     """Pass declared symmetry through to enumerate_h. SymmetryGroup objects
     pass through unchanged; strings (like 'symmetric') also pass through."""
@@ -821,6 +851,13 @@ def _walk_path_and_aggregate(
                 )
             )
 
+        step_reduction_signatures = tuple(
+            _reduction_signature(part, removed)
+            for part, removed in zip(
+                step_input_parts, (left_only_summed, right_only_summed), strict=False
+            )
+        )
+
         # Override step_input_parts / step_shapes to the EFFECTIVE versions so the
         # downstream existing code (per-input fingerprint + cache lookup + Cat C
         # joint-Burnside + V-only fallback) sees the rewritten step.
@@ -882,7 +919,9 @@ def _walk_path_and_aggregate(
                 if len(step_members) >= 2:
                     local_groups.append(step_members)
             if local_groups:
-                step_identity_pattern = tuple(local_groups)
+                step_identity_pattern = _identity_pattern_after_pre_reduction(
+                    tuple(local_groups), step_reduction_signatures
+                )
 
         step_canonical = ",".join(step_input_parts) + "->" + step_output
 
@@ -934,7 +973,11 @@ def _walk_path_and_aggregate(
                         for i, lbl in enumerate(joint_labels)
                         if lbl in removed_labels_in_step
                     }
-                    if removed_positions:
+                    if len(removed_positions) == len(joint_labels):
+                        # Every label the joint group acts on is summed away
+                        # before the step, so nothing of it is left to use.
+                        joint_group = None
+                    elif removed_positions:
                         stabilized = joint_group.setwise_stabilizer(removed_positions)
                         surviving_positions = tuple(
                             i
@@ -1381,7 +1424,13 @@ def compute_accumulation_cost(
                 output_subscript=output_subscript,
                 shapes=(eff_left_shape, eff_right_shape),
                 sym_fingerprint=eff_sym_fp,
-                identity_pattern=identity_pattern,
+                identity_pattern=_identity_pattern_after_pre_reduction(
+                    identity_pattern,
+                    (
+                        _reduction_signature(input_parts_list[0], left_only_summed),
+                        _reduction_signature(input_parts_list[1], right_only_summed),
+                    ),
+                ),
                 partition_budget=partition_budget,
             )
             return AccumulationCost(
