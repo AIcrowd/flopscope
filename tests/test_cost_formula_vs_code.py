@@ -915,8 +915,9 @@ class TestStatistics:
         # 3 features, 10 samples → f=3, s=10
         # cov: 2*9*10 + 2*3*10 = 180 + 60 = 240
         # + normalization: 2*9 + 3 = 21
-        # total: 261
-        assert _cost_of(we.corrcoef, numpy.random.rand(3, 10)) == 261
+        # + the clip into [-1, 1], two bounds per element: 2*9 = 18 (#340)
+        # total: 279
+        assert _cost_of(we.corrcoef, numpy.random.rand(3, 10)) == 279
 
     def test_cov_2f2s(self, we):
         # 3 features, 10 samples → 2*f^2*s + 2*f*s = 2*9*10 + 2*3*10 = 180 + 60 = 240

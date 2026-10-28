@@ -1770,11 +1770,13 @@ def test_convolve_mode_aware():
 
 
 def test_cov_corrcoef_centering():
-    """cov: 2*f^2*s + 2*f*s (Gram + centering); corrcoef: + 2*f^2 + f (normalization)."""
+    """cov: 2*f^2*s + 2*f*s (Gram + centering); corrcoef: + 2*f^2 + f (normalization)
+    + 2*f^2 (the clip into [-1, 1], #340)."""
     X = fnp.asarray(np.random.rand(5, 100))
     assert cost(lambda: fnp.cov(X)) == 2 * 5 * 5 * 100 + 2 * 5 * 100
     assert (
-        cost(lambda: fnp.corrcoef(X)) == (2 * 5 * 5 * 100 + 2 * 5 * 100) + 2 * 5 * 5 + 5
+        cost(lambda: fnp.corrcoef(X))
+        == (2 * 5 * 5 * 100 + 2 * 5 * 100) + 2 * 5 * 5 + 5 + 2 * 5 * 5
     )
 
 

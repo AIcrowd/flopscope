@@ -7256,18 +7256,20 @@ def _cov_cost(x, y=None, rowvar=True):
     return _builtins.max(2 * f * f * s + 2 * f * s, 1)
 
 
-def _corrcoef_cost(x, y=None, rowvar=True):
-    """Cost for corrcoef: cov_cost(x, y) + 2 * f^2 + f FLOPs.
+def _corrcoef_cost(x, y=None, rowvar=True, complex_result=False):
+    """Cost for corrcoef: cov_cost(x, y) + 4 * f^2 + f FLOPs (+ 2 * f^2 if complex).
 
     ``f`` here is the same rowvar-dependent feature count as ``_cov_cost``
     (the output correlation matrix is f x f, so the normalization term must
     track the same orientation as the Gram/centering term it wraps).
 
-    Normalization step: f^2 divides (divide cov[i,j] by std_i * std_j) plus
-    f sqrt calls (one per feature) → ``2 * f^2 + f`` additional FLOPs.
-    The ``2 * f^2`` counts the f^2 element-wise divides (FMA=2 convention gives
-    each divide as 2 FLOPs) and ``f`` counts the sqrt calls (1 FLOP each at the
-    transcendental-as-1 convention used for simple elementwise ops here).
+    Normalization step, in numpy's order: f sqrt calls (one per feature),
+    two divide passes over the f x f result (``c /= stddev[:, None]``, then
+    ``c /= stddev[None, :]``), ``2 * f^2``, and the clip of the result into
+    [-1, 1] (``np.clip(c.real, -1, 1, out=c.real)``), two bounds per element,
+    another ``2 * f^2``. A complex result has its imaginary part clipped too.
+    With a single variable numpy's cov is 0-d, ``diag`` raises, and
+    corrcoef returns ``c / c``: one divide in place of all of the above.
     """
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
@@ -7287,16 +7289,32 @@ def _corrcoef_cost(x, y=None, rowvar=True):
         else:
             f2 = y_arr.shape[1]
         f += f2
-    return _builtins.max(_cov_cost(x, y, rowvar) + 2 * f * f + f, 1)
+    if f == 1:
+        return _builtins.max(_cov_cost(x, y, rowvar) + 1, 1)
+    clips = 2 if complex_result else 1
+    return _builtins.max(_cov_cost(x, y, rowvar) + 2 * f * f + f + clips * 2 * f * f, 1)
 
 
 @_counted_wrapper
 def corrcoef(x: ArrayLike, y: ArrayLike | None = None, **kwargs: Any) -> FlopscopeArray:
-    """Counted version of np.corrcoef. Cost: (2*f^2*s + 2*f*s) + 2*f^2 + f FLOPs."""
+    """Counted version of np.corrcoef. Cost: (2*f^2*s + 2*f*s) + 4*f^2 + f FLOPs.
+
+    The clip into [-1, 1] is ``2*f^2`` of that, and a complex result adds a
+    second clip of ``2*f^2``; a single variable costs cov + 1 (``c / c``).
+    """
     budget = require_budget()
     if not isinstance(x, _np.ndarray):
         x = _np.asarray(x)
-    cost = _corrcoef_cost(x, y, rowvar=kwargs.get("rowvar", True))
+    dtype = kwargs.get("dtype")
+    if dtype is not None:
+        complex_result = _np.dtype(dtype).kind == "c"
+    else:
+        complex_result = x.dtype.kind == "c" or (
+            y is not None and _np.asarray(y).dtype.kind == "c"
+        )
+    cost = _corrcoef_cost(
+        x, y, rowvar=kwargs.get("rowvar", True), complex_result=complex_result
+    )
     # np.corrcoef always computes at least in float64 (numpy internally uses
     # np.result_type(x, y, np.float64)), regardless of the input dtype.
     billing_dtypes: tuple = (x.dtype, _np.dtype("float64"))

@@ -1642,7 +1642,7 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `correlate` | mode-aware: `full` = `2nm−n−m+1`; `valid` = `(2·min−1)·(max−min+1)`; `same` = exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:_correlate_cost` |
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |
 | `cov` | `2f²s + 2fs` (f = features, s = samples) | DERIVED: Gram term `f²` dot products of length `s` (2f²s) + centering pass `fs` elements × 2 FLOPs | `_pointwise.py:_cov_cost` |
-| `corrcoef` | `2f²s + 2fs + 2f² + f` | DERIVED: cov_cost + normalization (f² divides, 2 FLOPs each, + f sqrts) | `_pointwise.py:_corrcoef_cost` |
+| `corrcoef` | `2f²s + 2fs + 4f² + f`; a complex result `+ 2f²` more; one variable `2f²s + 2fs + 1` (numpy returns `c / c`) | DERIVED: cov_cost + normalization in numpy's order: f sqrts, two divide passes over the f×f result (`2f²`), the clip into [−1, 1] at two bounds per element (`2f²`, and again for the imaginary part of a complex result) (#340) | `_pointwise.py:_corrcoef_cost` |
 | `unwrap` | `13 × numel(input)` | DERIVED: 13 charged one-FLOP passes (diff, sub×2, mod, add, cmp×3, bitwise-and, select×2, abs, cumsum); the 2 select passes (3-arg `where`) no longer discount to free now that 3-arg `where` itself bills, so all 13 passes are charged — prior value was 11 | `_unwrap.py:unwrap_cost` |
 
 `cov` and `corrcoef` compute in float64 regardless of the input dtype, so their real
