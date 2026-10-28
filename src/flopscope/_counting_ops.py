@@ -146,8 +146,13 @@ def allclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> bool:
     numel = 1
     for d in out_shape:
         numel *= d
-    # 6 FLOPs/elem tolerance core (sub + 2*abs + mul + add + cmp) + (numel-1) all-reduce
-    cost = _builtins.max(7 * numel - 1, 1)
+    # isclose's passes per element (the tolerance core, then
+    # ``& isfinite(y) | (x == y)``, and ``isnan(x) & isnan(y)`` under
+    # equal_nan=True) + (numel-1) all-reduce
+    from flopscope._pointwise import isclose_passes
+
+    passes = isclose_passes(kwargs.get("equal_nan", False))
+    cost = _builtins.max(passes * numel + numel - 1, 1)
     # allclose IS isclose plus an all-reduce, so it inherits isclose's
     # unconditional ``result_type(y, 1.)`` cast: integer and bool operands
     # run the tolerance core in float64. Same mapping, same reason -- see the

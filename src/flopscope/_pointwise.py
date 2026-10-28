@@ -3942,6 +3942,16 @@ modf = _counted_unary_multi(_np.modf, "modf")
 frexp = _counted_unary_multi(_np.frexp, "frexp")
 
 
+def isclose_passes(equal_nan) -> int:
+    """Elementwise passes numpy's ``isclose`` makes over its output.
+
+    ``less_equal(abs(x-y), atol + rtol * abs(y))`` is six (sub, two abs, mul,
+    add, cmp), ``& isfinite(y) | (x == y)`` four more, and ``equal_nan=True``
+    adds ``result |= isnan(x) & isnan(y)``, four again.
+    """
+    return 14 if equal_nan else 10
+
+
 # isclose is binary (takes 2 args) but classified as unary in registry
 @_counted_wrapper
 def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
@@ -3973,8 +3983,12 @@ def isclose(a: ArrayLike, b: ArrayLike, **kwargs: Any) -> FlopscopeArray | bool:
         ),
         output_shape,
     )
-    # 6 FLOPs/elem: sub + 2*abs + mul + add + cmp (tolerance core; floor per documented policy)
-    cost = 6 * pointwise_cost(output_shape, symmetry=out_symmetry)
+    # numpy's passes per output element: the tolerance core, sub + 2*abs +
+    # mul + add + cmp, then ``& isfinite(y) | (x == y)``, and with
+    # equal_nan=True ``result |= isnan(x) & isnan(y)``
+    cost = isclose_passes(kwargs.get("equal_nan", False)) * pointwise_cost(
+        output_shape, symmetry=out_symmetry
+    )
     billing_dtypes: tuple = (
         billing_operand(a, a_arr),
         billing_operand(b, b_arr),

@@ -1191,26 +1191,27 @@ def test_trace_batch_multiply():
     assert cost(lambda: fnp.trace(np.ones((0, 10, 10)))) == 0
 
 
-def test_allclose_6per_elem():
-    """allclose must bill 7*numel(broadcast) - 1 (6/elem tolerance core + all-reduce)."""
+def test_allclose_11per_elem():
+    """allclose bills 11*numel(broadcast) - 1 (isclose's 10/elem + all-reduce, #343)."""
     a = np.random.rand(100)
     b = np.random.rand(100)
-    assert cost(lambda: fnp.allclose(a, b)) == 7 * 100 - 1
+    assert cost(lambda: fnp.allclose(a, b)) == 11 * 100 - 1
     # broadcast case
     a2 = np.random.rand(100, 1)
     b2 = np.random.rand(1, 100)
-    assert cost(lambda: fnp.allclose(a2, b2)) == 7 * 10_000 - 1
+    assert cost(lambda: fnp.allclose(a2, b2)) == 11 * 10_000 - 1
 
 
-def test_isclose_6per_elem():
-    """isclose must bill 6*numel(output) (tolerance core: sub+2*abs+mul+add+cmp)."""
+def test_isclose_10per_elem():
+    """isclose bills 10*numel(output): the tolerance core (sub+2*abs+mul+add+cmp),
+    then & isfinite(y) | (x == y) (#343)."""
     a = np.random.rand(100)
     b = np.random.rand(100)
-    assert cost(lambda: fnp.isclose(a, b)) == 6 * 100
+    assert cost(lambda: fnp.isclose(a, b)) == 10 * 100
     # broadcast
     a2 = np.random.rand(100, 1)
     b2 = np.random.rand(1, 100)
-    assert cost(lambda: fnp.isclose(a2, b2)) == 6 * 10_000
+    assert cost(lambda: fnp.isclose(a2, b2)) == 10 * 10_000
 
 
 def test_histogram_string_bins_charges_more_than_int():

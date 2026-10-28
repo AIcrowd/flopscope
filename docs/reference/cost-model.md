@@ -683,7 +683,7 @@ computation actually happens, not the input's label:
 | binary float-only ufuncs except division (`arctan2`, `hypot`, `logaddexp`, …) | NumPy-selected float loop (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) | unchanged — this replaces the old blanket-float64 rule for narrow integers |
 | `divide` / `true_divide` | integer pairs resolve to `float64` | unchanged |
 | predicate ufunc family (`signbit`, and the `logical_and(isinf(x), signbit(x))` composites `isneginf`/`isposinf`) | the same-size float, exactly as the unary float-only row above (`bool`/`int8`/`uint8` → `float16`; `int16`/`uint16` → `float32`; wider integers → `float64`) — NumPy publishes no integer `signbit` loop, so an integer operand is promoted before the sign test runs | unchanged |
-| tolerance checks (`isclose`, `allclose`, and the symmetry validators `is_symmetric`/`as_symmetric`, whose billed `k·(7n−1)` *is* an `allclose`) | `float64`, whatever the integer's own width — NumPy's `isclose` casts its reference operand with `result_type(y, 1.)` before comparing, unconditionally (an explicit `rtol=0, atol=0` promotes just the same) | `float16`/`float32` keep their own loop with default weak Python tolerances; supplied NumPy-scalar or array `rtol`/`atol` participate in billing dtype resolution and may widen the rate |
+| tolerance checks (`isclose`, `allclose`, and the symmetry validators `is_symmetric`/`as_symmetric`, whose billed `k·(7n−1)` prices the `np.allclose` they run) | `float64`, whatever the integer's own width — NumPy's `isclose` casts its reference operand with `result_type(y, 1.)` before comparing, unconditionally (an explicit `rtol=0, atol=0` promotes just the same) | `float16`/`float32` keep their own loop with default weak Python tolerances; supplied NumPy-scalar or array `rtol`/`atol` participate in billing dtype resolution and may widen the rate |
 | `float_power` | NumPy's selected loop has a `float64` real minimum | `float64` real minimum — unchanged in effect |
 | FFT family | `complex128` (no size-mapping — even `int8` runs the `complex128` path) | `float16`/`float32` → `complex64`; `float64` → `complex128` |
 | LAPACK-backed `linalg.*` | `float64` | unchanged — single-precision drivers stay single |
@@ -716,8 +716,8 @@ in**, never on what it returns. Every op in them answers `bool`, so an output-de
 rule would price them all at the baseline rate: on a 1000-element input,
 `signbit(int32_data)` bills the `float64` rate (**2000**), the same as
 `signbit(float64_data)`, while `signbit(int16_data)` bills the `float32` rate (**1000**)
-— and `isclose(int8_a, int8_b)` bills the `float64` rate (**12000**) because the
-tolerance core runs there, even though `isclose(float16_a, float16_b)` bills **6000**.
+— and `isclose(int8_a, int8_b)` bills the `float64` rate (**20000**) because the
+tolerance core runs there, even though `isclose(float16_a, float16_b)` bills **10000**.
 The weights are untouched; only the dtype rate follows the promotion.
 
 For a worked binary example, `hypot(int8, int8)` selects a float16 loop and
@@ -1636,8 +1636,8 @@ pre-existing weight 1.0 (see [Sort and select](#sort-and-select) for why).
 | `diff` | `prod(a.shape[:ax]) × (n×L − n×(n+1)/2) × prod(a.shape[ax+1:])`, `L = a.shape[ax]` | DERIVED: `n` passes of `L−k` subtractions | `_pointwise.py` |
 | `ediff1d` | `ary.size − 1 + size(to_begin) + size(to_end)` | DECLARED | `_pointwise.py` |
 | `gradient` | base: `sum over the axes axis= selects (all axes when axis=None) of 2·S` (`S = f.size`; one output value per element along each axis — interior differences and both boundaries — at ~2 FLOPs each, so at `edge_order=1` the cost is independent of axis length). Any other accepted `edge_order` (0, 2, or a non-integer in (1, 2]; > 2 is rejected) runs the 5-FLOP second-order boundary stencil on each of the two boundary hyperplanes instead of the 2-FLOP one-sided difference, adding `+6·S/L` per selected axis (`L = f.shape[axis]`). Each coord-array axis adds a spacing surcharge (uniform: `+3(L−1)`; non-uniform: `+3S(L−2)/L + 10(L−2) + 3(L−1) + 4S/L`) | DERIVED | `_pointwise.py:gradient` |
-| `allclose` | `7·numel(broadcast) − 1` (6 FLOPs/elem tolerance core + numel−1 all-reduce); the broadcast includes an array `rtol=`/`atol=` | DERIVED | `_counting_ops.py` |
-| `isclose` | `6·numel(broadcast)` (sub + 2·abs + mul + add + cmp per element); the broadcast includes an array `rtol=`/`atol=`, which also joins the symmetry and dtype resolution | DECLARED | `_pointwise.py` |
+| `allclose` | `11·numel(broadcast) − 1`, `15·numel(broadcast) − 1` with `equal_nan=True` (isclose's passes per element + numel−1 all-reduce); the broadcast includes an array `rtol=`/`atol=` | DERIVED | `_counting_ops.py` |
+| `isclose` | `10·numel(broadcast)`, `14·numel(broadcast)` with `equal_nan=True` (the tolerance core, sub + 2·abs + mul + add + cmp, then numpy's `& isfinite(y) \| (x == y)`, and `\|= isnan(x) & isnan(y)` under `equal_nan=True`, per element) (#343); the broadcast includes an array `rtol=`/`atol=`, which also joins the symmetry and dtype resolution | DECLARED | `_pointwise.py` |
 | `trace` (numpy.trace) | `diagonal_len × n_traces` where `diagonal_len = min(shape[ax1], shape[ax2])` reduced by `|offset|` (floored at 1) and `n_traces = size / (shape[ax1] × shape[ax2])` (batch-multiplied); bills identically to `linalg.trace` on matched axes | DERIVED | `_counting_ops.py:trace` |
 | `correlate` | mode-aware: `full` = `2nm−n−m+1`; `valid` = `(2·min−1)·(max−min+1)`; `same` = exact dot-length sum per numpy C layout | DERIVED per-mode | `_pointwise.py:_correlate_cost` |
 | `cross` | `3 × numel(output)` (2 muls + 1 sub per output scalar; 3-vec path preserves last dim, 2-D z-only drops last dim) | DERIVED: FMA=2, 3 FLOPs per output element | `_pointwise.py:cross` |

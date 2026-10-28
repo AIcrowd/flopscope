@@ -33,12 +33,14 @@ def _billed(fn):
         return int(ctx.flops_used) - before, out
 
 
-def _isclose_cost(numel):
-    return 6 * numel
+def _isclose_cost(numel, equal_nan=False):
+    # numpy's passes per element: the tolerance core (6), then
+    # ``& isfinite(y) | (x == y)`` (4), and ``isnan(x) & isnan(y)`` (4) (#343)
+    return (14 if equal_nan else 10) * numel
 
 
-def _allclose_cost(numel):
-    return 7 * numel - 1
+def _allclose_cost(numel, equal_nan=False):
+    return _isclose_cost(numel, equal_nan) + numel - 1
 
 
 def test_issue_repro_tracked_tolerances():
@@ -125,7 +127,7 @@ def test_scalar_tolerances_bill_as_before():
     cost, _ = _billed(lambda: fnp.isclose(a, a, rtol=1e-3, atol=1e-6))
     assert cost == _isclose_cost(50)
     cost, _ = _billed(lambda: fnp.allclose(a, a, rtol=1e-3, atol=1e-6, equal_nan=True))
-    assert cost == _allclose_cost(50)
+    assert cost == _allclose_cost(50, equal_nan=True)
 
 
 def _symmetric(n, seed):

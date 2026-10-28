@@ -92,16 +92,16 @@ class TestAllclose:
         b = numpy.random.randn(100)
         with BudgetContext(flop_budget=10**6) as budget:
             allclose(a, b)
-        # 7*numel - 1: 6/elem tolerance core + all-reduce
-        assert budget.flops_used == 7 * 100 - 1
+        # 11*numel - 1: isclose's 10 passes per element + all-reduce (#343)
+        assert budget.flops_used == 11 * 100 - 1
 
     def test_cost_minimum_one(self):
         a = numpy.array([1.0])
         b = numpy.array([1.0])
         with BudgetContext(flop_budget=10**6) as budget:
             allclose(a, b)
-        # 7*1 - 1 = 6 (numel=1)
-        assert budget.flops_used == 6
+        # 11*1 - 1 = 10 (numel=1)
+        assert budget.flops_used == 10
 
 
 # ---------------------------------------------------------------------------

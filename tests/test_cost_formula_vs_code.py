@@ -168,7 +168,8 @@ def test_two_output_unary_numel_bills_nout_times(name, we):
 
 def test_isclose_numel(we):
     a = numpy.random.rand(10, 10)
-    assert _cost_of(we.isclose, a, a) == 6 * 100  # 6/elem tolerance core
+    # tolerance core (6/elem) + & isfinite(y) | (x == y) (4/elem), #343
+    assert _cost_of(we.isclose, a, a) == 10 * 100
 
 
 def test_isnat_refuses_its_only_valid_input_dtype(we):
