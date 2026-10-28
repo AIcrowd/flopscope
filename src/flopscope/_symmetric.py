@@ -1004,6 +1004,11 @@ class SymmetricTensor(FlopscopeArray):
     def reshape(self, *shape, **kwargs):  # type: ignore[override]
         from flopscope._array_ops import reshape as _reshape
 
+        # As in FlopscopeArray.reshape: the method takes the shape as one
+        # tuple or list or as separate ints, while the free function's second
+        # positional slot is ``order``, so separate ints become one tuple.
+        if len(shape) > 1:
+            shape = (shape,)
         return _reshape(self, *shape, **kwargs)
 
     def ravel(self, order: str = "C"):  # type: ignore[override]
@@ -1026,7 +1031,9 @@ class SymmetricTensor(FlopscopeArray):
                 )
         # Pass the raw ndarray view so _ravel does not emit a second warning.
         out = _ravel(np.asarray(self), order=order)
-        return np.array(out, copy=True)
+        # Wrap the copy as ravel() wraps its result, so later operations on it
+        # are billed. The copy itself is billed as before.
+        return _asplainflopscope(np.array(out, copy=True))
 
     def squeeze(self, axis=None):  # type: ignore[override]
         from flopscope._array_ops import squeeze as _squeeze

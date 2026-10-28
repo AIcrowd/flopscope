@@ -1040,10 +1040,12 @@ class RemoteArray(metaclass=_RemoteArrayMeta):
 
     # -- convenience methods (delegate to server-side ops) ------------------
 
-    def reshape(self, *shape):
+    def reshape(self, *shape, order="C"):
         if len(shape) == 1 and isinstance(shape[0], (list, tuple)):
             shape = shape[0]
-        return self._dispatch_op("reshape", self, list(shape))
+        if order == "C":
+            return self._dispatch_op("reshape", self, list(shape))
+        return self._dispatch_op("reshape", self, list(shape), order=order)
 
     def astype(self, dtype):
         return self._dispatch_op("astype", self, dtype)
