@@ -1162,8 +1162,9 @@ def test_average_matches_mean_and_bills_weight_pipeline():
     assert cost(lambda: fnp.average(W, axis=1)) == cost(lambda: fnp.mean(W, axis=1))
     weighted = cost(lambda: fnp.average(W, axis=1, weights=w))
     unweighted = cost(lambda: fnp.average(W, axis=1))
-    # + a*w pass (numel) + w.sum reduction (numel - M) where M=1000
-    assert weighted == unweighted + W.size + (W.size - 1000)
+    # + a*w pass (numel) + w.sum over the 1000 weights (999) + zero check
+    # on the one weight sum (a compare and an any, 1 each), numpy's own steps (#339)
+    assert weighted == unweighted + W.size + (w.size - 1) + 2
 
 
 def test_dtype_predicates_are_free():

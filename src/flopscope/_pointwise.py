@@ -4575,6 +4575,30 @@ amin = _counted_reduction(_np.amin, "amin")
 any = _counted_reduction(_np.any, "any")
 
 
+def _average_weights_cost(shape, axis, axes_summed, weights_shape, symmetry) -> int:
+    """The weight sum and zero check numpy's ``average`` runs for ``weights=``.
+
+    numpy sums the weights once, ``scl = wgt.sum(axis=axis)``, and refuses
+    weights that sum to zero, ``np.any(scl == 0.0)``: ``numel(scl)``
+    comparisons and the ``any`` over them. Weights of the input's shape are
+    summed along ``axis`` like the input (``numel - M``). Weights of shape
+    ``a.shape[axis]`` are first reshaped to broadcast along ``axis``
+    (numpy's ``_weights_are_valid``), so their sum adds ``numel(w) - 1``
+    numbers into a single value. Shapes numpy refuses raise before any of
+    this runs.
+    """
+    shape = tuple(shape)
+    if tuple(weights_shape) == shape:
+        total = reduction_cost(shape, axis, symmetry=symmetry)
+        kept = _math_prod(s for i, s in enumerate(shape) if i not in axes_summed)
+    else:
+        spread = tuple(s if i in axes_summed else 1 for i, s in enumerate(shape))
+        total = reduction_cost(spread, axis)
+        kept = 1
+    # the check: one comparison per weight sum, then ``any`` over them
+    return total + kept + reduction_cost((kept,), None)
+
+
 @_counted_wrapper
 def average(
     a: ArrayLike,
@@ -4591,8 +4615,12 @@ def average(
                       = same as np.mean (sum pass + one divide per output).
     Cost (weights)    = reduction_cost(input)        # a*w sum pass
                       + pointwise_cost(input)        # a*w multiply pass
-                      + reduction_cost(input, axis)  # w.sum() pass (full-shape conservative)
+                      + weight sum + zero check      # scl = wgt.sum(axis); any(scl == 0)
                       + num_output_orbits            # per-output divides
+
+    The weight sum follows the weights numpy sums (see
+    ``_average_weights_cost``): ``numel - M`` for weights of the input's
+    shape, ``numel(w) - 1`` for weights of shape ``a.shape[axis]``.
     """
     from flopscope._accumulation._reduction import (
         _normalize_axis,
@@ -4608,7 +4636,9 @@ def average(
     cost = reduction_cost(a.shape, axis, symmetry=symmetry) + m
     if weights is not None:
         cost += pointwise_cost(tuple(a.shape), symmetry)  # the a*w multiply pass
-        cost += reduction_cost(a.shape, axis, symmetry=symmetry)  # w.sum() conservative
+        cost += _average_weights_cost(
+            a.shape, axis, axes_summed, _np.shape(weights), symmetry
+        )
     new_symmetry = (
         reduce_group(symmetry, ndim=a.ndim, axis=axis, keepdims=keepdims)
         if symmetry is not None

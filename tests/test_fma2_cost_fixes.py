@@ -50,8 +50,9 @@ def test_average_weighted_bills_aw_and_wsum():
     w = fnp.asarray(np.random.rand(1000) + 0.5)
     unweighted = cost(lambda: fnp.average(W, axis=1))
     weighted = cost(lambda: fnp.average(W, axis=1, weights=w))
-    # M = 1000 output orbits along axis=1
-    assert weighted == unweighted + W.size + (W.size - 1000)
+    # the 1-D weights are summed once (999 adds) and checked for a zero sum
+    # (a compare and an any, 1 each), numpy's own steps (#339)
+    assert weighted == unweighted + W.size + (w.size - 1) + 2
 
 
 def test_var_is_four_passes_and_shape_stable():
