@@ -55,7 +55,11 @@ from flopscope._ndarray import (
     _to_base_ndarray_tree,
 )
 from flopscope._perm_group import _DiminoBudgetExceeded
-from flopscope._symmetric import SymmetricTensor, _check_generators
+from flopscope._symmetric import (
+    SymmetricTensor,
+    _check_generators,
+    _max_generator_deviation,
+)
 from flopscope._symmetry_utils import (
     broadcast_group,
     direct_product_groups,
@@ -549,7 +553,10 @@ def _validate_result_symmetry(result, symmetry) -> bool:
         axes = symmetry.axes
         if axes is None:
             axes = tuple(range(symmetry.degree))
-        raise SymmetryError(axes=tuple(axes), max_deviation=float("inf"))
+        raise SymmetryError(
+            axes=tuple(axes),
+            max_deviation=_max_generator_deviation(result_arr, symmetry),
+        )
     return True
 
 

@@ -533,6 +533,35 @@ def _relabel_group_to_output(
     return validate_symmetry_group(remapped, ndim=len(output_subscript))
 
 
+def _fix_repeated_label_points(
+    group, group_axes: tuple[int, ...], operand_subscript: str
+):
+    """Keep the elements of ``group`` that fix every axis whose label repeats.
+
+    ``group_axes[k]`` is the operand axis that point ``k`` of the group stands
+    for. A permutation that moves one copy of a repeated label does not
+    permute the labels: under a swap of axes 1 and 2, ``einsum('iij->ij', t)``
+    reads ``t[i, i, j]``, which is not symmetric in ``i`` and ``j``. An element
+    that fixes every such axis moves only labels that occur once, so it does
+    permute the output labels. Returns None when only the identity is left.
+    """
+    repeated = {
+        point
+        for point, axis in enumerate(group_axes)
+        if operand_subscript.count(operand_subscript[axis]) > 1
+    }
+    if not repeated:
+        return group
+    kept = [
+        gen
+        for gen in group.pointwise_stabilizer(repeated).generators
+        if not gen.is_identity
+    ]
+    if not kept:
+        return None
+    return SymmetryGroup(*kept, axes=group.axes)
+
+
 def _infer_pathless_output_symmetry(operands, input_parts, output_subscript: str):
     if len(operands) != 1:
         return None
@@ -542,6 +571,10 @@ def _infer_pathless_output_symmetry(operands, input_parts, output_subscript: str
     group = operand.symmetry
     operand_subscript = input_parts[0]
     operand_rank = len(operand_subscript)
+    group_axes = group.axes if group.axes is not None else tuple(range(group.degree))
+    group = _fix_repeated_label_points(group, group_axes, operand_subscript)
+    if group is None:
+        return None
 
     # Detect axes that get summed out (label appears in operand but not output).
     summed_axes = tuple(
@@ -579,8 +612,7 @@ def _infer_pathless_output_symmetry(operands, input_parts, output_subscript: str
         return _relabel_group_to_output(reduced_group, source_labels, output_subscript)
 
     # No reduction — surviving labels all appear in output; existing direct path.
-    axes = group.axes if group.axes is not None else tuple(range(group.degree))
-    source_labels = tuple(operand_subscript[axis] for axis in axes)
+    source_labels = tuple(operand_subscript[axis] for axis in group_axes)
     return _relabel_group_to_output(group, source_labels, output_subscript)
 
 

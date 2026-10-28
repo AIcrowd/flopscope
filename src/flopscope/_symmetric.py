@@ -162,6 +162,27 @@ def _check_generators(array, group, *, atol: float = 1e-6, rtol: float = 1e-5) -
     return True
 
 
+def _max_generator_deviation(array, group) -> float:
+    """Largest ``|array - array.transpose(g)|`` over the generators. UNCOUNTED.
+
+    The measured counterpart of :func:`_check_generators`, for error messages.
+    """
+    array = np.asarray(array)
+    if array.dtype.kind not in "biufc":
+        return float("inf")
+    array = array.astype(np.result_type(array.dtype, np.float64), copy=False)
+    axes = group.axes if group.axes is not None else tuple(range(group.degree))
+    worst = 0.0
+    for gen in group.generators:
+        if gen.is_identity:
+            continue
+        perm = list(range(array.ndim))
+        for i in range(group.degree):
+            perm[axes[i]] = axes[gen._array_form[i]]
+        worst = max(worst, float(np.max(np.abs(array - array.transpose(perm)))))
+    return worst
+
+
 @_counted_wrapper
 def symmetrize(
     data: np.ndarray,
