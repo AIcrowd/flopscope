@@ -1214,24 +1214,29 @@ def test_data_movement_ops_bill_to_backend(invoke):
 
 
 @pytest.mark.parametrize(
-    "invoke",
+    ("invoke", "n"),
     [
-        lambda big: np.subtract.outer(big[0], big[0]),
-        lambda big: np.subtract.reduce(big, axis=0),
-        lambda big: np.subtract.accumulate(big, axis=0),
-        lambda big: np.subtract.reduceat(big, [0, big.shape[0] // 2], axis=0),
-        lambda big: np.add.at(big, (np.arange(big.shape[0]),), 1.0),
+        (lambda big: np.subtract.outer(big[0], big[0]), 2000),
+        # reduce adds each element once and writes a single row, so at
+        # 2000 x 2000 its numpy time is close to the wrapper's fixed overhead
+        # under coverage, and the comparison below flipped on CI runners.
+        # The overhead does not grow with the input; 4000 x 4000 clears it
+        # about five times over.
+        (lambda big: np.subtract.reduce(big, axis=0), 4000),
+        (lambda big: np.subtract.accumulate(big, axis=0), 2000),
+        (lambda big: np.subtract.reduceat(big, [0, big.shape[0] // 2], axis=0), 2000),
+        (lambda big: np.add.at(big, (np.arange(big.shape[0]),), 1.0), 2000),
     ],
     ids=["outer", "reduce", "accumulate", "reduceat", "at"],
 )
-def test_ufunc_methods_bill_to_backend(invoke):
+def test_ufunc_methods_bill_to_backend(invoke, n):
     """The ufunc-method wrappers invoked numpy directly instead of through
     ``_call_numpy``, so their whole backend cost was misfiled as flopscope
     overhead -- ``flopscope_backend_time_s`` came back at exactly 0.0 for calls
     taking milliseconds. The same omission is why their writes went unrecorded
     (pinned in ``test_symmetry_tag_forgery``); this is the timing half.
     """
-    big = flops.numpy.array(np.random.randn(2000, 2000))
+    big = flops.numpy.array(np.random.randn(n, n))
     invoke(big)
     flops.budget_reset()
     with flops.BudgetContext(flop_budget=10**12, quiet=True) as b:
